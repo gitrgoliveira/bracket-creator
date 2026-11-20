@@ -334,6 +334,7 @@ function lineupNoticeRow(key) {
 
 const LINEUP_SIDES = ["a", "b"];
 const NO_LINEUPS = { a: null, b: null };
+const NO_FAILED_LINEUPS = { a: false, b: false };
 
 // The lineup each team fields in this match, as the server holds it. A name
 // picked on the sheet saves the one position it names and the server puts it on
@@ -376,6 +377,11 @@ function useMatchLineups(compId, matchId) {
   // kachinuki advisory line) keys on. A save that only reached the outbox does
   // not move it; the read made once that save lands and is announced does.
   const [served, setServed] = useState(NO_SERVED_LINEUPS);
+  // Each side whose lineup was asked for and could not be read, and has not been read
+  // since: told apart from a read still out, since the operator may name bout 1 by hand
+  // only for the first (a damaged file or a lost connection alike; the read is made
+  // again when the connection returns, and a lineup that lands replaces the hand name).
+  const [failed, setFailed] = useState(NO_FAILED_LINEUPS);
   const syncRef = useRef(null);
 
   useEffect(() => {
@@ -397,6 +403,7 @@ function useMatchLineups(compId, matchId) {
     syncRef.current = sync;
     setLineups(NO_LINEUPS);
     setServed(NO_SERVED_LINEUPS);
+    setFailed(NO_FAILED_LINEUPS);
     setSettled(false);
 
     const isRead = (side) => sync.landed[side] > 0;
@@ -406,16 +413,24 @@ function useMatchLineups(compId, matchId) {
       const key = servedLineupKey(lineup);
       setServed(prev => (prev[side] === key ? prev : { ...prev, [side]: key }));
     };
+    const markFailed = (side, value) => setFailed(prev => (prev[side] === value ? prev : { ...prev, [side]: value }));
     // Rejects when the lineup cannot be read: each caller decides what that means.
     const read = async (side, teamId) => {
       const seq = ++sync.began[side];
       const epoch = sync.epoch[side];
-      const lineup = await resolveMatchLineup(compId, teamId, matchId, window.API, { throwOnError: true });
+      let lineup;
+      try {
+        lineup = await resolveMatchLineup(compId, teamId, matchId, window.API, { throwOnError: true });
+      } catch (e) {
+        if (sync.alive && epoch === sync.epoch[side] && !isRead(side)) markFailed(side, true);
+        throw e;
+      }
       if (sync.alive && epoch === sync.epoch[side]) serve(side, seq, lineup);
       const keepsHeld = isRead(side) && matchLineupSaveQueued(compId, teamId, matchId);
       if (sync.alive && epoch === sync.epoch[side] && seq >= sync.landed[side] && !keepsHeld) {
         sync.landed[side] = seq;
         sync.held[side] = lineup;
+        markFailed(side, false);
         setLineups(prev => ({ ...prev, [side]: lineup }));
       }
       return lineup;
@@ -442,6 +457,7 @@ function useMatchLineups(compId, matchId) {
       sync.held[side] = null;
       sync.teamIds[side] = "";
       sync.startGen += 1;
+      markFailed(side, false);
       setLineups(prev => ({ ...prev, [side]: null }));
       setSettled(false);
     };
@@ -466,6 +482,7 @@ function useMatchLineups(compId, matchId) {
           // A read still out began before this write: it must not put the old lineup back.
           sync.landed[side] = ++sync.began[side];
           sync.held[side] = lineup;
+          markFailed(side, false);
           if (fromServer) serve(side, sync.landed[side], lineup);
           setLineups(prev => ({ ...prev, [side]: lineup }));
         },
@@ -526,6 +543,9 @@ function useMatchLineups(compId, matchId) {
   return {
     lineupA: lineups.a,
     lineupB: lineups.b,
+    // Each side's lineup read failed and none has landed since (see failed above).
+    lineupFailedA: failed.a,
+    lineupFailedB: failed.b,
     // Both sides' first reads have settled (see settled above).
     lineupsSettled: settled,
     // Both sides' lineups as the server last answered them (see served above).
@@ -853,7 +873,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // Lineup data so each bout cell can show the assigned player
   // name + canonical position label. Falls back gracefully when the
   // lineup hasn't been submitted yet (saved: false -> null, bc-k404).
-  const { lineupA, lineupB, lineupsSettled, servedLineupsKey, startLineupReads, beginLineupWrite, watchLineupSide, dropLineup } = useMatchLineups(m.compId, m.id);
+  const { lineupA, lineupB, lineupFailedA, lineupFailedB, lineupsSettled, servedLineupsKey, startLineupReads, beginLineupWrite, watchLineupSide, dropLineup } = useMatchLineups(m.compId, m.id);
   // bc-pnum gap closure: each side's squad, so the inline lineup picker
   // below (submitInlineLineup / buildInlineLineupWrite) can resolve a
   // name typed or picked in THIS modal to its squad member id -- this is
@@ -4458,9 +4478,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
             // (a manual row is numbered from bout 2, so it is never the first).
             // Positional: the box still renders there with an empty roster, since
             // bout 1 is a lineup slot (lineupSlot below).
+            // One exception, a kachinuki side whose lineup read FAILED (not one still
+            // out, which is refused and read again): its bout 1 is named by hand, on
+            // the row like a later bout, since there is no lineup to go through. The
+            // server seats nobody on bout 1 while it cannot read the lineup, and
+            // seats the lineup's fighter once it can (the hand name stays only when
+            // it is that fighter).
             const firstRowIsLineup = !isDaihyoRow && idx === 0;
-            const manualPathB = !firstRowIsLineup && (isManualRow || kachinukiPastFirst || freeNameB);
-            const manualPathA = !firstRowIsLineup && (isManualRow || kachinukiPastFirst || freeNameA);
+            const handNamedFirstB = isKachinuki && firstRowIsLineup && lineupFailedB;
+            const handNamedFirstA = isKachinuki && firstRowIsLineup && lineupFailedA;
+            const manualPathB = handNamedFirstB || (!firstRowIsLineup && (isManualRow || kachinukiPastFirst || freeNameB));
+            const manualPathA = handNamedFirstA || (!firstRowIsLineup && (isManualRow || kachinukiPastFirst || freeNameA));
             // bc-dhrp: the representative bout's picker (submitRepresentative). It is
             // offered whenever the row is open to this viewer: a participant's sheet
             // (selfReport) offers it only while the match runs, and the judges'

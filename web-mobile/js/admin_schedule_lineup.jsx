@@ -503,18 +503,18 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           // labelable descendant, the Rename button. Only the position name is a
           // label, pointed at the name box by id.
           <div key={p.key} data-testid={`match-lineup-pos-${teamId}-${p.key}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-            {/* The picked member's number (bc-dnst) sits UNDER the position
-                name, inside the label's fixed column: a picked blank slot has
-                no name, so without it the box reads empty after the pick and
-                the operator cannot see which slot the position holds. Stacked
-                rather than beside the box so it adds no width: the box keeps
-                its intrinsic width as flex basis, so a chip beside it grew the
-                column's minimum past the modal and brought in a scrollbar. */}
+            {/* The picked member's number (bc-dnst) is shown once, in the box
+                (numberLabel below): a picked blank slot has no name, so without
+                it the box reads empty after the pick and the operator cannot
+                see which slot the position holds, and a named member reads
+                "T1.3 Sano" there. Nothing repeats it under the position name.
+                The box keeps its intrinsic width as flex basis, so a chip
+                beside it grew the column's minimum past the modal and brought
+                in a scrollbar; the number rides inside the box instead. */}
             <span style={{ minWidth: 72, fontWeight: 600, color: "var(--ink-2)", fontSize: 12, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
               <label htmlFor={`match-lineup-name-${teamId}-${p.key}`}>{p.label}</label>
-              {pickedLabel ? <span className="pmf__opt-label">{pickedLabel}</span> : null}
               {/* Rename lives in the same fixed column, so it adds no width
-                  to the row (see the chip note above). */}
+                  to the row (see the note above). */}
               {namedMemberAt(p.key) && renamingKey !== p.key ? (
                 <button type="button" className="btn btn--ghost btn--sm lineup-rename-btn"
                   onClick={() => startRename(p.key)} disabled={busy}

@@ -7,7 +7,8 @@
 // manually" numbers from bout 2, so the free name on a match that is not
 // running is the reachable case that used to ride the draft row instead
 // (pickManual), and be replaced by the seat at the start. Later rows keep
-// riding the bout itself and never become a lineup write.
+// riding the bout itself and never become a lineup write. The one exception is a
+// side whose lineup read failed: its bout 1 is named by hand, on the row.
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
@@ -124,6 +125,61 @@ describe.each(['scheduled', 'running'])('a pick on kachinuki bout 1 of a %s matc
     expect([compId, teamId, matchId, changed]).toEqual(['comp1', 'team-A', 'm1', ['1']]);
     expect(positions).toEqual({ '1': 'Ito' });
     expect(akaInput().value).toBe('Ito');
+  });
+});
+
+// A lineup read that FAILED (a damaged file or a lost connection) leaves bout 1 to be
+// named by hand, on the bout row like a later bout; a read still out refuses the pick
+// and reads again, so the name goes once the lineup shows.
+describe('kachinuki bout 1 when the lineup could not be read', () => {
+  const noticeText = () => [...document.querySelectorAll('[data-testid="team-editor-lineup-warning"]')].map((n) => n.textContent);
+
+  it.each(['scheduled', 'running'])('a failed read lets a name typed on bout 1 of a %s match ride the row', async (status) => {
+    stubApi({ 'team-A': [], 'team-B': blank('b') });
+    window.API.fetchLineupInForce = vi.fn().mockRejectedValue(new Error('damaged'));
+    await mount(kachinukiMatch(status));
+    await typeName(akaInput(), 'Ito');
+    expect(window.API.putMatchLineup).not.toHaveBeenCalled();
+    expect(noticeText()).toEqual([]);
+    expect(akaInput().value).toBe('Ito');
+  });
+
+  it('a failed read lets a listed member picked on bout 1 ride the row', async () => {
+    window.API.fetchLineupInForce = vi.fn().mockRejectedValue(new Error('damaged'));
+    await mount(kachinukiMatch('scheduled'));
+    await act(async () => { fireEvent.focus(akaInput()); });
+    const two = [...liveRow().querySelectorAll('.team-sub-match__side--aka .pmf__option')].find((b) => b.textContent.includes('T1.2'));
+    expect(two, 'the nameless member T1.2 is offered').toBeTruthy();
+    await act(async () => { fireEvent.click(two); });
+    await settle();
+    expect(window.API.putMatchLineup).not.toHaveBeenCalled();
+    expect(noticeText()).toEqual([]);
+  });
+
+  it('a read still out refuses the name, says it is being read again, and writes nothing', async () => {
+    stubApi({ 'team-A': [], 'team-B': blank('b') });
+    window.API.fetchLineupInForce = vi.fn(() => new Promise(() => {}));
+    await mount(kachinukiMatch('scheduled'));
+    await typeName(akaInput(), 'Ito');
+    expect(window.API.putMatchLineup).not.toHaveBeenCalled();
+    expect(noticeText()).toEqual([expect.stringContaining('being read again')]);
+  });
+
+  it('once the lineup is read, a pick on bout 1 goes through it again', async () => {
+    let healthy = false;
+    window.API.fetchLineupInForce = vi.fn(async () => {
+      if (!healthy) throw new Error('offline');
+      return null;
+    });
+    await mount(kachinukiMatch('scheduled'));
+    healthy = true;
+    await act(async () => { window.dispatchEvent(new Event('online')); });
+    await settle();
+    await act(async () => { fireEvent.focus(akaInput()); });
+    const two = [...liveRow().querySelectorAll('.team-sub-match__side--aka .pmf__option')].find((b) => b.textContent.includes('T1.2'));
+    await act(async () => { fireEvent.click(two); });
+    await settle();
+    expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
   });
 });
 

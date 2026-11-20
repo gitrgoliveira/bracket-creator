@@ -327,7 +327,9 @@ describe('the at-court panel', () => {
     });
     await flush();
 
-    expect(panelRow(utils, 1).getByText('Slot 6'), 'the member the Save minted is still listed').toBeTruthy();
+    // The number shows once, in the box, and nowhere under the position name.
+    expect(utils.getByTestId('match-lineup-pos-team-a-1').querySelector('[data-number]').getAttribute('data-number'), 'the member the Save minted is still listed').toBe('Slot 6');
+    expect(panelRow(utils, 1).queryByText('Slot 6')).toBeNull();
     expect(panelRow(utils, 1).getByRole('button', { name: 'Rename Senpo player' })).toBeTruthy();
   });
 
@@ -1032,7 +1034,10 @@ describe('a lineup followed from another device that names a member created ther
 
     expect(utils.getByLabelText('Chuken player').value).toBe('Zed');
     const row = utils.getByTestId('match-lineup-pos-team-a-2');
-    expect(within(row).getByText('Slot 5')).toBeTruthy();
+    // The number shows once, in the box, and nowhere under the position name.
+    expect(row.querySelector('[data-number]').getAttribute('data-number')).toBe('Slot 5');
+    expect(within(row).queryByText('Slot 5')).toBeNull();
+    expect(row.querySelector('.pmf__opt-label')).toBeNull();
     expect(within(row).getByRole('button', { name: 'Rename Chuken player' })).toBeTruthy();
   });
 

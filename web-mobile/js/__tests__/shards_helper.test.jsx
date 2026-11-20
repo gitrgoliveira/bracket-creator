@@ -60,7 +60,8 @@ describe('expectShardFiles', () => {
     const STEM = 'gate';
     const SUFFIX = '.test.jsx';
     let dir;
-    const touch = (...names) => names.forEach((n) => writeFileSync(path.join(dir, n), ''));
+    const BODY = 'defineShard(import.meta.url);\n';
+    const touch = (...names) => names.forEach((n) => writeFileSync(path.join(dir, n), BODY));
     const full = (n) => Array.from({ length: n }, (_, i) => `${STEM}.shard-${i + 1}-of-${n}${SUFFIX}`);
 
     beforeEach(() => { dir = mkdtempSync(path.join(tmpdir(), 'shards-')); });
@@ -68,33 +69,41 @@ describe('expectShardFiles', () => {
 
     it('passes when exactly the n shard files exist, ignoring the guard and other files', () => {
         touch(...full(3), `${STEM}.shards${SUFFIX}`, 'other.shard-1-of-9.test.jsx', `${STEM}.js`);
-        expect(() => expectShardFiles(dir, STEM, SUFFIX, 3)).not.toThrow();
+        expect(() => expectShardFiles(dir, STEM, SUFFIX, 3, BODY)).not.toThrow();
     });
 
     it('reports a missing shard', () => {
         touch(...full(3).slice(1), `${STEM}.shards${SUFFIX}`);
-        expect(() => expectShardFiles(dir, STEM, SUFFIX, 3)).toThrow();
+        expect(() => expectShardFiles(dir, STEM, SUFFIX, 3, BODY)).toThrow();
     });
 
     it('reports an extra shard', () => {
         touch(...full(3), `${STEM}.shard-4-of-3${SUFFIX}`);
-        expect(() => expectShardFiles(dir, STEM, SUFFIX, 3)).toThrow();
+        expect(() => expectShardFiles(dir, STEM, SUFFIX, 3, BODY)).toThrow();
     });
 
     it('reports a leftover from another n', () => {
         touch(...full(3), `${STEM}.shard-1-of-2${SUFFIX}`);
-        expect(() => expectShardFiles(dir, STEM, SUFFIX, 3)).toThrow();
+        expect(() => expectShardFiles(dir, STEM, SUFFIX, 3, BODY)).toThrow();
     });
 
     it('reports a different n entirely', () => {
         touch(...full(2));
-        expect(() => expectShardFiles(dir, STEM, SUFFIX, 3)).toThrow();
+        expect(() => expectShardFiles(dir, STEM, SUFFIX, 3, BODY)).toThrow();
+    });
+
+    it('reports a shard whose body was emptied or changed', () => {
+        touch(...full(3));
+        writeFileSync(path.join(dir, full(3)[1]), '');
+        expect(() => expectShardFiles(dir, STEM, SUFFIX, 3, BODY)).toThrow();
+        writeFileSync(path.join(dir, full(3)[1]), `// skipped\n${BODY}`);
+        expect(() => expectShardFiles(dir, STEM, SUFFIX, 3, BODY)).toThrow();
     });
 
     it('does not count the .shards guard file as a shard', () => {
         touch(`${STEM}.shards${SUFFIX}`);
-        expect(() => expectShardFiles(dir, STEM, SUFFIX, 1)).toThrow();
+        expect(() => expectShardFiles(dir, STEM, SUFFIX, 1, BODY)).toThrow();
         touch(...full(1));
-        expect(() => expectShardFiles(dir, STEM, SUFFIX, 1)).not.toThrow();
+        expect(() => expectShardFiles(dir, STEM, SUFFIX, 1, BODY)).not.toThrow();
     });
 });

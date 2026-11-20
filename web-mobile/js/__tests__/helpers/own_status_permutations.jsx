@@ -769,15 +769,13 @@ function* runningRepScenarios() {
 const runningRepName = (sc) => `${sc.draft ? 'draft+Start' : 'running'} ${sc.kind}:${sc.outcome}/${sc.timing} ${sc.foreign}`;
 
 // How a loop's `it` reports: how many combinations ran, how many failed, and
-// the first ten, against the slice the shard was given (`expected`), so a
-// shard that ran fewer combinations than its slice fails too.
-const expectSummary = (count, failures, expected) => {
+// the first ten (or every one).
+const expectSummary = (count, failures) => {
   expect({ summary: `${count} combinations, ${failures.length} failing`, first: failures.slice(0, 10) })
-    .toEqual({ summary: `${expected} combinations, 0 failing`, first: [] });
+    .toEqual({ summary: `${count} combinations, 0 failing`, first: [] });
 };
-const expectEveryFailureListed = (count, failures, expected) => {
+const expectEveryFailureListed = (count, failures) => {
   expect(failures, `${failures.length} of ${count} combinations failed:\n${failures.join('\n')}`).toEqual([]);
-  expect(count, 'combinations run').toBe(expected);
 };
 
 const familyLoop = (fam) => ({
@@ -842,13 +840,11 @@ export function defineOwnStatusShard(url) {
     describe(loop.describe, () => {
       it(loop.it, async () => {
         const failures = [];
-        let count = 0;
         for (const { sc, name } of rows) {
-          count += 1;
           const bad = await loop.run(sc);
           if (bad.length) failures.push(`${name}: ${bad[0]}`);
         }
-        loop.report(count, failures, rows.length);
+        loop.report(rows.length, failures);
       }, loop.timeout);
     });
   }

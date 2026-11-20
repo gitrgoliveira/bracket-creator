@@ -2,12 +2,16 @@
 // harness `helpers/minted_member_permutations.js`: the shard files on disk are
 // exactly the five the gate expects, their slices are disjoint and together are
 // every row, and the row count is pinned, so a row dropped from the harness, or
-// a shard file deleted, added or left over from another count, fails here.
+// a shard file deleted, added, emptied or left over from another count, fails
+// here. A shard's body is exactly its two lines, so each file runs its slice.
 import { describe, it, expect } from 'vitest';
 import { shardOf, expectShardFiles } from './helpers/shards.js';
 import { ALL } from './helpers/minted_member_permutations.js';
 
 const SHARDS = 5;
+const SHARD_BODY = `import { defineMintedShard } from './helpers/minted_member_permutations.js';
+defineMintedShard(import.meta.url);
+`;
 // Every state an add reaches crossed with every write naming its id, in one tab
 // and in two (counted from the gate before it was split).
 const ROWS = 504;
@@ -16,7 +20,7 @@ const label = (row) => row.join(' ');
 
 describe('the minted-member gate runs every row, once, over its shard files', () => {
     it('has exactly the shard files the gate expects', () => {
-        expectShardFiles(__dirname, 'minted_member_permutations', '.test.jsx', SHARDS);
+        expectShardFiles(__dirname, 'minted_member_permutations', '.test.jsx', SHARDS, SHARD_BODY);
     });
 
     it('pins the number of rows', () => {

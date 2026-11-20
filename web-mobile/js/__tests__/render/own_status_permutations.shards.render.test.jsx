@@ -1,7 +1,7 @@
 // The guard of the own-status permutation gate, which is split over the shard
 // files `own_status_permutations.shard-<k>-of-<n>.render.test.jsx` (the
 // harness is `../helpers/own_status_permutations.jsx`). It fails when a shard
-// file is deleted, added or left over from another count, when the shards stop
+// file is deleted, added, emptied or left over from another count, when the shards stop
 // covering every combination exactly once, or when a loop's number of
 // combinations changes. A change to a loop's combinations updates COUNTS here
 // on purpose, in the same change.
@@ -14,6 +14,9 @@ import { combinations } from '../helpers/own_status_permutations.jsx';
 const SHARDS = 7;
 const STEM = 'own_status_permutations';
 const SUFFIX = '.render.test.jsx';
+const SHARD_BODY = `import { defineOwnStatusShard } from '../helpers/own_status_permutations.jsx';
+defineOwnStatusShard(import.meta.url);
+`;
 // Each loop's number of combinations, in the order the gate runs the loops.
 const COUNTS = [
   ['chain', 312],
@@ -30,7 +33,7 @@ const key = (c) => `${c.loop}\t${JSON.stringify(c.sc)}`;
 
 describe('the own-status permutation gate\'s shards', () => {
   it(`are exactly the ${SHARDS} shard files`, () => {
-    expectShardFiles(here, STEM, SUFFIX, SHARDS);
+    expectShardFiles(here, STEM, SUFFIX, SHARDS, SHARD_BODY);
   });
 
   it('keep every loop\'s number of combinations, in the gate\'s order', () => {

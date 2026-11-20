@@ -3,8 +3,17 @@
 //   shardOf          which slice of a list a shard runs;
 //   shardFromUrl     which shard a file is, read from the file's own name;
 //   expectShardFiles the guard: the shard files on disk are exactly the N the
-//                    gate expects, so deleting or adding one fails loudly.
-import { readdirSync } from 'fs';
+//                    gate expects, each with exactly the body a shard has (the
+//                    define call and nothing else), so deleting, adding or
+//                    emptying one fails loudly.
+//
+// To change a gate's N (the shard count was picked by hand to balance the
+// workers, and vitest's own `--shard` splits by file, not by row, so it cannot
+// split one gate): in a shell, `cp` an existing shard file to each new
+// `<stem>.shard-<i>-of-<N><suffix>`, `git rm` the old ones, and set `SHARDS`
+// in the gate's guard file to N. The guard fails until all three agree.
+import { readdirSync, readFileSync } from 'fs';
+import path from 'path';
 import { expect } from 'vitest';
 
 // The k-th of n round-robin slices of `list` (k is 1-based), in list order.
@@ -31,12 +40,15 @@ const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // Asserts the shard files of one gate in `dir` are exactly
 // `<stem>.shard-<i>-of-<n><suffix>` for i = 1..n. A missing shard, an extra one
-// or a leftover `-of-<other n>` file fails. The guard file `<stem>.shards<suffix>`
-// does not match the pattern, so it is ignored.
-export function expectShardFiles(dir, stem, suffix, n) {
+// or a leftover `-of-<other n>` file fails, and so does a shard whose text is
+// not exactly `body`, since a shard that no longer calls its define function
+// runs none of its slice. The guard file `<stem>.shards<suffix>` does not match
+// the pattern, so it is ignored.
+export function expectShardFiles(dir, stem, suffix, n, body) {
     const pattern = new RegExp(`^${escapeRegExp(stem)}\\.shard-(\\d+)-of-(\\d+)${escapeRegExp(suffix)}$`);
     const found = readdirSync(dir).filter((name) => pattern.test(name)).sort();
     const expected = [];
     for (let i = 1; i <= n; i++) expected.push(`${stem}.shard-${i}-of-${n}${suffix}`);
     expect(found).toEqual(expected.sort());
+    for (const name of found) expect(readFileSync(path.join(dir, name), 'utf8'), `${name}'s body`).toBe(body);
 }

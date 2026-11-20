@@ -142,8 +142,8 @@ test.describe('spectator on a phone', () => {
       await expect(page).toHaveURL(/\/schedule$/);
       await expect(scheduleRows(page)).toHaveCount(18);
       await expect(scheduleCount(page)).toHaveText('18 matches of 18');
-      await expect(page.locator('.tw-court', { hasText: 'SHIAIJO A' }).locator('.tw-court__sub')).toHaveText('12 matches');
-      await expect(page.locator('.tw-court', { hasText: 'SHIAIJO B' }).locator('.tw-court__sub')).toHaveText('6 matches');
+      await expect(page.locator('.tw-court', { hasText: 'Shiaijo A' }).locator('.tw-court__sub')).toHaveText('12 matches');
+      await expect(page.locator('.tw-court', { hasText: 'Shiaijo B' }).locator('.tw-court__sub')).toHaveText('6 matches');
       await expect(scheduleRow(page, ids.first)).toContainText('Kendo Open');
       await shot(page, 'schedule', { fullPage: true });
     });
@@ -307,7 +307,7 @@ test.describe('spectator on a phone', () => {
     await test.step('the match card opened from the hero follows the operator\'s marks', async () => {
       await watchHeroMatch(page).tap();
       await expect(card).toBeVisible();
-      await expect(card).toContainText('NOW');
+      await expect(card).toContainText('● Now');
       await expect(cardSlots(card)).toHaveCount(4);
       expect(await cardMarks(card)).toEqual({ shiro: '', aka: '' });
       await awardIppon(op, 'shiro', 'M');
@@ -316,12 +316,12 @@ test.describe('spectator on a phone', () => {
       record({ journey: 'spectator', step: 'watchlist card live', marks: await cardMarks(card) });
     });
 
-    await test.step('the operator finishes the match: the open card reads FINAL, the hero moves to the next bout', async () => {
+    await test.step('the operator finishes the match: the open card reads Finished, the hero moves to the next bout', async () => {
       const started = await sides(upNextCard(op));
       expect(started, 'the next bout is the one read off the queue').toEqual(next);
       const opponent = started.shiro === followed ? started.aka : started.shiro;
       await finishMatch(op);
-      await expect(card).toContainText('FINAL');
+      await expect(card).toContainText('Finished');
       expect(await cardMarks(card)).toEqual({ shiro: 'M', aka: '' });
       await shot(page, 'watching-card-final');
       // Close the card (the tap that opened it was a while ago).
@@ -368,7 +368,7 @@ test.describe('spectator on a phone', () => {
       });
     };
 
-    await door('Home: the NOW list',
+    await door('Home: the Now list',
       async () => { await page.goto('/'); await homeNowRow(page).tap(); },
       { shiro: '', aka: '' },
       () => awardIppon(op, 'shiro', 'M'),
@@ -392,37 +392,37 @@ test.describe('spectator on a phone', () => {
 
     // The Overview is the one door that is no dialog while the tournament is
     // officiated: an Up next row expands a card in place (the dialog is the
-    // self-run page's), and the running match is its own inline ON NOW card.
+    // self-run page's), and the running match is its own inline On now card.
     // Both read the page's live rows. The operator scores on, then finishes the
     // running bout so the waiting one (the expanded row) starts.
-    await test.step('Overview: an Up next row expands a card; the ON NOW card follows the operator', async () => {
+    await test.step('Overview: an Up next row expands a card; the On now card follows the operator', async () => {
       await page.goto(`/competition/${ids.kendo}`);
       await upNextRow(page, match3).tap();
       const expanded = expandedCard(page);
       await expect(expanded).toBeVisible();
-      await expect(expanded).not.toContainText('NOW');
+      await expect(expanded, 'a waiting match carries no running badge').not.toContainText('● Now');
       await expect(cardSlots(expanded)).toHaveCount(4);
       expect(await cardMarks(expanded)).toEqual({ shiro: '', aka: '' });
-      await expect.poll(() => cardMarks(nowCard(page)), { message: 'Overview: the ON NOW card opens on the live score' })
+      await expect.poll(() => cardMarks(nowCard(page)), { message: 'Overview: the On now card opens on the live score' })
         .toEqual({ shiro: 'DM', aka: 'K' });
       // The operator takes Aka's mark back (Shiro's two ippon already decide the bout).
       await clearMarks(filledSlots(op, 'aka'));
       await settled(op);
-      await expect.poll(() => cardMarks(nowCard(page)), { message: 'Overview: the ON NOW card follows the operator' })
+      await expect.poll(() => cardMarks(nowCard(page)), { message: 'Overview: the On now card follows the operator' })
         .toEqual({ shiro: 'DM', aka: '' });
       await shot(page, 'door-overview-now');
 
       await finishMatch(op);
       await expect.poll(() => editorSides(op), { message: 'the operator\'s editor holds the third bout' }).toEqual(match3);
-      await expect(nowCard(page), 'the ON NOW card moves to the started bout').toContainText(match3.aka);
+      await expect(nowCard(page), 'the On now card moves to the started bout').toContainText(match3.aka);
       await expect(nowCard(page), 'and shows both of its sides, not the finished bout\'s').toContainText(match3.shiro);
       await expect(expanded, 'the waiting bout is no longer in Up next').toHaveCount(0);
       expect(await cardMarks(nowCard(page))).toEqual({ shiro: '', aka: '' });
       await awardIppon(op, 'shiro', 'M');
-      await expect.poll(() => cardMarks(nowCard(page)), { message: 'Overview: the ON NOW card follows the next bout' })
+      await expect.poll(() => cardMarks(nowCard(page)), { message: 'Overview: the On now card follows the next bout' })
         .toEqual({ shiro: 'M', aka: '' });
       await shot(page, 'door-overview-next-bout');
-      record({ journey: 'spectator', door: 'Overview: Up next row, ON NOW card', after: await cardMarks(nowCard(page)) });
+      record({ journey: 'spectator', door: 'Overview: Up next row, On now card', after: await cardMarks(nowCard(page)) });
     });
   });
 

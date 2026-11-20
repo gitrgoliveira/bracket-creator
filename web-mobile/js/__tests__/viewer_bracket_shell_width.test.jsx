@@ -93,7 +93,7 @@ describe('ViewerCompetition bracket-tab shell width modifier', () => {
     global.window.MatchCard = function MatchCard() { return null; };
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
     global.window.EmptyState = function EmptyState(props) {
-      return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message].filter(Boolean) };
+      return { type: 'div', props: { className: 'empty', ...props }, children: [props.title, props.message].filter(Boolean) };
     };
     global.window.formatDate = (d) => d || '';
     global.window.formatLabel = (s) => s || '';
@@ -152,21 +152,22 @@ describe('ViewerCompetition bracket-tab shell width modifier', () => {
     expect(cls).not.toContain('viewer__shell--bracket');
   });
 
-  // The header line above the title reuses this file's mount. It composes the
-  // date, the start time and the shiaijo. A competition in a tournament with
-  // no date has none either, so with no start time the separator has nothing
-  // before it and must not appear (bc-shfu). The shiaijo list is never empty:
-  // the server gives every competition at least one (resolveCompetitionCourts).
-  const eyebrow = (overrides) => {
+  // The meta line under the title reuses this file's mount. It composes the
+  // kind, the date, the start time and the shiaijo. A competition in a
+  // tournament with no date has none either, so with no start time the
+  // separator has nothing before it and must not appear (bc-shfu). The shiaijo
+  // list is never empty: the server gives every competition at least one
+  // (resolveCompetitionCourts).
+  const meta = (overrides) => {
     const hits = findAll(mount({ competition: mkComp(overrides) }), n =>
-      typeof n === 'object' && !Array.isArray(n) && n.props?.className === 'viewer__eyebrow');
+      typeof n === 'object' && !Array.isArray(n) && n.props?.className === 'viewer__sub');
     return collectText(hits[0]).replace(/\s+/g, ' ').trim();
   };
 
   it('composes date, time and shiaijo with no dangling separator', () => {
-    expect(eyebrow({ date: '2026-06-01', startTime: '09:00', courts: ['A'] })).toBe('2026-06-01 at 09:00 · A');
-    expect(eyebrow({ date: '2026-06-01', startTime: '', courts: ['A'] })).toBe('2026-06-01 · A');
-    expect(eyebrow({ date: '', startTime: '', courts: ['A', 'B'] })).toBe('A, B');
-    expect(eyebrow({ date: '', startTime: '10:30', courts: ['A'] })).toBe('10:30 · A');
+    expect(meta({ date: '2026-06-01', startTime: '09:00', courts: ['A'] })).toBe('Individual, 2026-06-01 at 09:00, Shiaijo A');
+    expect(meta({ date: '2026-06-01', startTime: '', courts: ['A'] })).toBe('Individual, 2026-06-01, Shiaijo A');
+    expect(meta({ date: '', startTime: '', courts: ['A', 'B'] })).toBe('Individual, Shiaijo A and B');
+    expect(meta({ date: '', startTime: '10:30', courts: ['A'] })).toBe('Individual, 10:30, Shiaijo A');
   });
 });

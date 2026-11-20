@@ -298,7 +298,7 @@ describe('a hantei stays the organiser\'s on the public score sheet (bc-dhas)', 
     const bout1 = [...document.querySelectorAll('.team-sub-match')][0];
     // bc-evts stage 5: the foul is a tap of its own; no write restates the
     // representative bout, so the verdict stays as recorded.
-    await act(async () => { fireEvent.click(bout1.querySelector('[aria-label="Add a SHIRO foul"]')); });
+    await act(async () => { fireEvent.click(bout1.querySelector('[aria-label="Add a Shiro foul"]')); });
     await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     await settle();
     expect(window.API.recordTap.mock.calls.map((c) => [c[2], c[3]])).toEqual([[{ kind: 'foul.add', pos: 1, side: 'b' }, '']]);

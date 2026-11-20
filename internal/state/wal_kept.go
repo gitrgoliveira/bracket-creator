@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -133,7 +132,7 @@ func walRestartRemedy(w *wal.WAL) string {
 // here. With no kept log it costs one map lookup. When the kept change still
 // cannot be written, the lock is released and the error wraps
 // ErrKeptChangeUnsettled: the caller must not write.
-func (s *Store) lockCompWrite(compID string) (*sync.RWMutex, error) {
+func (s *Store) lockCompWrite(compID string) (*compWriteLock, error) {
 	// lockComp re-checks the mutex it waited on is still compID's, so a writer
 	// that waited through DeleteCompetition never holds an orphaned one.
 	mu := s.lockComp(compID)
@@ -210,7 +209,7 @@ func (s *Store) settleKeptWALBeforeRead(compID string) {
 // reader that finds the settle failed moments ago (by the reader ahead of it)
 // does not try again: the lock is released and the error wraps
 // ErrKeptChangeUnsettled, as for a settle that failed.
-func (s *Store) lockCompWriteForRead(compID string) (*sync.RWMutex, error) {
+func (s *Store) lockCompWriteForRead(compID string) (*compWriteLock, error) {
 	mu := s.lockComp(compID)
 	if s.keptSettleWaits(compID) {
 		mu.Unlock()

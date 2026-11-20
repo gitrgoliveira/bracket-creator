@@ -1,7 +1,7 @@
 // minted_members.jsx: the ONE owner of what is known about a team member id
 // this device (or another tab of it) minted for a member add (bc-evts stage 3,
 // operator decision M1 (a), 2026-10-17). A leaf: no imports, no DOM, no
-// network. api_client.jsx creates one per page (`createMintedMembers`), asks
+// network. api_client_members.jsx creates one per page (`createMintedMembers`), asks
 // it before sending every write that names a member id (`gate`), tells it what
 // came of every add (`sent`, `answered`, `discarded`) and of every members
 // list (`listed`, `readEnded`), and does the reads it asks for.

@@ -22,6 +22,7 @@
 
 import { formatIpponsScore } from './bracket.jsx';
 import { hanteiDecided } from './result_slot.jsx';
+import { Icon } from './icon.jsx';
 import { withdrawalLabel } from './admin_scoring_shared.jsx';
 import { sideWord } from './side_cell.jsx';
 import { groupLabel, parseBoutGroup, GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_FLAGS, GROUP_REP, GROUP_REP_PICK_A, GROUP_REP_PICK_B } from './match_groups.jsx';
@@ -291,7 +292,7 @@ export function MatchHistoryDisclosure({ match, password, hidden = false, member
                 {/* The same open/closed cue as the editor's other disclosure
                     (the Ippon-type key): a ghost button reads as plain text
                     without one, and the operator would not know it opens. */}
-                <span aria-hidden="true" className="match-history__caret">{open ? '▾' : '▸'}</span>
+                <span aria-hidden="true" className="match-history__caret"><Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} /></span>
                 {open ? 'Hide history' : 'History'}
             </button>
             {open && (

@@ -44,7 +44,7 @@ describe('ViewerHome SSE offline banner', () => {
     // These must be set BEFORE the dynamic import so the const-bindings pick them up.
     const globals = {
       formatDate:               (d) => d || 'Date TBA',
-      formatViewerHeaderEyebrow:(date, venue) => `${date} · ${venue}`,
+      formatViewerHeaderMeta:(date, venue) => `${date} · ${venue}`,
       formatLabel:              (l) => l,
       hasBothSides:             () => false,
       compareDmy:               () => 0,

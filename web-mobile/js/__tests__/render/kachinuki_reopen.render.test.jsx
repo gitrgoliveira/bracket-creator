@@ -910,7 +910,7 @@ describe('kachinuki Encho and Undo encho keep their places in the footer', () =>
 // encho, and a completed encounter offers no match-level overtime stepper.
 describe('kachinuki encho stays on the bout, never on the encounter', () => {
   const tiedBout = { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: ['M'] };
-  const eyebrow = () => document.querySelector('.editor-modal__eyebrow').textContent;
+  const eyebrow = () => document.querySelector('.editor-modal__meta').textContent;
 
   it('Encho then a point and Record bout: no header overtime, no match-level encho, the bout keeps its own', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
@@ -983,7 +983,7 @@ describe('kachinuki encho stays on the bout, never on the encounter', () => {
       match: completedKachinukiMatch({ teamMatchType: 'regular', status: 'running', winner: null, encho: { periodCount: 1 } }),
     });
     expect(screen.getByTestId('scoring-modal-encho-checkbox')).toBeTruthy();
-    expect(document.querySelector('.editor-modal__eyebrow').textContent).toContain('Overtime');
+    expect(document.querySelector('.editor-modal__meta').textContent).toContain('Overtime');
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-fusenpai-button')); });
     await act(async () => { fireEvent.click(document.querySelector('input[name="decision-side"][value="aka"]')); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Record: / })); });

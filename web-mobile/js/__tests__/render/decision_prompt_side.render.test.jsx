@@ -69,7 +69,7 @@ describe('DecisionPrompt side picker', () => {
     const { container, onSubmit } = mount();
     pick(container, 'aka');
     expect(recordButton().disabled).toBe(false);
-    expect(recordButton().textContent).toBe('Record: AKA withdrew');
+    expect(recordButton().textContent).toBe('Record: Aka withdrew');
     expect(screen.queryByTestId('decision-prompt-hint')).toBeNull();
     expect(screen.getByTestId('decision-prompt-consequence').textContent)
       .toBe('Tora cannot fight again in this competition. Kuma wins this match.');
@@ -80,7 +80,7 @@ describe('DecisionPrompt side picker', () => {
   it('names SHIRO for a no-show, and the consequence follows the kind', () => {
     const { container } = mount({ kind: 'fusenpai' });
     pick(container, 'shiro');
-    expect(recordButton().textContent).toBe('Record: SHIRO did not show up');
+    expect(recordButton().textContent).toBe('Record: Shiro did not show up');
     expect(screen.getByTestId('decision-prompt-consequence').textContent)
       .toBe('Kuma cannot fight again in this competition. Tora wins this match.');
   });
@@ -95,8 +95,8 @@ describe('DecisionPrompt side picker', () => {
 
   it('each option is named by its side word and its competitor', () => {
     mount();
-    expect(screen.getByRole('radio', { name: 'SHIRO (White): Kuma' })).toBeTruthy();
-    expect(screen.getByRole('radio', { name: 'AKA (Red): Tora' })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Shiro (white): Kuma' })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Aka (red): Tora' })).toBeTruthy();
   });
 
   it('is a no-op while submitting', () => {

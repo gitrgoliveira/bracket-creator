@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { stripComments, scanSource, scanWholeFile } from '../../check-helpers.mjs';
 import { FORBIDDEN as NUMBER_RULES } from '../../check-competitor-search.mjs';
-import { FORBIDDEN as WRITE_RULES } from '../../check-write-result.mjs';
+import { FORBIDDEN as WRITE_RULES, PARSER_FILES } from '../../check-write-result.mjs';
 import { GO_RULES, JS_RULES, rulesFor, isSkipped, scanText } from '../../check-no-disable-comments.mjs';
 
 // The three default-win rules (WRITE_RULES[2], [3] and [4]) are the ones
@@ -62,10 +62,14 @@ describe('stripComments keeps every line where it was', () => {
   });
 
   it('a trailing comment goes, a URL in code stays', () => {
-    // The character before the slashes is kept (it is what proved this was
-    // not a URL), so the line ends in the space that preceded the comment.
-    expect(stripComments('x = 1; // .includes(\n')).toBe('x = 1; \n');
+    // The comment becomes spaces, so the line keeps its length.
+    expect(stripComments('x = 1; // .includes(\n')).toBe(`x = 1; ${' '.repeat(13)}\n`);
     expect(stripComments('u = "https://k.example/x";\n')).toBe('u = "https://k.example/x";\n');
+  });
+
+  it('a URL in JSX text hides no code after it', () => {
+    const src = '<a>https://example.org</a>{res.applied === false && <X/>}\n';
+    expect(stripComments(src)).toBe(src);
   });
 });
 
@@ -216,8 +220,10 @@ describe('the lint-disable gate refuses every disable directive', () => {
 
 // bc-evts stage 3: a tap's outcome is read through the owner
 // (tapOutcomeQuiet / tapNotAppliedText), never compared by hand outside
-// write_result.jsx, api_client.jsx and score_events.jsx; and the two retired
-// held reasons stay retired.
+// write_result.jsx, the outbox pieces that read a tap's answer
+// (api_client_queue.jsx, api_client_taps.jsx) and score_events.jsx; and the
+// two retired held reasons stay retired. The exempt outbox files are named
+// exactly (bc-jsxs): a new api_client_* piece is not exempt by its name.
 describe('the tap-outcome and retired-reason rules', () => {
   const rule = (name) => WRITE_RULES.find((r) => r.name === name);
   const trips = (r, line) => scanSource(line + '\n', [r]).length === 1;
@@ -227,13 +233,13 @@ describe('the tap-outcome and retired-reason rules', () => {
     expect(trips(r, "if (o.outcome === 'capped') note();")).toBe(true);
     expect(trips(r, "if (res.outcomes[0].outcome !== 'applied') x();")).toBe(true);
     expect(trips(r, 'if (!tapOutcomeQuiet(o)) note(tapNotAppliedText(o));')).toBe(false);
-    expect(r.exempt).toEqual(expect.arrayContaining(['write_result.jsx', 'api_client.jsx', 'score_events.jsx']));
+    expect(r.exempt).toEqual(['write_result.jsx', 'api_client_queue.jsx', 'api_client_taps.jsx', 'score_events.jsx']);
   });
   it('the individual, engi and team editors score a running match by taps: no autosave, no kept local edit', () => {
     // bc-evts stage 4 widened it to the engi editor; stage 5 adds the team one.
     const r = rule('editor-taps');
     expect(r).toBeTruthy();
-    expect(r.only).toEqual(['admin_scoring_individual.jsx', 'admin_scoring_engi.jsx', 'admin_scoring_team.jsx']);
+    expect(r.only).toEqual(['admin_scoring_individual.jsx', 'admin_scoring_engi.jsx', 'admin_scoring_team.jsx', 'admin_scoring_team_bouts.jsx', 'admin_scoring_team_kachinuki.jsx']);
     expect(trips(r, 'const { markDirty } = useDebouncedRunningWrite({ isRunningRef });')).toBe(true);
     expect(trips(r, '_ref.current = landedAutosave(onSubmit, seqRef, onLanded);')).toBe(true);
     expect(trips(r, 'useAdoptFromServer({ signature, apply, keepLocalEdits: true, isDirty });')).toBe(true);
@@ -249,7 +255,10 @@ describe('the tap-outcome and retired-reason rules', () => {
     expect(trips(r, 'if (err instanceof TypeError) setError(X);')).toBe(true);
     expect(trips(r, 'setError(err instanceof TypeError || !err.message ? X : err.message);')).toBe(true);
     expect(trips(r, 'if (isNoConnection(err)) setError(NOT_SENT_NO_CONNECTION);')).toBe(false);
-    expect(r.exempt).toEqual(['write_result.jsx', 'api_client.jsx']);
+    expect(r.exempt).toEqual(['write_result.jsx', 'api_client_requests.jsx']);
+  });
+  it('the outbox files that parse .applied/.persisted are named exactly, the entry and the other pieces not among them', () => {
+    expect(PARSER_FILES).toEqual(['api_client_flush.jsx', 'api_client_members.jsx', 'api_client_overlays.jsx']);
   });
   it('the retired needs_winner and default_win_stands codes trip anywhere', () => {
     const r = rule('retired-held-reasons');
@@ -348,6 +357,18 @@ describe('the "default win" rule sees a wrap a line-based scan cannot', () => {
     // Reports the line the match STARTS on (the "default" line), not the
     // "win" line it ends on -- the same convention scanSource uses.
     expect(hits[0].line).toBe(3);
+  });
+
+  it('reports hits in line order, whatever order the rules are listed in', () => {
+    // Rules are the scanner's outer loop: the first rule matches line 3, the
+    // second line 1, so unsorted output would print line 3 before line 1.
+    const rules = [
+      { re: /late/, why: 'first rule' },
+      { re: /early/, why: 'second rule' },
+    ];
+    const hits = scanWholeFile('early\nmiddle\nlate\n', rules);
+    expect(hits.map((h) => h.line)).toEqual([1, 3]);
+    expect(hits.map((h) => h.why)).toEqual(['second rule', 'first rule']);
   });
 
   it('a JSX expression splice between the words', () => {

@@ -175,22 +175,25 @@ describe('CompCard', () => {
   });
 
   // Copilot review (PR #195): with no date/startTime and empty courts the
-  // meta line must not render a dangling " · " separator.
+  // meta line must not render a dangling separator (a comma since the meta
+  // line moved to comma form).
   it('omits the meta separator entirely when courts and date/time are empty', () => {
     const c = { id: 'x', name: 'X', format: 'knockout', status: 'setup', courts: null };
-    expect(collectText(CompCard({ c, onOpen: noop, onStart: noop }))).not.toContain('·');
+    const text = collectText(CompCard({ c, onOpen: noop, onStart: noop }));
+    expect(text).toContain('Individual');
+    expect(text).not.toContain(',');
   });
 
-  it('does not lead the court list with a separator when nothing precedes it', () => {
+  it('joins the court list as one phrase after the kind, with no doubled separator', () => {
     const c = { id: 'x', name: 'X', format: 'knockout', status: 'setup', courts: ['A', 'B'] };
     const text = collectText(CompCard({ c, onOpen: noop, onStart: noop }));
-    expect(text).toContain('A, B');
-    expect(text).not.toContain('·');
+    expect(text).toContain('Individual, Shiaijo A and B');
+    expect(text).not.toContain(', ,');
   });
 
-  it('separates date from the court list with " · " when both are present', () => {
+  it('separates date from the court list with ", " when both are present', () => {
     const c = { id: 'x', name: 'X', format: 'knockout', status: 'setup', date: '2026-06-01', courts: ['A'] };
-    expect(collectText(CompCard({ c, onOpen: noop, onStart: noop }))).toContain('·');
+    expect(collectText(CompCard({ c, onOpen: noop, onStart: noop }))).toContain('Individual, 2026-06-01, Shiaijo A');
   });
 });
 

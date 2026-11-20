@@ -208,7 +208,7 @@ describe('the editor follows the match across the running line, both ways', () =
       r.rerender(el(bout({ status: 'completed', ipponsB: ['M', 'K'], winner: { id: 'p2', name: 'Tanaka' }, scoreVersion: 9 }), { onSubmit }));
     });
     expect(marks(r.container), 'the finished scoreline').toHaveLength(2);
-    expect(r.container.textContent).toContain('CORRECTION');
+    expect(r.container.textContent).toContain('Correction');
     const label = marks(r.container)[0];
     await click(r.container.querySelector(`[aria-label="${label}"]`));
     expect(sent(), 'a correction tap is local').toHaveLength(1);

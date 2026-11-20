@@ -4,7 +4,7 @@ import { collectText, findAll } from './helpers/vdom.js';
 
 
 // The broadcast overlay must signal a daihyosen bout on court. isPoolDaihyosenBout
-// (the "…-DH-N" rep-bout id) drives the DAIHYOSEN chip regardless of how the bout
+// (the "…-DH-N" rep-bout id) drives the Daihyosen chip regardless of how the bout
 // renders, so an individual-kind fixture exercises the detection without the team
 // lineup fetch / QR path.
 describe('StreamingOverlay DH signal', () => {
@@ -50,11 +50,11 @@ describe('StreamingOverlay DH signal', () => {
     vi.resetModules();
   });
 
-  it('shows a DAIHYOSEN chip when the running match is a pool daihyosen rep bout', () => {
+  it('shows a Daihyosen chip when the running match is a pool daihyosen rep bout', () => {
     const tree = runtime.mount(StreamingOverlay, { court: 'A', position: 'bottom', competitions: comp('Pool A-DH-0') });
     const chips = findAll(tree, n => n.props && n.props['data-testid'] === 'overlay-dh-badge');
     expect(chips).toHaveLength(1);
-    expect(collectText(chips[0])).toContain('DAIHYOSEN');
+    expect(collectText(chips[0])).toContain('Daihyosen');
   });
 
   it('shows NO DH chip for a regular running pool match', () => {

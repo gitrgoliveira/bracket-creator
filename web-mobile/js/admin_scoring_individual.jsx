@@ -10,6 +10,7 @@ const { useState, useEffect, useRef, useMemo } = React;
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout, isSupplementaryBout } from './pool_ids.jsx';
 import { SideLabel, sideWithColour } from './side_cell.jsx';
+import { Icon } from './icon.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, sideSlotOrder, struckIppons } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 // Imported from the leaf, not read off `window`: this editor is ES-imported by
@@ -73,6 +74,7 @@ import {
   LEAVE_MATCH_ANYWAY,
   finishButtonLabel,
   armedFinishLabel,
+  editorMetaText,
 } from './admin_scoring_shared.jsx';
 import { individualDraftTaps, rebaseIndividualDraft } from './draft_taps.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
@@ -87,7 +89,8 @@ import { GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_REP } from './match_grou
 // isKoTieBlocked: import-only, from the team editor's shared module. bc-rawm
 // reuses it here for the SAME tie rule (a knockout match cannot finish with
 // no winner), never a re-derivation of it; see canFinish below.
-import { TeamScoreEditorModal, isKoTieBlocked } from './admin_scoring_team.jsx';
+import { TeamScoreEditorModal } from './admin_scoring_team.jsx';
+import { isKoTieBlocked } from './admin_scoring_team_bouts.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 
@@ -1296,14 +1299,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
     <>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
-            <div className="editor-modal__eyebrow">
-              {m.compName} · {m.phase === "pool" ? window.poolLabel(m) : m.round}
-              {m.phase === "pool" && m.poolPosition > 0 && m.poolCount > 0
-                ? <span> · Match {m.poolPosition} of {m.poolCount}</span>
-                : m.phase === "bracket" && m.matchNumber > 0
-                ? <span> · Match {m.matchNumber}</span>
-                : null}
-              {enchoPeriodCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{enchoPeriodCount}</span>}
+            <div className="editor-modal__title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
+            </div>
+            <div className="editor-modal__meta">
+              {editorMetaText(m)}
+              {enchoPeriodCount > 0 && <span className="editor-modal__meta-encho">{editorMetaText(m) ? ", " : ""}(E) Overtime ×{enchoPeriodCount}</span>}
               {isPoolDaihyosenBout(m.id) && (
                 <span className="tag-badge" style={{ marginLeft: 6 }}>
                   {window.Term ? React.createElement(window.Term, { name: "daihyosen" }, "DH") : "DH"}
@@ -1317,17 +1318,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                   : "Daihyosen · representative tie-break bout"}
               </div>
             )}
-            <div className="editor-modal__title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
-            </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
             {(isComplete || m.status !== "running") && (
               <div className="editor-head-pill" style={{ fontSize: 10, fontWeight: 700 }}>
-                {isComplete ? "CORRECTION" : "PRE-MATCH"}
+                {isComplete ? "Correction" : "Pre-match"}
               </div>
             )}
-            {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}
+            {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}><Icon name="x" size={14} />Close</button>}
           </div>
         </div>
 
@@ -1341,7 +1339,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
           {m.repIsTeam && (
             <div data-testid="rep-bout-picker" className="rep-bout-picker" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
               <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: "var(--ink-2)" }}>
-                <span>Shiro rep · {m.sideB?.name || ""}</span>
+                <span>Shiro rep: {m.sideB?.name || ""}</span>
                 <select
                   data-testid="rep-shiro-select"
                   className="input"
@@ -1355,7 +1353,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                 </select>
               </label>
               <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: "var(--red)" }}>
-                <span>Aka rep · {m.sideA?.name || ""}</span>
+                <span>Aka rep: {m.sideA?.name || ""}</span>
                 <select
                   data-testid="rep-aka-select"
                   className="input"
@@ -1412,9 +1410,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                             undiscoverable as such) to a plain separator; the
                             special middles have dedicated controls — tie via the
                             draw toggle below (seeded from the persisted decision
-                            via initialIsDrawToggled), encho via the "· (E)
-                            Overtime ×N" eyebrow + EnchoControl pill, daihyosen via
-                            the DH eyebrow badge. Don't "restore" X/(E)/(DH) here.
+                            via initialIsDrawToggled), encho via the ", (E)
+                            Overtime ×N" meta line + EnchoControl pill, daihyosen via
+                            the DH badge on the meta line. Don't "restore" X/(E)/(DH) here.
                             The scored ippon sit HERE, flanking the VS, as on the
                             team bout rows (operator ruling): Shiro's pair on the
                             left, Aka's on the right, each filling outside-in. */}
@@ -1514,7 +1512,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               {/* Kept while armed on an untied scoreline (a legacy record),
                   so its Cancel stays reachable: the grid is locked while armed. */}
               {(aTotal === bTotal || decidedByHantei) && (
-                <div className="hantei-row" data-testid="scoring-modal-hantei-row" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "6px 8px", background: "var(--card-2, #fafafa)", borderRadius: 6 }}>
+                <div className="hantei-row" data-testid="scoring-modal-hantei-row" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "6px 8px", background: "var(--neutral-50)", borderRadius: 6 }}>
                   <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Hantei</span>
                   <span style={{ color: "var(--ink-3)" }}>(judges&apos; decision)</span>
                   {!decidedByHantei && (
@@ -1595,13 +1593,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                 <div className="decision-controls__group">
                   <div className="decision-btn-group">
                     <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={submitting || decisionSubmitting}>
-                      Kiken – Voluntary
+                      Kiken (voluntary)
                     </button>
                     <GlossaryHintAS name="kiken-voluntary" />
                   </div>
                   <div className="decision-btn-group">
                     <button data-testid="scoring-modal-kiken-injury-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-injury"); }} disabled={submitting || decisionSubmitting}>
-                      Kiken – Injury
+                      Kiken (injury)
                     </button>
                     <GlossaryHintAS name="kiken-injury" />
                   </div>
@@ -1749,14 +1747,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
           {!(isComplete && correctionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (
-              <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>← Prev</button>
+              <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>Prev</button>
             ) : <span />}
 
             <div className="score-nav__actions">
               {m.status === "scheduled" && own.startOffered && !isBarredMatch(m) && (
                 <button className="btn btn--sm" onClick={async () => {
                   // F5: this submits status:"running", the one shape
-                  // _notifyScoreSuperseded (api_client.jsx) deliberately stays
+                  // _notifyScoreSuperseded (api_client_status.jsx) deliberately stays
                   // silent for -- a debounced autosave being superseded is
                   // routine noise there, but Start match is an explicit
                   // operator tap: silence here would just re-enable the
@@ -1786,19 +1784,23 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               {own.kept ? null : (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
+                <button className={`btn btn--primary holds-label ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
                   if (isComplete && !correctionReason) { askCorrectionReason(); return; }
                   if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => (isComplete || !onSubmitAndNext ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
-                  title={koTieBlocked ? KO_TIE_REASON : hanteiFinishBlock || undefined}>
-                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(!!onSubmitAndNext && startsNext) : finishButtonLabel(!!onSubmitAndNext && startsNext)}
+                  title={koTieBlocked ? KO_TIE_REASON : hanteiFinishBlock || undefined}
+                  // Holds its place while armed (.holds-label): the armed label
+                  // is longer, and a button that grew or wrapped would move
+                  // under the finger before the second tap.
+                  data-reserve={isComplete ? undefined : armedFinishLabel(!!onSubmitAndNext && startsNext)}>
+                  <span className="holds-label__text">{submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? armedFinishLabel(!!onSubmitAndNext && startsNext) : finishButtonLabel(!!onSubmitAndNext && startsNext)}</span>
                 </button>
               )}
             </div>
 
             {nextMatch ? (
-              <button className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next →</button>
+              <button className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next</button>
             ) : <span />}
           </div>
           )}

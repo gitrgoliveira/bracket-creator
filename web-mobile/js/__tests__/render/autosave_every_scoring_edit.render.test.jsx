@@ -254,8 +254,8 @@ describe('a daihyosen verdict on a running encounter is saved on its own', () =>
     await mount(teamWithDaihyosen());
     await arm();
     // Each button names its colour, for an operator who does not know the words.
-    expect(screen.getByTestId('team-daihyosen-hantei-shiro').textContent).toBe('SHIRO (White) wins');
-    expect(screen.getByTestId('team-daihyosen-hantei-aka').textContent).toBe('AKA (Red) wins');
+    expect(screen.getByTestId('team-daihyosen-hantei-shiro').textContent).toBe('Shiro (white) wins');
+    expect(screen.getByTestId('team-daihyosen-hantei-aka').textContent).toBe('Aka (red) wins');
     await pick('shiro');
     expect(taps()).toEqual([{ kind: 'daihyosen.verdict', pos: -1, side: 'b' }]);
     expect(screen.getByTestId('team-daihyosen-ht-shiro')).toBeTruthy();

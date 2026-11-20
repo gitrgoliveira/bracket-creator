@@ -4,7 +4,7 @@
     "(hantei) on a representative bout, shared by BOTH places that say it:",
     "internal/mobileapp/handlers_match_refusals.go (repBoutHanteiRefusal, the",
     "409 hantei_organiser_only message the public page shows as it is) and",
-    "web-mobile/js/admin_scoring_team.jsx (the note under a representative bout",
+    "web-mobile/js/admin_scoring_team_bouts.jsx (the note under a representative bout",
     "the judges decided). The participant must read the same words whichever",
     "side says them. It pins values, not source text. \"recorded\" is both the",
     "note and the refusal once a hantei is on record; \"notRecorded\" is the",

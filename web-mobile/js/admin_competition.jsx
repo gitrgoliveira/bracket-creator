@@ -17,6 +17,7 @@ import { checkInApplies } from './competition_shape.jsx';
 import { leaveThen, confirmLeave } from './unsaved_entries.jsx';
 import { rosterUnreadableIssues } from './data_integrity.jsx';
 import { Icon } from './icon.jsx';
+import { andList } from './list_phrase.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor } from './queued_writes_wait.jsx';
 export { formatCompMinutes } from './admin_competition_settings.jsx';
@@ -324,7 +325,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // competition runs on 1, 2, 4, 8 or 16 shiaijo) plus the orphaned-shiaijo
   // rule (the competition still lists a court the tournament no longer has).
   // Both live in competitionDrawBlockedReason (admin_helpers.jsx) so this
-  // header, the dashboard card's "Start competition →" and the
+  // header, the dashboard card's "Start competition" and the
   // tournament-level "Start all" picker read ONE derived value: the two
   // latter surfaces used to ignore the rule entirely and let the operator
   // fire a request the server refuses with a transient toast.
@@ -358,11 +359,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // Derived through the shared helper rather than `t.courts` directly, so
   // this line and every allocation judgement resolve inheritance identically.
   const inheritedCourts = window.inheritedDrawCourts(courtList, t.courts);
+  // A part of the comma-separated meta line, so a list inside it reads with
+  // "and" (list_phrase.jsx); a court keeps its name ("Shiaijo A").
   const courtsSummary = courtList.length
-    ? courtList.join(", ")
+    ? `Shiaijo ${andList(courtList)}`
     : inheritedCourts.length
-      ? `No shiaijo of its own, draw would use ${inheritedCourts.join(", ")}`
-      : "No shiaijo assigned";
+      ? `no shiaijo of its own (the draw would use ${andList(inheritedCourts)})`
+      : "no shiaijo assigned";
   // Compute the other-competitions list once (used for both the render guard
   // and the map below).
   const otherComps = (t.competitions || []).filter((cc) => cc.id !== c.id);
@@ -422,17 +425,21 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         ]} />
         <div className="page-head">
           <div>
-            <div className="page-head__eyebrow">{t.name} ›</div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h1 className="page-head__title">{c.name}</h1>
               <StatusBadge status={localStatus ?? c.status} format={c.format} />
             </div>
+            {/* One phrase under the name, its parts separated by commas. "at"
+                only between a date AND a time; a part with nothing to say is
+                left out rather than leaving a bare separator. */}
             <div className="page-head__sub">
-              {window.competitionKindLabel(c)} · {rosterCount} ·{" "}
-              {/* "at" only between a date AND a time, and the separator only
-                  after one of them, or a missing time reads "<date> at ·". */}
-              {[c.date && formatDate(c.date), c.startTime].filter(Boolean).join(" at ")}
-              {(c.date || c.startTime) && " · "}{courtsSummary}
+              {[
+                t.name,
+                window.competitionKindLabel(c),
+                rosterCount,
+                [c.date && formatDate(c.date), c.startTime].filter(Boolean).join(" at "),
+                courtsSummary,
+              ].filter(Boolean).join(", ")}
             </div>
           </div>
           <div className="page-head__actions" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
@@ -445,7 +452,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                   </button>
                   <button type="button" className="btn btn--ghost" onClick={start} disabled={!isDateValid(c.date) || !!drawBlocker || starting || generating || drawWaiting}>
                     {starting && <span className="spinner" />}
-                    {starting ? "Starting…" : "Start competition →"}
+                    {starting ? "Starting…" : "Start competition"}
                   </button>
                 </div>
                 {!isDateValid(c.date) && (
@@ -491,7 +498,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                   </button>
                   <button type="button" className="btn btn--primary" onClick={(e) => leaving(start)(e)} disabled={navBusy}>
                     {starting && <span className="spinner" />}
-                    {starting ? "Starting…" : "Start competition →"}
+                    {starting ? "Starting…" : "Start competition"}
                   </button>
                 </div>
                 <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated. Preview below, then start. To change it, discard and edit first.</div>
@@ -501,7 +508,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
                 <button type="button" className="btn btn--primary" onClick={completeCompetition} disabled={navBusy}>
                   {completing && <span className="spinner" />}
-                  {completing ? "Completing…" : "Complete competition →"}
+                  {completing ? "Completing…" : "Complete competition"}
                 </button>
                 <div style={{ fontSize: 11, color: "var(--ink-3)" }}>All bracket matches are done. Completing reveals the Awards podium on the public viewer.</div>
               </div>

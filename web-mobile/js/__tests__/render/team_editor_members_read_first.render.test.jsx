@@ -35,7 +35,7 @@ import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { readCode } from '../helpers/source.js';
+import { readFamilyCode } from '../helpers/source.js';
 import { lineupPutStubByTeam } from '../helpers/lineup_server.js';
 import { FETCH_TIMEOUT_MS } from '../../write_result.jsx';
 
@@ -693,7 +693,7 @@ describe('team editor: a side that carries only its name', () => {
 // change that does start the read synchronously cannot bring the race back unseen.
 describe('team editor: the effect that notices a side given another team is declared before the one that reads the lineups', () => {
   it('has the side identity effect ahead of the lineup reads in the source', () => {
-    const code = readCode('admin_scoring_team.jsx');
+    const code = readFamilyCode('admin_scoring_team.jsx');
     const noticesSide = code.indexOf('sideSeen.current = {');
     const readsLineups = code.indexOf('startLineupReadsRef.current({');
 
@@ -708,7 +708,7 @@ describe('team editor: the effect that notices a side given another team is decl
 // not a second count kept beside it. The team of a side is read through sideTeam alone.
 describe('team editor: one counter says a side was given another team', () => {
   it('keeps no second generation counter, and no wrapper over sideTeam', () => {
-    const code = readCode('admin_scoring_team.jsx');
+    const code = readFamilyCode('admin_scoring_team.jsx');
     expect(code).not.toMatch(/sideGeneration/);
     expect(code).not.toMatch(/teamIdForSide/);
   });

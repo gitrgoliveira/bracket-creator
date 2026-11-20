@@ -126,7 +126,7 @@ async function closeEditor(page) {
   const modal = page.locator(EDITOR).first();
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (!(await modal.count())) return;
-    const close = modal.locator('button').filter({ hasText: /^(✕ Close|Close|Cancel)$/ }).first();
+    const close = modal.locator('button').filter({ hasText: /^(Close|Cancel)$/ }).first();
     if (await close.count()) await close.click().catch(() => {});
     else await page.keyboard.press('Escape');
     await modal.waitFor({ state: 'detached', timeout: 4000 }).catch(() => {});

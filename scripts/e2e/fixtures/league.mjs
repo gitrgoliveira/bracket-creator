@@ -415,7 +415,7 @@ export async function courtBoutAmong(page, among) {
 // Next before it), `-running`, `-before-finish` and `-after`. `winner` names
 // the competitor who takes it with one men, or `decide(page, pair)` records
 // the result instead (an encho and a hantei). Returns what the console said:
-// { pair, upNext (the card's text, '' when it was already running), eyebrow,
+// { pair, upNext (the card's text, '' when it was already running), meta (the editor's meta line),
 // finishLabel, shots }.
 export async function playTiebreakOnCourt(page, { among, winner, decide, shot, flow }) {
   await courtBoutAmong(page, among);
@@ -425,7 +425,7 @@ export async function playTiebreakOnCourt(page, { among, winner, decide, shot, f
   const pair = await ensureRunning(page);
   expect(pair, 'the tie-breaker bout runs on the court').toBeTruthy();
   expect(among.includes(pair.shiro) && among.includes(pair.aka), `${pair.shiro} v ${pair.aka} is the tie-breaker`).toBe(true);
-  const eyebrow = squash((await page.locator(INLINE_EDITOR).first().locator('.editor-modal__eyebrow').allInnerTexts())[0] || '');
+  const meta = squash((await page.locator(INLINE_EDITOR).first().locator('.editor-modal__meta').allInnerTexts())[0] || '');
   shots.running = await shot(page, `${flow}-console-running`, { fullPage: true });
   if (decide) await decide(page, pair);
   else await awardIppon(page, pair.shiro === winner ? 'shiro' : 'aka', 'M');
@@ -434,7 +434,7 @@ export async function playTiebreakOnCourt(page, { among, winner, decide, shot, f
   await finishMatch(page);
   await expect(completedRowFor(page, pair)).toBeVisible();
   shots.after = await shot(page, `${flow}-console-after`, { fullPage: true });
-  return { pair, upNext, eyebrow, finishLabel, shots };
+  return { pair, upNext, meta, finishLabel, shots };
 }
 
 // ----------------------------------------------------------- confirm dialogs
@@ -497,7 +497,7 @@ export async function readBanner(page) {
     const state = (b) => (b ? { offered: true, enabled: !b.disabled } : { offered: false, enabled: false });
     return {
       position: text(g.querySelector('.league-tiebreak__pos')),
-      teams: text(g.querySelector('.league-tiebreak__teams')).split(' · ').map((t) => t.trim()).filter(Boolean),
+      teams: text(g.querySelector('.league-tiebreak__teams')).split(/, | and /).map((t) => t.trim()).filter(Boolean),
       run: state(btn('Run tie-breaker')),
       remove: state(btn('Remove unscored tie-breaker')),
       hint: [...g.querySelectorAll('.field__hint')].map(text).join(' '),
@@ -585,18 +585,24 @@ export async function readChusen(page) {
     const range = /places (\d+)(?:st|nd|rd|th) to (\d+)(?:st|nd|rd|th)/.exec(text(g));
     return {
       pool: text(g.querySelector('.league-tiebreak__pos')),
-      teams: text(g.querySelector('.league-tiebreak__teams')).split(' · ').map((t) => t.trim()).filter(Boolean),
+      teams: text(g.querySelector('.league-tiebreak__teams')).split(/, | and /).map((t) => t.trim()).filter(Boolean),
       min: range ? Number(range[1]) : NaN,
       max: range ? Number(range[2]) : NaN,
     };
   }));
 }
 
+// How the tie-break notices list the teams in a group: "A", "A and B", "A, B
+// and C" (andList, web-mobile/js/list_phrase.jsx). The readers above split it
+// back on ", " and " and ", which holds for the one-word names these journeys
+// give their teams.
+export const andList = (xs) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
 // The individual notice once a tie-breaker round leaves a tie, and its group
 // of `names` (in the order the notice lists them).
 export const circleNotice = (page) => titled(page, TEXT.circleTitle);
 export const circleGroup = (page, names) => circleNotice(page).locator('.league-tiebreak__group').filter({
-  has: page.locator('.league-tiebreak__teams', { hasText: exact(names.join(' · ')) }),
+  has: page.locator('.league-tiebreak__teams', { hasText: exact(andList(names)) }),
 });
 
 // The lots entry that holds a number box for each of `names`, wherever it is
@@ -710,7 +716,7 @@ export async function readPodium(page) {
     const text = (e) => (e ? e.textContent.replace(/\s+/g, ' ').trim() : '');
     return {
       place: Number(/^awards-place-(\d+)-/.exec(el.getAttribute('data-testid'))[1]),
-      label: text(el.querySelector('.place, .awards-hero__eyebrow')),
+      label: text(el.querySelector('.place, .awards-hero__place')),
       name: text(el.querySelector('.name, .awards-hero__name')),
       dojo: text(el.querySelector('.dojo, .awards-hero__dojo')),
     };

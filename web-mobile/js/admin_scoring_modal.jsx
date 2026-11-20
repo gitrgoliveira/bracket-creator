@@ -5,19 +5,17 @@
 //
 // Implementation lives in the sibling modules:
 //   admin_scoring_autosave.jsx   : autosave/sync infra
-//   admin_scoring_team.jsx       : team helpers + TeamScoreEditorModal
+//   admin_scoring_team.jsx       : TeamScoreEditorModal
+//   admin_scoring_team_bouts.jsx : team bout and result rules
+//   admin_scoring_team_kachinuki.jsx: team kachinuki rules
 //   admin_scoring_individual.jsx: ScoreEditorModal (individual editor)
 
 import { ScoreEditorModal } from './admin_scoring_individual.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 import { registerUnsavedInput } from './app_version.jsx';
 
-import {
-  teamResultLabel,
-  isKoTieBlocked,
-  resolveMatchLineup,
-  resolveLineupTeamId,
-} from './admin_scoring_team.jsx';
+import { teamResultLabel, isKoTieBlocked } from './admin_scoring_team_bouts.jsx';
+import { resolveMatchLineup, resolveLineupTeamId } from './lineup_resolver.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,

@@ -108,10 +108,10 @@ async function mount(match, { withNext = false } = {}) {
 }
 
 const SITES = [
-  { name: 'individual Finish', match: individualMatch, button: () => screen.getByText('Finish'), armed: 'Tap again to finish' },
-  { name: 'individual Finish + Start Next', match: individualMatch, withNext: true, button: () => screen.getByText('Finish + Start Next →'), armed: 'Tap again to finish →' },
-  { name: 'team Finish', match: teamMatch, button: () => screen.getByText('Finish'), armed: 'Tap again to finish' },
-  { name: 'team Finish + Start Next', match: teamMatch, withNext: true, button: () => screen.getByText('Finish + Start Next →'), armed: 'Tap again to finish →' },
+  { name: 'individual Finish', match: individualMatch, button: () => screen.getByText('Finish').closest('button'), armed: 'Tap again to finish' },
+  { name: 'individual Finish + Start Next', match: individualMatch, withNext: true, button: () => screen.getByText('Finish + Start Next').closest('button'), armed: 'Tap again to finish and start next' },
+  { name: 'team Finish', match: teamMatch, button: () => screen.getByText('Finish').closest('button'), armed: 'Tap again to finish' },
+  { name: 'team Finish + Start Next', match: teamMatch, withNext: true, button: () => screen.getByText('Finish + Start Next').closest('button'), armed: 'Tap again to finish and start next' },
   { name: 'kachinuki End match', match: kachinukiMatch, button: () => screen.getByTestId('kachinuki-end-match-button'), armed: /^Tap again/ },
 ];
 
@@ -121,7 +121,13 @@ describe.each(SITES)('bc-dtfn: $name', ({ match, withNext, button, armed }) => {
     const btn = button();
     await pointerTap(btn);
     await pointerTap(btn);
-    expect(btn.textContent).toMatch(armed);
+    // A string is the whole label, so a shorter one cannot pass for it.
+    if (typeof armed === 'string') {
+      expect(btn.textContent).toBe(armed);
+      // The button keeps the armed label's room in both states, so arming
+      // never moves it under the finger (.holds-label).
+      expect(btn.closest('button').getAttribute('data-reserve')).toBe(armed);
+    } else expect(btn.textContent).toMatch(armed);
     expect(completed()).toBe(0);
   });
 
@@ -162,8 +168,8 @@ describe.each(SITES)('bc-dtfn: $name', ({ match, withNext, button, armed }) => {
 // wording too: no arrow promising a start that cannot happen. The engi match
 // is built lazily because engiMatch is declared further down.
 describe.each([
-  { name: 'individual', match: individualMatch, button: () => screen.getByText('Finish') },
-  { name: 'team', match: teamMatch, button: () => screen.getByText('Finish') },
+  { name: 'individual', match: individualMatch, button: () => screen.getByText('Finish').closest('button') },
+  { name: 'team', match: teamMatch, button: () => screen.getByText('Finish').closest('button') },
   { name: 'engi', match: () => engiMatch(), button: () => screen.getByTestId('engi-submit') },
 ])('the $name editor on the last bout of a court', ({ match, button }) => {
   it('reads Finish, not Finish + Start Next, when startsNext is false', async () => {
@@ -172,7 +178,7 @@ describe.each([
       render(<ScoreEditorModal match={match()} onClose={vi.fn()} onSubmit={vi.fn()} onSubmitAndNext={vi.fn()} startsNext={false} password="" />);
     });
     expect(button().textContent).toBe('Finish');
-    expect(screen.queryByText('Finish + Start Next →')).toBeNull();
+    expect(screen.queryByText('Finish + Start Next')).toBeNull();
   });
 
   it('reads Tap again to finish, with no arrow, once armed', async () => {

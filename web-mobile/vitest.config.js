@@ -23,7 +23,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Use a factory so each project gets its own plugin instance, sharing a
 // single instance across projects can cause cross-project state leakage in
 // plugins that cache state per build (e.g. configResolved caches).
-const makePlugins = () => [react({ include: /\.(js|jsx)$/, jsxRuntime: 'classic' })];
+// A test that opens two tabs of one device imports api_client.jsx twice, under
+// its own query each (`api_client.jsx?tab=a`). The query makes a second module
+// instance of the entry only; the outbox modules it imports (`api_client_*`)
+// would be shared, so both "tabs" would hold one queue. This carries the
+// importer's `tab` query onto those imports, so each tab gets the whole outbox
+// family as a browser tab would. Every other import stays shared, as before.
+const TAB_QUERY = /[?&]tab=([^&#]+)/;
+const tabInstances = () => ({
+  name: 'bc-tab-instances',
+  enforce: 'pre',
+  async resolveId(source, importer, options) {
+    const tab = importer && TAB_QUERY.exec(importer)?.[1];
+    if (!tab || !/(^|\/)api_client_\w+\.jsx$/.test(source)) return null;
+    const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+    if (!resolved || TAB_QUERY.test(resolved.id)) return resolved;
+    return { ...resolved, id: `${resolved.id}?tab=${tab}` };
+  },
+});
+const makePlugins = () => [tabInstances(), react({ include: /\.(js|jsx)$/, jsxRuntime: 'classic' })];
 const sharedResolve = {
   alias: {
     // qr.jsx is imported as ./qr.js in admin_shell.jsx because esbuild's

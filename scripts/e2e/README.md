@@ -258,8 +258,11 @@ Two projects, both Chromium:
 `test.setTimeout`. `expect` waits 15 s (`EXPECT_TIMEOUT_MS` in
 `fixtures/devices.mjs`, which the fixtures use for their own waits), an action
 such as a tap waits 15 s (`actionTimeout`) and a navigation 30 s
-(`navigationTimeout`). `retries` is 0 and `forbidOnly` is on, so a stray
-`test.only` fails the run. Chromium runs with `--no-sandbox` only when the
+(`navigationTimeout`). `retries` is 1 and `forbidOnly` is on, so a stray
+`test.only` fails the run. A journey that fails and then passes on its retry is
+reported as flaky (the list reporter prints a `flaky` line after the run), not
+as passed: read it, since a journey that is flaky every run has a real timing
+fault. A journey that fails both tries fails the run. Chromium runs with `--no-sandbox` only when the
 process is root, which it refuses to sandbox; anywhere else the sandbox stays
 on (the same rule as `scripts/screenshots/run.mjs`).
 
@@ -273,9 +276,13 @@ another court).
 
 `fixtures/test.mjs` starts one `mobile-app` per spec file, on a free port and
 a throwaway data folder, through `scripts/screenshots/lib/server.mjs`, and
-stops it by PID. Spec files run in parallel across workers (Playwright's
-default, about half the cores), each worker with its own browser and its own
-server; on a slow or loaded machine pass `E2E_ARGS='--workers=1'`. A worker
+stops it by PID. Spec files run in parallel across workers: a third of the
+machine's available CPUs (`os.availableParallelism()`), and at least one, so 3
+on a 10-core machine. At half the cores, Playwright's default, one or two
+journeys a run missed a screen change inside their timeouts while every core
+was busy. Each worker has
+its own browser and its own server. Pass `E2E_ARGS='--workers=N'` to set the
+count, or `--workers=1` on a slow or loaded machine. A worker
 runs its files one after another (all of them with `--workers=1`), and each
 file starts with a fresh server, never the previous file's tournament. A
 worker stops a file's server when it starts the next file's server, or when

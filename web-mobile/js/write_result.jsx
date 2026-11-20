@@ -1,7 +1,7 @@
 // Owner of ONE question: did a score write actually land, and if not, is the
 // state the operator is looking at ever going to become true?
 //
-// EVERY consumer imports this module directly -- api_client.jsx, the three
+// EVERY consumer imports this module directly -- the api_client_* modules, the three
 // scoring editors (admin_scoring_team, admin_scoring_individual,
 // admin_scoring_engi), admin_scoring_shared.jsx, admin_shiaijo.jsx, admin.jsx
 // (the single editMatchScore chokepoint every score-editor host routes
@@ -83,8 +83,8 @@ export function writeKeepsEditorOpen(patch, res) {
 // case where re-entering is the wrong move (bc-lww1). Every OTHER write failure
 // ends in "re-enter the result", and here that is actively wrong: re-entering
 // re-stamps the write with the current clock, so it would beat the newer
-// stored change and undo it. One owner for these strings: api_client.jsx's
-// `_notifyScoreSuperseded` broadcast uses them, and so does notLandedBanner at
+// stored change and undo it. One owner for these strings: the
+// `_notifyScoreSuperseded` broadcast (api_client_status.jsx) uses them, and so does notLandedBanner at
 // the foot of this file -- the answer for every explicit-tap call site that
 // submits with status:"running", the shape that broadcast deliberately stays
 // silent for (a superseded autosave is routine noise; an operator tapping
@@ -234,7 +234,7 @@ export function decisionWord(code) {
 }
 
 // supersededBanner: the one choice of banner for a superseded write, asked by
-// notLandedBanner and by api_client.jsx's not-applied broadcast. The server's
+// notLandedBanner and by the not-applied broadcast (api_client_status.jsx). The server's
 // sentence (`message`) is shown as it is when it sends one (notSavedText's
 // `sentence` path).
 export function supersededBanner(res) {
@@ -349,7 +349,7 @@ export function writeRetryable(res) {
 // exist, and tells them not to do the one thing that would save their work.
 //
 // Owned here, beside the superseded pair, for the same reason that pair is: the
-// consumers are api_client.jsx and notLandedBanner below, which is what the
+// consumers are the api_client_* modules and notLandedBanner below, which is what the
 // explicit-tap call sites in the scoring editors ask to turn an awaited result
 // into this banner state.
 export const CLOCK_SKEW_REASON_TEXT = "this device's clock was out of step with the server";
@@ -399,7 +399,7 @@ export function notLandedBanner(res) {
 // terminalFailureBanner: the banner a score editor raises for a queued write
 // that failed for good (subscribeTerminalWriteFailed), in the same shape as
 // notLandedBanner's, plus `sentence` when the refusal is a whole sentence that
-// says what to do (api_client.jsx _replayRefusal), and `lead` when the write
+// says what to do (_replayRefusal, api_client_requests.jsx), and `lead` when the write
 // was not lost (a superseded replay, kept in the match's history). One owner,
 // so no editor drops the mark.
 export function terminalFailureBanner(info) {
@@ -469,7 +469,7 @@ export function queuedNotice(res, { keepsFailing = false, blockedBy = null } = {
 }
 
 // HELD_WRITE_DISCARD_LABEL / heldWriteDiscardConfirm: the way past a held
-// write the server keeps refusing (api_client.jsx discardFailingHeldWrites).
+// write the server keeps refusing (discardFailingHeldWrites, api_client_outbox.jsx).
 // It holds back no other write, but it is retried as long as the page is
 // open, so the editor's pending banner offers to discard it, and only it,
 // after this confirm. Named "result" as the operator counts it.
@@ -542,7 +542,8 @@ const HELD_WRITE_AFTER_DISCARD = {
     'awards': 'Check the fighting-spirit awards afterwards, and save them again if it is still needed.',
 };
 
-// The label api_client.jsx's check-in, court-call and settings doors give
+// The label the check-in, court-call and settings doors (api_client_competitions.jsx,
+// api_client_tournament.jsx) give
 // their held write (`where`) already names the kind ("Check-in: Ren Abe",
 // "Court call: "…"", "Tournament settings"), so only what follows that name is
 // kept: "check-in (Ren Abe)", never "check-in (Check-in: Ren Abe)".
@@ -557,8 +558,8 @@ function doorLabelDetail(where) {
 }
 
 // heldWriteWhatWhere: the same, with the match (as the score list labels it)
-// or the team it is about when the device knows it (`where`, api_client.jsx
-// _whereOf; stage 3 review 5, H5), e.g. "reopen (Pool A · Match 3)".
+// or the team it is about when the device knows it (`where`, `_whereOf` in
+// api_client_status.jsx; stage 3 review 5, H5), e.g. "reopen (Pool A · Match 3)".
 export function heldWriteWhatWhere(held) {
     const what = heldWriteWhat(held);
     let where = held && typeof held.where === 'string' ? held.where.trim() : '';
@@ -612,8 +613,8 @@ export function queuedWritesNoun(results, total, { finished = true, taps = false
 // isFinishedResultWrite: the ONE answer to "is this queued write a finished
 // result" (bc-evts stage 3 review 2, R5): a finished score write, a decision,
 // or a representative bout change. Every count and alert
-// that speaks of results asks it (api_client.jsx: the pass's sent and
-// displaced counts, `unsentWrites().terminal`, every alert's `terminalCount`).
+// that speaks of results asks it (api_client_flush.jsx: the pass's sent and
+// displaced counts; api_client_outbox.jsx: `unsentWrites().terminal`; every alert's `terminalCount`).
 // An entry's own `terminal` flag says only how it is SENT (its own method and
 // url, never the running score PUT), so a court move, a time change, a lineup
 // or member save, a reopen or a send back to the queue carries it and is still
@@ -646,7 +647,7 @@ export function heldWritesText(status, counts) {
 
 
 // FETCH_TIMEOUT_MS: how long a bounded request is waited on before it is
-// reported as not answered. api_client.jsx gives it to every fetchWithTimeout
+// reported as not answered. api_client_requests.jsx gives it to every fetchWithTimeout
 // and to _fetchJson (headers AND body there).
 export const FETCH_TIMEOUT_MS = 12000;
 
@@ -673,8 +674,8 @@ export function noAnswerSentence(notDone) {
 // The one sentence for a direct write that got no answer. A fetch rejects with
 // a TypeError both when the request never left the device and when it landed
 // and only the answer was lost, and nothing tells the two apart, so the
-// sentence claims neither: the change may or may not be saved. api_client.jsx's
-// _directFetch throws it for every direct write; the callers that run their
+// sentence claims neither: the change may or may not be saved.
+// _directFetch (api_client_requests.jsx) throws it for every direct write; the callers that run their
 // own fetch show it through isNoConnection.
 export const WRITE_NOT_CONFIRMED = 'No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.';
 
@@ -693,8 +694,8 @@ export function isNoConnection(err) {
 
 // The error a call throws once it has turned a lost connection into one of the
 // sentences above: `noConnection` marks it, so shownMessage prints it as it is,
-// and the browser's own TypeError stays as the `cause`. api_client.jsx's
-// _directFetch and every caller that runs its own fetch build it here.
+// and the browser's own TypeError stays as the `cause`.
+// _directFetch (api_client_requests.jsx) and every caller that runs its own fetch build it here.
 export function noConnectionError(sentence, cause) {
     return Object.assign(new Error(sentence, { cause }), { noConnection: true });
 }
@@ -790,7 +791,7 @@ function matchLabelList(ms) {
 // last-write-wins drop: nothing raced the operator, the write is simply
 // disallowed until they say so explicitly.
 //
-// api_client.jsx is the parser, exactly as it is for the 200 shapes: it
+// api_client_requests.jsx is the parser, exactly as it is for the 200 shapes: it
 // attaches the four fields to the thrown Error as `.downstreamKnockoutPlayed`
 // so a catcher never re-derives the shape from a raw response body or a
 // message-string regex (the precedent the earlier 409 parsers set).
@@ -812,7 +813,7 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatch
     // result, so "who moves in the knockout" is the consequence they cannot
     // see from where they are. Branched before the knockout defaults below,
     // whose `displaced` describes one slot only. `ranking` (set by
-    // api_client's overridePoolRanks) is the same refusal for a pool rank
+    // api_client_competitions.jsx's overridePoolRanks) is the same refusal for a pool rank
     // recorded by hand (chusen), which corrects no result.
     if (qualifierChange && qualifierChange.length) {
         return {
@@ -1020,7 +1021,7 @@ export function courtBusyReopenWarning({ court, label }) {
 // The finished-league warning (warn
 // first, then save). A correction of a finished league's result is answered
 // 409 {error: "league_finished", message, removedCourts} until it carries the
-// request-only confirmFinished; api_client.jsx parses it onto the thrown
+// request-only confirmFinished; api_client_requests.jsx parses it onto the thrown
 // Error as `.leagueFinished` ({removedCourts}), which leagueFinishedRefusal
 // reads, so no caller re-derives the shape. attemptScoreWrite asks it on every
 // host (the admin hosts and the court console alike: it is not gated on
@@ -1029,7 +1030,7 @@ export function courtBusyReopenWarning({ court, label }) {
 export const LEAGUE_FINISHED_WARNING = 'This league has finished. Changing this result can change the final table and podium. If it leaves a new tie at a podium place, the league goes back to match play to settle it.';
 
 // The same warning when what was refused is a REOPEN of a match of the finished
-// league (api_client.jsx marks the refusal `reopen`): the league goes back into
+// league (_reopenRefusal, api_client_requests.jsx, marks the refusal `reopen`): the league goes back into
 // match play at once, whatever the match is then finished with.
 export const LEAGUE_FINISHED_REOPEN_WARNING = 'This league has finished. Reopening this match puts the league back into match play. Its final table and podium are decided again when the match is finished.';
 
@@ -1073,7 +1074,7 @@ export function leagueFinishedConfirm({ removedCourts, reopen } = {}) {
 // {error: "lots_replaced", message} until it carries the request-only
 // confirmLots. The server words the sentence (the place and the order entered:
 // "This replaces the lots you entered for 1st: Bea 1st, Aki 2nd. The bout's
-// result will decide the place."); api_client.jsx parses the refusal onto the
+// result will decide the place."); api_client_requests.jsx parses the refusal onto the
 // thrown Error as `.lotsReplaced`, which lotsReplacedRefusal reads, and
 // attemptScoreWrite shows lotsReplacedConfirm and resends with confirmLots on
 // Replace the lots. The lots stay stored; only the bout's result then decides.
@@ -1175,7 +1176,7 @@ export const DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED = 'Ranking not recorded: the 
 // this same 409. There is no operator at the keyboard for the flush loop to
 // prompt -- attemptScoreWrite's confirm dialog above has nothing to show a
 // tap into -- so the write is dropped exactly like any other non-retryable
-// 4xx (the api_client.jsx flush loop's generic "rejected" branch), but with
+// 4xx (the api_client_flush.jsx flush loop's generic "rejected" branch), but with
 // this reason instead of the bare "downstream_knockout_played" token: a
 // dropped correction is finished work the operator must be told about in
 // words, and the queue must not retry it forever (it will never land

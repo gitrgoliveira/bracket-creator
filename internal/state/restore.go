@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
 	"gopkg.in/yaml.v3"
@@ -699,7 +698,7 @@ func (s *Store) restoreSwap(req RestoreRequest) (plan RestorePlan, err error) {
 	lockIDs := slices.Concat(w.replaced, w.removed, w.created)
 	slices.Sort(lockIDs)
 	lockIDs = slices.Compact(lockIDs)
-	held := make([]*sync.RWMutex, 0, len(lockIDs))
+	held := make([]*compWriteLock, 0, len(lockIDs))
 	defer func() {
 		for i := len(held) - 1; i >= 0; i-- {
 			held[i].Unlock()

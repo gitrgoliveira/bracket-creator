@@ -22,7 +22,7 @@ export const tvBoard = (page) => page.getByTestId('tv-display-root');
 
 export async function openTvBoard(page, court) {
   await page.goto(`/display?court=${encodeURIComponent(court)}`);
-  await expect(tvBoard(page)).toContainText(`SHIAIJO ${court}`);
+  await expect(tvBoard(page)).toContainText(`Shiaijo ${court}`);
 }
 
 // ------------------------------------------------- search, watchlist, cards --
@@ -103,7 +103,7 @@ export const watchHeroMatch = (page) => watchHero(page).locator('.wl-hero__sides
 export const competitionTab = (page, label) => page.locator('.viewer__tab', { hasText: new RegExp(`^${label}$`) });
 
 // The doors a spectator opens a match card through, besides the schedule's own
-// rows: Home's NOW list, a pool's match list, and an Up next row (Home's or a
+// rows: Home's Now list, a pool's match list, and an Up next row (Home's or a
 // competition's Overview). Where one list holds several matches the row is
 // named by both competitors.
 export const homeNowRow = (page) => page.locator('.hero-running .vsched-item');
@@ -111,7 +111,7 @@ export const poolRow = (page, { shiro, aka }) => page.locator('button.pool-match
 export const upNextRow = (page, { shiro, aka }) => page.locator('button.vsched-item').filter({ hasText: shiro }).filter({ hasText: aka });
 
 // The Overview's inline cards (officiated tournaments, where no dialog opens
-// there): the one an Up next row expanded (it has a Close button) and the ON NOW
+// there): the one an Up next row expanded (it has a Close button) and the On now
 // card of the running match (it has none).
 export const expandedCard = (page) => page.locator('.match-detail-card').filter({ has: page.getByRole('button', { name: 'Close' }) });
 export const nowCard = (page) => page.locator('.match-detail-card').filter({ hasNot: page.getByRole('button', { name: 'Close' }) });

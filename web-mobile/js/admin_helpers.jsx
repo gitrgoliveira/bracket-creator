@@ -916,7 +916,7 @@ function seededRanks(players) {
 function competitionSeedingBlocker(competition) {
   const ranks = seededRanks(competition.players);
   const diagnosis = seedGapDiagnosis(ranks);
-  if (diagnosis) return { reason: diagnosis, fix: SEEDING_FIX, section: "participants", cta: "Fix seeding →" };
+  if (diagnosis) return { reason: diagnosis, fix: SEEDING_FIX, section: "participants", cta: "Fix seeding" };
   const seen = new Set();
   const duplicates = [];
   ranks.forEach((rank) => {
@@ -929,7 +929,7 @@ function competitionSeedingBlocker(competition) {
       reason: `Seeding is invalid: seed rank${plural} ${rankList(duplicates.sort((a, b) => a - b))} ${duplicates.length === 1 ? "is" : "are"} used more than once.`,
       fix: SEEDING_DUPLICATE_FIX,
       section: "participants",
-      cta: "Fix seeding →",
+      cta: "Fix seeding",
     };
   }
   return null;
@@ -951,7 +951,7 @@ function competitionSeedingBlocker(competition) {
 function competitionDrawBlocker(competition, tournamentCourts) {
   if (!competition) return null;
   const courtsReason = competitionDrawBlockedReason(competition, tournamentCourts);
-  if (courtsReason) return { reason: courtsReason, fix: SHIAIJO_FIX, section: "settings", cta: "Reassign shiaijo →" };
+  if (courtsReason) return { reason: courtsReason, fix: SHIAIJO_FIX, section: "settings", cta: "Reassign shiaijo" };
   // NOTE: only sees a seeding when the caller's competition carries one.
   // Both viewer payloads hydrate seeds (WithSeeds: true on the detail AND
   // the list build -- handlers_viewer.go, where the list was flipped so the

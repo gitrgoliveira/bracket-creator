@@ -34,7 +34,7 @@
     --navy: #1d3557;
     --aka: #c8202e;
     --muted: #5d6b7e;
-    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
   }
   html, body { margin: 0; background: var(--paper); }
   .stage { display: flex; background: var(--paper); box-sizing: border-box; }
@@ -55,7 +55,7 @@
     display: block;
     transform-origin: 0 0;
   }
-  .label { margin-top: 18px; font: 14px/1.2 var(--mono); letter-spacing: .06em; color: var(--muted); }
+  .label { margin-top: 18px; font: 15px/1.3 var(--sans); color: var(--muted); }
   .label::before { content: ""; display: block; width: 36px; height: 2px; margin-bottom: 10px; background: var(--navy); }
   .shot--console .label::before { background: var(--aka); }
   .stage--narrow .label { display: none; }
@@ -72,11 +72,11 @@
   // 600 CSS px.
   const SURFACES = [
     { key: 'console', w: 1180, h: 820, show: 820, radius: 13,
-      label: '1 · SCORED AT THE COURT', title: 'Court console', wide: 420, narrow: 0 },
+      label: '1 · Scored at the court', title: 'Court console', wide: 420, narrow: 0 },
     { key: 'display', w: 1280, h: 720, show: 720, radius: 10,
-      label: '2 · ON THE COURT DISPLAY', title: 'Court display', wide: 492, narrow: 520 },
+      label: '2 · On the court display', title: 'Court display', wide: 492, narrow: 520 },
     { key: 'phone', w: 390, h: 844, show: 760, radius: 26,
-      label: '3 · FOLLOWED ON EVERY PHONE', title: 'Phone following a competitor', wide: 384, narrow: 333 },
+      label: '3 · Followed on every phone', title: 'Phone following a competitor', wide: 384, narrow: 333 },
   ];
   window.showStage = (frames) => {
     const layout = frames.layout === 'narrow' ? 'narrow' : 'wide';

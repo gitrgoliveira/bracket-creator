@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 let ownStatusMoveHolds;
 let ownStatusMoveEnded;
 beforeAll(async () => {
-  ({ ownStatusMoveHolds, ownStatusMoveEnded } = await import('../../admin_shiaijo.jsx'));
+  ({ ownStatusMoveHolds, ownStatusMoveEnded } = await import('../../admin_shiaijo_feed.jsx'));
 });
 
 describe('ownStatusMoveHolds', () => {

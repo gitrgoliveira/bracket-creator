@@ -376,6 +376,8 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     const glyph = caret.querySelector('.tsm-caret.tsm-caret--open');
     expect(glyph).not.toBeNull();
     expect(glyph.getAttribute('aria-hidden')).toBe('true');
+    // Drawn by Icon, not a typed triangle (operator decision H1).
+    expect(glyph.getAttribute('data-icon')).toBe('chevron-right');
     expect(caret.getAttribute('aria-expanded')).toBe('true');
   });
 
@@ -584,7 +586,7 @@ describe('TeamScoreEditorModal: a fixed-order row with no roster metadata still 
       expect(container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]').length).toBe(5);
     });
 
-    const shiroInput = container.querySelector('input[aria-label="Senpo SHIRO player"]');
+    const shiroInput = container.querySelector('input[aria-label="Senpo Shiro player"]');
     expect(shiroInput).not.toBeNull();
 
     await act(async () => {
@@ -674,14 +676,14 @@ describe('TeamScoreEditorModal: a fixed-order row with no roster metadata still 
       expect(container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]').length).toBe(4);
     });
 
-    const senpoInput = container.querySelector('input[aria-label="Senpo SHIRO player"]');
+    const senpoInput = container.querySelector('input[aria-label="Senpo Shiro player"]');
     expect(senpoInput).not.toBeNull();
     await act(async () => { fireEvent.focus(senpoInput); });
     const senpoOptionNames = [...container.querySelectorAll('.pmf__opt-name')].map(n => n.textContent);
     expect(senpoOptionNames).not.toContain('Kenji Tanaka');
 
     await act(async () => { fireEvent.blur(senpoInput); });
-    const chukenInput = container.querySelector('input[aria-label="Chuken SHIRO player"]');
+    const chukenInput = container.querySelector('input[aria-label="Chuken Shiro player"]');
     expect(chukenInput).not.toBeNull();
     await act(async () => { fireEvent.focus(chukenInput); });
     const chukenOptionNames = [...container.querySelectorAll('.pmf__opt-name')].map(n => n.textContent);
@@ -709,7 +711,7 @@ describe('TeamScoreEditorModal: a fixed-order row with no roster metadata still 
       expect(container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]').length).toBe(5);
     });
 
-    const senpoInput = container.querySelector('input[aria-label="Senpo SHIRO player"]');
+    const senpoInput = container.querySelector('input[aria-label="Senpo Shiro player"]');
     expect(senpoInput).not.toBeNull();
     await act(async () => { fireEvent.focus(senpoInput); });
 
@@ -719,7 +721,7 @@ describe('TeamScoreEditorModal: a fixed-order row with no roster metadata still 
     // The Aka side's list carries ITS team's number (a side-letter lookup
     // once labelled both lists with the Shiro team's number).
     await act(async () => { fireEvent.blur(senpoInput); });
-    const akaInput = container.querySelector('input[aria-label="Senpo AKA player"]');
+    const akaInput = container.querySelector('input[aria-label="Senpo Aka player"]');
     expect(akaInput).not.toBeNull();
     await act(async () => { fireEvent.focus(akaInput); });
     const akaLabels = [...container.querySelectorAll('.pmf__opt-label')].map(n => n.textContent);

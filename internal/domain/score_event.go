@@ -586,7 +586,7 @@ func equalStrings(a, b []string) bool {
 }
 
 // BoutWinnerSide is the one winner rule for a team bout (the JS
-// boutWinnerSide, admin_scoring_team.jsx): a hantei on a tied bout names its
+// boutWinnerSide, admin_scoring_team_bouts.jsx): a hantei on a tied bout names its
 // side, a Tie names none, a fusensho names the awarded side, else the side
 // with more points. "" for no winner.
 func BoutWinnerSide(aCount, bCount int, draw bool, fusensho, hanteiSide string) string {

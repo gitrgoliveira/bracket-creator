@@ -213,7 +213,9 @@ test.describe('kachinuki in pools', () => {
     await endMatch(page);
     const rowText = await expectCompleted(page, pair, line);
     // A draw names no winner.
-    expect(rowText.match(/✓/g) || [], `a drawn encounter marks no winner: ${rowText}`).toHaveLength(0);
+    // The winner's tick is an icon; its screen-reader words are what the
+    // row's text holds (WinnerTick, side_cell.jsx).
+    expect(rowText.match(/Winner: |, winner\b/g) || [], `a drawn encounter marks no winner: ${rowText}`).toHaveLength(0);
     tally[p].T += 1;
     tally[role.C].T += 1;
     record({ journey: JOURNEY, step: 'enc2', action: 'End match', pair, rowText, screenshot: await shot(page, 'enc2-completed') });

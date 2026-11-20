@@ -141,6 +141,7 @@ function validateSwissSettings(format, swissRounds) {
 // (mp-sspn). Importing keeps the defaults in one place.
 import { normalizeTheme } from './admin_branding.jsx';
 import { teamMatchTypeHint } from './pool_ids.jsx';
+import { Icon } from './icon.jsx';
 // bc-qual LP-5a: the qualifier-preview arithmetic AND the pool-size/winners
 // form-coupling rules are shared with admin_competition_settings.jsx (the
 // competition Settings page renders the same "Knockout qualifiers" radio),
@@ -506,7 +507,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
                 onChange={(e) => { setDurationDays(decideNumericUpdate(e.target.value, 1).value); setError(""); }}
                 style={{ maxWidth: 100 }}
               />
-              <div className="field__hint">{`Duration in days (1–${MAX_TOURNAMENT_DURATION_DAYS}). Multi-day tournaments constrain competitions to their day.`}</div>
+              <div className="field__hint">{`Duration in days (1 to ${MAX_TOURNAMENT_DURATION_DAYS}). Multi-day tournaments constrain competitions to their day.`}</div>
               {errorField === "durationDays" && error && <div className="field__error" role="alert">{error}</div>}
             </div>
           </div>
@@ -590,7 +591,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
               <span className="card__title">Public information</span>
               <span className="card__sub">Shown to attendees on the public tournament page.{!publicOpen && hasPublicInfo ? " Configured." : ""}</span>
             </span>
-            <span className="disclosure__toggle" aria-hidden="true">{publicOpen ? "−" : "+"}</span>
+            <Icon name={publicOpen ? "chevron-down" : "chevron-right"} size={16} className="disclosure__toggle" />
           </button>
           {publicOpen && (
           <div style={{ marginTop: 16 }}>
@@ -671,7 +672,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
                 <div key={ct._key} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
                   <input className="input" aria-label={`Contact ${i + 1} label`} style={{ flex: "0 0 120px" }} value={ct.label} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], label: e.target.value }; setContacts(next); }} placeholder="Label" />
                   <input className="input" aria-label={`Contact ${i + 1} value`} style={{ flex: 1 }} value={ct.value} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], value: e.target.value }; setContacts(next); }} placeholder="Value (email, phone, URL, etc.)" />
-                  <button type="button" className="btn" aria-label={`Remove contact ${i + 1}`} style={{ padding: "4px 10px" }} onClick={() => setContacts(contacts.filter((_, j) => j !== i))}>✕</button>
+                  <button type="button" className="btn" aria-label={`Remove contact ${i + 1}`} style={{ padding: "4px 10px" }} onClick={() => setContacts(contacts.filter((_, j) => j !== i))}><Icon name="x" size={14} /></button>
                 </div>
               ))}
               {contacts.length < 10 && (
@@ -1599,7 +1600,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 submit while the POST is in flight. */}
             <button type="button" className="btn btn--primary" onClick={create} disabled={!!courtsErr || creating}>
               {creating && <span className="spinner" />}
-              {creating ? "Creating…" : "Create & continue →"}
+              {creating ? "Creating…" : "Create & continue"}
             </button>
           </div>
         </div>
@@ -1785,8 +1786,8 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
               <div>
                 <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 6 }}>
                   {files.length} file{files.length !== 1 ? "s" : ""} selected
-                  {manifestFile ? <span className="tag-badge">✓ manifest found: {manifestFile.name}</span> : <span className="tag-badge tag-badge--warn">⚠ no manifest.yaml found</span>}
-                  {csvFiles.length > 0 && <span style={{ marginLeft: 6, fontSize: 12 }}>· {csvFiles.length} CSV file{csvFiles.length !== 1 ? "s" : ""}</span>}
+                  {csvFiles.length > 0 && <span style={{ fontSize: 12 }}>, {csvFiles.length} CSV file{csvFiles.length !== 1 ? "s" : ""}</span>}
+                  {manifestFile ? <span className="tag-badge"><Icon name="check" size={10} className="icon-lead" />Manifest found: {manifestFile.name}</span> : <span className="tag-badge tag-badge--warn"><Icon name="triangle-alert" size={10} className="icon-lead" />No manifest.yaml found</span>}
                 </div>
               </div>
             )}
@@ -1834,7 +1835,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
                   is what made the old refusal list unreadable. */}
               {previewShiaijoProblems > 0 && (
                 <div className="alert alert--warn" style={{ marginTop: 10 }} data-testid="preview-shiaijo-warning">
-                  ⚠ {pluralize(previewShiaijoProblems, "competition")} would be refused, shown in red.{" "}
+                  <Icon name="triangle-alert" size={13} className="icon-lead" />{pluralize(previewShiaijoProblems, "competition")} would be refused, shown in red.{" "}
                   {window.shiaijoCountHint(venueCourts.length)}{" "}
                   A row with no shiaijo of its own inherits the venue&apos;s list and is checked the same way.
                 </div>
@@ -1860,13 +1861,13 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
                   <div className="import-result__head">
                     <div style={{ flex: 1 }}>
                       <strong>{r.name || r.id}</strong>
-                      {!r.error && <span style={{ fontSize: 12, color: "var(--ink-3)", marginLeft: 8 }}>{pluralize(r.participantCount, "participant")} {r.seedCount > 0 ? `, ${pluralize(r.seedCount, "seed")}` : ""}</span>}
+                      {!r.error && <span style={{ fontSize: 12, color: "var(--ink-3)", marginLeft: 8 }}>{pluralize(r.participantCount, "participant")}{r.seedCount > 0 ? `, ${pluralize(r.seedCount, "seed")}` : ""}</span>}
                     </div>
                     {r.error
-                      ? <span className="tag-badge tag-badge--warn">✕ not imported</span>
+                      ? <span className="tag-badge tag-badge--warn"><Icon name="x" size={10} className="icon-lead" />Not imported</span>
                       : r.warning
-                        ? <span className="tag-badge tag-badge--warn">⚠ imported</span>
-                        : <span className="tag-badge">✓ imported</span>}
+                        ? <span className="tag-badge tag-badge--warn"><Icon name="triangle-alert" size={10} className="icon-lead" />Imported</span>
+                        : <span className="tag-badge"><Icon name="check" size={10} className="icon-lead" />Imported</span>}
                   </div>
                   {r.error && (
                     <div className="import-result__error" role="alert" data-testid="import-result-error">

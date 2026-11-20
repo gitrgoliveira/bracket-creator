@@ -115,14 +115,14 @@ describe('bc-qual: the page head names the shiaijo an inherited draw would use',
     const { container } = await mountSettings(comp, vi.fn());
     const head = container.querySelector('.page-head__sub');
     expect(head).not.toBeNull();
-    expect(head.textContent).toContain('No shiaijo of its own');
-    expect(head.textContent).toContain('A, B');
+    expect(head.textContent).toContain('no shiaijo of its own');
+    expect(head.textContent).toContain('A and B');
   });
 
   it('lists the competition\'s own shiaijo when it has them', async () => {
     const { container } = await mountSettings(makeCompetition(), vi.fn());
     const head = container.querySelector('.page-head__sub');
     expect(head.textContent).toContain('A');
-    expect(head.textContent).not.toContain('No shiaijo');
+    expect(head.textContent).not.toContain('no shiaijo');
   });
 });

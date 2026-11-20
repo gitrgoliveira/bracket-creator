@@ -57,6 +57,42 @@ export const cssBlock = (css, selector) => {
   return css.slice(m.index, css.indexOf('}', css.indexOf('{', m.index)));
 };
 
+// A FAMILY is an entry module plus the modules split out of it, named
+// `<entry stem>_*.jsx` (api_client.jsx and api_client_<piece>.jsx). A source scan
+// of a file that is being split reads the family, so moving code inside it
+// needs no test edit. Comments are stripped file by file, never over the
+// joined text, so a phantom block cannot run from one file into the next.
+// The family is found by name, so it is only as precise as the stem: a module
+// whose stem begins unrelated modules (admin_schedule.jsx and its
+// admin_schedule_page.jsx, ...) would read those too. So only the entries
+// listed in SPLIT_ENTRIES have a family; every other module is its own, and
+// adding an entry to the list is a deliberate act that
+// source_family.test.jsx pins to the exact modules it reads.
+
+/** The entries that were split into `<stem>_*.jsx` modules. */
+export const SPLIT_ENTRIES = ['api_client.jsx', 'admin_scoring_team.jsx', 'admin_shiaijo.jsx'];
+
+/** The entry first, then its `<stem>_*.jsx` modules in name order; an entry
+ * that is not in SPLIT_ENTRIES is a family of one. */
+export const familyFiles = (entry) => {
+  if (!SPLIT_ENTRIES.includes(entry)) return [entry];
+  const stem = entry.replace(/\.jsx$/, '');
+  const rest = readdirSync(JS_DIR)
+    .filter((f) => f.startsWith(`${stem}_`) && f.endsWith('.jsx'))
+    .sort();
+  return [entry, ...rest];
+};
+
+/** Raw source of a family, the files joined by a newline. */
+export const readFamily = (entry) => familyFiles(entry).map(readSource).join('\n');
+
+/** Source of a family with comments removed. */
+export const readFamilyCode = (entry) => familyFiles(entry).map(readCode).join('\n');
+
+/** Share of a family's bytes that survive readFamilyCode, over the family
+ * total: a small module of mostly comments does not fail it alone. */
+export const familyRetention = (entry) => readFamilyCode(entry).length / readFamily(entry).length;
+
 /** Every top-level module in web-mobile/js, for repo-wide sweeps. */
 export const modules = () => readdirSync(JS_DIR).filter((f) => f.endsWith('.jsx'));
 

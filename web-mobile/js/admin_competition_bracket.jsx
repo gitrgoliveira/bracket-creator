@@ -135,7 +135,7 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
               courts={courts}
               onChange={(cc) => onMoveCourt(compId, match.id, cc, { shown: match, hostUnsavedRef })}
               btnClassName="running-panel__court-btn"
-              label="SHIAIJO "
+              label="Shiaijo "
             />
           </div>
         ) : null}
@@ -276,7 +276,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
 
   if (!bracket || !bracket.rounds) {
     const previewMode = c && c.status === "draw-ready";
-    return <EmptyState icon="⚙" title="Bracket not generated yet" message={previewMode ? "Bracket not available for this format preview." : "Start the competition to build the bracket."} />;
+    return <EmptyState icon="settings" title="Bracket not generated yet" message={previewMode ? "Bracket not available for this format preview." : "Start the competition to build the bracket."} />;
   }
   const select = async (m, ri, mi) => {
     if (selected && selected.matchId !== m.id && holdsUnsaved(editorUnsavedRef)
@@ -417,7 +417,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
         ) : selectedMatch ? (
           <EmptyState title="Match not ready" message="Waiting for upstream winners." />
         ) : (
-          <EmptyState icon="👆" title="Pick a match" message="Click any match in the bracket to record results." />
+          <EmptyState icon="pointer" title="Pick a match" message="Click any match in the bracket to record results." />
         )}
       </div>
     </div>

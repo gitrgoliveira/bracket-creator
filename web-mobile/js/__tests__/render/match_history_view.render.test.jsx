@@ -102,7 +102,7 @@ describe('the History disclosure in the score editor', () => {
       + 'Kept in history: points, MK vs H, fouls Shiro 1, Aka 0'
       + 'Kept in history: bout 2, M vs –');
     expect(rows[2]).toBe('10:01:00 Decision recorded, changed the result'
-      + 'Kept in history: the result, Kiken – Voluntary by Aka');
+      + 'Kept in history: the result, Kiken (voluntary) by Aka');
   });
 
   it('opening it changes nothing in the editor: no write, no unsaved change', async () => {
@@ -111,7 +111,7 @@ describe('the History disclosure in the score editor', () => {
     await openHistory();
     expect(window.API.recordScore).not.toHaveBeenCalled();
     // Closing an untouched completed match asks nothing.
-    await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
+    await act(async () => { fireEvent.click(screen.getByText('Close')); });
     expect(window.confirmDialog).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });

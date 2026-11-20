@@ -3,6 +3,7 @@
 
 import { LineupNameInput } from './admin_scoring_shared.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
+import { Icon } from './icon.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
@@ -592,22 +593,22 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
     <>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
           <div>
-            <div className="overline">
-              {comp?.name} · {m.scheduledAt || m.round || ""}
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Lineup for this match</h2>
+            <div className="meta-line">
+              {[comp?.name, m.scheduledAt || m.round || ""].filter(Boolean).join(", ")}
             </div>
-            <h2 style={{ margin: "4px 0 0", fontSize: 20, fontWeight: 700 }}>Lineup for this match</h2>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
               Each team keeps the lineup of its previous match until you save a different one for this match.
             </div>
           </div>
-          <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>{variant === "inline" ? "Done" : "✕ Close"}</button>
+          <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>{variant === "inline" ? "Done" : <><Icon name="x" size={14} />Close</>}</button>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
           <div style={{ borderRight: "1px solid var(--line)", paddingRight: 20 }}>
-            <div className="overline" style={{ marginBottom: 8 }}>
-              SHIRO (white)
-            </div>
+            <h3 className="column-label">
+              Shiro (white)
+            </h3>
             {teamB ? (
               <MatchLineupSideEditor
                 key={`${m.id}-side-b-${sideBKey}`}
@@ -624,9 +625,9 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
             )}
           </div>
           <div>
-            <div className="overline" style={{ marginBottom: 8 }}>
-              AKA (red)
-            </div>
+            <h3 className="column-label">
+              Aka (red)
+            </h3>
             {teamA ? (
               <MatchLineupSideEditor
                 key={`${m.id}-side-a-${sideAKey}`}

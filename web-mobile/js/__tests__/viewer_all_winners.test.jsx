@@ -31,7 +31,7 @@ const STUBBED_GLOBALS = {
   formatDate: (d) => d,
   competitionKindLabel: (c) => c.kind === 'team' ? 'Teams' : 'Individual',
   StatusBadge: function StatusBadge() { return null; },
-  formatViewerHeaderEyebrow: () => '',
+  formatViewerHeaderMeta: () => '',
   formatLabel: (f) => f,
   hasBothSides: () => true,
   compareDmy: () => 0,

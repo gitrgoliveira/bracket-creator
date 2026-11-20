@@ -95,7 +95,7 @@ export const decisionPrompt = (page, root = INLINE_EDITOR) => page.locator(root)
 // prompt picks no side for the operator and Record stays off until one is
 // picked (bc-dsid), so `side` is required. Returns what the prompt showed: the
 // side preselected (none), whether Record was off before the pick, and the
-// label it read once the side was picked ("Record: AKA withdrew").
+// label it read once the side was picked ("Record: Aka withdrew").
 export async function recordDecision(page, kind, { side, reason, root = INLINE_EDITOR } = {}) {
   if (!side) throw new Error('recordDecision: pick a side; the prompt preselects none (bc-dsid)');
   await decisionButton(page, kind, root).tap();
@@ -115,7 +115,7 @@ export async function recordDecision(page, kind, { side, reason, root = INLINE_E
   return { preselected, recordDisabledBeforePick, recordLabel, chosen: side };
 }
 
-// Is the inline editor holding a RUNNING bout (no PRE-MATCH / CORRECTION pill)?
+// Is the inline editor holding a RUNNING bout (no Pre-match / Correction pill)?
 export async function inlineRunning(page) {
   const ed = inlineEditor(page).first();
   if (!(await ed.isVisible().catch(() => false))) return false;
@@ -227,12 +227,17 @@ const liveIndividualBout = async (page, { quick = false } = {}) => (
 // liveBout, which reads a team sheet as well (correctAcross).
 export async function correctCompleted(page, pair, { readLive = liveIndividualBout } = {}) {
   const done = completedRowFor(page, pair);
-  const live = await readLive(page);
+  let live = await readLive(page);
   await done.getByRole('button', { name: 'Correct' }).tap();
+  const pill = inlineEditor(page).first().locator('.editor-head-pill');
+  const notice = done.locator('.shiaijo-upnext__error[role="alert"]');
+  // The read above can come before the console starts the next bout by itself
+  // (Finish + Start Next), so the answer to the tap decides: the correction
+  // opens, or the refusal says a bout runs.
+  await expect(pill.or(notice).first()).toBeVisible();
   let refusal = null;
-  if (live) {
-    const notice = done.locator('.shiaijo-upnext__error[role="alert"]');
-    await expect(notice).toBeVisible();
+  if (await notice.isVisible()) {
+    live ??= await readLive(page);
     const toast = (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | ');
     refusal = {
       notice: (await notice.innerText()).trim(), toast,
@@ -242,9 +247,14 @@ export async function correctCompleted(page, pair, { readLive = liveIndividualBo
     await page.getByRole('button', { name: 'Send back to queue' }).tap();
     refusal.sendBack = await hastyShiaijoConfirm(page);
     await expect.poll(() => readLive(page, { quick: true }), { timeout: 10_000 }).toBeNull();
+    // The refusal's toast sits over the bottom of the completed list and takes
+    // the next tap; dismiss it first, as the operator would.
+    const dismiss = page.locator('.toast__dismiss');
+    if (await dismiss.isVisible()) await dismiss.tap();
+    await expect(page.locator('.toast')).toHaveCount(0);
     await done.getByRole('button', { name: 'Correct' }).tap();
   }
-  await expect(inlineEditor(page).first().locator('.editor-head-pill')).toHaveText('CORRECTION');
+  await expect(pill).toHaveText('Correction');
   return { live, refusal };
 }
 

@@ -44,7 +44,7 @@ describe('admin_backup_api', () => {
 
   // A backup read is not a write: it goes through plain fetch, so a lost
   // connection keeps the browser's own error and never becomes the "not sent"
-  // sentence a write says (api_client.jsx _backupRequest).
+  // sentence a write says (api_client_requests.jsx _backupRequest).
   describe('a backup read that cannot be sent', () => {
     const READS = {
       backupTournament: () => API.backupTournament(ORGANISER_KEY),

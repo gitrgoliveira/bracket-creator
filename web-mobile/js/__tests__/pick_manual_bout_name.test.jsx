@@ -1,11 +1,11 @@
-// pickManualBoutName (admin_scoring_team.jsx) is the write behind a name typed or picked
+// pickManualBoutName (lineup_resolver.jsx) is the write behind a name typed or picked
 // on a bout row that has no lineup slot to route through. A rename the server accepted is
 // handed to onRenamed as the member the server answered, stamped, so the sheet can merge
 // it over a list of the team's members that predates it. A rename the server refused, a
 // pick that renames nothing and a substitution hand nothing over.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { pickManualBoutName } from '../admin_scoring_team.jsx';
+import { pickManualBoutName } from '../lineup_resolver.jsx';
 import { answered } from './helpers/team_members.js';
 
 const BLANK = { id: 'b3', index: 3, name: '' };

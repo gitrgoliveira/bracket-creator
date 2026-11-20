@@ -268,7 +268,7 @@ describe('the team editor shows the daihyosen verdict the server holds', () => {
     const { rerender, container } = render(
       <ScoreEditorModal match={teamMatch([bout()])} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
     );
-    const armed = c => /Cancel hantei|SHIRO \(White\) wins|AKA \(Red\) wins/.test(c.textContent);
+    const armed = c => /Cancel hantei|Shiro \(white\) wins|Aka \(red\) wins/.test(c.textContent);
     expect(armed(container)).toBe(false);
 
     await act(async () => { rerender(
@@ -402,7 +402,7 @@ describe('the team editor shows the bout scoreline the server holds', () => {
   // reason the string is absent (including a render that threw the strip away),
   // and matches a prefix of a larger number — so `not.toContain('PW: 2')` was
   // three different ways of not testing this.
-  const AKA = 'AKA (Red)', SHIRO = 'SHIRO (White)';
+  const AKA = 'Aka (red)', SHIRO = 'Shiro (white)';
   const totalsBySide = (container) => Object.fromEntries(
     [...container.querySelectorAll('.team-summary__side')]
       .map(el => [

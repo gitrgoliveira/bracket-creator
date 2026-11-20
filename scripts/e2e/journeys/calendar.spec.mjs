@@ -250,9 +250,12 @@ test.describe('calendar', () => {
       for (let i = 0; i < await frames.count(); i += 1) {
         const f = frames.nth(i);
         await f.scrollIntoViewIfNeeded();
-        const name = await f.locator('.cal-block__name').boundingBox();
+        // The name's lines, not its box: the box spans the block's width and the
+        // text wraps around the Move button's float.
+        const nameLines = await lineBoxes(f.locator('.cal-block__name'));
         const move = await f.locator('.cal-block__move-btn').boundingBox();
-        expect(intersects(name, move), `${(await f.locator('.cal-block__name').innerText()).trim()}: Move over the name`).toBe(false);
+        expect(nameLines.length, 'the block shows its name').toBeGreaterThan(0);
+        expect(nameLines.filter((l) => intersects(l, move)).map((l) => l.text), `${(await f.locator('.cal-block__name').innerText()).trim()}: Move over the name`).toEqual([]);
       }
       await shot(page, 'tablet');
     } finally {

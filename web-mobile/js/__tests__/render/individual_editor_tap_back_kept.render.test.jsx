@@ -80,6 +80,6 @@ describe('a match that is not running keeps nothing against another device', () 
     await tap(letterBtn(akaSide(r.container), 'M'));
     await act(async () => { r.rerender(el(bout({ status: 'scheduled', ipponsA: ['K'], modifiedAt: NOW + 50 }))); });
     expect(marks(r.container)).toEqual([expect.stringMatching(/^Aka slot \d: remove K$/)]);
-    expect(r.container.textContent).toContain('PRE-MATCH');
+    expect(r.container.textContent).toContain('Pre-match');
   });
 });

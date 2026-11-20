@@ -9,12 +9,13 @@ import { VSchedItem, MatchViewerModal, useLiveMatch, matchInList } from './viewe
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
 import { mirrorWatchlistParam } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
+import { Icon } from './icon.jsx';
 
 const { useState, useMemo, useRef, useEffect } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 const formatLabel = window.formatLabel;
-const formatViewerHeaderEyebrow = window.formatViewerHeaderEyebrow;
+const formatViewerHeaderMeta = window.formatViewerHeaderMeta;
 const EmptyState = window.EmptyState;
 
 // Canonical "match has both sides for real participants" predicate.
@@ -383,15 +384,15 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     && secondaryOnDeck.some((m) => m.id === secondaryAlert.id);
 
   return (
-    <div className="viewer">
+    <main className="viewer">
       <div className="viewer__shell">
         <div className="viewer__head viewer__head--hero">
           <img src="/api/branding/logo" onError={(e) => { e.target.onerror = null; e.target.src = "/logo.jpeg"; }} alt="Tournament logo" className="topbar__logo viewer__logo" decoding="async" />
           <div className="viewer__title-block">
-            <div className="viewer__eyebrow">
-              {formatViewerHeaderEyebrow(formatDate(t.date), t.venue)}
+            <h1 className="viewer__title viewer__title--lg">{t.name}</h1>
+            <div className="viewer__sub">
+              {formatViewerHeaderMeta(formatDate(t.date), t.venue)}
             </div>
-            <div className="viewer__title viewer__title--lg">{t.name}</div>
           </div>
           <button type="button" className={`viewer__admin-pill${comps.length === 0 ? " viewer__admin-pill--prominent" : ""}`} onClick={onAdminClick}>
             <svg width="10" height="12" viewBox="0 0 10 12" fill="none" aria-hidden="true">
@@ -412,7 +413,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
           )}
           <TournamentInfo tournament={t} />
           <div className="viewer__court-filter">
-             <select className="input" value={courtFilter} onChange={(e) => setCourtFilter(e.target.value)}>
+             <select className="input" aria-label="Filter by shiaijo" value={courtFilter} onChange={(e) => setCourtFilter(e.target.value)}>
                <option value="all">All Shiaijo</option>
                {(t.courts || ["A"]).map(c => <option key={c} value={c}>Shiaijo {c}</option>)}
              </select>
@@ -463,7 +464,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
 
           {globalRunning.length > 0 && (
             <div className="hero-running">
-              <div className="hero-running__lbl"><span className="dot dot--running"></span> NOW · {pluralize(globalRunning.length, "match", "matches")}</div>
+              <div className="hero-running__lbl"><span className="dot dot--running"></span> Now · {pluralize(globalRunning.length, "match", "matches")}</div>
               <div className="vsched hero-running__vsched">
                 {globalRunning.slice(0, 3).map((m) => <VSchedItem key={`${m.compId}:${m.id}`} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => openMatch(m)} />)}
               </div>
@@ -472,24 +473,24 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
 
           <div className="viewer-nav-row">
             <button type="button" className="viewer-nav-card" onClick={onOpenSchedule}>
-              <span className="viewer-nav-card__icon">🗓</span>
+              <span className="viewer-nav-card__icon"><Icon name="calendar" size={20} /></span>
               <div className="viewer-nav-card__text">
                 <div className="viewer-nav-card__title">Full schedule</div>
                 <div className="viewer-nav-card__sub">{pluralize(bothSidesMatches.length, "match", "matches")} · {pluralize((tournament.courts || []).length, "court", "courts")}</div>
               </div>
-              <span className="viewer-nav-card__chev">→</span>
+              <span className="viewer-nav-card__chev"><Icon name="arrow-right" size={14} /></span>
             </button>
 
             {/* mp-koqh: Results summary: only shown when at least one comp has completed. */}
             {onOpenResults && completedCount > 0 && (
               <button type="button" className="viewer-nav-card" onClick={onOpenResults} data-testid="open-results-btn">
-                <span className="viewer-nav-card__icon">🏅</span>
+                <span className="viewer-nav-card__icon"><Icon name="medal" size={20} /></span>
                 <div className="viewer-nav-card__text">
                   <div className="viewer-nav-card__title">Results</div>
                   <div className="viewer-nav-card__sub">All placings</div>
                 </div>
                 <span className="viewer__results-badge" aria-label={`${completedCount} completed`}>{completedCount}</span>
-                <span className="viewer-nav-card__chev">→</span>
+                <span className="viewer-nav-card__chev"><Icon name="arrow-right" size={14} /></span>
               </button>
             )}
           </div>
@@ -499,7 +500,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
               <div className="section-title">Competitions</div>
               <div className="vlist">
                 <EmptyState
-                  icon="⚙️"
+                  icon="settings"
                   title="No competitions yet"
                   message="Head to Admin to set up the first competition."
                   cta={<button type="button" className="btn btn--primary empty__cta" onClick={onAdminClick}>Open admin</button>}
@@ -524,10 +525,15 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
                       <button type="button" className="vlist-item vlist-item--comp" onClick={() => onSelectCompetition(c.id)}>
                         <div className="comp-item__header">
                           <div className="comp-item__body">
-                            <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize > 1 ? ` · ${c.teamSize}-person` : ""}</div>
                             <div className="vlist-item__name">{c.name}</div>
                             <div className="vlist-item__meta">
-                              {c.players.length} {c.kind === "team" ? "teams" : "players"} · {formatLabel(c.format)} · Starts {c.startTime}
+                              {[
+                                competitionKindLabel(c),
+                                c.teamSize > 1 ? `${c.teamSize}-person` : "",
+                                `${c.players.length} ${c.kind === "team" ? "teams" : "players"}`,
+                                formatLabel(c.format),
+                                c.startTime ? `starts ${c.startTime}` : "",
+                              ].filter(Boolean).join(", ")}
                             </div>
                           </div>
                           <StatusBadge status={c.status} showRunningDot format={c.format} />
@@ -586,12 +592,12 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
                 else window.location.href = "/glossary";
               }}
             >
-              <span className="vlist-item__icon">📖</span>
+              <span className="vlist-item__icon"><Icon name="book-open" size={18} /></span>
               <div className="vlist-item__rowbody">
                 <div className="vlist-item__rowtitle">Kendo glossary</div>
                 <div className="vlist-item__rowsub">Quick reference for scoring-table terms (Kiken, Hikiwake, Encho, etc.)</div>
               </div>
-              <span className="vlist-item__rowchev">→</span>
+              <span className="vlist-item__rowchev"><Icon name="arrow-right" size={14} /></span>
             </a>
           </div>
 
@@ -607,7 +613,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
         </div>
       </div>
       {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={t} paceLookup={paceLookup} />}
-    </div>
+    </main>
   );
 }
 
@@ -635,20 +641,20 @@ function DisplayModes({ tournament }) {
           target="_blank"
           rel="noopener noreferrer"
         >
-          <span className="vlist-item__icon">🪟</span>
+          <span className="vlist-item__icon"><Icon name="app-window" size={18} /></span>
           <div className="vlist-item__rowbody">
             <div className="vlist-item__rowtitle">All courts overview</div>
             <div className="vlist-item__rowsub">Lobby grid showing every court at a glance · opens in a new tab</div>
           </div>
-          <span className="vlist-item__rowchev">→</span>
+          <span className="vlist-item__rowchev"><Icon name="arrow-right" size={14} /></span>
         </a>
         {/* Per-court links consolidated into compact inline rows. */}
         {[
-          { icon: "📺", title: "Court displays", suffix: "" },
-          { icon: "🎥", title: "Streaming overlays", suffix: "&overlay=1" },
+          { icon: "tv", title: "Court displays", suffix: "" },
+          { icon: "video", title: "Streaming overlays", suffix: "&overlay=1" },
         ].map((row) => (
           <div key={row.title} className="vlist-item vlist-item--row vlist-item--static">
-            <span className="vlist-item__icon">{row.icon}</span>
+            <span className="vlist-item__icon"><Icon name={row.icon} size={18} /></span>
             <div className="vlist-item__rowbody">
               <div className="vlist-item__rowtitle">{row.title}</div>
               <div className="vlist-item__rowsub viewer-display-modes__row-links">
@@ -656,7 +662,7 @@ function DisplayModes({ tournament }) {
                   <span key={cc}>
                     <a href={`/display?court=${encodeURIComponent(cc)}${row.suffix}`} target="_blank" rel="noopener noreferrer"
                       className="viewer-display-modes__link">Shiaijo {cc}</a>
-                    {i < courts.length - 1 && <span aria-hidden="true" className="viewer-display-modes__sep">·</span>}
+                    {i < courts.length - 1 && <span aria-hidden="true" className="viewer-display-modes__sep">,</span>}
                   </span>
                 ))}
               </div>

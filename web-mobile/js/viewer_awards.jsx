@@ -5,6 +5,7 @@ import { WinnerBadge } from './viewer_standings.jsx';
 import { competitionKindLabel } from './viewer_utils.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 import { effectiveTwoThirdPlaces, FORMAT_LEAGUE } from './competition_shape.jsx';
+import { Icon } from './icon.jsx';
 
 const { useState, useMemo, useRef, useEffect } = React;
 const EmptyState = window.EmptyState;
@@ -207,10 +208,12 @@ export async function resolveCompetitionAwards(comp, fetchers) {
   return { state: "final", podium: deriveAwards(null, standings, d.pools, ntpFrom(d.players), comp) };
 }
 
+// `icon` is an Icon name; each spot draws it in the place's accent (the icon
+// strokes in currentColor) at the size the spot gives it.
 const PLACE_STYLE = {
-  1: { icon: "🏆", label: "1st Place", accent: "var(--gold, #d4af37)" },
-  2: { icon: "🥈", label: "2nd Place", accent: "var(--silver, #c0c0c0)" },
-  3: { icon: "🥉", label: "3rd Place", accent: "var(--bronze, #cd7f32)" },
+  1: { icon: "trophy", label: "1st Place", accent: "var(--gold, #d4af37)" },
+  2: { icon: "medal", label: "2nd Place", accent: "var(--silver, #c0c0c0)" },
+  3: { icon: "medal", label: "3rd Place", accent: "var(--bronze, #cd7f32)" },
 };
 
 export function AwardsView({ c, bracket, standings, pools, players }) {
@@ -317,7 +320,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
   };
 
   if (isSwissLoading || resolvedState === "loading") {
-    return <EmptyState icon="🏆" title="Loading final standings…" data-testid="awards-loading" />;
+    return <EmptyState icon="trophy" title="Loading final standings…" data-testid="awards-loading" />;
   }
 
   if (awards.length === 0) {
@@ -326,14 +329,14 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
     if (isMixed && resolvedState === "in-progress") {
       return (
         <div>
-          <EmptyState icon="🏆" title="Knockout in progress" data-testid="awards-in-progress" />
+          <EmptyState icon="trophy" title="Knockout in progress" data-testid="awards-in-progress" />
           {hasFsAwards && <FightingSpiritSection fsAwards={fsAwards} isFs={isFs} />}
         </div>
       );
     }
     return (
       <div>
-        <EmptyState icon="🏆" title="Final standings not yet available" data-testid="awards-empty" />
+        <EmptyState icon="trophy" title="Final standings not yet available" data-testid="awards-empty" />
         {hasFsAwards && <FightingSpiritSection fsAwards={fsAwards} isFs={isFs} />}
       </div>
     );
@@ -352,7 +355,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
           {c?.name ? `${c.name}: Awards` : "Awards"}
         </div>
         <div className={isFs ? "awards__subtitle--fs" : "awards__subtitle"}>
-          Closing ceremony · {awards.length} place{awards.length === 1 ? "" : "s"}
+          Closing ceremony, {awards.length} place{awards.length === 1 ? "" : "s"}
         </div>
       </div>
       <button type="button" className="btn btn--sm" onClick={toggleFs} data-testid="awards-fullscreen">
@@ -387,7 +390,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
                 data-testid={`awards-place-${a.place}-${idx}`}
                 style={{ borderTop: `4px solid ${style.accent}` }}
               >
-                <div style={{ fontSize: isFs ? 56 : 28 }}>{style.icon}</div>
+                <div style={{ fontSize: isFs ? 56 : 28, color: style.accent }}><Icon name={style.icon} size={isFs ? 56 : 28} /></div>
                 <div className="place" style={{ fontSize: isFs ? 18 : 12 }}>{style.label}</div>
                 <div className="name" style={{ fontSize: isFs ? 28 : 16 }}>{a.name}</div>
                 {a.dojo && (
@@ -428,9 +431,9 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
           data-testid={`awards-place-1-${awards.indexOf(champion)}`}
           style={isFs ? { padding: 32, marginBottom: 20 } : null}
         >
-          <div className="awards-hero__crown" style={isFs ? { fontSize: 48 } : null}>{PLACE_STYLE[1].icon}</div>
-          <div className="awards-hero__eyebrow" style={isFs ? { fontSize: 16 } : null}>Champion</div>
+          <div className="awards-hero__crown" style={{ color: PLACE_STYLE[1].accent, ...(isFs ? { fontSize: 48 } : null) }}><Icon name={PLACE_STYLE[1].icon} size={isFs ? 48 : 28} /></div>
           <div className="awards-hero__name" style={isFs ? { fontSize: 34 } : null}>{champion.name}</div>
+          <div className="awards-hero__place" style={isFs ? { fontSize: 16 } : null}>Champion</div>
           {champion.dojo && (
             <div className="awards-hero__dojo" style={isFs ? { fontSize: 18 } : null}>{champion.dojo}</div>
           )}
@@ -445,7 +448,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
             data-testid={`awards-place-2-${awards.indexOf(second)}`}
             style={isFs ? { fontSize: 18, padding: "20px 24px" } : null}
           >
-            <div style={{ fontSize: isFs ? 40 : 22 }}>{PLACE_STYLE[2].icon}</div>
+            <div style={{ fontSize: isFs ? 40 : 22, color: PLACE_STYLE[2].accent }}><Icon name={PLACE_STYLE[2].icon} size={isFs ? 40 : 22} /></div>
             <div className="place" style={{ fontSize: isFs ? 16 : 12 }}>{PLACE_STYLE[2].label}</div>
             <div className="name" style={{ fontSize: isFs ? 24 : 16 }}>{second.name}</div>
             {second.dojo && (
@@ -465,7 +468,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
               data-testid={`awards-place-3-${awards.indexOf(a)}`}
               style={isFs ? { fontSize: 16, padding: "16px 20px" } : null}
             >
-              <div style={{ fontSize: isFs ? 36 : 20 }}>{PLACE_STYLE[3].icon}</div>
+              <div style={{ fontSize: isFs ? 36 : 20, color: PLACE_STYLE[3].accent }}><Icon name={PLACE_STYLE[3].icon} size={isFs ? 36 : 20} /></div>
               <div className="place" style={{ fontSize: isFs ? 14 : 11 }}>{PLACE_STYLE[3].label}</div>
               <div className="name" style={{ fontSize: isFs ? 20 : 14 }}>{a.name}</div>
               {a.dojo && (
@@ -482,7 +485,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
   );
 }
 
-// FightingSpiritSection renders the 🔥 Fighting Spirit subsection inside
+// FightingSpiritSection renders the Fighting Spirit subsection inside
 // AwardsView. Distinct from the placement podium: never merged into
 // deriveAwards/podium logic. Renders nothing when the list is empty/absent.
 export function FightingSpiritSection({ fsAwards, isFs }) {
@@ -496,7 +499,7 @@ export function FightingSpiritSection({ fsAwards, isFs }) {
         className="section-title"
         style={{ margin: "0 0 12px", fontSize: isFs ? 22 : 15 }}
       >
-        🔥 Fighting Spirit
+        <Icon name="flame" size={isFs ? 22 : 15} className="icon-lead" />Fighting Spirit
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {fsAwards.map((a, idx) => (
@@ -506,14 +509,14 @@ export function FightingSpiritSection({ fsAwards, isFs }) {
               padding: isFs ? "14px 20px" : "10px 14px",
               borderRadius: 8,
               background: "var(--accent-soft)",
-              border: "1px solid var(--accent-warm, #fb923c)",
+              border: "1px solid var(--orange-400)",
               display: "flex",
               flexDirection: "column",
               gap: 2,
             }}
             data-testid={`fighting-spirit-award-${idx}`}
           >
-            <div style={{ fontSize: isFs ? 13 : 11, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            <div style={{ fontSize: isFs ? 14 : 12, fontWeight: 600, color: "var(--ink-3)" }}>
               {a.title}
             </div>
             <div style={{ fontSize: isFs ? 22 : 16, fontWeight: 700, color: "var(--ink-1)" }}>
@@ -585,14 +588,13 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
   }, [compsSig, compsRef]);
 
   return (
-    <div className="viewer">
+    <main className="viewer">
       <div className="viewer__shell">
         <div className="viewer__head">
-          <button type="button" className="viewer__back" onClick={onBack} aria-label="Back">←</button>
+          <button type="button" className="viewer__back" onClick={onBack} aria-label="Back"><Icon name="arrow-left" size={16} /></button>
           <div className="viewer__title-block">
-            <div className="viewer__eyebrow">{tournament && tournament.name}</div>
-            <div className="viewer__title">Results</div>
-            <div className="viewer__sub">All competition placings</div>
+            <h1 className="viewer__title">Results</h1>
+            <div className="viewer__sub">{tournament && tournament.name ? `${tournament.name}, all competition placings` : "All competition placings"}</div>
           </div>
         </div>
         <div className="viewer__body">
@@ -607,7 +609,7 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
             </div>
           )}
           {!viewState.loading && !viewState.error && viewState.results.length === 0 && (
-            <EmptyState icon="🏅" title="No completed competitions" message="Check back once competitions have finished." data-testid="all-winners-empty" />
+            <EmptyState icon="medal" title="No completed competitions" message="Check back once competitions have finished." data-testid="all-winners-empty" />
           )}
           {!viewState.loading && viewState.results.map(({ comp, state: compState, podium, error: compErr }) => (
             <div key={comp.id} className="card" style={{ padding: "12px 16px", marginBottom: 12 }} data-testid={`all-winners-card-${comp.id}`}>
@@ -638,7 +640,7 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
                     style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: idx < podium.length - 1 ? "1px solid var(--line)" : "none" }}
                     data-testid={`all-winners-place-${comp.id}-${a.place}-${idx}`}
                   >
-                    <span style={{ fontSize: 22 }}>{style.icon}</span>
+                    <span style={{ fontSize: 22, color: style.accent }}><Icon name={style.icon} size={22} /></span>
                     <span style={{ fontSize: 12, color: "var(--ink-3)", minWidth: 60 }}>{style.label}</span>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>{a.name}</div>
@@ -655,7 +657,7 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
           ))}
         </div>
       </div>
-    </div>
+    </main>
   );
 }
 

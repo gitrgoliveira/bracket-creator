@@ -193,7 +193,7 @@ test.describe('J5 kachinuki from the court console', () => {
     await expect(currentBout(page)).toBeVisible();
     await expect(boutFilled(currentBout(page), 'shiro')).toHaveCount(0);
     // Bout 2 is a regulation bout.
-    await expect(editor(page).locator('.editor-modal__eyebrow').first()).not.toContainText(/overtime/i);
+    await expect(editor(page).locator('.editor-modal__meta').first()).not.toContainText(/overtime/i);
   }
 
   // bc-sync (fixed): a tapped point still unsent survives a reload.
@@ -281,6 +281,10 @@ test.describe('J5 kachinuki from the court console', () => {
       await shot(page, `lineup-${court}-saved`);
       await closeLineupPanel(page);
     }
+    // The member adds and lineup saves go through the outbox, and the next
+    // test opens a fresh browser: wait for them to land, or the last team's
+    // lineup dies with this page and M2 starts with Aka's fighter unseated.
+    await settled(page);
   });
 
   // Semifinal M1 on shiaijo A. The intended encounter (Shiro = m1.shiro):
@@ -316,7 +320,7 @@ test.describe('J5 kachinuki from the court console', () => {
       await expect(recordBoutButton(page)).toBeVisible();
       const v2Shot = await shot(page, 'v2-start-double-tap');
       record({ step: 'M1 start', action: 'Start match (Up next card)', variant: 'V2 doubleTap', ...v2,
-        eyebrow: (await editor(page).locator('.editor-modal__eyebrow').first().innerText()).trim(),
+        meta: (await editor(page).locator('.editor-modal__meta').first().innerText()).trim(),
         running: await recordBoutButton(page).isVisible(), screenshot: v2Shot });
       await expectPairing(1, S[0], A[0]);
       await shot(page, 'bout-1-open');
@@ -448,11 +452,11 @@ test.describe('J5 kachinuki from the court console', () => {
       await shot(page, 'bout-4-tied-encho-offered');
       const overtimeBefore = await enchoUndoButton(page).isVisible();
       const v2 = await doubleTap(enchoButton(page));
-      const eyebrow = (await editor(page).locator('.editor-modal__eyebrow').first().innerText()).trim();
+      const meta = (await editor(page).locator('.editor-modal__meta').first().innerText()).trim();
       // Undo encho appears beside Encho with the first tap and the row re-centres, so
       // the second tap can land on it and take the period straight back.
       const inOvertime = await untilStable(() => enchoUndoButton(page).isVisible(), { from: overtimeBefore });
-      record({ step: 'M1 bout 4', action: 'Encho', variant: 'V2 doubleTap', ...v2, eyebrow, inOvertimeAfterDoubleTap: inOvertime,
+      record({ step: 'M1 bout 4', action: 'Encho', variant: 'V2 doubleTap', ...v2, meta, inOvertimeAfterDoubleTap: inOvertime,
         enchoStillOffered: await enchoButton(page).isVisible(), middle: await boutMiddle(currentBout(page)),
         screenshot: await shot(page, 'v2-encho-double-tap') });
       // The rest of the bout is fought in overtime: put the period back when the
@@ -820,7 +824,7 @@ test.describe('J5 kachinuki from the court console', () => {
       const reload = await interruptC(page, 'reload');
       const back = await editor(page).waitFor({ state: 'visible', timeout: EXPECT_TIMEOUT_MS }).then(() => true, () => false);
       record({ step: 'M1 reopen', action: 'reopened encounter', variant: 'V3 interrupt reload', ...reload, editorBack: back,
-        eyebrow: back ? (await editor(page).locator('.editor-modal__eyebrow').first().innerText()).trim() : null,
+        meta: back ? (await editor(page).locator('.editor-modal__meta').first().innerText()).trim() : null,
         doneRows: back ? await doneRows(page).count() : null, current: back ? await boutNames(currentBout(page)) : null,
         screenshot: await shot(page, 'v3-reload-reopened') });
       expect(back).toBe(true);
@@ -1005,7 +1009,7 @@ test.describe('J5 kachinuki from the court console', () => {
       // a started match hidden behind a pinned correction, is gone, bc-crpn).
       const afterStart = {
         upNextStill: await upNextCard(page).isVisible(),
-        panelShows: (await editor(page).locator('.editor-modal__eyebrow').first().innerText().catch(() => '')).replace(/\s+/g, ' '),
+        panelShows: (await editor(page).locator('.editor-modal__meta').first().innerText().catch(() => '')).replace(/\s+/g, ' '),
         correctionBadge: await editor(page).getByText('Correction', { exact: true }).count(),
         m2Live: await recordBoutButton(page).isVisible(),
         backToCourt: await page.getByRole('button', { name: /Back to court/ }).count(),
@@ -1014,9 +1018,12 @@ test.describe('J5 kachinuki from the court console', () => {
         ...afterStart, screenshot: await shot(page, 'v5-m2-started-after-m1-ended') });
       await expect(recordBoutButton(page)).toBeVisible();
       // Nothing to recover from: the row stays to say so.
+      // The server seats the first bout's fighters just after the start, with
+      // events of its own, so the names arrive a moment later.
+      await expect.poll(() => boutNames(currentBout(page)), { timeout: EXPECT_TIMEOUT_MS })
+        .toEqual({ shiro: MEMBERS[m2.shiro][0], aka: MEMBERS[m2.aka][0] });
       record({ step: 'M1 reopen, court busy', action: 'recover the started M2', variant: 'V5 lost place', recoverTaps: 0,
         live: await boutNames(currentBout(page)) });
-      expect(await boutNames(currentBout(page))).toEqual({ shiro: MEMBERS[m2.shiro][0], aka: MEMBERS[m2.aka][0] });
       const marks = await boutFilled(currentBout(page), 'aka').count();
       record({ step: 'M1 reopen, court busy', action: 'M2 restarted after the requeue', variant: 'result',
         m2Bout1AkaMarks: marks, panelSays: 'Sending it back to the queue keeps any score already entered for it: it carries on from there when it is started again',
@@ -1282,7 +1289,10 @@ test.describe('J5 kachinuki from the court console', () => {
     await test.step('start the final and score one point', async () => {
       await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
       await expect(recordBoutButton(page)).toBeVisible();
-      expect(await boutNames(currentBout(page))).toEqual({ shiro: MEMBERS[final.shiro][0], aka: MEMBERS[final.aka][0] });
+      // The server seats the first bout's fighters from the lineups just after
+      // the start, with events of its own, so the names arrive a moment later.
+      await expect.poll(() => boutNames(currentBout(page)), { timeout: EXPECT_TIMEOUT_MS })
+        .toEqual({ shiro: MEMBERS[final.shiro][0], aka: MEMBERS[final.aka][0] });
       await awardBoutIppon(page, 'shiro', 'M');
       await settled(page);
       await shot(page, 'final-running-one-point');

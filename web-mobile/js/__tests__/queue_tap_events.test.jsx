@@ -276,7 +276,9 @@ describe('pending taps', () => {
         window.dispatchEvent(new StorageEvent('storage', {
             key: 'bc_write_queue_v2', oldValue: null, newValue: JSON.stringify([entry]),
         }));
-        await tick(0);
+        // A tab takes up another tab's entry, then waits for that tab's lease to show
+        // (ADOPTED_FLUSH_DELAY_MS, api_client_flush.jsx) before it sends.
+        await tick(400);
         expect(batches.map((b) => b.body.events[0].id)).toEqual(['other.1']);
     });
 });

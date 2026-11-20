@@ -389,7 +389,7 @@ export const recipes = [
 // shows (lib/card.mjs).
 recipes.push(...cardRecipes(recipes, [
   // The Draw step: the first pools of the preview.
-  ['mobile-draw-preview', 'card-draw', { x: 248, y: 213, width: 483, height: 388 }],
+  ['mobile-draw-preview', 'card-draw', { x: 248, y: 193, width: 483, height: 388 }],
   // Rules per competition: the type, the format and the team options.
   ['mobile-create-team-competition', 'card-rules', { x: 319, y: 300, width: 571, height: 400 }],
 ]));

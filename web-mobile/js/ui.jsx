@@ -89,7 +89,7 @@ function Toast() {
       role={role}
       aria-live={ariaLive}
     >
-      <div className="toast__icon" aria-hidden="true">{shownIsError || shownIsWarning ? '⚠️' : shown.type === 'pending' ? '⏳' : '✅'}</div>
+      <div className="toast__icon" aria-hidden="true"><Icon name={shownIsError || shownIsWarning ? 'triangle-alert' : shown.type === 'pending' ? 'hourglass' : 'circle-check'} /></div>
       <div className="toast__msg">{shown.message}</div>
       {shown.latched && (
         <button type="button"
@@ -221,11 +221,11 @@ function formatAdminHeaderSub(dateStr, venue, courtsCount, compsCount, participa
     pluralize(courtsCount, "shiaijo (court)", "shiaijo (courts)"),
     pluralize(compsCount, "competition"),
     pluralize(participantsCount, "participant")
-  ].filter(Boolean).join(" · ");
+  ].filter(Boolean).join(", ");
 }
 
-function formatViewerHeaderEyebrow(dateStr, venue) {
-  return [dateStr, venue].filter(Boolean).join(" · ");
+function formatViewerHeaderMeta(dateStr, venue) {
+  return [dateStr, venue].filter(Boolean).join(", ");
 }
 
 function formatLabel(format) {
@@ -486,10 +486,12 @@ function DialogHost() {
 // Icon lives in icon.jsx (no side effects); imported above, re-exported below
 // and set on window here as before.
 
+// EmptyState's `icon` is an Icon name (icon.jsx), drawn at the 32 px the
+// `.empty .icon` slot was sized for.
 function EmptyState({ icon, title, message, cta, ctaNote, className, style, ...attrs }) {
   return (
     <div className={`empty${className ? " " + className : ""}`} style={style} {...attrs}>
-      {icon && <div className="icon">{icon}</div>}
+      {icon && <div className="icon"><Icon name={icon} size={32} /></div>}
       {title && <h3>{title}</h3>}
       {message && <div>{message}</div>}
       {cta}
@@ -598,7 +600,7 @@ function ShareLinkModal({ title, url, onClose, onCopy, children }) {
       <button type="button" className="btn" onClick={onClose}>Close</button>
     </>}>
       <div className="share-link">
-        {showQR && <canvas ref={canvasRef} className="share-link__qr" />}
+        {showQR && <canvas ref={canvasRef} className="share-link__qr" role="img" aria-label={`QR code for ${url}`} />}
         <div className="share-link__url" data-testid="share-link-url">{url}</div>
         {typeof children === "function" ? children(showQR) : children}
       </div>
@@ -709,7 +711,7 @@ function isInteractiveTarget(el) {
   return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
 }
 
-export { FieldError, StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, useClickOutside, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, ShiaijoCountNotes, Modal };
+export { FieldError, StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, useClickOutside, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderMeta, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, ShiaijoCountNotes, Modal };
 
 // copyToClipboard: the clipboard half of ShareLinkModal above, the one sheet
 // that copies anything. It lived in admin_shell.jsx until the watchlist
@@ -753,7 +755,7 @@ if (typeof window !== "undefined") {
   window.isTextEntry = isTextEntry;
   window.isInteractiveTarget = isInteractiveTarget;
   window.formatAdminHeaderSub = formatAdminHeaderSub;
-  window.formatViewerHeaderEyebrow = formatViewerHeaderEyebrow;
+  window.formatViewerHeaderMeta = formatViewerHeaderMeta;
   window.confirmDialog = confirmDialog;
   window.promptDialog = promptDialog;
   window.DialogHost = DialogHost;

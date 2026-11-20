@@ -4,6 +4,7 @@
 import { poolLabel, tournamentMatches, compMatches, compareDmy } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster, buildWatchedSets, matchInvolvesWatchedSet, normalizeEntryKey } from './viewer_watchlist_core.jsx';
 import { withNumber, teamNameMark } from './match_scoreboard.jsx';
+import { Icon } from './icon.jsx';
 import { SideCell } from './side_cell.jsx';
 import { MatchViewerModal, localQueueLabelCompact, useLiveMatch, matchInList } from './viewer_match.jsx';
 import { sameCompetitor, competitorKey } from './competitor_identity.jsx';
@@ -196,13 +197,13 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
         {picked.map((p) => (
           <span key={p.id} className="pmf__chip">
             {p.name}
-            <button type="button" onClick={(e) => { e.stopPropagation(); toggle(p); }} aria-label="Remove">×</button>
+            <button type="button" onClick={(e) => { e.stopPropagation(); toggle(p); }} aria-label="Remove"><Icon name="x" size={14} /></button>
           </span>
         ))}
         {dojoText ? (
           <span className="pmf__chip pmf__chip--text">
             &quot;{dojoText}&quot;
-            <button type="button" onClick={(e) => { e.stopPropagation(); setDojoText(""); }} aria-label="Remove">×</button>
+            <button type="button" onClick={(e) => { e.stopPropagation(); setDojoText(""); }} aria-label="Remove"><Icon name="x" size={14} /></button>
           </span>
         ) : null}
         <input
@@ -238,8 +239,8 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
           {matches.map((p) => {
             const isPicked = !!picked.find((x) => x.id === p.id);
             return (
-              <button type="button" key={p.id} className={`pmf__option ${isPicked ? "is-picked" : ""}`} onClick={() => toggle(p)}>
-                <span className="pmf__check">{isPicked ? "✓" : ""}</span>
+              <button type="button" key={p.id} className={`pmf__option ${isPicked ? "is-picked" : ""}`} aria-pressed={isPicked} onClick={() => toggle(p)}>
+                <span className="pmf__check" aria-hidden="true">{isPicked ? <Icon name="check" size={13} /> : null}</span>
                 <span className="pmf__opt-body">
                   <span className="pmf__opt-name">{p.number ? `${p.number} · ` : ""}{p.name}</span>
                   <span className="pmf__opt-dojo">{p.dojo}{p.comps?.length ? ` · ${p.comps.join(", ")}` : ""}</span>
@@ -354,14 +355,14 @@ export function TWMatch({ m, highlight, onClick, paceLookup }) {
   // button to keyboard / screen-reader users (a no-op button is confusing).
   const Tag = onClick ? "button" : "div";
   return (
-    <Tag className={`tw-match ${m.status === "running" ? "tw-match--running" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} {...(onClick ? { type: "button", onClick } : {})} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
+    <Tag className={`tw-match ${m.status === "running" ? "tw-match--running" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} {...(onClick ? { type: "button", onClick } : {})} style={{ textAlign: "left", border: "none", background: m.status === "completed" ? undefined : "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="tw-match__meta">
         <div className="tw-match__time">
           <PaceTime display={d} fallback={m.scheduledAt || "-"} />
         </div>
         <div className="tw-match__phase">{m.phase === "pool" ? poolLabel(m) : m.round}</div>
         {queuePill && (
-          <div className="tw-match__queue" style={{ fontSize: 10, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)", marginTop: 2 }}>
+          <div className="tw-match__queue" style={{ fontSize: 11, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)", marginTop: 2 }}>
             {queuePill}
           </div>
         )}
@@ -508,17 +509,17 @@ export function ScheduleViewer({ tournament, tweaks, paceLookup }) {
             }}
             aria-label="Unpin primary"
           >
-            ✕ Clear
+            <Icon name="x" size={12} />Clear
           </button>
         </div>
       ) : null}
       <div className="tw-sched__filters">
         <PlayerMultiFilter tournament={tournament} picked={picked} setPicked={setPicked} dojoText={dojoText} setDojoText={setDojoText} />
-        <select className="input" style={{ width: "auto", minWidth: 160 }} value={compFilter} onChange={(e) => setCompFilter(e.target.value)}>
+        <select className="input" aria-label="Filter by competition" style={{ width: "auto", minWidth: 160 }} value={compFilter} onChange={(e) => setCompFilter(e.target.value)}>
           <option value="all">All competitions</option>
           {(tournament.competitions || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <select className="input" style={{ width: "auto" }} value={courtFilter} onChange={(e) => setCourtFilter(e.target.value)}>
+        <select className="input" aria-label="Filter by shiaijo" style={{ width: "auto" }} value={courtFilter} onChange={(e) => setCourtFilter(e.target.value)}>
           <option value="all">All Shiaijo</option>
           {courts.map(c => <option key={c} value={c}>Shiaijo {c}</option>)}
         </select>
@@ -540,7 +541,7 @@ export function ScheduleViewer({ tournament, tweaks, paceLookup }) {
 
       <div className="tw-courts">
         {allMatches.length === 0 ? (
-          <EmptyState icon="🗓" title="No matches scheduled yet" message="The schedule will appear here once the tournament begins." style={{ gridColumn: "1 / -1" }} />
+          <EmptyState icon="calendar" title="No matches scheduled yet" message="The schedule will appear here once the tournament begins." style={{ gridColumn: "1 / -1" }} />
         ) : courts.map((cc) => {
           const list = byCourt[cc] || [];
           const runningOn = list.find((m) => m.status === "running");
@@ -549,10 +550,10 @@ export function ScheduleViewer({ tournament, tweaks, paceLookup }) {
             <div key={cc} className="tw-court">
               <div className="tw-court__head">
                 <div>
-                  <div className="tw-court__title">SHIAIJO {cc}</div>
-                  <div className="tw-court__sub">{list.length} match{list.length === 1 ? "" : "es"}{runningOn ? " · in progress" : ""}</div>
+                  <div className="tw-court__title">Shiaijo {cc}</div>
+                  <div className="tw-court__sub">{list.length} match{list.length === 1 ? "" : "es"}{runningOn ? ", in progress" : ""}</div>
                 </div>
-                {runningOn && <span className="bc-running">● NOW</span>}
+                {runningOn && <span className="bc-running">● Now</span>}
               </div>
               <div className="tw-court__list">
                 {list.length === 0 ? (
@@ -589,14 +590,13 @@ export function ViewerSchedule({ tournament, onBack, tweaks, paceLookup }) {
   const [selectedMatch, openMatch, closeMatch] = useLiveMatch(rowOf);
   const extendedTweaks = { ...tweaks, onMatchClick: openMatch };
   return (
-    <div className="viewer">
+    <main className="viewer">
       <div className="viewer__shell">
         <div className="viewer__head">
-          <button type="button" className="viewer__back" onClick={onBack} aria-label="Back">←</button>
+          <button type="button" className="viewer__back" onClick={onBack} aria-label="Back"><Icon name="arrow-left" size={16} /></button>
           <div className="viewer__title-block">
-            <div className="viewer__eyebrow">{tournament.name}</div>
-            <div className="viewer__title">Schedule</div>
-            <div className="viewer__sub">All matches across courts and competitions</div>
+            <h1 className="viewer__title">Schedule</h1>
+            <div className="viewer__sub">{[tournament.name, tournament.name ? "all matches across courts and competitions" : "All matches across courts and competitions"].filter(Boolean).join(", ")}</div>
           </div>
         </div>
         <div className="viewer__body">
@@ -605,7 +605,7 @@ export function ViewerSchedule({ tournament, onBack, tweaks, paceLookup }) {
         </div>
       </div>
       {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tourneyWithQueue} paceLookup={paceLookup} />}
-    </div>
+    </main>
   );
 }
 

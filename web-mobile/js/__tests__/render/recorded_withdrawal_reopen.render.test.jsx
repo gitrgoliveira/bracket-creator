@@ -129,7 +129,7 @@ async function clearWithdrawal() {
 }
 
 describe.each([
-  ['team', teamWithdrawal, 'Recorded: Kiken – Voluntary, Kyoto withdrew.', 'Kyoto'],
+  ['team', teamWithdrawal, 'Recorded: Kiken (voluntary), Kyoto withdrew.', 'Kyoto'],
   ['individual', individualWithdrawal, 'Recorded: Fusenpai, Tanaka did not appear.', 'Tanaka'],
 ])('%s editor: Clear withdrawal and reopen', (_kind, fixture, recorded, withdrawn) => {
   it('says what is recorded and what clearing does, then reopens in one tap with no reason, never a score write', async () => {
@@ -157,7 +157,7 @@ describe.each([
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.queryByTestId('host-closed')).toBeNull();
     expect(screen.queryByTestId('recorded-withdrawal')).toBeNull();
-    expect(screen.queryByText('CORRECTION')).toBeNull();
+    expect(screen.queryByText('Correction')).toBeNull();
   });
 
   it('asks before reopening a later match with its own result, then retries with force', async () => {
@@ -318,7 +318,7 @@ describe('kachinuki: a withdrawal reopens through Clear withdrawal and reopen', 
   it('shows the recorded line in place of the one-tap Reopen, and states the consequence first', async () => {
     const onClose = vi.fn();
     await mountLive(kachinukiWithdrawal(), onClose);
-    expect(screen.getByTestId('recorded-withdrawal').textContent).toContain('Recorded: Kiken – Voluntary, Kyoto withdrew.');
+    expect(screen.getByTestId('recorded-withdrawal').textContent).toContain('Recorded: Kiken (voluntary), Kyoto withdrew.');
     expect(screen.queryByTestId('kachinuki-reopen-button')).toBeNull();
 
     expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toContain('Kyoto can compete again');

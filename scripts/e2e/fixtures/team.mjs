@@ -35,14 +35,15 @@ export const positionLabels = (teamSize) => {
 
 // ---------------------------------------------------------------- Lineups page
 
-const overlineField = (page, text) => page.locator('label')
-  .filter({ has: page.locator('.overline', { hasText: new RegExp(`^${text}$`, 'i') }) }).first();
+// A Lineups page field by its label ("Team", "Lineup for").
+const labelledField = (page, text) => page.locator('label')
+  .filter({ has: page.locator('.field__label', { hasText: new RegExp(`^${text}$`) }) }).first();
 
 export const lineupsForm = (page) => page.getByTestId('lineup-form-root');
 
 // The Lineups page's own name for a team's lineup before any match has one of
-// its own: what the "Lineup for" select offers first and the form's overline
-// reads for it.
+// its own: what the "Lineup for" select offers first and the line under the
+// form's heading (`.lineup-form__target`) names it by.
 export const STARTING_LINEUP = 'Starting lineup';
 
 // Open the Lineups page on `team` (its display name) and on the lineup the
@@ -52,22 +53,22 @@ export async function openLineups(page, id, { team, lineupFor = STARTING_LINEUP 
   await page.goto(`/admin/competition/${encodeURIComponent(id)}/lineups`);
   await expect(lineupsForm(page)).toBeVisible();
   if (team) {
-    const sel = overlineField(page, 'Team').locator('select');
+    const sel = labelledField(page, 'Team').locator('select');
     await sel.selectOption({ label: team });
     await expect(lineupsForm(page).locator('h2')).toContainText(team);
   }
   if (lineupFor !== STARTING_LINEUP) {
-    await overlineField(page, 'Lineup for').locator('select').selectOption({ label: lineupFor });
+    await labelledField(page, 'Lineup for').locator('select').selectOption({ label: lineupFor });
   }
-  // The form's overline names the lineup it edits.
-  await expect(lineupsForm(page).locator('.overline').first()).toHaveText(lineupFor);
+  // The line under the form's heading names the lineup it edits.
+  await expect(lineupsForm(page).locator('.lineup-form__target')).toHaveText(lineupFor);
   // The team members load separately from the lineup; wait for their list.
   await expect(lineupsForm(page).getByText('Team members', { exact: true })).toBeVisible();
 }
 
 // The choices of the Lineups page's "Lineup for" select, in order: "Starting
 // lineup" first, then the team's matches by the labels the select shows.
-export const lineupForOptions = async (page) => (await overlineField(page, 'Lineup for').locator('option').allInnerTexts())
+export const lineupForOptions = async (page) => (await labelledField(page, 'Lineup for').locator('option').allInnerTexts())
   .map((t) => t.trim());
 
 // The position's <select> on the Lineups page ("Senpo player", "2 player").
@@ -121,8 +122,8 @@ export async function lineupsNameSlot(page, label, name) {
 }
 
 // The PUT every lineup save sends: a team's lineup of a round (the Lineups
-// page) or of one match (the lineup panel, the score sheet row), api_client.jsx
-// putTeamLineup / putMatchLineup. Armed BEFORE the tap that sends it. A timeout
+// page) or of one match (the lineup panel, the score sheet row),
+// putTeamLineup / putMatchLineup in api_client_teams.jsx. Armed BEFORE the tap that sends it. A timeout
 // the caller never reached (the tap threw first) is not an unhandled rejection.
 // `teamId` names the team whose lineup is being saved, and `matchId` the match
 // whose own lineup it is (`null`: the team's starting lineup, round 0); a PUT
@@ -148,8 +149,8 @@ function lineupSaveAnswer(page, target) {
 // also opens "Lineup saved, but ..." warnings, and an older toast outlives it.
 export async function lineupsSave(page) {
   // The save is of the team and lineup the two selects show right now.
-  const teamId = await overlineField(page, 'Team').locator('select').inputValue();
-  const matchId = (await overlineField(page, 'Lineup for').locator('select').inputValue()) || null;
+  const teamId = await labelledField(page, 'Team').locator('select').inputValue();
+  const matchId = (await labelledField(page, 'Lineup for').locator('select').inputValue()) || null;
   const answered = lineupSaveAnswer(page, { teamId, matchId });
   await lineupsForm(page).getByRole('button', { name: 'Save lineup' }).tap();
   const res = await answered;
@@ -289,7 +290,7 @@ export async function panelSave(page, i, { refused = false, matchId } = {}) {
 }
 
 export async function closePanel(page) {
-  await lineupPanel(page).getByRole('button', { name: /^(✕ Close|Done)$/ }).tap();
+  await lineupPanel(page).getByRole('button', { name: /^(Close|Done)$/ }).tap();
   await expect(lineupPanel(page)).toHaveCount(0);
 }
 
@@ -345,8 +346,8 @@ export async function sheetState(root, bouts = 5) {
 }
 
 // Start the Up next team match and return once the court has it running:
-// the sheet is running once it holds the match without a PRE-MATCH pill (a
-// strike tapped during PRE-MATCH is a draft, sent only by Start).
+// the sheet is running once it holds the match without a Pre-match pill (a
+// strike tapped during Pre-match is a draft, sent only by Start).
 export async function startUpNextTeam(page) {
   await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
   const ed = inlineEditor(page);

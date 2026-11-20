@@ -82,8 +82,10 @@ func NewRouter() *gin.Engine {
 	// Get web directory, fall back to the global helper.WebFs if appResources
 	// has not been set (e.g. during integration tests that call NewRouter directly).
 	var webFS fs.FS = helper.WebFs
+	var mobileFS fs.FS = helper.MobileWebFs
 	if res := GetResources(); res != nil {
 		webFS = res.GetWebFS()
+		mobileFS = res.GetMobileWebFS()
 	}
 	webDir, err := fs.Sub(webFS, "web")
 	if err != nil {
@@ -91,6 +93,7 @@ func NewRouter() *gin.Engine {
 	} else {
 		// Serve static files
 		r.StaticFS("/static", http.FS(webDir))
+		serveSharedFonts(r, mobileFS)
 		// Serve index.html file directly from the root path
 		r.GET("/", func(c *gin.Context) {
 			data, err := fs.ReadFile(webDir, "index.html")
@@ -174,6 +177,19 @@ func NewRouter() *gin.Engine {
 	r.POST("/create", createTournamentHandler)
 
 	return r
+}
+
+// serveSharedFonts serves the tournament app's self-hosted fonts at /fonts, so
+// the CLI web UI draws the same letters and symbols as the app, on every
+// device, from the one copy of each font file (web-mobile/vendor/fonts in
+// mobileFS, the tournament app's embedded files).
+func serveSharedFonts(r *gin.Engine, mobileFS fs.FS) {
+	fontsDir, err := fs.Sub(mobileFS, "web-mobile/vendor/fonts")
+	if err != nil {
+		log.Printf("Warning: font directory not found in the mobile web files, fonts will not be served: %v", err)
+		return
+	}
+	r.StaticFS("/fonts", http.FS(fontsDir))
 }
 
 func init() {

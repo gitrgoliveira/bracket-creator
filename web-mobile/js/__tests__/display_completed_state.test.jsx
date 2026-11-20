@@ -4,7 +4,7 @@ import { emptyStateHeadline } from '../display_scoreboard.jsx';
 import { findAll } from './helpers/vdom.js';
 
 // mp-s99q: TvDisplay empty-state redesign tests.
-// Covers the three empty-state sub-states, the IN PROGRESS wayfinding strip,
+// Covers the three empty-state sub-states, the "In progress" wayfinding strip,
 // and the "Scan for results" QR affordance.
 
 // Stub window.renderQR so StreamingQR doesn't throw in the test env.
@@ -90,7 +90,7 @@ describe('TvDisplay empty state: allCompleted', () => {
 
 // ─── Active-courts wayfinding strip ──────────────────────────────────────────
 
-describe('TvDisplay empty state: IN PROGRESS wayfinding strip', () => {
+describe('TvDisplay empty state: "In progress" wayfinding strip', () => {
     it('renders tvd-active-courts with chips for B and C when court A is completed and B/C have active matches', () => {
         const tournament = makeTournament(['A', 'B', 'C']);
         const comps = [
@@ -131,7 +131,7 @@ describe('TvDisplay empty state: IN PROGRESS wayfinding strip', () => {
         expect(str).not.toContain('"data-testid":"tvd-active-courts"');
     });
 
-    it('uses "IN PROGRESS" wording, never "LIVE" or "live"', () => {
+    it('uses "In progress" wording, never "LIVE", "Live" or "live"', () => {
         const tournament = makeTournament(['A', 'B']);
         const comps = [makeComp('c1', [
             makeMatch('a1', 'A', 'completed'),
@@ -139,8 +139,9 @@ describe('TvDisplay empty state: IN PROGRESS wayfinding strip', () => {
         ])];
         const tree = TvDisplay({ court: 'A', tournament, competitions: comps, connected: true });
         const str = treeStr(tree);
-        expect(str).toContain('IN PROGRESS');
+        expect(str).toContain('In progress');
         expect(str).not.toContain('LIVE');
+        expect(str).not.toContain('Live');
         expect(str).not.toContain('"live"');
     });
 });

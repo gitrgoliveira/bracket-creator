@@ -519,7 +519,7 @@ func TestTournamentHandlers(t *testing.T) {
 // TestViewerCompetitions_EmptyForFreshTournamentIsAnArrayNotNull is the
 // other half of bc-pnum ruling 3's test pair: the SPA's load() builds
 // tournament.competitions from a SEPARATE fetch, GET /api/viewer/competitions
-// (fetchCompetitions in api_client.jsx), not from the tournament object
+// (fetchCompetitions in api_client_competitions.jsx), not from the tournament object
 // itself. That endpoint already returns a non-nil, pre-allocated slice
 // (buildViewerCompetitionPayloads: `make([]any, 0, len(ids))`), so for a
 // fresh tournament with zero competitions it must serialise as JSON `[]`,

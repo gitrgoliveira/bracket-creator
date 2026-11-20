@@ -122,7 +122,7 @@ function AnnouncementComposer({ password, showToast }) {
             <button type="button" className="btn btn--sm btn--danger" onClick={handleClearAnnouncements}>Clear all</button>
           </div>
           {activeAnnouncements.map(ann => (
-            <div key={ann.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", background: "var(--color-surface-raised, #f5f5f5)", borderRadius: 4, marginBottom: 4 }}>
+            <div key={ann.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", background: "var(--neutral-100)", borderRadius: 4, marginBottom: 4 }}>
               <span style={{ flex: 1, fontSize: "0.9em" }}>{ann.message}</span>
               <button type="button"
                 className="btn btn--sm"

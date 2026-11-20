@@ -118,12 +118,14 @@ async function mount(match, { selfReport = false, onClose = vi.fn(), prevMatch, 
   return { ...utils, onSubmit, onClose, rerenderWith: async (m) => { await act(async () => { utils.rerender(view(m)); }); } };
 }
 
-// The daihyosen row's two name boxes, by their aria-label ("Daihyosen SHIRO player").
+// The daihyosen row's two name boxes, by their aria-label ("Daihyosen Shiro
+// player"). Callers name the side as 'SHIRO' or 'AKA'.
+const SIDE_WORD = { SHIRO: 'Shiro', AKA: 'Aka' };
 function dhInputs() {
-  return screen.queryAllByLabelText(/^Daihyosen (SHIRO|AKA) player$/);
+  return screen.queryAllByLabelText(/^Daihyosen (Shiro|Aka) player$/);
 }
 function dhInput(side) {
-  return dhInputs().find((el) => el.getAttribute('aria-label').includes(side));
+  return dhInputs().find((el) => el.getAttribute('aria-label').includes(SIDE_WORD[side] || side));
 }
 
 async function openDh(side) {
@@ -373,7 +375,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     // The member POST is still out. Finish or Close now would send or drop the pick
     // while the member may already exist on the server, so both wait for it.
     expect(screen.getByText('Finish').closest('button').disabled).toBe(true);
-    expect(screen.getByText('✕ Close').closest('button').disabled).toBe(true);
+    expect(screen.getByText('Close').closest('button').disabled).toBe(true);
     await act(async () => { answerEve({ id: 'm9', name: 'Eve', index: 3 }); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(screen.getByText('Finish').closest('button').disabled).toBe(false);
@@ -413,7 +415,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
     expect(onSubmit).not.toHaveBeenCalled();
     // The board agrees with the server, so the sheet is not dirty: Close asks nothing.
-    await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
+    await act(async () => { fireEvent.click(screen.getByText('Close')); });
     expect(window.confirmDialog).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -471,12 +473,12 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.click(add.closest('button')); });
     await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', '', expect.any(Object)));
     // leaveEditor does nothing while the member POST is out, so the buttons must not look available.
-    expect(screen.getByText('← Prev').closest('button').disabled).toBe(true);
-    expect(screen.getByText('Next →').closest('button').disabled).toBe(true);
+    expect(screen.getByText('Prev').closest('button').disabled).toBe(true);
+    expect(screen.getByText('Next').closest('button').disabled).toBe(true);
     await act(async () => { answerEve({ id: 'm9', name: 'Eve', index: 3 }); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    expect(screen.getByText('← Prev').closest('button').disabled).toBe(false);
-    expect(screen.getByText('Next →').closest('button').disabled).toBe(false);
+    expect(screen.getByText('Prev').closest('button').disabled).toBe(false);
+    expect(screen.getByText('Next').closest('button').disabled).toBe(false);
   });
 
   it('R19: a completed match whose side was given another team clears the stored pick, and Close closes at once with no discard prompt', async () => {
@@ -489,7 +491,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await rerenderWith(makeMatch({ status: 'completed', sideA: { id: 't3', name: 'Team C' }, subResults: [DH_EMPTY] }));
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(dhInput('AKA').value).toBe('');
-    await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
+    await act(async () => { fireEvent.click(screen.getByText('Close')); });
     expect(window.confirmDialog).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -504,7 +506,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     await pickFromDh('AKA', 'Erin');
     expect(dhInput('AKA').value).toBe('Erin');
-    await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
+    await act(async () => { fireEvent.click(screen.getByText('Close')); });
     expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining({ message: 'Your unsaved entries will be discarded. Leave this match anyway?' }));
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -533,7 +535,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     const wrap = dhInput('AKA').closest('.lineup-name');
     await act(async () => { fireEvent.click(within(wrap).getByRole('button', { name: 'Clear player' })); });
     expect(dhInput('AKA').value).toBe('');
-    await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
+    await act(async () => { fireEvent.click(screen.getByText('Close')); });
     expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining({ message: 'Your unsaved entries will be discarded. Leave this match anyway?' }));
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -781,7 +783,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
       expect(patch.changed || [], 'the picks did not change').not.toContain('repPickA');
       expect(patch.changed || [], 'the picks did not change').not.toContain('repPickB');
     }
-    await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
+    await act(async () => { fireEvent.click(screen.getByText('Close')); });
     expect(window.confirmDialog).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);
   });

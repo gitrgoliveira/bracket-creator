@@ -31,10 +31,10 @@ import { SideLabel } from './side_cell.jsx';
 // rather than re-derived: see its header in match_scoreboard.jsx.
 import { teamNameMark } from './match_scoreboard.jsx';
 import { barredNameMark } from './barred_chip.jsx';
+import { Icon } from './icon.jsx';
 
 const { useState, useMemo } = React;
 const EmptyState = window.EmptyState;
-const Icon = window.Icon;
 
 // DH-winner detection uses isPoolDaihyosenBout (pool_ids.jsx): a suffix match
 // (…-DH-N) so a pool name that happens to contain "-DH-" can't false-positive a
@@ -88,7 +88,7 @@ export function WinnerBadge({ name, isFs = false, testId, marginBottom }) {
       data-testid={testId}
       style={marginBottom != null ? { marginBottom } : undefined}
     >
-      <span className="winner-badge__icon" aria-hidden="true">{Icon ? <Icon name="trophy" /> : "🏆"}</span>
+      <span className="winner-badge__icon" aria-hidden="true"><Icon name="trophy" /></span>
       <span>Winner: {name}</span>
     </div>
   );
@@ -178,10 +178,10 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   const isTeam = !isEngi && (c.teamSize || 0) > 0;
   const emptyColSpan = isEngi ? 4 : isTeam ? 10 : 7;
   const rankedBy = isEngi
-    ? "Ranked by: wins → total flags → head-to-head."
+    ? "Ranked by: wins, total flags, head-to-head."
     : isTeam
-      ? "Ranked by: team wins → IV → PW → head-to-head."
-      : "Ranked by: wins → points scored (PW) → head-to-head.";
+      ? "Ranked by: team wins, IV, PW, head-to-head."
+      : "Ranked by: wins, points scored (PW), head-to-head.";
 
   if (loading) return <window.LoadingSpinner text="Loading standings…" />;
   if (error) return <div className="alert alert--error">{error}</div>;
@@ -842,7 +842,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
   // field render as before (no header relabel, no winner badge).
   const isLeague = competition && competition.format === "league";
   if (!pools || pools.length === 0) {
-    return <EmptyState icon="⏳" title={isLeague ? "League not drawn yet" : "Pools not drawn yet"} />;
+    return <EmptyState icon="hourglass" title={isLeague ? "League not drawn yet" : "Pools not drawn yet"} />;
   }
   const compTMT = teamMatchTypeFor(competition);
 

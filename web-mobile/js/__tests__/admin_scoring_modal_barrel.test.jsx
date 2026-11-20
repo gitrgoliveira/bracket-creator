@@ -49,7 +49,7 @@ const EXPECTED_EXPORTS = [
   'decideDrawToggle',
   'shouldBlockScoringKeys',
   'DecisionPrompt',
-  // Team-specific helpers (from admin_scoring_team.jsx in post-split world)
+  // Team-specific helpers (from admin_scoring_team_bouts.jsx in post-split world)
   'teamResultLabel',
   'isKoTieBlocked',
   // Lineup resolvers (from lineup_resolver.jsx in post-split world)

@@ -5391,9 +5391,11 @@ paths:
         match) whose BOTH sides are already barred by a decision recorded on
         a different match: neither can fight, so it is recorded as a draw
         with no winner and no new eligibility change. `decisionBy` is not
-        required for this one shape, unlike every other `decision` value;
-        any other `hikiwake` request is rejected with 400 ("use /score for
-        fought/hikiwake"). The equivalent knockout case, where the bracket
+        required for this one shape, unlike every other `decision` value.
+        The same draw sent again under the same `modifiedAt` once it is
+        recorded (a resend whose first answer was lost) is answered 200 with
+        the recorded match and writes nothing; any other `hikiwake` request
+        is rejected with 400 ("use /score for fought/hikiwake"). The equivalent knockout case, where the bracket
         needs a winner and a draw cannot stand in, is refused instead with
         409 `ineligible_competitor` naming both sides and pointing at the
         earlier withdrawal or the draw. On a tie-breaker bout (a

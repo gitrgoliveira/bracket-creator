@@ -68,7 +68,7 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
             Contact your tournament administrator for the credential.
           </p>
           {onBack && (
-            <button type="button" className="btn btn--ghost" onClick={onBack}>← Back</button>
+            <button type="button" className="btn btn--ghost" onClick={onBack}>Back</button>
           )}
         </div>
       </div>
@@ -160,7 +160,7 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
           </div>
           <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
             {onBack && (
-              <button type="button" className="btn btn--ghost" onClick={onBack} disabled={saving}>← Back</button>
+              <button type="button" className="btn btn--ghost" onClick={onBack} disabled={saving}>Back</button>
             )}
             <button type="submit" className="btn btn--primary btn--lg" disabled={saving} style={{ flex: 1 }}>
               {saving ? "Saving…" : "Reset password"}

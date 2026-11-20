@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/backup"
 	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
@@ -187,16 +188,47 @@ func (s *Store) rlockComp(id string) *sync.RWMutex {
 }
 
 // lockComp acquires the write lock for id and verifies that getCompLock(id)
-// still returns the same mutex.
-func (s *Store) lockComp(id string) *sync.RWMutex {
+// still returns the same mutex. Every competition write lock is taken here
+// (lockCompWrite, lockCompWriteForRead, the snapshot settle, the restore), so
+// its Unlock is the one place the competition's write count moves.
+func (s *Store) lockComp(id string) *compWriteLock {
 	for {
 		mu := s.getCompLock(id)
 		mu.Lock()
 		if s.getCompLock(id) == mu {
-			return mu
+			return &compWriteLock{mu: mu, writes: s.compWriteCount(id)}
 		}
 		mu.Unlock()
 	}
+}
+
+// compWriteLock is a held competition write lock. Unlock counts the release
+// BEFORE it lets readers in, so a read that ran after the writer is always
+// one that sees the count moved (CompetitionWriteToken).
+type compWriteLock struct {
+	mu     *sync.RWMutex
+	writes *atomic.Uint64
+}
+
+func (l *compWriteLock) Unlock() {
+	l.writes.Add(1)
+	l.mu.Unlock()
+}
+
+func (s *Store) compWriteCount(id string) *atomic.Uint64 {
+	c, _ := s.compWrites.LoadOrStore(id, &atomic.Uint64{})
+	return c.(*atomic.Uint64)
+}
+
+// CompetitionWriteToken changes whenever a write to compID may have landed:
+// a writer released the competition's write lock, or an overrides.json save
+// landed (its writers hold s.mu, not the competition lock). A reader that
+// makes several loads, each under its own read lock, reads the token before
+// and after them: an equal token means no write landed between its loads, so
+// they all read one state. A token that moved for a write that changed
+// nothing only costs the reader another try.
+func (s *Store) CompetitionWriteToken(compID string) uint64 {
+	return s.compWriteCount(compID).Load() + s.FileVersion(compID, "overrides.json")
 }
 
 // listCompetitionsLocked lists the directory names under competitions/.

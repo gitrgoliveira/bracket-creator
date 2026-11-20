@@ -46,7 +46,7 @@ func teamBoutLabel(teamSize, bout int) string {
 // while bouts have no result. It names the bouts and what to record, and
 // never mentions the lineup: a vacancy is legitimate play and must not read
 // as something to complete. The JS twin is unfinishedTeamBoutsMessage in
-// web-mobile/js/admin_scoring_team.jsx; both are pinned to
+// web-mobile/js/admin_scoring_team_bouts.jsx; both are pinned to
 // testdata/unfinished_team_bouts.json.
 func unfinishedTeamBoutsMessage(teamSize int, bouts []int) string {
 	labels := make([]string, len(bouts))

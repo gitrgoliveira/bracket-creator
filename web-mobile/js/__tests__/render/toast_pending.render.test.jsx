@@ -11,7 +11,8 @@ import { pushToast, resetToastQueue } from '../../toast_queue.jsx';
 
 afterEach(() => { act(() => { resetToastQueue(); }); cleanup(); });
 
-const icon = (container) => container.querySelector('.toast__icon').textContent;
+// The icon is drawn by the app (icon.jsx), named on its svg, never an emoji.
+const icon = (container) => container.querySelector('.toast__icon svg')?.getAttribute('data-icon');
 const shownAs = (message, type) => {
   const r = render(<Toast />);
   act(() => { pushToast(message, type); });
@@ -21,17 +22,17 @@ const shownAs = (message, type) => {
 describe('the toast icon', () => {
   it('is the pending icon for a write held on the device', () => {
     const { container, getByRole } = shownAs('Not sent yet', 'pending');
-    expect(icon(container)).toBe('⏳');
+    expect(icon(container)).toBe('hourglass');
     expect(getByRole('status')).toBeTruthy();
     expect(container.querySelector('.toast__dismiss'), 'nothing to dismiss').toBeNull();
   });
 
   it('stays the success check for a success and the warning for an error', () => {
     const ok = shownAs('Lineup saved', undefined);
-    expect(icon(ok.container)).toBe('✅');
+    expect(icon(ok.container)).toBe('circle-check');
     act(() => { resetToastQueue(); });
     cleanup();
     const err = shownAs('Failed', 'error');
-    expect(icon(err.container)).toBe('⚠️');
+    expect(icon(err.container)).toBe('triangle-alert');
   });
 });

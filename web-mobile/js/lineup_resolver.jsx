@@ -761,3 +761,61 @@ export function boutSideView({ isKachinuki, isDaihyosen, existingName, lineupNam
   const displayName = resolveBoutSideDisplayName({ squad, memberId, storedName: name });
   return { name, displayName };
 }
+
+// pickManualBoutName: the write behind a name typed or picked on a bout row
+// with no lineup slot to route through -- a beyond-teamSize kachinuki bout,
+// or any row forced onto the manual path (see the call site's own doc
+// comment, above the `pickManual` factory in TeamScoreEditorModal, for
+// exactly which rows that covers). Hoisted to module scope so this exact
+// rename-vs-substitute contract is pinned directly, and so it is built ONCE
+// rather than once per bout row on every render -- it used to be a closure
+// defined inside the per-row map, mirroring buildInlineLineupWrite above,
+// which was pulled out of the same component for the same reason. It lives
+// here, beside the lineup writes, because it renames a team member (a member
+// write) and is not a kachinuki rule.
+//
+// A picked squad member (member.id set) writes the sub directly: no rename
+// is possible there, since the operator picked an existing identity rather
+// than typing over one. Without a pick, a name typed over a picked-but-
+// still-BLANK member RENAMES that member (the ruling: the name attaches to
+// the number it was shown with) and keeps the row's id; typed over anything
+// else (a named member, or no prior pick at all) is a substitution and
+// carries no id, exactly as the fixed-order lineup path does. A rename the
+// server holds is handed to onRenamed as the member written.
+export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad, onRenamed, compId, teamId, password, updateSub, onRenameFailed }, value, member) {
+  if (member && member.id) {
+    updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: member.id }));
+    return;
+  }
+  const typed = String(value || "").trim();
+  const priorId = sub[memberIdKey] || "";
+  const prior = priorId ? (squad || []).find(mm => mm && mm.id === priorId) : null;
+  const renames = !!(prior && !(prior.name || "").trim() && typed);
+  updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: renames ? priorId : "" }));
+  if (!renames || !teamId || typeof window.API?.renameTeamMember !== "function") return;
+  try {
+    // The member as this device shows it, renamed and stamped now (the rename is an
+    // outbox entry, bc-evts stage 3 review 2, R1): what the sheet's lists merge by. A
+    // refusal the server gives later puts the member back as it was and is told the
+    // same way as one that never reached the outbox.
+    onRenamed([await window.API.renameTeamMember(compId, teamId, priorId, typed, password, {
+      member: prior,
+      onRefusal: (e) => {
+        if (e && e.revertMember) onRenamed([e.revertMember]);
+        // Claimed only when the sheet said it (R2): false leaves it to the outbox.
+        return onRenameFailed(typed, e) !== false;
+      },
+    })]);
+  } catch (e) {
+    // TELL THE OPERATOR. The rename never reached the server, so the member
+    // stays nameless there permanently: every later picker row, the Lineups
+    // page and the member list keep offering it as "no name yet", and
+    // nothing catches up on a later load because nothing was written. The
+    // bout row itself is fine (it carries the typed name and the id), which
+    // is exactly why this needs saying out loud rather than looking
+    // correct. The sibling resolver path reports the same failure through
+    // this channel for the same reason (bc-dnst). The error goes along: a
+    // refusal with its own sentence is shown in those words (memberRefusalNote).
+    onRenameFailed(typed, e);
+  }
+}

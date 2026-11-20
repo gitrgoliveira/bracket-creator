@@ -8,13 +8,9 @@
 // to reach the button). A source-text guard is the right tool here: it pins
 // the structural constraint across future edits at near-zero cost.
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { readFamily } from './helpers/source.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dir = dirname(__filename);
-const src = readFileSync(join(__dir, '../admin_scoring_team.jsx'), 'utf8');
+const src = readFamily('admin_scoring_team.jsx');
 
 // Extract the JSX text belonging to each named button via a minimal bracket
 // scan rather than a regex that could match the wrong closing bracket.

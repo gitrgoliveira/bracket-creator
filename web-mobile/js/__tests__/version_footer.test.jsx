@@ -28,6 +28,8 @@ describe('VersionFooter', () => {
     expect(treeStr).toContain('v1.2.3');
     expect(treeStr).toContain('https://github.com/gitrgoliveira/bracket-creator');
     expect(treeStr).toContain('app-version-link');
+    // Two parts, the version and the link, keep their one middle dot.
+    expect(runtime.currentTree().props.children[1]).toBe(' · ');
   });
 
   it('renders a non-semver version using gitCommit and buildDate with GitHub link', () => {
@@ -35,8 +37,8 @@ describe('VersionFooter', () => {
     runtime.mount(VersionFooter, {});
 
     const treeStr = JSON.stringify(runtime.currentTree());
-    expect(treeStr).toContain('fc928e0');
-    expect(treeStr).toContain('2026-06-16');
+    // Three parts are joined by commas.
+    expect(runtime.currentTree().props.children.slice(0, 2)).toEqual(['fc928e0, 2026-06-16', ', ']);
     expect(treeStr).toContain('https://github.com/gitrgoliveira/bracket-creator');
     expect(treeStr).toContain('app-version-link');
   });

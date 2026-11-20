@@ -279,7 +279,7 @@ func refuseFinishedLeagueLotsReset(txr CompetitionTransactor, tl TournamentLoade
 // finish the match against it. recorded says whether the organiser recorded
 // one, which decides the sentence. The recorded one is also the note the public
 // score sheet shows under a representative bout the judges decided
-// (admin_scoring_team.jsx); testdata/rep_bout_hantei_messages.json holds both
+// (REP_BOUT_DECIDED_NOTE, admin_scoring_team_bouts.jsx); testdata/rep_bout_hantei_messages.json holds both
 // for the two languages.
 func repBoutHanteiRefusal(recorded bool) *selfRunRefusal {
 	message := "Only the tournament organizer can record a judges' decision (hantei)."

@@ -12,7 +12,7 @@ import (
 // bc-kclr: the server half of taking a mark back on a kachinuki bout. The
 // merge (engine.mergeKachinukiSubResults) keeps any stored row a payload
 // omits, so the editor now sends a bout the operator cleared as an explicit
-// empty row (kachinukiRowCleared, admin_scoring_team.jsx). These pin that such
+// empty row (kachinukiRowSent, admin_scoring_team.jsx). These pin that such
 // a row is stored as cleared, on a running write and on End match.
 
 func TestScoreHandler_KachinukiClearedBoutIsStored(t *testing.T) {

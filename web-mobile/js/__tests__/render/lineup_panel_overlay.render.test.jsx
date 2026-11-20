@@ -72,7 +72,7 @@ async function mount(extra) {
 
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
 const escape = (target = document.body) => act(async () => { fireEvent.keyDown(target, { key: 'Escape' }); });
-const closeButton = (utils) => utils.getByRole('button', { name: '✕ Close' });
+const closeButton = (utils) => utils.getByRole('button', { name: 'Close' });
 const sideA = (utils) => within(utils.getByTestId('match-lineup-side-team-a'));
 
 describe('the panel as a dialog', () => {

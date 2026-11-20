@@ -5,7 +5,7 @@ paths:
   - "internal/state/{legacy_hantei,team_result}*.go"
   - "internal/engine/{scoring,scoring_tx,engi,match_label,bracket_result,daihyosen}*.go"
   - "internal/mobileapp/validation*.go"
-  - "web-mobile/js/{bracket,side_marks,side_cell,result_slot,result_recency,match_scoreboard,match_shows_score,numbered_name,display_scoreboard,display_helpers,display_lobby,streaming_overlay,pool_ids,admin_scoring_individual,admin_scoring_team,admin_scoring_shared,admin_shiaijo,viewer_match}.jsx"
+  - "web-mobile/js/{bracket,side_marks,side_cell,result_slot,result_recency,match_scoreboard,match_shows_score,numbered_name,display_scoreboard,display_helpers,display_lobby,streaming_overlay,pool_ids,admin_scoring_individual,admin_scoring_team,admin_scoring_team_bouts,admin_scoring_team_kachinuki,admin_scoring_shared,admin_shiaijo,admin_shiaijo_context,admin_shiaijo_feed,admin_shiaijo_queue,admin_shiaijo_calls,admin_shiaijo_moves,admin_shiaijo_start,viewer_match}.jsx"
 ---
 
 # Match results and marks

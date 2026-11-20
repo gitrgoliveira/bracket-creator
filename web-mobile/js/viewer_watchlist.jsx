@@ -30,6 +30,7 @@
 // real one -- what matters is that the chain is ACYCLIC and no module in it is
 // script-tagged, so none of it can be evaluated twice or mid-cycle.
 import { NumberedName } from './numbered_name.jsx';
+import { Icon } from './icon.jsx';
 import { sideWord, sideFillClass } from './side_cell.jsx';
 import { competitorMatchesQuery } from './competitor_search.jsx';
 import { buildWatchlistLink } from './watchlist_link.jsx';
@@ -176,7 +177,7 @@ function WatchPicker({ roster, rosterLoaded = true, dojos, watchedPlayerIds, wat
               className="pmf__option pmf__option--dojo"
               onClick={() => pickDojo(d)}
             >
-              <span className="pmf__check" aria-hidden="true">⌂</span>
+              <span className="pmf__check" aria-hidden="true"><Icon name="house" size={13} /></span>
               <span className="pmf__opt-body">
                 <span className="pmf__opt-name">{d.name}</span>
                 <span className="pmf__opt-dojo">Watch all · {pluralize(d.total, "member")}</span>
@@ -189,7 +190,7 @@ function WatchPicker({ roster, rosterLoaded = true, dojos, watchedPlayerIds, wat
               className="pmf__option"
               onClick={() => pickPlayer(p)}
             >
-              <span className="pmf__check">{p.checkedIn ? "✓" : ""}</span>
+              <span className="pmf__check" aria-hidden="true">{p.checkedIn ? <Icon name="check" size={13} /> : null}</span>
               <span className="pmf__opt-body">
                 <span className="pmf__opt-name">
                   {/* Through NumberedName, the one owner of the chip rule. No
@@ -307,7 +308,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick, paceL
     <div key={key} className={`wl-hero__side ${sideFillClass(side)}`}>
       <span className="wl-hero__side-head">
         <span className="wl-hero__side-lbl">{sideWord(side)}</span>
-        {you ? <span className="wl-hero__you">you</span> : null}
+        {you ? <span className="wl-hero__you">You</span> : null}
       </span>
       <span className="wl-hero__side-name"><NumberedName name={name} number={number || ""} /></span>
       {dojo ? <span className="wl-hero__side-dojo">{dojo}</span> : null}
@@ -406,9 +407,9 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick, paceL
         <button type="button" className="wl-hero__sides wl-hero__sides--btn"
           onClick={() => onMatchClick(nextMatch)}>
           {sides}
-          {/* The words name the ACTION and stay in the accessible name; only
-              the arrow is hidden, since "right arrow" is noise. */}
-          <span className="wl-hero__more">Match details<span aria-hidden="true"> →</span></span>
+          {/* The words name the ACTION and are the whole label: the button
+              already says it goes somewhere, so no arrow is glued to it. */}
+          <span className="wl-hero__more">Match details</span>
         </button>
       </div>
     </div>
@@ -596,15 +597,15 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
           title={unresolved ? "No one from this dojo is in this tournament's roster" : undefined}>
           {multi && (
             <button type="button" className="pmf__chip-pin" onClick={() => togglePin(entry)} aria-label={isPrimary ? `Unpin ${entry.dojo}` : `Pin ${entry.dojo} as primary`} aria-pressed={isPrimary}>
-              {isPrimary ? "★" : "☆"}
+              <Icon name={isPrimary ? "star-filled" : "star"} size={12} />
             </button>
           )}
-          {unresolved && <span aria-hidden="true">⚠</span>}
-          <span className="pmf__chip-icon" aria-hidden="true">⌂</span>
+          {unresolved && <Icon name="triangle-alert" size={11} />}
+          <span className="pmf__chip-icon" aria-hidden="true"><Icon name="house" size={11} /></span>
           {/* The count is a claim about the roster too: "(0)" beside a dojo
               whose competition failed to load says nobody entered. */}
           {entry.dojo}{rosterLoaded ? ` (${total})` : ""}
-          <button type="button" onClick={() => removeEntry(entry)} aria-label={`Remove ${entry.dojo}`}>×</button>
+          <button type="button" onClick={() => removeEntry(entry)} aria-label={`Remove ${entry.dojo}`}><Icon name="x" size={14} /></button>
         </span>
       );
     }
@@ -624,13 +625,13 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
         title={unresolved ? "Not in this tournament's roster" : (checkedIn ? "Checked in" : undefined)}>
         {multi && (
           <button type="button" className="pmf__chip-pin" onClick={() => togglePin(entry)} aria-label={isPrimary ? `Unpin ${name}` : `Pin ${name} as primary`} aria-pressed={isPrimary}>
-            {isPrimary ? "★" : "☆"}
+            <Icon name={isPrimary ? "star-filled" : "star"} size={12} />
           </button>
         )}
-        {unresolved && <span aria-hidden="true">⚠</span>}
+        {unresolved && <Icon name="triangle-alert" size={11} />}
         <NumberedName name={name} number={(pRecord && pRecord.number) || ""} />
-        {checkedIn && <span className="pmf__chip-tick" aria-hidden="true">✓</span>}
-        <button type="button" onClick={() => removeEntry(entry)} aria-label={`Remove ${name}`}>×</button>
+        {checkedIn && <span className="pmf__chip-tick" aria-hidden="true"><Icon name="check" size={10} /></span>}
+        <button type="button" onClick={() => removeEntry(entry)} aria-label={`Remove ${name}`}><Icon name="x" size={14} /></button>
       </span>
     );
   };
@@ -755,7 +756,7 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
           which one they get. */}
       {multi && !primaryEntry && (
         <div className="hint watchlist-pin-hint">
-          {heroNextMatch && heroLabel ? `Showing ${heroLabel}. ` : ""}Tap ☆ on a chip to pin who gets the on-deck chime.
+          {heroNextMatch && heroLabel ? `Showing ${heroLabel}. ` : ""}Tap the star on a chip to pin who gets the on-deck chime.
         </div>
       )}
 

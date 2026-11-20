@@ -292,6 +292,28 @@ func TestCreatePools_TitlePrefixPrintsCompetitionTags(t *testing.T) {
 					assert.Equalf(t, prefix, val, "%s row %d is a competition-name tag", sheet, row)
 				}
 			}
+
+			// A cell value of "" proves little on its own: an uncalculated
+			// competitor formula reads as "" too. So also pin where the
+			// competitors start (B holds each one's name formula) and whether
+			// the tags are merged.
+			merged, err := f.GetMergeCells(sheet)
+			require.NoError(t, err)
+			firstCompetitor := 1
+			if prefix == "" {
+				assert.Emptyf(t, merged, "%s: no tags, so nothing is merged", sheet)
+			} else {
+				assert.Lenf(t, merged, helper.CompetitionTagRows, "%s: one merged cell per tag row", sheet)
+				firstCompetitor = helper.CompetitionTagRows + 1
+				for row := 1; row < firstCompetitor; row++ {
+					formula, err := f.GetCellFormula(sheet, fmt.Sprintf("B%d", row))
+					require.NoError(t, err)
+					assert.Emptyf(t, formula, "%s row %d is a tag, not a competitor", sheet, row)
+				}
+			}
+			formula, err := f.GetCellFormula(sheet, fmt.Sprintf("B%d", firstCompetitor))
+			require.NoError(t, err)
+			assert.NotEmptyf(t, formula, "%s row %d is the first competitor", sheet, firstCompetitor)
 		}
 		assert.NoError(t, f.Close())
 	}

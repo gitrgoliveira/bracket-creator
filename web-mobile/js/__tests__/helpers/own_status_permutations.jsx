@@ -833,7 +833,7 @@ export function defineOwnStatusShard(url) {
   const { k, n } = shardFromUrl(url);
   const mine = shardOf(combinations(), k, n);
   beforeAll(async () => { ({ ScoreEditorModal, restore } = await installIndividualEditor()); });
-  afterAll(() => restore());
+  afterAll(() => restore?.());
   for (const loop of LOOPS) {
     const rows = mine.filter((c) => c.loop === loop.id);
     if (!rows.length) continue;

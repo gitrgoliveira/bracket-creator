@@ -281,10 +281,10 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source][, checked_in | checked_in
 
 ## Testing & Verification
 
-- **Gate cadence: targeted tests while iterating, the full gate before claiming completion** (operator ruling 2026-09-25). `make go/test` takes about 10 minutes on 8 cores (the JS tests about 8 of them, the Go tests under 1, measured 2026-11-18) and keeps every core busy, which slows every other session on the machine; a full run after each small fix is what made concurrent sessions look stuck. While iterating, run only what the change touches, each in seconds and without `cd`:
+- **Gate cadence: targeted tests while iterating, the full gate before claiming completion** (operator ruling 2026-09-25). `make go/test` takes about 1.5 to 2 minutes on 8 cores (the JS tests about 65 seconds of that, measured 2026-11-20) and keeps every core busy, which slows every other session on the machine; a full run after each small fix is what made concurrent sessions look stuck. While iterating, run only what the change touches, each in seconds and without `cd`:
   ```bash
   go -C <wt> test -run TestName ./internal/<pkg>/...
-  npm --prefix <wt>/web-mobile test -- js/__tests__/<file>   # vitest matches by substring, so this also finds <file>.node.test.jsx
+  npm --prefix <wt>/web-mobile test -- js/__tests__/<file>.   # vitest matches by substring; the trailing dot finds <file>.test.jsx and <file>.node.test.jsx only
   npm --prefix <wt>/web-mobile run test:render -- js/__tests__/render/<file>.render.test.jsx
   ```
   Run the full `make go/test` before any claim that the work is done, fixed or passing, before pushing, and before marking a PR ready. A change made after that run needs it again before the next such claim. Brief subagents the same way: an implementer or fixer runs targeted tests, and whoever claims completion runs the full gate once, in the foreground.

@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Three vitest projects run under `vitest run` / `npm test`:
 //
-//  unit  , pure-logic suite with the fake React global stub (~1572 tests).
+//  unit  , pure-logic suite with the fake React global stub.
 //           Fast: components are never mounted; logic helpers are called directly.
 //  node  , the unit files that touch no page, picked by the file-name suffix
 //           `<name>.node.test.<ext>`: plain Node, no jsdom, only the console guard.

@@ -199,6 +199,15 @@ export function numberedMemberName(entry) {
   return [entry.label, entry.name].filter(Boolean).join(" ");
 }
 
+// teamCarriesName: whether a name typed into a lineup place is one a member of
+// the team already carries (compared trimmed and case-insensitively, as the
+// save's resolver places a typed name). Such a name is placed by its member, so
+// a nameless default is never taken for it.
+export function teamCarriesName(squadEntries, name) {
+  const wanted = String(name || "").trim().toLowerCase();
+  return !!wanted && (squadEntries || []).some(e => e && e.name && e.name.toLowerCase() === wanted);
+}
+
 // fieldedDefaults: what each EMPTY place of a kachinuki lineup form shows as its
 // default, from the server's answer of who it fields there (`fielded`, position
 // key to member id, API.fetchFieldedLineup) and the team's squad entries. A

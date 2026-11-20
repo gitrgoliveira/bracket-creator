@@ -5,7 +5,7 @@ import { LineupNameInput } from './admin_scoring_shared.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
 import { Icon } from './icon.jsx';
 import { scoreRowMatchLabel, teamMatchTypeFor } from './pool_ids.jsx';
-import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel, fieldedDefaults } from './lineup_resolver.jsx';
+import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel, fieldedDefaults, teamCarriesName } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { kachinukiMembersKey } from './kachinuki_advisory.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
@@ -278,7 +278,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const typedNamesAtDefaults = async ({ positions: composed, memberIds: composedIds, changed }) => {
     const typedKeys = changed.filter(key => {
       const name = (composed[key] || "").trim();
-      return name && !composedIds[key] && !squadEntries.some(e => e.name && e.name.toLowerCase() === name.toLowerCase());
+      return name && !composedIds[key] && !teamCarriesName(squadEntries, name);
     });
     if (typedKeys.length === 0 || isOffline()) return {};
     const open = { ...composed };
@@ -612,7 +612,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
                 // typed over a picked blank member does, and the team's numbers stay
                 // with its people. Over a named default it is someone else, and so is
                 // a name a member of the team already carries (save() places that one).
-                const typedKnown = !!trimmed && squadEntries.some(e => e.name && e.name.toLowerCase() === trimmed.toLowerCase());
+                const typedKnown = teamCarriesName(squadEntries, trimmed);
                 const shown = typedKnown ? null : defaults[p.key];
                 setMemberIds(ids => {
                   if (entry && entry.id) return { ...ids, [p.key]: entry.id };

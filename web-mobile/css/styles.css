@@ -269,6 +269,7 @@
   --black-a12: rgba(0, 0, 0, 0.12);
   --black-a20: rgba(0, 0, 0, 0.2);
   --black-a25: rgba(0, 0, 0, 0.25);
+  --black-a30: rgba(0, 0, 0, 0.3);
   --black-a35: rgba(0, 0, 0, 0.35);
 }
 
@@ -3484,7 +3485,7 @@ a.vlist-item {
 }
 
 .vsched-item__ctx {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--ink-3);
   margin-bottom: 6px;
   white-space: nowrap;
@@ -3841,7 +3842,7 @@ details[open] > summary::before { transform: rotate(90deg); }
   background: transparent;
   border-color: var(--white-a28);
   color: var(--white-a78);
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   padding: 3px 8px;
 }
 
@@ -5404,7 +5405,7 @@ details[open] > summary::before { transform: rotate(90deg); }
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
-  transition: border-color 120ms var(--ease-out), box-shadow 120ms var(--ease-out), opacity 120ms var(--ease-out);
+  transition: border-color 120ms var(--ease-out), box-shadow 120ms var(--ease-out);
   font-size: 13px;
 }
 
@@ -5413,8 +5414,10 @@ details[open] > summary::before { transform: rotate(90deg); }
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
+/* A finished match sits on the grey card fill rather than fading: a fade
+   took its muted labels below 4.5:1, and its score already says it is done. */
 .tw-match--done {
-  opacity: 0.65;
+  background: var(--surface-2);
 }
 
 .tw-match--highlight {
@@ -5436,7 +5439,7 @@ details[open] > summary::before { transform: rotate(90deg); }
 }
 
 .tw-match__phase {
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--ink-3);
   margin-top: 1px;
   white-space: nowrap;
@@ -5480,7 +5483,7 @@ details[open] > summary::before { transform: rotate(90deg); }
    tinted block's edge. Measured at 390px: both text runs now start at the same
    x, where the caption used to start 6px left. */
 .tw-match__comp {
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--ink-3);
   padding: 0 6px;
   margin-top: 3px;
@@ -7252,7 +7255,8 @@ details[open] > summary::before { transform: rotate(90deg); }
   display: inline-block;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 0.64em;
+  /* Never under the 11px floor, and still scaling with a large name (TV). */
+  font-size: max(var(--fs-xs), 0.64em);
   font-weight: 700;
   color: inherit;
   background: color-mix(in srgb, currentColor 12%, transparent);
@@ -7977,7 +7981,7 @@ svg.icon-lead {
   border-radius: 3px; font-family: var(--font-mono); font-weight: 700;
   font-size: 13px; color: var(--ink-1); }
 .msb-slot--aka { color: var(--red); }
-.msb-vs { min-width: 16px; text-align: center; color: var(--gray-400); font-size: 11px; font-weight: 700; }
+.msb-vs { min-width: 16px; text-align: center; color: var(--ink-3); font-size: 11px; font-weight: 700; }
 .msb-hansoku { color: var(--danger); font-weight: 700; }
 /* The loose result mark (both slots full, drifted data): it is the row's ONLY
    indication of the verdict on that surface, so it reads at slot strength.
@@ -7992,7 +7996,7 @@ svg.icon-lead {
 .msb-row--summary { border-top: 2px solid var(--ink-1); }
 .msb-row--summary .msb-slot { border: none; flex-direction: column; min-width: 26px;
   font-size: 16px; font-weight: 800; height: auto; }
-.msb-lab { display: block; font-size: 10px; font-weight: 600; color: var(--ink-3); }
+.msb-lab { display: block; font-size: var(--fs-xs); font-weight: 600; color: var(--ink-3); }
 abbr.msb-lab { text-decoration: none; cursor: help; }
 /* running-match highlight: navy running-signal language (DESIGN.md Principle 3).
    --accent-soft fill (same token used by bc-match--running / sched-row--running)
@@ -8072,7 +8076,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .lobby-cycle-bar {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.3));
+  background: linear-gradient(90deg, transparent, var(--black-a30));
   transform-origin: left;
   animation: lobby-cycle-fill var(--lobby-cycle-ms) linear;
 }
@@ -8096,6 +8100,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .lobby-cell .msb-row { font-size: 1.7vh; }
 .lobby-cell .msb-name { font-size: 1.9vh; }
 .lobby-cell .msb-vs { font-size: 1.5vh; min-width: 3vh; }
+/* No fill on the board's tags: on the tinted Now row a fill of Aka's red
+   took the tag to 4.2:1. The outline still marks it. */
+.lobby-cell .num-prefix { background: transparent; }
 .lobby-cell .msb-slot { min-width: 2.6vh; height: 3vh; font-size: 1.9vh; }
 /* The live IV/PW aggregate, which is the whole point of this board. It shares
    the centre ELEMENT with the plain "vs" separator, so without a class of its

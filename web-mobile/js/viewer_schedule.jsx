@@ -355,14 +355,14 @@ export function TWMatch({ m, highlight, onClick, paceLookup }) {
   // button to keyboard / screen-reader users (a no-op button is confusing).
   const Tag = onClick ? "button" : "div";
   return (
-    <Tag className={`tw-match ${m.status === "running" ? "tw-match--running" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} {...(onClick ? { type: "button", onClick } : {})} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
+    <Tag className={`tw-match ${m.status === "running" ? "tw-match--running" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} {...(onClick ? { type: "button", onClick } : {})} style={{ textAlign: "left", border: "none", background: m.status === "completed" ? undefined : "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="tw-match__meta">
         <div className="tw-match__time">
           <PaceTime display={d} fallback={m.scheduledAt || "-"} />
         </div>
         <div className="tw-match__phase">{m.phase === "pool" ? poolLabel(m) : m.round}</div>
         {queuePill && (
-          <div className="tw-match__queue" style={{ fontSize: 10, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)", marginTop: 2 }}>
+          <div className="tw-match__queue" style={{ fontSize: 11, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)", marginTop: 2 }}>
             {queuePill}
           </div>
         )}

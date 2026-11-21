@@ -240,7 +240,7 @@ describe('kachinuki bout 1 when the team members could not be read', () => {
     await act(async () => { land(); });
     await settle();
     expect(akaInput().value, 'bout 1 shows the name').toBe('Maeda');
-    expect(noticeText(), 'once the save lands').toEqual(['Lineup saved, but the team member list could not be loaded, so no position could be linked to a team member this time. Scores will still record normally.']);
+    expect(noticeText(), 'once the save lands').toEqual(['Saved by name only: the team member list could not be loaded. Scores will still record normally.']);
   });
 });
 

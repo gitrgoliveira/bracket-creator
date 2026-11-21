@@ -11,7 +11,7 @@
 // called directly, never through `API`. Never import api_client.jsx from here
 // (it would run the outbox twice).
 
-import { _fetchJson, _readLineup } from './api_client_requests.jsx';
+import { _fetchJson, _readLineup, _refusalError } from './api_client_requests.jsx';
 import { _outboxWrite, _queuedLineupSave } from './api_client_enqueue.jsx';
 import {
     _withListedMembersForgotten, _memberWrite, _newClientId, _shownMember,
@@ -62,8 +62,9 @@ export const teamsApi = {
             headers: password ? { 'X-Tournament-Password': password } : {}
         });
         if (!res.ok) {
+            // A refusal keeps its code (team_members_unreadable names the file).
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to load team members");
+            throw _refusalError(err, "Failed to load team members");
         }
         const data = await res.json();
         // A member the server lists exists, whatever was known of them.

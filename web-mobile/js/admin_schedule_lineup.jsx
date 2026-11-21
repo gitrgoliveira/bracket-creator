@@ -10,7 +10,7 @@ import { renameMemberFields } from './lineup_rename.jsx';
 import { kachinukiMembersKey } from './kachinuki_advisory.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
 import { queuedNotice, writePending, writeHeldOnDeviceOnly, isOffline } from './write_result.jsx';
-import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice, MEMBERS_UNAVAILABLE_NOTICE } from './lineup_draft.jsx';
+import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
 import { useUnsavedInput } from './app_version.jsx';
@@ -138,7 +138,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const {
     values, setValues, memberIds, setMemberIds,
     error, setError, warning: lineupWarning, setWarning: setLineupWarning,
-    squad, changeMembers, squadUnavailable,
+    squad, changeMembers, squadUnavailable, membersNotice,
   } = form;
   // RENAME (bc-dnst, operator decision 2026-09-15): a member's name can be
   // corrected from this panel as well as from the Lineups page (the score sheet
@@ -414,8 +414,11 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // behaves today. bc-cse: the failure is no longer discarded either --
       // `memberFailures` carries it through to the warning shown below on
       // a successful save.
+      // When the server said team-members.yaml cannot be read, nothing is resolved: an
+      // add would only be refused, so the typed names are saved by name alone and the
+      // note says so in the one sentence (operator decisions U1, U2).
       let memberFailures = [];
-      if (Object.keys(positionsForResolver).length > 0 && listed) {
+      if (Object.keys(positionsForResolver).length > 0 && listed && !form.membersUnreadable) {
         try {
           const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
           if (typeof resolver === "function") {
@@ -628,10 +631,11 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           </div>
         ); })}
         {/* A list that failed to load is not an empty team: saying it has no
-            members would be false (the Lineups page's rule, one sentence). */}
+            members would be false (the Lineups page's rule, one sentence, which
+            names team-members.yaml when that file cannot be read). */}
         {squadUnavailable ? (
           <div className="field__hint field__hint--warn" data-testid="lineup-members-unavailable">
-            {MEMBERS_UNAVAILABLE_NOTICE}
+            {membersNotice}
           </div>
         ) : suggestions.length === 0 && (
           <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>

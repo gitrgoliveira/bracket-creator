@@ -38,7 +38,7 @@ import { answered, namedLater } from '../helpers/team_members.js';
 import { lineupPutStub } from '../helpers/lineup_server.js';
 import { QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE } from '../../write_result.jsx';
 import * as AppVersion from '../../app_version.jsx';
-import { MEMBERS_UNAVAILABLE_NOTICE } from '../../lineup_draft.jsx';
+import { MEMBERS_UNAVAILABLE_NOTICE, MEMBERS_UNREADABLE_NOTICE } from '../../lineup_draft.jsx';
 
 const SQUAD = [
   { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -1078,6 +1078,74 @@ describe('the at-court panel when the team members cannot be read', () => {
 
     expect(utils.queryByTestId('lineup-members-unavailable')).toBeNull();
     expect(utils.getByText(/This team has no registered members/)).toBeTruthy();
+  });
+
+  it('names team-members.yaml when the server says the file cannot be read', async () => {
+    api.fetchSquads.mockRejectedValue(membersUnreadable());
+    api.fetchLineupInForce.mockResolvedValue(null);
+    const utils = await mountPanel();
+
+    expect(utils.getByTestId('lineup-members-unavailable').textContent).toBe(MEMBERS_UNREADABLE_NOTICE);
+  });
+
+  it('saves a typed name by name alone, adds no member, and says so in the one sentence', async () => {
+    api.fetchSquads.mockRejectedValue(membersUnreadable());
+    const utils = await mountPanel();
+    await typeName(utils, 1, 'Kudo');
+
+    await click(saveButton(utils));
+
+    expect(api.addTeamMember, 'no member add is sent').not.toHaveBeenCalled();
+    expect(api.renameTeamMember).not.toHaveBeenCalled();
+    expect(putOf(api.putMatchLineup.mock.calls[0])).toEqual({ positions: { 1: 'Kudo' }, memberIds: undefined });
+    expect(utils.getByTestId('match-lineup-warning-team-a').textContent).toBe(SAVED_BY_NAME_ONLY);
+  });
+});
+
+// The note after a Save when the team members could not be read (operator decision U2).
+const SAVED_BY_NAME_ONLY = 'Saved by name only: the team member list could not be loaded. Scores will still record normally.';
+
+// The read of the team members refused 409 team_members_unreadable, as fetchSquads
+// throws it: the server's sentence, and its code beside it.
+function membersUnreadable() {
+  return Object.assign(
+    new Error('The team members could not be read. The organiser needs to check team-members.yaml in the tournament data.'),
+    { code: 'team_members_unreadable' },
+  );
+}
+
+// The Lineups page says the same as the panel: which file cannot be read when the
+// server says so, else that the list could not be loaded.
+describe('the Lineups page when the team members cannot be read', () => {
+  it('names team-members.yaml when the server says the file cannot be read', async () => {
+    api.fetchSquads.mockRejectedValue(membersUnreadable());
+    const utils = await mountPage();
+
+    expect(utils.getByTestId('lineup-members-unavailable').textContent).toBe(MEMBERS_UNREADABLE_NOTICE);
+    expect(utils.queryByText(/This team has no members yet/)).toBeNull();
+  });
+
+  it('places an added name by name alone, adds no member, and Save says so in the one sentence', async () => {
+    api.fetchSquads.mockRejectedValue(membersUnreadable());
+    const utils = await mountPage();
+    await pick(utils, 1, '__add__');
+    await act(async () => { fireEvent.change(utils.getByLabelText('New member name for Senpo'), { target: { value: 'Kudo' } }); });
+    await click(utils.getByRole('button', { name: 'Add' }));
+
+    expect(window.confirmDialog, 'nothing to confirm: no member is added').not.toHaveBeenCalled();
+    await click(saveButton(utils));
+
+    expect(api.addTeamMember, 'no member add is sent').not.toHaveBeenCalled();
+    expect(api.renameTeamMember).not.toHaveBeenCalled();
+    expect(putOf(api.putTeamLineup.mock.calls[0])).toEqual({ positions: { 1: 'Kudo' }, memberIds: undefined });
+    expect(utils.getByTestId('lineup-member-warning').textContent).toBe(SAVED_BY_NAME_ONLY);
+  });
+
+  it('says the list could not be loaded for any other failure', async () => {
+    api.fetchSquads.mockRejectedValue(new Error('internal error'));
+    const utils = await mountPage();
+
+    expect(utils.getByTestId('lineup-members-unavailable').textContent).toBe(MEMBERS_UNAVAILABLE_NOTICE);
   });
 });
 

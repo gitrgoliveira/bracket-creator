@@ -101,6 +101,13 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			return
 		}
 		squads, err := store.LoadSquads(compID)
+		if errors.Is(err, state.ErrTeamMembersUnreadable) {
+			// 409 with the member writes' code, so the lineup screens can name
+			// the file rather than say only that the list could not be loaded.
+			slog.Error("mobileapp: team-members.yaml cannot be read", "method", c.Request.Method, "path", c.Request.URL.Path, "err", err)
+			c.JSON(errTeamMembersUnreadableRead.status, errTeamMembersUnreadableRead.body())
+			return
+		}
 		if err != nil {
 			internalError(c, err)
 			return
@@ -375,6 +382,14 @@ var errTeamMembersUnreadableWrite = &selfRunRefusal{
 	status:  errTeamMembersUnreadable.status,
 	code:    errTeamMembersUnreadable.code,
 	message: "The team members could not be read, so the team member was not saved. The organiser needs to check team-members.yaml in the tournament data.",
+}
+
+// errTeamMembersUnreadableRead answers GET team-members when team-members.yaml
+// cannot be read: the same status and code, worded for a read.
+var errTeamMembersUnreadableRead = &selfRunRefusal{
+	status:  errTeamMembersUnreadable.status,
+	code:    errTeamMembersUnreadable.code,
+	message: "The team members could not be read. The organiser needs to check team-members.yaml in the tournament data.",
 }
 
 // respondSquadWriteError maps an AddTeamMember/RenameTeamMember/

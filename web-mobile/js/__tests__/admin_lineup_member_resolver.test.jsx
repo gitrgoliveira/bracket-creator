@@ -413,9 +413,7 @@ describe('memberIdentityWarning', () => {
       ],
       true,
     );
-    expect(msg).toContain('Lineup saved');
-    expect(msg).toContain('team member list could not be loaded');
-    expect(msg).toContain('Scores will still record normally');
+    expect(msg).toBe('Saved by name only: the team member list could not be loaded. Scores will still record normally.');
     expect(msg).not.toContain('Sato');
     expect(msg).not.toContain('Tanaka');
     expect(msg).not.toContain('Senpo');

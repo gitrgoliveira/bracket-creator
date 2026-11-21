@@ -6510,6 +6510,70 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/competitions/{id}/team-members:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    get:
+      tags: [competitions]
+      summary: List every team's members
+      description: |
+        The members of every team of the competition, keyed by the team's
+        participant id, each with its `modifiedAt` stamp. Organiser only, in
+        a self-run tournament too: the public page reads a team's members
+        from the viewer payload instead.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: The members of every team.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  teamMembers:
+                    type: object
+                    description: Team participant id to that team's members.
+                    additionalProperties:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/TeamMember'
+        '401':
+          description: '`invalid admin password`: missing or wrong.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No competition with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            The competition's `team-members.yaml` cannot be read
+            (`team_members_unreadable`, the code the member writes answer,
+            with a `message` to show). The error is logged naming the file.
+            The lineup screens say which file the organiser needs to check,
+            and a lineup can still be saved by name only.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [team_members_unreadable]
+                  message:
+                    type: string
+        '500':
+          description: Any other failure to read the team members.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/competitions/{id}/teams/{tid}/members:
     parameters:
       - $ref: '#/components/parameters/CompetitionId'

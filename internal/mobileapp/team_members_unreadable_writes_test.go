@@ -47,6 +47,21 @@ func TestTeamMemberWrites_MembersUnreadableIsRefusedNotRetried(t *testing.T) {
 	}
 }
 
+// The read of a competition's team members over a team-members.yaml that cannot
+// be read answers 409 with the member writes' code, never the 500 of a server
+// fault, so the lineup screens can say which file the organiser needs to check.
+func TestTeamMembersRead_MembersUnreadableIsNamed(t *testing.T) {
+	w := newNoLineupWorld(t, false)
+	w.corruptCompetitionFile("team-members.yaml")
+
+	rec := w.send(http.MethodGet, "/api/competitions/"+w.comp+"/team-members", nil)
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	var got map[string]string
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, "team_members_unreadable", got["error"])
+	assert.Equal(t, "The team members could not be read. The organiser needs to check team-members.yaml in the tournament data.", got["message"])
+}
+
 // teamMembersUnreadableAddMessage is the member write's sentence, spelled out
 // here so a change to what the operator reads is a change to this test.
 const teamMembersUnreadableAddMessage = "The team members could not be read, so the team member was not saved. The organiser needs to check team-members.yaml in the tournament data."

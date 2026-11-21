@@ -246,14 +246,20 @@ function requestMembers(compId, password) {
   return requestsOfThisTick.get(key);
 }
 
-// The team's members (the API answers every team's, keyed by id), or null when
-// they cannot be read: whoever asks keeps the list it has.
+// What readMembers answers when the server says team-members.yaml cannot be read
+// (409 team_members_unreadable): not a list, like null, so the opening read alone
+// tells it apart and names the file.
+const MEMBERS_UNREADABLE = 'team_members_unreadable';
+
+// The team's members (the API answers every team's, keyed by id), or, when they
+// cannot be read, null (MEMBERS_UNREADABLE when the file itself cannot be read):
+// whoever asks keeps the list it has.
 async function readMembers(compId, teamId, password) {
   try {
     const squads = await requestMembers(compId, password);
     return (squads && squads[teamId]) || [];
-  } catch (_e) {
-    return null;
+  } catch (e) {
+    return e && e.code === MEMBERS_UNREADABLE ? MEMBERS_UNREADABLE : null;
   }
 }
 
@@ -306,6 +312,11 @@ export function newMembersWait() {
 // operator the team is empty invites a second slot for a member who already has one.
 export const MEMBERS_UNAVAILABLE_NOTICE = "The team member list could not be loaded, so this may not be the whole team. Reload before adding a member, or you may add a second slot for someone who already has one.";
 
+// The same place's wording when the server said team-members.yaml itself cannot be
+// read (409 team_members_unreadable): reloading will not help, and the organiser
+// needs to repair the file.
+export const MEMBERS_UNREADABLE_NOTICE = "The team members could not be read, so the list is not shown and no member can be added or renamed. You can still type names and save the lineup; they are saved by name only. The organiser needs to check team-members.yaml in the tournament data.";
+
 // The ONE wording of a typed name refused because the team's members are still being
 // read (stage 3 review 3, F1): the Lineups page's add row and the team sheet's typed
 // representative both say it, and the typed name stays where it was typed.
@@ -337,7 +348,10 @@ export function membersNotReadNotice(name) {
 //                       stamp (mergeMembers), so that none is lost and none is
 //                       undone by an older copy; squadRef, the same list for a
 //                       handler that resumes after a wait, and
-//                       squadUnavailable, that they could not be read
+//                       squadUnavailable, that they could not be read, and
+//                       membersNotice, the sentence that says so ('' otherwise);
+//                       membersUnreadable, that the server said the file cannot
+//                       be read, so a typed name is placed by name alone
 // and gives the editor
 //   lineupToSave()        what a Save carries: the form as shown and `changed`, the
 //                         positions the operator changed, `{ positions, memberIds,
@@ -412,7 +426,11 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // for the team by then: a lineup is still read and saved without it. A read made
   // later that fails shows nothing and changes no flag.
   const [squad, setSquadList] = useState([]);
-  const [squadUnavailable, setSquadUnavailable] = useState(false);
+  // membersNotice is the sentence that says why they could not be read ('' while they
+  // could): MEMBERS_UNREADABLE_NOTICE when the file cannot be read, else
+  // MEMBERS_UNAVAILABLE_NOTICE. squadUnavailable is whether there is one.
+  const [membersNotice, setMembersNotice] = useState('');
+  const squadUnavailable = membersNotice !== '';
   // squadRef mirrors squad for the editor's save, which resolves a typed name after
   // it awaits (the first list, a member write). A read of the team's members that
   // lands meanwhile (a change announced) may bring in a member another device
@@ -475,7 +493,7 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   const showMembers = (team, members) => {
     if (team !== squadTeam.current || !Array.isArray(members)) return;
     setSquad(members);
-    setSquadUnavailable(false);
+    setMembersNotice('');
     firstMembers.current.show();
   };
 
@@ -697,7 +715,7 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
         return;
       }
       if (!firstMembers.current.listed) {
-        setSquadUnavailable(true);
+        setMembersNotice(members === MEMBERS_UNREADABLE ? MEMBERS_UNREADABLE_NOTICE : MEMBERS_UNAVAILABLE_NOTICE);
         firstMembers.current.fail();
       }
       if (members !== TIMED_OUT) return;
@@ -839,7 +857,11 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     // A form that holds nothing read has no draft to offer back or discard.
     draft: read ? draft : { ...draft, restored: false, stale: null },
     error, setError, warning, setWarning,
-    squad, changeMembers, memberRenamed, squadRef, squadUnavailable, membersListed: () => firstMembers.current.listed,
+    squad, changeMembers, memberRenamed, squadRef, squadUnavailable, membersNotice,
+    // The server said team-members.yaml cannot be read: no member can be added or
+    // renamed, so the editors place a typed name by name alone (operator decision U1).
+    membersUnreadable: membersNotice === MEMBERS_UNREADABLE_NOTICE,
+    membersListed: () => firstMembers.current.listed,
     membersReadOver: () => firstMembers.current.ended,
     dropOwnLineup, lineupToSave, confirmSaved,
     isMounted: () => mountedRef.current,

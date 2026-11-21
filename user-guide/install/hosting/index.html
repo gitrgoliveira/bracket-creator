@@ -598,6 +598,8 @@
       
         
       
+        
+      
     
     
     
@@ -682,6 +684,33 @@
     
   
   Run a tournament on the day
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../organisers/sample-printouts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sample printouts
 
     
   </span>
@@ -2308,7 +2337,7 @@
 <p>The Docker baseline is the reusable core: the GCP and Oracle Terraform modules render the same Compose file and Caddyfile onto a cloud VM using cloud-init. Each guide includes the full prerequisites and a one-command Terraform (or Compose) flow.</p>
 <div class="admonition note">
 <p class="admonition-title">PDF export needs the PDF-enabled image</p>
-<p>The lean default image cannot generate PDFs (competitor tags, name sheets, trees). It ships without LibreOffice to stay small. If your operators export PDFs, run the <code>ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest</code> image variant instead. Excel export works on every image.</p>
+<p>The lean default image cannot generate PDFs (competitor tags, name sheets, trees). It ships without LibreOffice to stay small. If your operators export PDFs, run the <code>ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest</code> image variant instead. Excel export works on every image. The <a href="../../organisers/sample-printouts/">sample printouts</a> show what the PDF export prints.</p>
 </div>
 <h2 id="security">Security</h2>
 <p>Any deployment reachable over the internet should run in locked mode rather than the default file mode. Locked mode reads a bcrypt hash from an environment variable and turns the password-reset endpoint off (in file mode it answers only the machine running the server). Refer to <a href="../../organisers/operating-modes/#admin-authentication-mode">Admin authentication</a> for the setup steps.</p>

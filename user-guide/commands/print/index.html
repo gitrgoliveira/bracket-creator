@@ -591,6 +591,8 @@
       
         
       
+        
+      
     
     
     
@@ -675,6 +677,33 @@
     
   
   Run a tournament on the day
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../organisers/sample-printouts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sample printouts
 
     
   </span>
@@ -2312,7 +2341,7 @@
 <p>Renders bracket Excel workbooks into grouped, print-ready <strong>PDFs</strong> (competitor tags, name sheets, bracket trees, and more) using <strong>LibreOffice</strong>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>bracket-creator print --type &lt;type&gt; (--input &lt;dir&gt; | --tournament-data &lt;dir&gt;) [flags]
 </code></pre></div>
-<p>This is the command-line counterpart of the tournament app's <strong>Export PDFs</strong> button. Both share the same rendering engine. Use the CLI when you want PDFs without running the server, or when you want to generate them on a separate, LibreOffice-equipped machine. Refer to <a href="#when-to-use-the-cli">When to use the CLI</a>.</p>
+<p>This is the command-line counterpart of the tournament app's <strong>Export PDFs</strong> button. Both share the same rendering engine. Use the CLI when you want PDFs without running the server, or when you want to generate them on a separate, LibreOffice-equipped machine. Refer to <a href="#when-to-use-the-cli">When to use the CLI</a>. The <a href="../../organisers/sample-printouts/">sample printouts</a> show a page of each PDF it writes.</p>
 <h2 id="input-modes">Input modes</h2>
 <p>Provide <strong>exactly one</strong>:</p>
 <table>
@@ -2373,7 +2402,7 @@ other competition still prints as usual. By default the command still exits succ
 </tr>
 <tr>
 <td><code>names</code></td>
-<td>The "Names to Print" sheets, A3 landscape, with title pages</td>
+<td>The "Names to Print" sheets, A3 landscape, with title pages. Each sheet also opens with a page of three competition tags. A workbook from <code>create-pools</code> or <code>create-knockout</code> has them only when it was made with a title prefix; a workbook built from <code>--tournament-data</code> has them on every sheet it prints</td>
 </tr>
 <tr>
 <td><code>tags</code></td>

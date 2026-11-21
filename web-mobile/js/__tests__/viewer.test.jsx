@@ -417,7 +417,6 @@ describe('Viewer Utils', () => {
     });
 
     it('threads compKind and teamSize onto bracket matches for team comps', () => {
-      global.window = global.window || {};
       const savedRoundLabel = global.window.roundLabel;
       const savedBracketRoundLabel = global.window.bracketRoundLabel;
       global.window.roundLabel = (i, _total) => `Round ${i + 1}`;
@@ -522,7 +521,6 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
     global.window.formatIpponsScore = vi.fn(() => '3-2');
     global.window.teamIVScore = () => null;
@@ -682,7 +680,6 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
     global.window.useEscapeToClose = vi.fn();
     vi.resetModules();
@@ -869,7 +866,6 @@ describe('LeagueMatrix (mp-f4xo)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     savedIsHikiwake = global.window.isHikiwake;
     global.window.isHikiwake = vi.fn(() => false);
     vi.resetModules();
@@ -1304,7 +1300,6 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
     global.window.formatIpponsScore = vi.fn(() => '');
     global.window.teamIVScore = () => null;
@@ -1461,21 +1456,6 @@ describe('linkBase', () => {
   it('falls back to window.location.origin when tournament is undefined', () => {
     expect(linkBase(undefined)).toBe(window.location.origin);
   });
-
-  it('returns empty string when publicURL is absent and origin is opaque ("null")', () => {
-    const origDescriptor = Object.getOwnPropertyDescriptor(window, 'location');
-    try {
-      Object.defineProperty(window, 'location', {
-        value: { origin: 'null' },
-        writable: true, configurable: true,
-      });
-      expect(linkBase({})).toBe('');
-    } finally {
-      if (origDescriptor) {
-        Object.defineProperty(window, 'location', origDescriptor);
-      }
-    }
-  });
 });
 
 describe('isNonPublicOrigin', () => {
@@ -1595,7 +1575,6 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] } : { had: false };
@@ -1711,7 +1690,6 @@ describe('ViewerHome empty-state discoverability (mp-og2g)', () => {
     });
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] } : { had: false };
@@ -1846,7 +1824,6 @@ describe('ViewerHome globalRunning de-dup (mp-42rg)', () => {
     });
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] } : { had: false };

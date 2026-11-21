@@ -10,7 +10,7 @@
 //     (replayScoring, the closed-match rule, BasisContains):
 //     internal/engine/score_replay.go.
 // The replay is pinned against Go by the shared golden table
-// internal/engine/testdata/score_replay.json (score_replay_golden.test.jsx).
+// internal/engine/testdata/score_replay.json (score_replay_golden.node.test.jsx).
 //
 // Scope: position 0 of an individual or engi match (stage 3), and a team
 // match's bouts (stage 5): the numbered bouts and the representative bout

@@ -157,6 +157,7 @@ jobs:
   #    |_|\___||___/\__|
   #
   test:
+    name: test (${{ matrix.packages.name }})
     permissions:
       contents: read
       id-token: write # for codecov/codecov-action
@@ -166,14 +167,39 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # name: job name and coverage file coverage-<name>.txt. flag: the Codecov
+        # flag. path: the package pattern to test; the "internal" jobs split
+        # ./internal/... in three, each package whole in one job, and the rest
+        # entry carries exclude too, the top-level internal package names
+        # joined by "|" that it leaves out of its path. All three upload under the flag
+        # "internal", so Codecov merges them into one internal figure.
+        #
+        # Measured on this runner on 2026-11-21, two CI runs of the same
+        # commit (slowest "Run tests" step): one job for all of internal took 259 s and 271 s;
+        # engine, mobileapp and the rest in three jobs took 226 s and 242 s. A
+        # package is never split, so no layout goes below engine alone (158 to
+        # 175 s). A fourth job (helper apart) timed the same as three, and two
+        # jobs (engine apart) were unsteady: 201 s and 291 s.
         packages:
           - name: cmd
+            flag: cmd
             path: ./cmd/...
             timeout: 20m
-          - name: internal
+          - name: internal-engine
+            flag: internal
+            path: ./internal/engine/...
+            timeout: 10m
+          - name: internal-mobileapp
+            flag: internal
+            path: ./internal/mobileapp/...
+            timeout: 10m
+          - name: internal-rest
+            flag: internal
             path: ./internal/...
+            exclude: engine|mobileapp
             timeout: 10m
           - name: integration
+            flag: integration
             path: ./tests/...
             timeout: 10m
     steps:
@@ -196,13 +222,26 @@ jobs:
         # Makefile): the same tests, less CPU.
         env:
           GOGC: "400"
-        run: go test ${{ matrix.packages.path }} -timeout=${{ matrix.packages.timeout }} -race -coverprofile=coverage-${{ matrix.packages.name }}.txt -covermode=atomic
+          PACKAGE_PATH: ${{ matrix.packages.path }}
+          PACKAGE_EXCLUDE: ${{ matrix.packages.exclude }}
+        # An explicit bash shell, for pipefail: a go list that fails after
+        # printing some packages must fail the step, not test the shorter list.
+        shell: bash
+        run: |
+          PKGS="$PACKAGE_PATH"
+          if [ -n "$PACKAGE_EXCLUDE" ]; then
+            # Drops the excluded top-level packages from the entry's own path.
+            # The anchored pattern keeps "engine" from matching another
+            # package whose name merely contains it.
+            PKGS=$(go list "$PACKAGE_PATH" | grep -v -E "^$(go list -m)/internal/(${PACKAGE_EXCLUDE})(/|$)")
+          fi
+          go test $PKGS -timeout=${{ matrix.packages.timeout }} -race -coverprofile=coverage-${{ matrix.packages.name }}.txt -covermode=atomic
 
       - name: Upload coverage to Codecov (${{ matrix.packages.name }})
         uses: codecov/codecov-action@v7
         with:
           files: ./coverage-${{ matrix.packages.name }}.txt
-          flags: ${{ matrix.packages.name }}
+          flags: ${{ matrix.packages.flag }}
           fail_ci_if_error: true
           use_oidc: true
 
@@ -212,11 +251,51 @@ jobs:
   # | |_| |___) |   | |  __/\__ \ |_
   #  \___/|____/    |_|\___||___/\__|
   #
-  # Runs both JS suites. web-mobile (unit + render projects) so missing window.*
-  # references in component render paths are caught in CI; web/ because the CLI
-  # wrapper's form validation restates rules the Go side owns (the legal shiaijo
-  # counts among them), and a restatement nothing executes drifts silently.
+  # Runs both JS suites. web-mobile (unit, node and render projects) so missing
+  # window.* references in component render paths are caught in CI; web/
+  # because the CLI wrapper's form validation restates rules the Go side owns
+  # (the legal shiaijo counts among them), and a restatement nothing executes
+  # drifts silently.
+  #
+  # The web-mobile suite runs as four jobs (vitest --shard, which splits the
+  # files of all three projects by count), and the pool comes from
+  # web-mobile/vitest.config.js (vmThreads), so CI runs the pool the local gate
+  # runs and no --pool flag appears here. The web/ tests and the JS lint run
+  # once, in test-js-web-lint below, not once per shard.
+  # Measured on 2026-11-21 on this runner (ubuntu-latest, 4 cores, 16 GB), two
+  # CI runs of the same commit, slowest job's "Run JS tests" step under
+  # vmThreads: 1 job 187 s and 178 s, 2 jobs 83 and 84 s, 3 jobs 69 and 69 s,
+  # 4 jobs 65 and 50 s (each job's peak summed RSS 1.9 to 3.7 GB; summed runner
+  # time 236 and 210 s against 203 and 192 s for one job); forks at one job
+  # 227 s and 352 s; main's last run took 360 s. The shards split by file
+  # count, so they are uneven.
   test-js:
+    name: test-js (${{ matrix.shard }}/4)
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+          cache: npm
+          cache-dependency-path: web-mobile/package-lock.json
+
+      - name: Install JS dependencies (web-mobile)
+        run: cd web-mobile && npm ci
+
+      - name: Run JS tests (unit, node and render, shard ${{ matrix.shard }}/4)
+        run: cd web-mobile && npm test -- --shard=${{ matrix.shard }}/4
+
+  test-js-web-lint:
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -235,9 +314,6 @@ jobs:
 
       - name: Install JS dependencies (web-mobile)
         run: cd web-mobile && npm ci
-
-      - name: Run JS tests (unit + render)
-        run: cd web-mobile && npm test
 
       - name: Install JS dependencies (web)
         run: cd web && npm ci

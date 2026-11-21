@@ -80,7 +80,6 @@ describe('bracketRoundLabel: one round name per match, every surface (mp-u37s)',
 
 describe('row labels agree with bracket columns across a collapsed bye round (mp-u37s)', () => {
   beforeEach(() => {
-    global.window = global.window || {};
     // The REAL primitives, exactly as bracket.jsx publishes them at runtime.
     global.window.roundLabel = roundLabel;
     global.window.bracketRoundLabel = bracketRoundLabel;

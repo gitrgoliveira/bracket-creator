@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "test:render": "vitest run --config vitest.config.render.js",
+    "test:render": "vitest run --project render",
     "lint": "npx --yes oxlint@latest --deny-warnings --report-unused-disable-directives",
     "audit": "npx --yes audit-ci@latest --config audit-ci.jsonc"
   },

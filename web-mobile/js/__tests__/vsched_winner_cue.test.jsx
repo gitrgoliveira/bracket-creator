@@ -22,7 +22,6 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     global.window.matchScoreStr = vi.fn(() => '');
     global.window.queueLabelCompact = null;
     vi.resetModules();

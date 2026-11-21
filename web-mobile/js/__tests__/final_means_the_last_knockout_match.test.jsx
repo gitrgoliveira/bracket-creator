@@ -13,7 +13,7 @@
 // heading.
 //
 // A removed label leaves no failing test behind on its own, which is why this
-// file exists, following running_state_static.test.jsx (a removed animation)
+// file exists, following running_state_static.node.test.jsx (a removed animation)
 // and team_editor_vacancy_not_flagged (a removed warning). It pins the RULE,
 // both halves of it, so the sanctioned use cannot be deleted as over-zealous
 // cleanup either.

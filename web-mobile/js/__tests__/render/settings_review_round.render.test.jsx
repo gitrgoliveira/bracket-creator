@@ -5,7 +5,7 @@ import { installSettingsHarness, mountSettings, makeSettingsCompetition } from '
 // bc-symm-settings-create-parity, review round. Five defects the Format/Kind
 // editors on the Settings screen made reachable, each driven through the
 // real component rather than asserted against a helper in isolation --
-// competition_shape.test.jsx already proves the helpers; what these pin is
+// competition_shape.node.test.jsx already proves the helpers; what these pin is
 // that the SCREEN routes through them.
 //
 //   1. A cleared "Team size" saved 5, not the last-saved value. The guard

@@ -29,19 +29,28 @@
 // A second family (review 6, `runRunningRep`) drives the team sheet's
 // representative-bout add and remove on a RUNNING match, which moves no
 // status: no note at all, whatever another device does while it is out.
+//
+// This module is the gate's harness; it registers no test of its own. The
+// combinations are split over the shard files
+// `render/own_status_permutations.shard-<k>-of-<n>.render.test.jsx`, each of
+// which calls `defineOwnStatusShard(import.meta.url)` and runs its round-robin
+// slice of every loop, in the order the loops are listed in LOOPS below, so
+// vitest runs the slices in parallel workers. The guard
+// `render/own_status_permutations.shards.render.test.jsx` pins the shard files
+// on disk and each loop's number of combinations, so a dropped shard or a
+// dropped combination fails.
 import React from 'react';
 import { render, act, fireEvent, screen, cleanup } from '@testing-library/react';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import {
   installIndividualEditor, resetOutbox, API, bout, letterBtn, shiroSide, NOW,
-} from '../helpers/individual_editor.js';
-import { teamBout, kachinukiBout, ipponBtn, marks as boutMarks } from '../helpers/team_editor.js';
-import { engiBout } from '../helpers/engi_editor.js';
+} from './individual_editor.js';
+import { teamBout, kachinukiBout, ipponBtn, marks as boutMarks } from './team_editor.js';
+import { engiBout } from './engi_editor.js';
+import { shardOf, shardFromUrl } from './shards.js';
 
 let ScoreEditorModal;
 let restore;
-beforeAll(async () => { ({ ScoreEditorModal, restore } = await installIndividualEditor()); });
-afterAll(() => restore());
 
 const OUTCOMES = ['landed', 'refused', 'held', 'discarded'];
 const UNSAVED_WARNING = /^Your unsaved entries will be discarded\. /;
@@ -667,34 +676,26 @@ async function runChain(sc) {
   return bad;
 }
 
-describe('two own status writes over one move: every combination (team)', () => {
-  it('never reads the editor\'s own move as another device\'s', async () => {
-    const failures = [];
-    let count = 0;
-    for (const family of ['startRep', 'presave', 'addRemove']) {
-      for (const draft of [false, true]) {
-        for (const o1 of OUTCOMES) {
-          for (const o2 of OUTCOMES) {
-            // The second write lands only on what the first made: an add after
-            // a Start that did not land, or a remove after an add that did
-            // not, is refused by the server.
-            if (o1 !== 'landed' && o2 === 'landed') continue;
-            for (const feed of ['before', 'after']) {
-              for (const order of ['firstFirst', 'secondFirst']) {
-                const sc = { family, draft, o1, o2, feed, order };
-                count += 1;
-                const bad = await runChain(sc);
-                if (bad.length) failures.push(`${family}${draft ? '+draft' : ''} ${o1}/${o2} feed ${feed} ${order}: ${bad[0]}`);
-              }
-            }
+// The chain loop's combinations (runChain), in the order the gate runs them.
+function* chainScenarios() {
+  for (const family of ['startRep', 'presave', 'addRemove']) {
+    for (const draft of [false, true]) {
+      for (const o1 of OUTCOMES) {
+        for (const o2 of OUTCOMES) {
+          // The second write lands only on what the first made: an add after
+          // a Start that did not land, or a remove after an add that did
+          // not, is refused by the server.
+          if (o1 !== 'landed' && o2 === 'landed') continue;
+          for (const feed of ['before', 'after']) {
+            for (const order of ['firstFirst', 'secondFirst']) yield { family, draft, o1, o2, feed, order };
           }
         }
       }
     }
-    expect({ summary: `${count} combinations, ${failures.length} failing`, first: failures.slice(0, 10) })
-      .toEqual({ summary: `${count} combinations, 0 failing`, first: [] });
-  }, 600_000);
-});
+  }
+}
+
+const chainName = (sc) => `${sc.family}${sc.draft ? '+draft' : ''} ${sc.o1}/${sc.o2} feed ${sc.feed} ${sc.order}`;
 
 function* scenarios(fam) {
   for (const draft of [false, true]) {
@@ -751,38 +752,100 @@ function* scenarios(fam) {
 
 const describeName = (sc) => `${sc.start}${sc.draft ? `+draft(${sc.final})` : ''} ${sc.writes.map((w) => `${w.kind}:${w.outcome}/${w.timing}/${w.foreign}${w.cancelFirst ? '/keep-first' : ''}`).join(' ') || 'no own write'} then ${[].concat(sc.after).join('+')}`;
 
-describe('the running sheet\'s representative-bout change: every combination (team)', () => {
-  it('raises no note, never offers Start and shows the server\'s board', async () => {
-    const failures = [];
-    let count = 0;
-    for (const draft of [false, true]) {
-      for (const kind of ['add', 'remove']) {
-        for (const foreign of ['restamp', 'finish']) {
-          for (const outcome of OUTCOMES) {
-            for (const timing of ['before', 'after']) {
-              const sc = { draft, kind, foreign, outcome, timing };
-              count += 1;
-              const bad = await runRunningRep(sc);
-              if (bad.length) failures.push(`${draft ? 'draft+Start' : 'running'} ${kind}:${outcome}/${timing} ${foreign}: ${bad[0]}`);
-            }
-          }
+// The running-rep loop's combinations (runRunningRep), in the order the gate
+// runs them.
+function* runningRepScenarios() {
+  for (const draft of [false, true]) {
+    for (const kind of ['add', 'remove']) {
+      for (const foreign of ['restamp', 'finish']) {
+        for (const outcome of OUTCOMES) {
+          for (const timing of ['before', 'after']) yield { draft, kind, foreign, outcome, timing };
         }
       }
     }
-    expect(failures, `${failures.length} of ${count} combinations failed:\n${failures.join('\n')}`).toEqual([]);
-  }, 300_000);
+  }
+}
+
+const runningRepName = (sc) => `${sc.draft ? 'draft+Start' : 'running'} ${sc.kind}:${sc.outcome}/${sc.timing} ${sc.foreign}`;
+
+// How a loop's `it` reports: how many combinations ran, how many failed, and
+// the first ten (or every one).
+const expectSummary = (count, failures) => {
+  expect({ summary: `${count} combinations, ${failures.length} failing`, first: failures.slice(0, 10) })
+    .toEqual({ summary: `${count} combinations, 0 failing`, first: [] });
+};
+const expectEveryFailureListed = (count, failures) => {
+  expect(failures, `${failures.length} of ${count} combinations failed:\n${failures.join('\n')}`).toEqual([]);
+};
+
+const familyLoop = (fam) => ({
+  id: fam.name,
+  describe: `own status writes and the kept draft: every combination (${fam.name})`,
+  it: `holds every invariant (${fam.name})`,
+  timeout: 900_000,
+  scenarios: () => scenarios(fam),
+  name: describeName,
+  run: (sc) => run(fam, sc),
+  report: expectSummary,
 });
 
-describe.each([[INDIVIDUAL], [TEAM], [KACHINUKI], [ENGI]])('own status writes and the kept draft: every combination (%s)', (fam) => {
-  it(`holds every invariant (${fam.name})`, async () => {
-    const failures = [];
-    let n = 0;
-    for (const sc of scenarios(fam)) {
-      n += 1;
-      const bad = await run(fam, sc);
-      if (bad.length) failures.push(`${describeName(sc)}: ${bad[0]}`);
-    }
-    expect({ summary: `${n} combinations, ${failures.length} failing`, first: failures.slice(0, 10) })
-      .toEqual({ summary: `${n} combinations, 0 failing`, first: [] });
-  }, 900_000);
-});
+// The gate's six loops, in the order the single file ran them before the
+// split. Each one: its combinations, the name a failure is reported under, its
+// runner and how its `it` reports.
+const LOOPS = [
+  {
+    id: 'chain',
+    describe: 'two own status writes over one move: every combination (team)',
+    it: 'never reads the editor\'s own move as another device\'s',
+    timeout: 600_000,
+    scenarios: chainScenarios,
+    name: chainName,
+    run: (sc) => runChain(sc),
+    report: expectSummary,
+  },
+  {
+    id: 'runningRep',
+    describe: 'the running sheet\'s representative-bout change: every combination (team)',
+    it: 'raises no note, never offers Start and shows the server\'s board',
+    timeout: 300_000,
+    scenarios: runningRepScenarios,
+    name: runningRepName,
+    run: (sc) => runRunningRep(sc),
+    report: expectEveryFailureListed,
+  },
+  ...[INDIVIDUAL, TEAM, KACHINUKI, ENGI].map(familyLoop),
+];
+
+// Every combination of all six loops, in the order the gate runs them, each
+// tagged with its loop's id and the name a failure is reported under.
+export function combinations() {
+  const out = [];
+  for (const loop of LOOPS) {
+    for (const sc of loop.scenarios()) out.push({ loop: loop.id, sc, name: loop.name(sc) });
+  }
+  return out;
+}
+
+// Registers one shard of the gate: the shard file's k and n come from its own
+// name, and it runs its round-robin slice of combinations(), one `it` per loop
+// in LOOPS order, each over that loop's share of the slice.
+export function defineOwnStatusShard(url) {
+  const { k, n } = shardFromUrl(url);
+  const mine = shardOf(combinations(), k, n);
+  beforeAll(async () => { ({ ScoreEditorModal, restore } = await installIndividualEditor()); });
+  afterAll(() => restore?.());
+  for (const loop of LOOPS) {
+    const rows = mine.filter((c) => c.loop === loop.id);
+    if (!rows.length) continue;
+    describe(loop.describe, () => {
+      it(loop.it, async () => {
+        const failures = [];
+        for (const { sc, name } of rows) {
+          const bad = await loop.run(sc);
+          if (bad.length) failures.push(`${name}: ${bad[0]}`);
+        }
+        loop.report(rows.length, failures);
+      }, loop.timeout);
+    });
+  }
+}

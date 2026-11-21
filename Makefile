@@ -49,7 +49,7 @@ endif
 SHA256_CHECK := $(if $(shell command -v sha256sum 2>/dev/null),sha256sum,shasum -a 256) -c --quiet -
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/prose docs/clean docs/screenshots docs/videos docs/media docs/media-copies e2e e2e/deps run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/prose docs/clean docs/screenshots docs/videos docs/media docs/media-copies docs/samples e2e e2e/deps run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -284,28 +284,29 @@ examples: go/build ## Build locally and create example files
 	@echo "Cleaning previous examples..."
 	rm -f pools-example-*.xlsx playoffs-example-*.xlsx knockout-example-*.xlsx
 	@echo "Building examples..."
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -t 5 -f ./test-data/mock_data_small.csv -o ./pools-example-small.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 3 -w 2 -c 1 -t 3 -f ./test-data/mock_data_small_3_teams.csv -o ./pools-example-small-3-teams.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -p 8 -w 2 -c 1 -f ./test-data/mock_data_single_pool_8.csv -o ./pools-example-single-pool-8.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 8 -w 2 -c 1 -f ./test-data/mock_data_single_pool_8.csv -o ./pools-example-single-pool-8-round-robin.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 3 -w 2 -c 1 -t 3 -f ./test-data/mock_data_teams_of_3_pool_3.csv -o ./pools-example-teams-of-3-round-robin.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -t 5 -f ./test-data/mock_data_small.csv -o ./knockout-example-small.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -r -p 3 -w 2 -c 2 -f ./test-data/mock_data_medium_zekken.csv -o ./pools-example-medium.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 -f ./test-data/mock_data_medium_zekken.csv -o ./knockout-example-medium.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-teams.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-teams-max-size.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-max-size.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./knockout-example-large.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./pools-example-medium-seeded.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./knockout-example-medium-seeded.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-seeded.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./knockout-example-large-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -t 5 -f ./test-data/mock_data_small.csv --title-prefix "Pools Example Small" -n K -o ./pools-example-small.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 3 -w 2 -c 1 -t 3 -f ./test-data/mock_data_small_3_teams.csv --title-prefix "Pools Example Small 3 Teams" -n K -o ./pools-example-small-3-teams.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -p 8 -w 2 -c 1 -f ./test-data/mock_data_single_pool_8.csv --title-prefix "Pools Example Single Pool 8" -n K -o ./pools-example-single-pool-8.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 8 -w 2 -c 1 -f ./test-data/mock_data_single_pool_8.csv --title-prefix "Pools Example Single Pool 8 Round Robin" -n K -o ./pools-example-single-pool-8-round-robin.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 3 -w 2 -c 1 -t 3 -f ./test-data/mock_data_teams_of_3_pool_3.csv --title-prefix "Pools Example Teams Of 3 Round Robin" -n K -o ./pools-example-teams-of-3-round-robin.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -t 5 -f ./test-data/mock_data_small.csv --title-prefix "Knockout Example Small" -n K -o ./knockout-example-small.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -r -p 3 -w 2 -c 2 -f ./test-data/mock_data_medium_zekken.csv --title-prefix "Pools Example Medium" -n K -o ./pools-example-medium.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 -f ./test-data/mock_data_medium_zekken.csv --title-prefix "Knockout Example Medium" -n K -o ./knockout-example-medium.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -p 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_medium_teams.csv --title-prefix "Pools Example Medium Teams" -n K -o ./pools-example-medium-teams.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_large_zekken.csv --title-prefix "Pools Example Large Teams" -n K -o ./pools-example-large-teams.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_large_zekken.csv --title-prefix "Pools Example Large Teams Max Size" -n K -o ./pools-example-large-teams-max-size.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -c 2 -f ./test-data/mock_data_large_zekken.csv --title-prefix "Pools Example Large Max Size" -n K -o ./pools-example-large-max-size.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 -f ./test-data/mock_data_large_zekken.csv --title-prefix "Knockout Example Large" -n K -o ./knockout-example-large.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv --title-prefix "Pools Example Medium Seeded" -n K -o ./pools-example-medium-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv --title-prefix "Knockout Example Medium Seeded" -n K -o ./knockout-example-medium-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv --title-prefix "Pools Example Large Seeded" -n K -o ./pools-example-large-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv --title-prefix "Knockout Example Large Seeded" -n K -o ./knockout-example-large-seeded.xlsx
 # 5 pools sending ONE qualifier each, seeded, on two shiaijo. Every other
 # example uses -w 2, and no 2-qualifier draw changed shape in the pool-to-
 # knockout rework, so without this the workbooks exercise none of it. Here
 # shiaijo A runs pools A, B and C (seeds 1 and 3) and its bye must fall on
 # Pool A, seed 1's pool; it used to fall on Pool C for being last in the block.
-	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 5 -w 1 -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./pools-example-medium-seeded-one-qualifier.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 5 -w 1 -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv --title-prefix "Pools Example Medium Seeded One Qualifier" -n K -o ./pools-example-medium-seeded-one-qualifier.xlsx
 	@echo "Examples successfully created!"
 
 docker/build: ## Build Docker image
@@ -432,6 +433,12 @@ docs/media: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate every captured screens
 	@# One run with no KIND, rather than depending on the two targets above:
 	@# those would start node and a browser twice over two disjoint halves.
 	@node $(SHOTS_DIR)/run.mjs $(if $(KIND),'KIND=$(KIND)',) $(SHOTS_ARGS)
+
+# The sample printouts the docs show (docs/samples/), printed from the example
+# workbooks. Only a PDF whose pages changed is copied into docs/, with its
+# thumbnail; see scripts/samples/README.md. Needs LibreOffice, as print does.
+docs/samples: go/build ## Reprint the docs' sample printouts from the example workbooks and copy in the ones whose pages changed
+	@node scripts/samples/run.mjs
 
 # The landing page serves lighter copies of its media beside the captured
 # originals: a WebP of each picture and an MP4 (H.264) of the clip, for a

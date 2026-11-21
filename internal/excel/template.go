@@ -16,6 +16,14 @@ import (
 func NewFileFromScratch() (*excelize.File, error) {
 	f := excelize.NewFile()
 
+	// Every workbook is set in Arial (operator decision): it is on Windows and
+	// macOS, and LibreOffice on Linux prints it in Liberation Sans, which has
+	// Arial's widths. The default font is what an unstyled cell, and any text
+	// typed into one, takes; every style below names it too.
+	if err := f.SetDefaultFont(helper.WorkbookFont); err != nil {
+		return nil, errors.Join(fmt.Errorf("setting the default font: %w", err), f.Close())
+	}
+
 	// excelize.NewFile always creates "Sheet1"; rename it to "data".
 	if err := f.SetSheetName("Sheet1", helper.SheetData); err != nil {
 		return nil, errors.Join(fmt.Errorf("renaming Sheet1 to data: %w", err), f.Close())
@@ -92,21 +100,21 @@ func setupTimeEstimatorSheet(f *excelize.File) {
 
 	// Styles
 	hdr := mustStyle(f, &excelize.Style{
-		Font:      &excelize.Font{Family: "Calibri", Bold: true, Size: 12, Color: "000000"},
+		Font:      &excelize.Font{Family: helper.WorkbookFont, Bold: true, Size: 12, Color: "000000"},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true},
 	})
 	inp := mustStyle(f, &excelize.Style{
-		Font:      &excelize.Font{Family: "Calibri", Size: 12, Color: "000000"},
+		Font:      &excelize.Font{Family: helper.WorkbookFont, Size: 12, Color: "000000"},
 		Alignment: &excelize.Alignment{Vertical: "center", WrapText: true},
 	})
 	customFmt := `[$-F400]h:mm:ss\ AM/PM`
 	tim := mustStyle(f, &excelize.Style{
-		Font:         &excelize.Font{Family: "Calibri", Size: 12, Color: "000000"},
+		Font:         &excelize.Font{Family: helper.WorkbookFont, Size: 12, Color: "000000"},
 		Alignment:    &excelize.Alignment{Vertical: "center", WrapText: true},
 		CustomNumFmt: &customFmt,
 	})
 	emp := mustStyle(f, &excelize.Style{
-		Font:      &excelize.Font{Family: "Calibri", Size: 12, Color: "000000"},
+		Font:      &excelize.Font{Family: helper.WorkbookFont, Size: 12, Color: "000000"},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true},
 	})
 
@@ -210,28 +218,28 @@ func setupPoolDrawSheet(f *excelize.File) {
 
 	// B2 title style: bold 16 pt, underlined, centred.
 	titleStyle := mustStyle(f, &excelize.Style{
-		Font:      &excelize.Font{Family: "Calibri", Bold: true, Size: 16, Underline: "single"},
+		Font:      &excelize.Font{Family: helper.WorkbookFont, Bold: true, Size: 16, Underline: "single"},
 		Alignment: &excelize.Alignment{Horizontal: "center"},
 	})
 	logSetupErr("B2 style", f.SetCellStyle(s, "B2", "B2", titleStyle))
 
 	// A2, G2: same bold/underline chrome without centre-align.
 	sideStyle := mustStyle(f, &excelize.Style{
-		Font: &excelize.Font{Family: "Calibri", Bold: true, Size: 16, Underline: "single"},
+		Font: &excelize.Font{Family: helper.WorkbookFont, Bold: true, Size: 16, Underline: "single"},
 	})
 	logSetupErr("A2 style", f.SetCellStyle(s, "A2", "A2", sideStyle))
 	logSetupErr("G2 style", f.SetCellStyle(s, "G2", "G2", sideStyle))
 
 	// Row 3: bold, underlined, centred (visual separator row).
 	row3Style := mustStyle(f, &excelize.Style{
-		Font:      &excelize.Font{Family: "Calibri", Bold: true, Size: 12, Underline: "single"},
+		Font:      &excelize.Font{Family: helper.WorkbookFont, Bold: true, Size: 12, Underline: "single"},
 		Alignment: &excelize.Alignment{Horizontal: "center"},
 	})
 	logSetupErr("row3 style", f.SetCellStyle(s, "A3", "H3", row3Style))
 
 	// Row 4: plain 12 pt spacer before pool content starts at row 5.
 	row4Style := mustStyle(f, &excelize.Style{
-		Font: &excelize.Font{Family: "Calibri", Size: 12},
+		Font: &excelize.Font{Family: helper.WorkbookFont, Size: 12},
 	})
 	logSetupErr("row4 style", f.SetCellStyle(s, "A4", "H4", row4Style))
 }
@@ -288,11 +296,11 @@ func setupNamesToPrintSheet(f *excelize.File) {
 	// Apply column-level default styles so any cell the code doesn't
 	// explicitly restyle still renders at the correct font size.
 	sideStyle := mustStyle(f, &excelize.Style{
-		Font:      &excelize.Font{Family: "Calibri", Bold: true, Size: 28, Color: "000000"},
+		Font:      &excelize.Font{Family: helper.WorkbookFont, Bold: true, Size: 28, Color: "000000"},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 	})
 	nameStyle := mustStyle(f, &excelize.Style{
-		Font:      &excelize.Font{Family: "Calibri", Bold: true, Size: 72, Color: "000000"},
+		Font:      &excelize.Font{Family: helper.WorkbookFont, Bold: true, Size: 72, Color: "000000"},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 	})
 	logSetupErr("col A style", f.SetColStyle(s, "A", sideStyle))
@@ -319,13 +327,18 @@ func setupTreeSheet(f *excelize.File) {
 	// leftwards and was cut off by the roster block in A: rows next to a roster
 	// box printed "-2nd Player 05" instead of "Pool B-2nd Player 05", hiding
 	// exactly the part that says which pool feeds the slot.
+	//
+	// C is 33 so that C and the gutter B together hold the longest label the
+	// example workbooks print in bold 12pt Arial ("Pool X-2nd K70 Nathaniel
+	// Hawthorne", about 214pt against 37 units of about 6.1pt each). The bracket
+	// columns keep their width, so the tree prints a little smaller to fit.
 	logSetupErr("col A", f.SetColWidth(s, "A", "A", 25))
 	logSetupErr("col B", f.SetColWidth(s, "B", "B", 4))
 	labelCol, lcErr := excelize.ColumnNumberToName(helper.TreeLabelCol)
 	logSetupErr("label col name", lcErr)
 	bracketCol, bcErr := excelize.ColumnNumberToName(helper.TreeLabelCol + 1)
 	logSetupErr("bracket col name", bcErr)
-	logSetupErr("label col width", f.SetColWidth(s, labelCol, labelCol, 28))
+	logSetupErr("label col width", f.SetColWidth(s, labelCol, labelCol, 33))
 	logSetupErr("bracket cols width", f.SetColWidth(s, bracketCol, "Z", 3.5))
 
 	// Page layout: A4 portrait, matches the original template.

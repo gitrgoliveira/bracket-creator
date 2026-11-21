@@ -93,9 +93,15 @@ func (layout *dataColumnLayout) writePlayer(f *excelize.File, row int, player *P
 
 func finishDataSheet(f *excelize.File) {
 	sheetName := SheetData
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 9))
+	// A holds the "Title prefix:" and "Entry order" labels. D and E hold the
+	// display name and the "Player Number" header (or the number and the
+	// first metadata column without display names): 15 fits the examples'
+	// longest display name ("SHAKESPEARE", about 85pt in 11pt Arial) and keeps
+	// "Player Number" clear of the "Metadata" header beside it.
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 10.5))
 	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "B", "C", 20))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "D", "Z", 12))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "D", "E", 15))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "F", "Z", 12))
 	fmt.Printf("Data added to spreadsheet\n")
 }
 
@@ -327,7 +333,7 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool, poolCoords map[string]cellC
 
 	// Pool header style: bold italic, 12 pt, silver fill, thick borders, right-aligned.
 	headerCellStyle, err := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Family: "Calibri", Bold: true, Italic: true, Size: 12},
+		Font: &excelize.Font{Family: WorkbookFont, Bold: true, Italic: true, Size: 12},
 		Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"C0C0C0"}},
 		Border: []excelize.Border{
 			{Type: "left", Style: 2, Color: "000000"},
@@ -342,7 +348,7 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool, poolCoords map[string]cellC
 	}
 	// Pool content style: 12 pt, thick borders on all sides.
 	contentCellStyle, err := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Family: "Calibri", Size: 12},
+		Font: &excelize.Font{Family: WorkbookFont, Size: 12},
 		Border: []excelize.Border{
 			{Type: "left", Style: 2, Color: "000000"},
 			{Type: "right", Style: 2, Color: "000000"},

@@ -6,7 +6,7 @@ Renders bracket Excel workbooks into grouped, print-ready **PDFs** (competitor t
 bracket-creator print --type <type> (--input <dir> | --tournament-data <dir>) [flags]
 ```
 
-This is the command-line counterpart of the tournament app's **Export PDFs** button. Both share the same rendering engine. Use the CLI when you want PDFs without running the server, or when you want to generate them on a separate, LibreOffice-equipped machine. Refer to [When to use the CLI](#when-to-use-the-cli).
+This is the command-line counterpart of the tournament app's **Export PDFs** button. Both share the same rendering engine. Use the CLI when you want PDFs without running the server, or when you want to generate them on a separate, LibreOffice-equipped machine. Refer to [When to use the CLI](#when-to-use-the-cli). The [sample printouts](../organisers/sample-printouts.md) show a page of each PDF it writes.
 
 ## Input modes
 
@@ -48,7 +48,7 @@ Provide **exactly one**:
 | Type | Output |
 |------|--------|
 | `registration` | The data sheet from every workbook |
-| `names` | The "Names to Print" sheets, A3 landscape, with title pages |
+| `names` | The "Names to Print" sheets, A3 landscape, with title pages. Each sheet also opens with a page of three competition tags. A workbook from `create-pools` or `create-knockout` has them only when it was made with a title prefix; a workbook built from `--tournament-data` has them on every sheet it prints |
 | `tags` | The competitor "Tags" sheets, with title pages (team workbooks excluded). Tags carry a [QR code](../organisers/run-tournament.md#export-and-print) when the tournament's public URL is set. |
 | `pools-trees` | Pool Draw + Tree sheets (a participant booklet), page-numbered |
 | `full-bracket` | Pool Draw + Pool/Elimination Matches + Trees, page-numbered |

@@ -2,8 +2,10 @@ package helper
 
 import (
 	"fmt"
+	"math"
 	"runtime"
 	"sync"
+	"unicode/utf8"
 	"weak"
 
 	excelize "github.com/xuri/excelize/v2"
@@ -28,6 +30,7 @@ const (
 	styleNameID               styleKey = "name_id"
 	styleNameIDPosition       styleKey = "name_id_position"
 	styleNameIDPositionStack  styleKey = "name_id_position_stacked"
+	styleCompetitionTag       styleKey = "competition_tag"
 	styleTime                 styleKey = "time"
 	styleDuration             styleKey = "duration"
 	styleUnlockedText         styleKey = "unlocked_text"
@@ -121,7 +124,7 @@ func buildBorderStyleBottomLeft(f *excelize.File) int {
 				Style: 2,
 			},
 		},
-		Font:      &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 12},
+		Font:      &excelize.Font{Family: WorkbookFont, Bold: false, Color: "000000", Size: 12},
 		Alignment: &excelize.Alignment{Horizontal: "left"},
 	})
 	return borderStyle
@@ -150,7 +153,7 @@ func getTreeHeaderStyle(f *excelize.File) int {
 
 func buildTreeHeaderStyle(f *excelize.File) int {
 	borderStyle := mustNewStyle(f, &excelize.Style{
-		Font: &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: 12},
+		Font: &excelize.Font{Family: WorkbookFont, Bold: true, Color: "000000", Size: 12},
 		Fill: excelize.Fill{Type: "pattern", Color: []string{"EFEFEF"}, Pattern: 1},
 	})
 	return borderStyle
@@ -179,7 +182,7 @@ func buildTreeTopStyle(f *excelize.File) int {
 				Style: 2,
 			},
 		},
-		Font: &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 12},
+		Font: &excelize.Font{Family: WorkbookFont, Bold: false, Color: "000000", Size: 12},
 	})
 	return borderStyle
 }
@@ -202,7 +205,7 @@ func buildTreeBodyStyle(f *excelize.File) int {
 				Style: 2,
 			},
 		},
-		Font: &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 12},
+		Font: &excelize.Font{Family: WorkbookFont, Bold: false, Color: "000000", Size: 12},
 	})
 	return borderStyle
 }
@@ -230,7 +233,7 @@ func buildTreeBottomStyle(f *excelize.File) int {
 				Style: 2,
 			},
 		},
-		Font: &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 12},
+		Font: &excelize.Font{Family: WorkbookFont, Bold: false, Color: "000000", Size: 12},
 	})
 	return borderStyle
 }
@@ -247,7 +250,7 @@ func getTreeTextStyle(f *excelize.File) int {
 func buildTreeTextStyle(f *excelize.File) int {
 	style := mustNewStyle(f, &excelize.Style{
 		Alignment: &excelize.Alignment{Horizontal: "right", Vertical: "center"},
-		Font:      &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: 12},
+		Font:      &excelize.Font{Family: WorkbookFont, Bold: true, Color: "000000", Size: 12},
 		Border: []excelize.Border{
 			{Type: "bottom", Color: "000000", Style: 2},
 		},
@@ -262,7 +265,7 @@ func getPoolHeaderStyle(f *excelize.File) int {
 func buildPoolHeaderStyle(f *excelize.File) int {
 	style := mustNewStyle(f, &excelize.Style{
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
-		Font:      &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: 12},
+		Font:      &excelize.Font{Family: WorkbookFont, Bold: true, Color: "000000", Size: 12},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 2},
 			{Type: "bottom", Color: "000000", Style: 2},
@@ -279,7 +282,7 @@ func getRedHeaderStyle(f *excelize.File) int {
 func buildRedHeaderStyle(f *excelize.File) int {
 	style := mustNewStyle(f, &excelize.Style{
 		Alignment: &excelize.Alignment{Horizontal: "center"},
-		Font:      &excelize.Font{Family: "Calibri", Bold: true, Color: "FFFFFF", Size: 12},
+		Font:      &excelize.Font{Family: WorkbookFont, Bold: true, Color: "FFFFFF", Size: 12},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 1},
 			{Type: "bottom", Color: "000000", Style: 1},
@@ -302,7 +305,7 @@ func getWhiteHeaderStyle(f *excelize.File) int {
 func buildWhiteHeaderStyle(f *excelize.File) int {
 	style := mustNewStyle(f, &excelize.Style{
 		Alignment: &excelize.Alignment{Horizontal: "center"},
-		Font:      &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: 12},
+		Font:      &excelize.Font{Family: WorkbookFont, Bold: true, Color: "000000", Size: 12},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 1},
 			{Type: "bottom", Color: "000000", Style: 1},
@@ -325,7 +328,7 @@ func getTextStyle(f *excelize.File) int {
 func buildTextStyle(f *excelize.File) int {
 	style := mustNewStyle(f, &excelize.Style{
 		Alignment: &excelize.Alignment{Horizontal: "center"},
-		Font:      &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 12},
+		Font:      &excelize.Font{Family: WorkbookFont, Bold: false, Color: "000000", Size: 12},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 1},
 			{Type: "bottom", Color: "000000", Style: 1},
@@ -343,7 +346,7 @@ func getGreyTextStyle(f *excelize.File) int {
 func buildGreyTextStyle(f *excelize.File) int {
 	style := mustNewStyle(f, &excelize.Style{
 		Alignment: &excelize.Alignment{Horizontal: "center"},
-		Font:      &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 12},
+		Font:      &excelize.Font{Family: WorkbookFont, Bold: false, Color: "000000", Size: 12},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 1},
 			{Type: "bottom", Color: "000000", Style: 1},
@@ -359,16 +362,20 @@ func getNameIDStyle(f *excelize.File) int {
 	return getCachedStyle(f, styleNameID, buildNameIDStyle)
 }
 
+// buildNameIDStyle is the competitor name's style. The name column has a fixed
+// width (namesToPrintNameColWidth); a long name shrinks into it rather than
+// overflowing or wrapping.
 func buildNameIDStyle(f *excelize.File) int {
-	style := mustNewStyle(f, &excelize.Style{
-		Alignment: &excelize.Alignment{
-			Horizontal: "center",
-			Vertical:   "center",
-			// The name column has a fixed width (namesToPrintNameColWidth); a
-			// long name shrinks into it rather than overflowing or wrapping.
-			ShrinkToFit: true,
-		},
-		Font: &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 110},
+	return buildNameBoxStyle(f, false, 110)
+}
+
+// buildNameBoxStyle is the one style of a name printed in a Names to Print box,
+// a competitor's or the competition's tag: centred in a thick border at the
+// given size, wrapping when wrap is set and shrinking to fit otherwise.
+func buildNameBoxStyle(f *excelize.File, wrap bool, size float64) int {
+	return mustNewStyle(f, &excelize.Style{
+		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: wrap, ShrinkToFit: !wrap},
+		Font:      &excelize.Font{Family: WorkbookFont, Bold: false, Color: "000000", Size: size},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 2},
 			{Type: "bottom", Color: "000000", Style: 2},
@@ -376,7 +383,6 @@ func buildNameIDStyle(f *excelize.File) int {
 			{Type: "right", Color: "000000", Style: 2},
 		},
 	})
-	return style
 }
 
 func getNameIDPositionStyle(f *excelize.File) int {
@@ -420,7 +426,7 @@ func buildNameIDPositionStyleFor(f *excelize.File, stacked bool, letterCount int
 	}
 	return mustNewStyle(f, &excelize.Style{
 		Alignment: alignment,
-		Font:      &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: fontSize},
+		Font:      &excelize.Font{Family: WorkbookFont, Bold: true, Color: "000000", Size: fontSize},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 2},
 			{Type: "bottom", Color: "000000", Style: 2},
@@ -475,6 +481,64 @@ func buildNameIDPositionStackedStyle(f *excelize.File, letterCount int) int {
 	return buildNameIDPositionStyleFor(f, true, letterCount)
 }
 
+// Competition-name tag sizing (competitionTagFit). A name of up to
+// competitionTagOneLineMaxRunes characters prints on one line, shrunk to fit
+// the merged A:B cell as a competitor's name is. A longer one wraps, at
+// competitionTagFitConstant / sqrt(characters) points, rounded down: the area
+// a wrapped name covers grows with its length times the square of its size,
+// so this keeps it inside the 270pt row at any length.
+//
+// Both were measured with LibreOffice, which lays a cell out the way the
+// Export PDFs print it (each row's optimal height for the wrapped name, set
+// against the 270pt row), in a workbook whose default font is Arial, as every
+// workbook's is: for every length from 46 to 300 characters and at 350, 400,
+// 500, 800 and 1000, in ordinary text, the same text in capitals, words of W
+// and M, and an unbroken run of W. LibreOffice (26.8, macOS) prints Arial in
+// Liberation Sans, which has Arial's widths, as LibreOffice on Linux does; the
+// two measured alike. At 410 the tallest is 225pt (67 W's at 50pt), 237pt in a
+// column narrowed to 170 units (Excel's width units are a little narrower than
+// LibreOffice's); at 440, 59 characters of W and M words came out at 255pt, and
+// at 460, 52 W's at 63pt came out taller than the row. DejaVu Sans, which
+// LibreOffice falls back to on a Linux system without Liberation Sans, is
+// wider: at 410 its tallest is 255pt in the 170-unit column, still inside the
+// row. The one-line limit, 45 characters, is the organiser's ruling: a name
+// that fits a line keeps it. A 45-character name on one line, in ordinary
+// text, capitals, words of W and M or an unbroken run of W, shrinks to print
+// whole (from 51pt in ordinary text down to 25pt for the W's), and a
+// 46-character one wraps at 60pt. From about 30 characters up, wrapping would
+// print ordinary text about as large or larger (at 30 characters one line is
+// 74pt, and 38pt for a run of W, against 74pt wrapped), so the limit trades
+// some size for keeping the name on one line; it never costs fit.
+const (
+	competitionTagFontSize        = 110.0
+	competitionTagOneLineMaxRunes = 45
+	competitionTagFitConstant     = 410.0
+)
+
+// competitionTagFit is the one rule for how a competition-name tag prints:
+// whether it wraps and at what font size. A one-line tag shrinks to fit from
+// competitionTagFontSize, so its size is only where shrinking starts.
+func competitionTagFit(tag string) (wrap bool, size float64) {
+	n := utf8.RuneCountInString(tag)
+	if n <= competitionTagOneLineMaxRunes {
+		return false, competitionTagFontSize
+	}
+	return true, math.Floor(competitionTagFitConstant / math.Sqrt(float64(n)))
+}
+
+// getCompetitionTagStyle returns the style for a competition-name tag, cached
+// per size, so every tag of one name shares one style.
+func getCompetitionTagStyle(f *excelize.File, tag string) int {
+	wrap, size := competitionTagFit(tag)
+	key := styleCompetitionTag
+	if wrap {
+		key = styleKey(fmt.Sprintf("%s_wrap_%g", styleCompetitionTag, size))
+	}
+	return getCachedStyle(f, key, func(f *excelize.File) int {
+		return buildNameBoxStyle(f, wrap, size)
+	})
+}
+
 func getTimeStyle(f *excelize.File) int {
 	return getCachedStyle(f, styleTime, buildTimeStyle)
 }
@@ -482,7 +546,7 @@ func getTimeStyle(f *excelize.File) int {
 func buildTimeStyle(f *excelize.File) int {
 	style := mustNewStyle(f, &excelize.Style{
 		Alignment: &excelize.Alignment{Horizontal: "center"},
-		Font:      &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 12},
+		Font:      &excelize.Font{Family: WorkbookFont, Bold: false, Color: "000000", Size: 12},
 		NumFmt:    20, // h:mm
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 1},
@@ -502,7 +566,7 @@ func buildDurationStyle(f *excelize.File) int {
 	customFmt := "[h]:mm:ss"
 	style := mustNewStyle(f, &excelize.Style{
 		Alignment:    &excelize.Alignment{Horizontal: "center"},
-		Font:         &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 12},
+		Font:         &excelize.Font{Family: WorkbookFont, Bold: false, Color: "000000", Size: 12},
 		CustomNumFmt: &customFmt,
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 1},
@@ -521,7 +585,7 @@ func getUnlockedTextStyle(f *excelize.File) int {
 func buildUnlockedTextStyle(f *excelize.File) int {
 	style := mustNewStyle(f, &excelize.Style{
 		Alignment: &excelize.Alignment{Horizontal: "center"},
-		Font:      &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 12},
+		Font:      &excelize.Font{Family: WorkbookFont, Bold: false, Color: "000000", Size: 12},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 1},
 			{Type: "bottom", Color: "000000", Style: 1},

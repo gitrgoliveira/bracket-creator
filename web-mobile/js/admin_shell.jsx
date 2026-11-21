@@ -708,7 +708,7 @@ function ShareRegistrationModal({ url, onClose, showToast }) {
 const PDF_EXPORT_TYPES = [
   { type: "all", label: "All (everything)", hint: "Registration, names, tags, pools & trees, full bracket" },
   { type: "registration", label: "Registration", hint: "The data sheet from every competition" },
-  { type: "names", label: "Names to Print", hint: "A3 landscape, one title page per competition" },
+  { type: "names", label: "Names to Print", hint: "A3 landscape, a title page per competition, a page of competition tags per shiaijo" },
   { type: "tags", label: "Tags", hint: "Competitor tags (team competitions excluded)" },
   { type: "pools-trees", label: "Pools & Trees", hint: "Pool draw + bracket trees, page-numbered" },
   { type: "full-bracket", label: "Full bracket", hint: "Pools, matches and trees, page-numbered" },

@@ -166,6 +166,8 @@ mp-*/
 .github/skills
 
 *.pdf
+# The docs' sample printouts (make docs/samples) are committed.
+!docs/samples/**/*.pdf
 
 # Serena: track only the project config; everything else is per-machine state.
 # `.serena/*` (not `.serena/`) so the negation below can re-include the file.

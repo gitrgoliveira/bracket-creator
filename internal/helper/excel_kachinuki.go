@@ -240,7 +240,7 @@ func writeBoutDetailSheet(f *excelize.File, sheet, titleSuffix string, matches [
 	// recorded bout names its fighter after the bout number, and "17 T12.4
 	// Yui Nakamura (Fukusho)" clips at a match block's width. The print is
 	// scaled to one page wide whatever they are.
-	setMatchColumnsWidthByStartCol(f, sheet, 1)
+	setMatchColumnsWidthByStartCol(f, sheet, 1, matchNameColWidth)
 	handleExcelError("SetColWidth", f.SetColWidth(sheet, "A", "A", kachinukiFighterColWidth))
 	handleExcelError("SetColWidth", f.SetColWidth(sheet, "G", "G", kachinukiFighterColWidth))
 	styles := newMatchStyles(f)

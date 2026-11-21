@@ -360,7 +360,7 @@ func TestCreateHandler_TeamSizeIsBounded(t *testing.T) {
 // TestCreateHandler_WithoutTeamMatchTypeMatchesTheExamples pins that a request
 // without teamMatchType draws the same workbook as before the field existed:
 // it reproduces the committed example workbooks byte for byte, each posted
-// with the settings its make examples line passes to the create-pools or
+// with the settings its make examples line passes, title and number prefix included, to the create-pools or
 // create-knockout command (the generator /create runs). A change to what a
 // workbook prints fails here until make examples regenerates them.
 func TestCreateHandler_WithoutTeamMatchTypeMatchesTheExamples(t *testing.T) {
@@ -372,19 +372,29 @@ func TestCreateHandler_WithoutTeamMatchTypeMatchesTheExamples(t *testing.T) {
 		{"pools-example-small-3-teams.xlsx", "mock_data_small_3_teams.csv", url.Values{
 			"tournamentType": {"pools"}, "determined": {"on"}, "roundRobin": {"on"},
 			"playersPerPool": {"3"}, "winnersPerPool": {"2"}, "courts": {"1"}, "teamMatches": {"3"},
+			"titlePrefix": {"Pools Example Small 3 Teams"}, "numberPrefix": {"K"},
 		}},
 		{"pools-example-teams-of-3-round-robin.xlsx", "mock_data_teams_of_3_pool_3.csv", url.Values{
 			"tournamentType": {"pools"}, "determined": {"on"}, "roundRobin": {"on"},
 			"playersPerPool": {"3"}, "winnersPerPool": {"2"}, "courts": {"1"}, "teamMatches": {"3"},
+			"titlePrefix": {"Pools Example Teams Of 3 Round Robin"}, "numberPrefix": {"K"},
+		}},
+		// create-pools -d -p 3 -w 2 -t 5 -c 2, teams of five on two shiaijo
+		{"pools-example-medium-teams.xlsx", "mock_data_medium_teams.csv", url.Values{
+			"tournamentType": {"pools"}, "determined": {"on"},
+			"playersPerPool": {"3"}, "winnersPerPool": {"2"}, "courts": {"2"}, "teamMatches": {"5"},
+			"titlePrefix": {"Pools Example Medium Teams"}, "numberPrefix": {"K"},
 		}},
 		// create-knockout -d -t 5 (two shiaijo by default)
 		{"knockout-example-small.xlsx", "mock_data_small.csv", url.Values{
 			"tournamentType": {"knockout"}, "determined": {"on"}, "courts": {"2"}, "teamMatches": {"5"},
+			"titlePrefix": {"Knockout Example Small"}, "numberPrefix": {"K"},
 		}},
 		// create-pools -d -p 8 -w 2 -c 1, an individual competition
 		{"pools-example-single-pool-8.xlsx", "mock_data_single_pool_8.csv", url.Values{
 			"tournamentType": {"pools"}, "determined": {"on"},
 			"playersPerPool": {"8"}, "winnersPerPool": {"2"}, "courts": {"1"},
+			"titlePrefix": {"Pools Example Single Pool 8"}, "numberPrefix": {"K"},
 		}},
 	} {
 		t.Run(tc.example, func(t *testing.T) {

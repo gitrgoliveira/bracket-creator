@@ -148,11 +148,16 @@ const (
 // Layout: Name | V | P | vs | P | V | Name | Spacer = 8 columns.
 const CourtsColumnsPerCourt = 8
 
-// Column-width constants for match layout sheets.
+// Column-width constants for match layout sheets. The Elimination Matches
+// sheet's name columns are wider than the Pool Matches ones because a side
+// not yet decided prints its source as well as its name ("Pool X-2nd K70
+// Nathaniel Hawthorne", about 200pt in 12pt Arial against 184pt at 30): 34
+// holds the longest the example workbooks print.
 const (
-	matchNameColWidth   = 30
-	matchScoreColWidth  = 5
-	matchSpacerColWidth = 5
+	matchNameColWidth       = 30
+	eliminationNameColWidth = 34
+	matchScoreColWidth      = 5
+	matchSpacerColWidth     = 5
 )
 
 // ColHeaderFlags is the single-source column header label for the engi

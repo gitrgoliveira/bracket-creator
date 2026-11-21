@@ -93,9 +93,15 @@ func (layout *dataColumnLayout) writePlayer(f *excelize.File, row int, player *P
 
 func finishDataSheet(f *excelize.File) {
 	sheetName := SheetData
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 9))
+	// A holds the "Title prefix:" and "Entry order" labels. D and E hold the
+	// display name and the "Player Number" header (or the number and the
+	// first metadata column without display names): 15 fits the examples'
+	// longest display name ("SHAKESPEARE", about 85pt in 11pt Arial) and keeps
+	// "Player Number" clear of the "Metadata" header beside it.
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 10.5))
 	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "B", "C", 20))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "D", "Z", 12))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "D", "E", 15))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "F", "Z", 12))
 	fmt.Printf("Data added to spreadsheet\n")
 }
 

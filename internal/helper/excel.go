@@ -1094,7 +1094,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 				startCol := 1 + c*CourtsColumnsPerCourt
 
 				if !configuredStartCols[startCol] {
-					setMatchColumnsWidthByStartCol(f, sheetName, startCol)
+					setMatchColumnsWidthByStartCol(f, sheetName, startCol, matchNameColWidth)
 					configuredStartCols[startCol] = true
 				}
 
@@ -1297,7 +1297,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	for c := 0; c < numCourts; c++ {
 		courtStartCol := 1 + c*CourtsColumnsPerCourt
 		if !configuredStartCols[courtStartCol] {
-			setMatchColumnsWidthByStartCol(f, sheetName, courtStartCol)
+			setMatchColumnsWidthByStartCol(f, sheetName, courtStartCol, eliminationNameColWidth)
 			configuredStartCols[courtStartCol] = true
 		}
 	}
@@ -1725,11 +1725,14 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 	}
 }
 
-func setMatchColumnsWidthByStartCol(f *excelize.File, sheetName string, startCol int) {
+// setMatchColumnsWidthByStartCol sizes one court's eight match columns: the
+// two name columns at nameWidth (matchNameColWidth, or eliminationNameColWidth
+// on the Elimination Matches sheet), the five score columns and the spacer.
+func setMatchColumnsWidthByStartCol(f *excelize.File, sheetName string, startCol int, nameWidth float64) {
 	startColName := mustColumnName(startCol)
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, startColName, startColName, matchNameColWidth))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, startColName, startColName, nameWidth))
 	handleExcelError("SetColWidth", f.SetColWidth(sheetName, mustColumnName(startCol+1), mustColumnName(startCol+5), matchScoreColWidth))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, mustColumnName(startCol+6), mustColumnName(startCol+6), matchNameColWidth))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, mustColumnName(startCol+6), mustColumnName(startCol+6), nameWidth))
 	handleExcelError("SetColWidth", f.SetColWidth(sheetName, mustColumnName(startCol+7), mustColumnName(startCol+7), matchSpacerColWidth))
 }
 

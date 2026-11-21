@@ -362,16 +362,26 @@ func getNameIDStyle(f *excelize.File) int {
 	return getCachedStyle(f, styleNameID, buildNameIDStyle)
 }
 
+// buildNameIDStyle is the competitor name's style. The name column has a fixed
+// width (namesToPrintNameColWidth); a long name shrinks into it rather than
+// overflowing or wrapping.
 func buildNameIDStyle(f *excelize.File) int {
-	style := mustNewStyle(f, &excelize.Style{
-		Alignment: &excelize.Alignment{
-			Horizontal: "center",
-			Vertical:   "center",
-			// The name column has a fixed width (namesToPrintNameColWidth); a
-			// long name shrinks into it rather than overflowing or wrapping.
-			ShrinkToFit: true,
-		},
-		Font: &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 110},
+	return buildNameBoxStyle(f, false, 110)
+}
+
+// buildNameBoxStyle is the one style of a name printed in a Names to Print box,
+// a competitor's or the competition's tag: centred in a thick border at the
+// given size, wrapping when wrap is set and shrinking to fit otherwise.
+func buildNameBoxStyle(f *excelize.File, wrap bool, size float64) int {
+	alignment := &excelize.Alignment{Horizontal: "center", Vertical: "center"}
+	if wrap {
+		alignment.WrapText = true
+	} else {
+		alignment.ShrinkToFit = true
+	}
+	return mustNewStyle(f, &excelize.Style{
+		Alignment: alignment,
+		Font:      &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: size},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 2},
 			{Type: "bottom", Color: "000000", Style: 2},
@@ -379,7 +389,6 @@ func buildNameIDStyle(f *excelize.File) int {
 			{Type: "right", Color: "000000", Style: 2},
 		},
 	})
-	return style
 }
 
 func getNameIDPositionStyle(f *excelize.File) int {
@@ -530,28 +539,7 @@ func getCompetitionTagStyle(f *excelize.File, tag string) int {
 		key = styleKey(fmt.Sprintf("%s_wrap_%g", styleCompetitionTag, size))
 	}
 	return getCachedStyle(f, key, func(f *excelize.File) int {
-		return buildCompetitionTagStyle(f, wrap, size)
-	})
-}
-
-// buildCompetitionTagStyle is the competitor name's style (buildNameIDStyle)
-// at the given size, wrapping instead of shrinking for a long name.
-func buildCompetitionTagStyle(f *excelize.File, wrap bool, size float64) int {
-	alignment := &excelize.Alignment{Horizontal: "center", Vertical: "center"}
-	if wrap {
-		alignment.WrapText = true
-	} else {
-		alignment.ShrinkToFit = true
-	}
-	return mustNewStyle(f, &excelize.Style{
-		Alignment: alignment,
-		Font:      &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: size},
-		Border: []excelize.Border{
-			{Type: "top", Color: "000000", Style: 2},
-			{Type: "bottom", Color: "000000", Style: 2},
-			{Type: "left", Color: "000000", Style: 2},
-			{Type: "right", Color: "000000", Style: 2},
-		},
+		return buildNameBoxStyle(f, wrap, size)
 	})
 }
 

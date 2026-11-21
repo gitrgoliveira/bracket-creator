@@ -66,6 +66,8 @@ func TestExportCompetitionXlsx_EveryShiaijoSheetOpensWithCompetitionTags(t *test
 	}{
 		{state.CompFormatMixed, []string{"A", "B"}, 16},
 		{state.CompFormatKnockout, []string{"A", "B"}, 16},
+		// A league is one pool, so it lists its competitors on one shiaijo.
+		{state.CompFormatLeague, []string{"A"}, 8},
 	} {
 		t.Run(fmt.Sprintf("%s over %d shiaijo", tc.format, len(tc.courts)), func(t *testing.T) {
 			eng, store, _ := setupTestEngine(t)

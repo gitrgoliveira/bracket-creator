@@ -1307,7 +1307,12 @@ func TestCompetitionTagText(t *testing.T) {
 		"Senior Men - ":       "Senior Men",
 		"Senior Men:":         "Senior Men",
 		"Cup 2026, ":          "Cup 2026",
+		"Senior Men –":        "Senior Men",
+		"Senior Men — ":       "Senior Men",
+		"Cup |":               "Cup",
+		"Cup /":               "Cup",
 		"Under-18":            "Under-18",
+		"Under–18":            "Under–18",
 		" - ":                 "",
 		"":                    "",
 	} {

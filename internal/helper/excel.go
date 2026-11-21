@@ -40,6 +40,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	excelize "github.com/xuri/excelize/v2"
@@ -1920,11 +1921,13 @@ func printNameEntries(f *excelize.File, sheetName string, players []Player, sani
 	// are excelize file-scoped and cache-keyed (getCachedStyle), so their IDs
 	// are assigned in FIRST-REQUEST order. Requesting the plain position
 	// style and the name style here, unconditionally, keeps that order
-	// (and therefore every sheet's serialized bytes) identical to before for
-	// every row that turns out non-stacked -- which is every row on every
+	// for every row that turns out non-stacked -- which is every row on every
 	// sheet a one-letter (or absent) prefix produces, the common case. The
 	// stacked style is requested lazily, from inside the loop, only for a
-	// row that actually needs it.
+	// row that actually needs it. A sheet with competition tags requests the
+	// tag style (writeCompetitionTags) between these two and the stacked one,
+	// so its style IDs, and its serialized bytes, differ from a sheet without
+	// tags.
 	defaultPositionStyle := getNameIDPositionStyle(f)
 	nameIDStyle := getNameIDStyle(f)
 
@@ -2050,7 +2053,14 @@ func writeCompetitionTags(f *excelize.File, sheetName, tag string) int {
 // ("Senior Men - " from a title prefix typed to be followed by something).
 // Empty means the sheet carries no tags.
 func competitionTagText(name string) string {
-	return strings.TrimSpace(strings.TrimRight(strings.TrimSpace(name), " -:,"))
+	return strings.TrimRightFunc(strings.TrimSpace(name), isTagSeparator)
+}
+
+// isTagSeparator reports whether r is a separator competitionTagText drops
+// from the end of a name: space, any dash (hyphen, en dash, em dash), or one
+// of : , | /.
+func isTagSeparator(r rune) bool {
+	return unicode.IsSpace(r) || unicode.Is(unicode.Dash, r) || strings.ContainsRune(":,|/", r)
 }
 
 func FillEstimations(f *excelize.File, numPools int64, totalPoolMatches int64, teamSize int64, numEliminationMatches int64, numCourts int) {

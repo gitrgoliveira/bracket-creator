@@ -1483,9 +1483,10 @@ describe('the team\'s members', () => {
 
   // A name typed before the first list is shown would be resolved against no members: a
   // new name minted where the member's seeded slot is free, and the name of a member the
-  // team has refused by the server as a second one. Nothing waits for the first list
-  // (bc-evts stage 3 review 2, R1): an editor asks membersListed() whether a read has
-  // shown one (membersReadOver() whether the read is over), and resolves only then.
+  // team has refused by the server as a second one. So a typed name waits for the first
+  // list (operator decision V1): an editor asks membersRead(), which answers once the
+  // read made as the editor opened is over whether it showed one (membersListed()), and
+  // resolves the name only then.
   describe('whether a list has been read', () => {
     const openedWith = async (opening) => {
       api.fetchSquads.mockReturnValueOnce(opening.promise);
@@ -1524,18 +1525,49 @@ describe('the team\'s members', () => {
       expect(view.result.current.squadUnavailable).toBe(true);
     });
 
-    // Stage 3 review 3, F1: a read that is never answered must not leave a typed name
-    // unresolved for the editor's life. The read made as the editor opens is ended at
-    // the deadline of any bounded request, as a failure is.
+    it('membersRead waits while the read is out, and answers true once it shows its list', async () => {
+      const opening = deferred();
+      const view = await openedWith(opening);
+      let answer = 'waiting';
+      view.result.current.membersRead().then((listed) => { answer = listed; });
+      await act(async () => { await Promise.resolve(); });
+      expect(answer, 'the read is still out').toBe('waiting');
+      await act(async () => { opening.resolve({ t: MEMBERS }); });
+      expect(answer).toBe(true);
+    });
+
+    it('membersRead answers false once the read fails', async () => {
+      const opening = deferred();
+      const view = await openedWith(opening);
+      const answer = view.result.current.membersRead();
+      await act(async () => { opening.reject(new Error('offline')); });
+      await expect(answer).resolves.toBe(false);
+    });
+
+    it('membersRead answers false for a name waiting on a team the editor was given another for', async () => {
+      const opening = deferred();
+      const view = await openedWith(opening);
+      const answer = view.result.current.membersRead();
+      api.fetchSquads.mockReturnValue(deferred().promise);
+      view.rerender(props({ teamId: 'u' }));
+      await act(async () => { await Promise.resolve(); });
+      await expect(answer).resolves.toBe(false);
+    });
+
+    // Stage 3 review 3, F1: a read that is never answered must not hold a typed name for
+    // the editor's life. The read made as the editor opens is ended at the deadline of
+    // any bounded request, as a failure is, and a name waiting for it goes by name only.
     it('is ended at the deadline of any bounded request, saying the members could not be read', async () => {
       vi.useFakeTimers();
       try {
         const view = await openedWith(deferred());
+        let answer = 'waiting';
+        view.result.current.membersRead().then((listed) => { answer = listed; });
         await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 1); });
-        expect(view.result.current.membersReadOver(), 'the read is still out').toBe(false);
+        expect(answer, 'the read is still out').toBe('waiting');
         expect(view.result.current.squadUnavailable).toBe(false);
         await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-        expect(view.result.current.membersReadOver()).toBe(true);
+        expect(answer).toBe(false);
         expect(view.result.current.membersListed()).toBe(false);
         expect(view.result.current.squadUnavailable).toBe(true);
       } finally {
@@ -1543,13 +1575,13 @@ describe('the team\'s members', () => {
       }
     });
 
-    it('ends at the deadline for good: a name typed next goes on, the members read as unavailable, and a list that arrives later is still shown', async () => {
+    it('ends at the deadline for good: a name typed next goes on at once, the members read as unavailable, and a list that arrives later is still shown', async () => {
       vi.useFakeTimers();
       try {
         const opening = deferred();
         const view = await openedWith(opening);
         await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS); });
-        expect(view.result.current.membersReadOver(), 'a name typed next goes on at once').toBe(true);
+        await expect(view.result.current.membersRead(), 'a name typed next goes on at once').resolves.toBe(false);
         expect(view.result.current.squadUnavailable, 'and the editor says the members could not be read').toBe(true);
 
         await act(async () => { opening.resolve({ t: MEMBERS }); });

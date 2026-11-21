@@ -261,6 +261,21 @@ export function mergeLineupIdsForPosition(existingIds, posKey, resolvedId) {
   return updated;
 }
 
+// withLineupPosition: `lineup` (null for none) with ONE position's name and member
+// id taken from `from` (a lineup, or any { positions, memberIds }), dropped where
+// `from` has none (a picked blank member's "" name is kept, as buildInlineLineupWrite
+// keeps it), every other position as `lineup` holds it. The team sheet puts a pick on
+// the lineup held for its side this way, so two picks on one side that resume in turn
+// (two names typed while the members are read) each change their own position and
+// neither undoes the other's.
+export function withLineupPosition(lineup, posKey, from) {
+  const positions = { ...lineup?.positions };
+  const fromPositions = from?.positions || {};
+  if (Object.prototype.hasOwnProperty.call(fromPositions, posKey)) positions[posKey] = fromPositions[posKey];
+  else delete positions[posKey];
+  return { ...lineup, positions, memberIds: mergeLineupIdsForPosition(lineup?.memberIds, posKey, from?.memberIds?.[posKey]) };
+}
+
 // resolveTypedMemberName: the one step that resolves a name typed into a team
 // slot to its squad member, through resolveMemberIdsForPositions (admin_lineup.jsx,
 // reached via window.AdminLineupHelpers). `key` is the name's key in the
@@ -366,10 +381,10 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
   let resolvedId = pickedMemberId;
   let nextSquad = Array.isArray(squad) ? squad : [];
   let failures = [];
-  // `opts.resolve === false`: the side's members have not been read, so a typed
-  // name is placed by name alone (no id), never resolved against no list,
-  // where it would mint a member the seeded slot or a named member already is
-  // (bc-evts stage 3 review 2, R1: nothing waits for the read).
+  // `opts.resolve === false`: the side's members could not be read (the sheet
+  // waited for them, operator decision V1), so a typed name is placed by name
+  // only (no id) and no member is added, never resolved against no list,
+  // where it would mint a member the seeded slot or a named member already is.
   if (!pickedMemberId && value && opts.resolve !== false) {
     // A failed resolve still writes the name: mergeLineupIdsForPosition below
     // clears this position's id, and the load-time repair fills it in later.

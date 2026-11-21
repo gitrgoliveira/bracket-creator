@@ -285,32 +285,71 @@ export function mergeMembers(shown, arriving) {
 }
 
 // The first list of a team's members that a read shows. A name typed before one is
-// shown is resolved against no members: a new name would be minted where the member's
-// seeded slot is free, and the name of a member the team already has would be refused
-// by the server as a second member of that name. So an editor resolves a typed name
+// shown would be resolved against no members: a new name would be minted where the
+// member's seeded slot is free, and the name of a member the team already has would be
+// refused by the server as a second member of that name. So a typed name waits for the
+// read (waitForMembers, operator decision V1, round ship-kno1-review-2) and is resolved
 // only once `listed` says a READ's list has been shown for the team (a change an editor
-// made itself is not one); before that it saves the name alone, with the
-// members-unavailable warning, and never waits for the read (bc-evts stage 3 review 2,
-// R1: "ALL goes to the outbox ... but never blocks the UI"). `show` marks a list shown,
-// `fail` a read that failed (`ended` either way). Another team starts a new one.
+// made itself is not one). `show` marks a list shown, `fail` a read that failed or was
+// not answered by its deadline (`ended` either way, and `over` settles). `expire` is a
+// wait that reached waitForMembers' own deadline with no read over (`expired`, until a
+// read shows a list or fails): a typed name goes on by name only, while the team sheet's
+// typed representative is still refused as before (operator decision V3). Another team
+// starts a new one, and fails the old one, so nothing waits on it for good.
 export function newMembersWait() {
+  let settle;
   const wait = {
     listed: false,
     ended: false,
+    expired: false,
+    over: new Promise((resolve) => { settle = resolve; }),
     show: () => {
       wait.listed = true;
       wait.ended = true;
+      wait.expired = false;
+      settle();
     },
-    fail: () => { wait.ended = true; },
+    fail: () => {
+      wait.ended = true;
+      wait.expired = false;
+      settle();
+    },
+    expire: () => {
+      wait.ended = true;
+      wait.expired = true;
+      settle();
+    },
   };
   return wait;
 }
 
+// waitForMembers: whether a read's list of the team's members has been shown, once the
+// read `wait` stands for is over (operator decision V1): the lineup panel's Save, the
+// Lineups page's add and the team score sheet's typed bout fighter each wait here for
+// a typed name. The read has its own deadline; this one bounds a wait whose read is
+// never made (a side whose team is not known yet), and a wait that reaches it ends the
+// read's wait (`expire`), so a name typed after it does not wait again (a list that arrives later
+// is still shown, and a name typed after that is resolved against it). False (the read
+// failed, any cause, or was not answered) means the name is placed by name only and no
+// member is added.
+export async function waitForMembers(wait) {
+  if (!wait.ended && (await withinDeadline(wait.over, FETCH_TIMEOUT_MS)) === TIMED_OUT) wait.expire();
+  return wait.listed;
+}
+
+// A wait that ended with no list stands for a read that is over. A new read of the
+// team's members (after a sign-in again, or the password changed) gets a new wait, so
+// a name typed while it is out waits for its list instead of going by name only.
+// Answers the wait to keep: `wait` itself unless it ended unlisted.
+export function renewedMembersWait(wait) {
+  return wait.ended && !wait.listed ? newMembersWait() : wait;
+}
+
 // The ONE wording of a team whose members list could not be read, shown where an empty
 // list would otherwise read as a team with no members: the Lineups page and the match's
-// lineup panel. An empty list and one that failed to load look alike, and telling the
-// operator the team is empty invites a second slot for a member who already has one.
-export const MEMBERS_UNAVAILABLE_NOTICE = "The team member list could not be loaded, so this may not be the whole team. Reload before adding a member, or you may add a second slot for someone who already has one.";
+// lineup panel. An empty list and one that failed to load look alike. While it shows, a
+// typed name is saved by name only and no member is added (operator decision V1).
+export const MEMBERS_UNAVAILABLE_NOTICE = "The team member list could not be loaded, so the list is not shown. You can still type names and save the lineup; they are saved by name only.";
 
 // The same place's wording when the server said team-members.yaml itself cannot be
 // read (409 team_members_unreadable): reloading will not help, and the organiser
@@ -318,8 +357,8 @@ export const MEMBERS_UNAVAILABLE_NOTICE = "The team member list could not be loa
 export const MEMBERS_UNREADABLE_NOTICE = "The team members could not be read, so the list is not shown and no member can be added or renamed. You can still type names and save the lineup; they are saved by name only. The organiser needs to check team-members.yaml in the tournament data.";
 
 // The ONE wording of a typed name refused because the team's members are still being
-// read (stage 3 review 3, F1): the Lineups page's add row and the team sheet's typed
-// representative both say it, and the typed name stays where it was typed.
+// read (stage 3 review 3, F1): the team sheet's typed representative says it (operator
+// decision V3 keeps that path as it was), and the typed name stays where it was typed.
 export function membersNotReadNotice(name) {
   const reason = "the team's members are still being read. Try again once the list shows.";
   return name ? `"${name}" was not placed: ${reason}` : `T${reason.slice(1)}`;
@@ -349,9 +388,7 @@ export function membersNotReadNotice(name) {
 //                       undone by an older copy; squadRef, the same list for a
 //                       handler that resumes after a wait, and
 //                       squadUnavailable, that they could not be read, and
-//                       membersNotice, the sentence that says so ('' otherwise);
-//                       membersUnreadable, that the server said the file cannot
-//                       be read, so a typed name is placed by name alone
+//                       membersNotice, the sentence that says so ('' otherwise)
 // and gives the editor
 //   lineupToSave()        what a Save carries: the form as shown and `changed`, the
 //                         positions the operator changed, `{ positions, memberIds,
@@ -374,15 +411,10 @@ export function membersNotReadNotice(name) {
 //                         carries its team's previous one, and show that one
 //   retry()               read again ("Try again")
 //   membersListed()       whether a read of the team's members has shown a list
-//   membersReadOver()     whether that read is over (shown, or failed): an editor
-//                         resolves a typed name only then, never waiting for it
-//                         (bc-evts stage 3 review 2, R1). Against no list while the
-//                         read is out the name would be minted where the member's
-//                         seeded slot is free, or where the team already has the
-//                         member, so then it is saved by name alone (or refused, on
-//                         the Lineups page), with the members-unavailable warning;
-//                         after a read that failed it goes on without them, as it
-//                         always did
+//   membersRead()         waits for the read made as the editor opened (bounded,
+//                         waitForMembers) and answers membersListed(): a typed name
+//                         is resolved only when it is true, and otherwise placed by
+//                         name only, with no member added (operator decision V1)
 //   isMounted()           whether the editor is still on screen (R2)
 // A lineup change announced for the competition (the lineup-updated event) is
 // followed: the lineup is read again and shown, unless the form has edits or a
@@ -682,12 +714,16 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   }, [read]);
 
   // The list shown is the one of the team it was read for: giving the editor another
-  // team drops it, so its members are not merged into the new team's list.
+  // team drops it, so its members are not merged into the new team's list, and its
+  // notice, which spoke of the earlier team's read.
   useEffect(() => {
     if (squadTeam.current === teamKey) return;
     squadTeam.current = teamKey;
     squadRef.current = [];
     setSquadList([]);
+    setMembersNotice('');
+    // A typed name waiting for the earlier team's read goes on, by name only.
+    firstMembers.current.fail();
     firstMembers.current = newWait();
   }, [teamKey]);
 
@@ -701,12 +737,15 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // team. Changing the team or the password, or leaving, ends this read: it was
   // made for what no longer applies. Its failure flags the members as unavailable
   // unless a read's list is shown for the team by then, and so does a read not
-  // answered by the deadline of any bounded request (stage 3 review 3, F1): a read
-  // that never answers would otherwise leave every typed name unresolved for the
-  // editor's life. A list that arrives after the deadline is still shown.
+  // answered by the deadline of any bounded request (stage 3 review 3, F1): a typed
+  // name waits for this read (membersRead, V1), and goes on by name only once it is
+  // over without a list. A list that arrives after the deadline is still shown, and
+  // a name typed after it is then resolved against it.
   useEffect(() => {
     if (!compId || !teamId) return undefined;
     let ended = false;
+    // A read made again (the password changed after a sign-in) is waited for afresh.
+    firstMembers.current = renewedMembersWait(firstMembers.current);
     const reading = readMembers(compId, teamId, password);
     withinDeadline(reading, FETCH_TIMEOUT_MS).then((members) => {
       if (ended) return;
@@ -858,11 +897,8 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     draft: read ? draft : { ...draft, restored: false, stale: null },
     error, setError, warning, setWarning,
     squad, changeMembers, memberRenamed, squadRef, squadUnavailable, membersNotice,
-    // The server said team-members.yaml cannot be read: no member can be added or
-    // renamed, so the editors place a typed name by name alone (operator decision U1).
-    membersUnreadable: membersNotice === MEMBERS_UNREADABLE_NOTICE,
     membersListed: () => firstMembers.current.listed,
-    membersReadOver: () => firstMembers.current.ended,
+    membersRead: () => waitForMembers(firstMembers.current),
     dropOwnLineup, lineupToSave, confirmSaved,
     isMounted: () => mountedRef.current,
   };

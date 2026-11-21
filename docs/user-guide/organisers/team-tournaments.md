@@ -92,6 +92,76 @@ position by its place in the order alone, Slot 1 upwards. A five-person team
 runs to Slot 7, its five positions plus the two reserves. The numbered form
 appears once the draw is generated.
 
+### When the team member list cannot be loaded
+
+The match lineup panel, the Lineups page and the score sheet each read the
+team's members when they open. A name you type is matched against that list,
+so all three wait for it before they place the name, for up to about 12
+seconds:
+
+- On the lineup panel, **Save lineup** reads **Saving…** and the boxes are
+  locked.
+- On the Lineups page, **Add** reads **Adding…**, and **Save lineup** and the
+  other positions are greyed out.
+- On the score sheet, the name stays in its box while **Close**, **Cancel**,
+  **Prev** and **Next** are greyed out, with **Finish** (or **Save
+  correction**) and the representative bout buttons on a regular team match,
+  or **Record bout** and **End match** on a kachinuki match.
+
+Once the list arrives, the name picks its member, names a blank numbered place,
+or adds a member, as described under [Team members](#team-members), with no
+note.
+
+If the list cannot be loaded, whatever the reason (a dropped connection, a list
+that does not arrive in time, or a team members file the server cannot read),
+the name you typed is saved in the lineup by that name alone, and nobody is
+added to the team. When a typed name was saved that way, one note says so:
+"Saved by name only: the team member list could not be loaded. Scores will
+still record normally." On the Lineups page, **+ Add new member…** places the
+name in its position by name only while the list cannot be loaded, shown as
+"Unresolved:" followed by the name, and **Save lineup** saves it so.
+
+A name saved by name only is not linked to any team member. In a kachinuki
+match, where a team fights in member number order wherever its lineup names
+nobody, it does not count as the member it names, so number order can seat
+that same person a second time. Once the team members can be read again,
+whether the connection came back or the file was corrected, open the lineup
+and pick the team member in place of each name saved by name only, or, for a
+person who is not a team member yet, add them with **+ Add new member…** on
+the Lineups page or type the name again on the score sheet. On the Lineups page each such name shows as "Unresolved:" followed by
+the name; on the lineup panel or the score sheet you pick the member from the
+list in that place. Do this before the next **Record bout**.
+
+While the list cannot be loaded, the lineup panel shows a plain "Add player…"
+box in each empty place, and the Lineups page shows the notice where the
+**Team members** list would be. Both say one of two things. When the list only failed to
+load: "The team member list could not be loaded, so the list is not shown. You
+can still type names and save the lineup; they are saved by name only." When
+the server cannot read the file: "The team members could not be read, so the
+list is not shown and no member can be added or renamed. You can still type
+names and save the lineup; they are saved by name only. The organiser needs to
+check team-members.yaml in the tournament data."
+
+A team's members are kept in `competitions/<competition id>/team-members.yaml`
+inside the data folder: the folder given with `--folder` or
+`TOURNAMENT_DATA_DIR` when the app was started, or with neither, the folder it
+was started from (refer to the [mobile-app command](../commands/mobile-app.md#flags)).
+When it cannot be read, the server log has an error line, "team-members.yaml
+cannot be read", with the request path, which names the competition, and the
+reason. Correct the file, or ask whoever runs the server to. The app reads it
+again the next time a screen asks for the team's members, for example when you
+open the lineup panel, the Lineups page or the score sheet again, with no
+restart. Then pick the team member in place of each name saved by name only,
+as described above.
+
+Restoring the competition from a backup also brings its team members back, but
+it puts back every result and lineup of the competition as the backup holds
+them too, so anything recorded since the backup was made is lost or changed.
+Check the restore plan first: it says how many recorded results each
+competition will lose or change. Refer to
+[Restoring from a file](backup-and-restore.md#restoring-from-a-file) and
+[What is restored and what is not](backup-and-restore.md#what-is-restored-and-what-is-not).
+
 ### Incomplete and uneven teams
 
 Team sizes are not fixed. A lineup can leave any position empty. Teams in the same competition can field different numbers of fighters, and the app never blocks a save or disqualifies a team over a vacancy. Fill in as many positions as each team brings and save. You can edit a lineup at any time, including after the match has started, so you can complete or adjust the order as a round is running. Every bout still needs a result or a decision. When only one team leaves a position empty, the court operator records a **Fusensho** for the team whose fighter is present. When both teams leave a position empty, the court operator records that bout as a **Tie**, which counts as an individual draw for both teams. An empty position also shows a box directly on its score sheet row, labelled with its own number, so you can name the fighter without leaving the bout you are scoring.
@@ -171,7 +241,7 @@ While a bout is being fought, the line names both of its fighters as on, whateve
 - **A team has nobody left.** When **Record bout** takes the last fighter in a team's lineup off, no pairing follows. The bout you recorded joins the read-only rows, and one line stands where the current bout was, for example "Aka has no fighters left. End match finishes the encounter." **Record bout** is greyed out, because that bout is already recorded; if the team does have another fighter, use **+ Add next bout manually**. You can still tap the recorded bout to correct it like any earlier bout: a correction that changes who won, or makes it a draw, makes it the current bout again, to record anew, while a different technique for the same winner does not. Until the editor has read the lineups, when it is opened again or on another device, the bout you recorded shows as the current bout, and tapping **Record bout** again changes nothing.
 - **A draw leaves one team with nobody.** That team's last fighter stays on for the next pairing.
 - **A team has no saved lineup.** It fights in member number order, and a lineup that leaves places empty is filled the same way, as [Team lineups](#team-lineups) explains. A reserve you pick on a bout, rather than place in the lineup, does not count against "no fighters left". Picking or typing a fighter on a bout still overrides the order, and a saved lineup always wins. **Record bout** pairs the winner with the next member of the team that lost, or says that team has no fighters left.
-- **The team members or the lineups could not be read.** The score sheet shows a warning once for that match, and the server log names the file. With the lineups unreadable it reads "The lineups could not be read, so who fights next is not worked out. Add each bout's pairing by hand." Neither team then fields anyone: there is no line above the current bout, and **Record bout** records the bout you scored but adds no next pairing. With the team members unreadable, and a lineup that leaves a place to fill, it reads "Team members could not be read, so fighters are not seated by member number. Add each bout's pairing by hand." No place is filled by member number, so **Record bout** brings in only the fighters a saved lineup names, and the line above the current bout lists only them; after a team with no saved lineup loses a bout, no pairing follows. Either way scoring carries on, and the line that a team has no fighters left never takes the place of the current bout. Use **+ Add next bout manually** to pick or type both fighters of a bout the app does not add. The first bout can be named by hand too once a lineup read has failed. With the team members unreadable, a name you type on the first bout is still saved in the match's lineup, by that name alone: the app tries to add the fighter to the team, the server refuses because it cannot read the file, and the row under the bout first says the lineup was saved but the fighter could not be linked to a team member, then "Saved by name only: the team member list could not be loaded. Scores will still record normally." To repair the file, read the server log's error line: it names the file and the competition and says why the file could not be read. Correct that file, or ask whoever runs the server to. Once the file can be read again, the next **Record bout** pairs by member number again. While the lineups cannot be read, the lineup panel of the match shows an error instead of the lineup, since it is the page that edits that file; with only the team members unreadable it shows the lineup, with a plain "Add player…" box in each empty place, and says "The team members could not be read, so the list is not shown and no member can be added or renamed. You can still type names and save the lineup; they are saved by name only. The organiser needs to check team-members.yaml in the tournament data." The Lineups page says the same. When the list only failed to load, for example over a dropped connection, both say instead that the list could not be loaded and to reload before adding a member.
+- **The team members or the lineups could not be read.** The score sheet shows a warning once for that match, and the server log names the file. With the lineups unreadable it reads "The lineups could not be read, so who fights next is not worked out. Add each bout's pairing by hand." Neither team then fields anyone: there is no line above the current bout, and **Record bout** records the bout you scored but adds no next pairing. With the team members unreadable, and a lineup that leaves a place to fill, it reads "Team members could not be read, so fighters are not seated by member number. Add each bout's pairing by hand." No place is filled by member number, so **Record bout** brings in only the fighters a saved lineup names, and the line above the current bout lists only them; after a team with no saved lineup loses a bout, no pairing follows. Either way scoring carries on, and the line that a team has no fighters left never takes the place of the current bout. Use **+ Add next bout manually** to pick or type both fighters of a bout the app does not add. The first bout can be named by hand too once a lineup read has failed. With the team members unreadable, a name you type on the first bout is saved in the match's lineup by that name alone, nobody is added to the team, and the row under the bout says "Saved by name only: the team member list could not be loaded. Scores will still record normally." To repair the file, read the server log's error line: it names the competition and says why the file could not be read. Correct that file, or ask whoever runs the server to. Once the file can be read again, the next **Record bout** pairs by member number again. While the lineups cannot be read, the lineup panel of the match shows an error instead of the lineup, since it is the page that edits that file. For what the lineup panel, the Lineups page and the score sheet do with a typed name while the team members cannot be loaded, and where the file is, refer to [When the team member list cannot be loaded](#when-the-team-member-list-cannot-be-loaded).
 - **A tie leaves both teams with nobody.** The bout stays the current bout, in pools, leagues and knockouts alike, and the line names both of its fighters as on. **Encho** is there if you want the pair to fight on, **Record bout** is greyed out because nothing can follow it, and **End match** decides the rest: a drawn encounter in a pool or league, held back in a knockout, which needs a winner. Scoring a point on that tie, or starting **Encho**, makes it a bout being fought again: both fighters stay on and **Record bout** records it anew.
 
 If the app adds a pairing you did not want, for example an extra bout after the encounter was really over, use **× Remove this bout** to take it back. It only removes a bout that has no score yet, so nothing you have recorded is lost. When the bout you remove is the pairing **Record bout** added, the bout before it becomes the current bout again, as if **Record bout** had not been pressed, so the line above names both of its fighters as on until you record it again. When you remove a bout you added with **+ Add next bout manually** after a team had nobody left, the sheet goes back to how it was before you added it: the recorded bout stays recorded and the line still names the team with nobody left. Editing a lineup in between does not change this. If the match's history does not show how the bout you removed was added, for example because that history could not be saved, the recorded bout stays recorded; tap it to correct it.

@@ -127,10 +127,10 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // device saved: this panel's picker (LineupNameInput) stays typeable, unlike the
   // Lineups page's strict select-by-id dropdown (AdminLineup), so doSave resolves a
   // typed name to its member id against it. A squad that could not be read must
-  // not block loading OR saving the lineup: the resolver simply mints for every
-  // name it cannot find against an empty list, and bc-cse's `squadUnavailable`
-  // records that this happened, so doSave's warning names the real root cause
-  // instead of reporting every position the resolver then "failed" to match.
+  // not block loading OR saving the lineup: a Save waits for the read (bounded,
+  // operator decision V1), and without a list it saves every typed name by name
+  // only, adds no member, and its note says so in one sentence (U2);
+  // `squadUnavailable` is what puts the notice above the boxes.
   const form = useLineupForm({
     compId, teamId, matchId, positionKeys, password,
     matchLabel: match ? scoreRowMatchLabel(match) : "", teamName: team?.name || team?.Name,
@@ -273,12 +273,17 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // for the position. A name a member already carries is placed by the resolver, and
   // a named default is someone else, so neither is asked; a read that fails,
   // is not answered within SAVE_READ_MS, or is not asked at all while the browser
-  // is offline leaves the resolver's own rule, so the save reaches the outbox
-  // without waiting on the network. Answers the ids to add, by position key.
+  // is offline leaves the resolver's own rule. This read is the Save's second wait
+  // on the network, after the one for the team's members, and adds at most
+  // SAVE_READ_MS before the save reaches the outbox (none while offline). Asked only
+  // once the team's members were read and a list shown, of the list as that read left
+  // it (form.squadRef), not the one this render held. Answers the ids to add, by
+  // position key.
   const typedNamesAtDefaults = async ({ positions: composed, memberIds: composedIds, changed }) => {
+    const members = form.squadRef.current;
     const typedKeys = changed.filter(key => {
       const name = (composed[key] || "").trim();
-      return name && !composedIds[key] && !teamCarriesName(squadEntries, name);
+      return name && !composedIds[key] && !teamCarriesName(members, name);
     });
     if (typedKeys.length === 0 || isOffline()) return {};
     const open = { ...composed };
@@ -294,7 +299,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     clearTimeout(timer);
     const seated = {};
     typedKeys.forEach(key => {
-      const entry = squadEntries.find(e => e.id === places?.[key]);
+      const entry = members.find(e => e && e.id === places?.[key]);
       if (entry && !entry.name) seated[key] = entry.id;
     });
     return seated;
@@ -318,7 +323,15 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     try {
       const toSave = form.lineupToSave();
       const { positions: composed, changed } = toSave;
-      const composedIds = { ...toSave.memberIds, ...(kachinuki ? await typedNamesAtDefaults(toSave) : {}) };
+      // A typed name is resolved against the team's members, so it waits for their read
+      // (operator decision V1), under "Saving…", bounded by the read's deadline. A
+      // changed position that holds a name was typed or picked from the list, and a
+      // pick means the list was shown, so only a typed name ever waits. Without a list
+      // (the read failed or was not answered, whatever the cause) every typed name is
+      // saved by name only and no member is added.
+      const names = changed.some(key => (composed[key] || "").trim());
+      const listed = names ? await form.membersRead() : form.membersListed();
+      const composedIds = { ...toSave.memberIds, ...(kachinuki && listed ? await typedNamesAtDefaults(toSave) : {}) };
       // The lineup as the form shows it once the typed names are resolved, vacant
       // positions left out: the lineup the duplicate guard below is asked of. What is
       // sent is the positions the operator changed (changedLineupSave, below).
@@ -347,8 +360,8 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         // goes through the resolver with this id as the position's current
         // member, so it renames that member (a blank one) rather than the
         // slot seeded for the position, and never the wrong fighter.
-        const picked = pickedId ? squadEntries.find(e => e.id === pickedId) : null;
-        const unchanged = !!picked && (!v || v.toLowerCase() === picked.name.toLowerCase());
+        const picked = pickedId ? form.squadRef.current.find(e => e && e.id === pickedId) : null;
+        const unchanged = !!picked && (!v || v.toLowerCase() === (picked.name || "").toLowerCase());
         if (pickedId && unchanged) {
           positionsOut[key] = v;
           memberIdsOut[key] = pickedId;
@@ -357,15 +370,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           positionsForResolver[key] = v;
         }
       });
-      // A typed name is resolved against the team's members only once the read of them
-      // is over: while it is out, against no list, a new name would be minted where the
-      // position's seeded slot is free, and the name of a member the team has would be
-      // refused by the server as a second one. Nothing waits for that read (bc-evts
-      // stage 3 review 2, R1): while it is out the typed names are saved by name alone;
-      // after a read that failed they go on without the members, as they always did.
-      // The warning below says so either way.
-      const listed = form.membersReadOver();
-      const membersUnavailable = squadUnavailable || (Object.keys(positionsForResolver).length > 0 && !listed);
+      // The typed names that go by name only: every one, when no list was read (the
+      // note after the save says so, operator decisions V1 and U2).
+      const byNameOnly = !listed && Object.keys(positionsForResolver).length > 0;
       // The member the resolver will put each typed name on, asked of the list the
       // resolver is given (the team's members as the Save's read of them left them) through
       // the resolver's own decision (typedNameTarget). A minted member collides with
@@ -414,11 +421,11 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // behaves today. bc-cse: the failure is no longer discarded either --
       // `memberFailures` carries it through to the warning shown below on
       // a successful save.
-      // When the server said team-members.yaml cannot be read, nothing is resolved: an
-      // add would only be refused, so the typed names are saved by name alone and the
-      // note says so in the one sentence (operator decisions U1, U2).
+      // Without a list nothing is resolved (operator decision V1): against none a name
+      // the team has would be added again, and over a file the server cannot read an
+      // add would only be refused, so the typed names are saved by name only.
       let memberFailures = [];
-      if (Object.keys(positionsForResolver).length > 0 && listed && !form.membersUnreadable) {
+      if (Object.keys(positionsForResolver).length > 0 && listed) {
         try {
           const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
           if (typeof resolver === "function") {
@@ -489,7 +496,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           if (typeof showToast === "function") showToast("Match lineup saved");
         }, () => {});
         const composer = window.AdminLineupHelpers?.memberIdentityWarning;
-        if (typeof composer === "function") setLineupWarning(composer(memberFailures, membersUnavailable, teamSize));
+        if (typeof composer === "function") setLineupWarning(composer(memberFailures, byNameOnly, teamSize));
         return;
       }
       // Reflect exactly what was persisted: the whole lineup the server holds now,
@@ -498,7 +505,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       if (typeof showToast === "function") showToast("Match lineup saved");
       const composer = window.AdminLineupHelpers?.memberIdentityWarning;
       if (typeof composer === "function") {
-        setLineupWarning(composer(memberFailures, membersUnavailable, teamSize));
+        setLineupWarning(composer(memberFailures, byNameOnly, teamSize));
       }
     } catch (e) {
       setError(e?.message || "Failed to save lineup");

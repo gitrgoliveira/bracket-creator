@@ -204,43 +204,63 @@ describe('kachinuki bout 1 when the lineup could not be read', () => {
   });
 });
 
-// team-members.yaml unreadable (the members read fails, the lineups are fine): a name
-// typed on bout 1 goes on without the members (stage 3 review 3, F1): the member is
-// added and the lineup save naming it is queued behind the add. The server refuses the
-// add 409 team_members_unreadable, which is final: the outbox drops the add and sends
-// the save without its id (outbox_blockers.test.jsx), and the save lands by name
-// alone. Before, the add's 500 was retried for the page's life and held the save, and
-// every later write of the match, behind it. The row says the add was refused.
+// team-members.yaml unreadable (the members read is refused 409 team_members_unreadable,
+// the lineups are fine): a name typed on bout 1 waits for the read, and once it is refused
+// the name is saved in the match's lineup by name only and nobody is added (operator
+// decisions V1 and V2): an add would only be refused over a file the server cannot read.
+// The row says so in the one sentence once the save lands (U2).
 describe('kachinuki bout 1 when the team members could not be read', () => {
   const noticeText = () => [...document.querySelectorAll('[data-testid="team-editor-lineup-warning"]')].map((n) => n.textContent);
-  const SERVER_SENTENCE = 'The team members could not be read, so the team member was not saved. The organiser needs to check team-members.yaml in the tournament data.';
+  const UNREADABLE = 'The team members could not be read. The organiser needs to check team-members.yaml in the tournament data.';
 
-  it.each(['scheduled', 'running'])('a name typed on bout 1 of a %s match adds the member, and the refused add is said in the row', async (status) => {
-    window.API.fetchSquads = vi.fn().mockRejectedValue(new Error('internal error'));
-    let refuse;
-    window.API.addTeamMember = vi.fn(async (_c, _t, name, _p, opts) => {
-      refuse = () => opts.onRefusal(Object.assign(new Error(SERVER_SENTENCE), { code: 'team_members_unreadable', status: 409 }));
-      return answered({ id: 'new-1', index: 4 }, { name });
-    });
+  it.each(['scheduled', 'running'])('a name typed on bout 1 of a %s match is saved by name only, adding nobody', async (status) => {
+    window.API.fetchSquads = vi.fn().mockRejectedValue(Object.assign(new Error(UNREADABLE), { code: 'team_members_unreadable' }));
     let land;
     window.API.putMatchLineup = vi.fn(async (_c, _t, matchId, positions) => ({
       pending: true, settled: new Promise((r) => { land = () => r({ matchId, positions, memberIds: {} }); }),
     }));
     await mount(kachinukiMatch(status));
     await typeName(akaInput(), 'Maeda');
-    expect(window.API.addTeamMember, 'the add is sent once').toHaveBeenCalledTimes(1);
+    expect(window.API.addTeamMember, 'no member add is sent').not.toHaveBeenCalled();
+    expect(window.API.renameTeamMember).not.toHaveBeenCalled();
     expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
     const [, teamId, , positions, , memberIds, changed] = window.API.putMatchLineup.mock.calls[0];
     expect([teamId, changed]).toEqual(['team-A', ['1']]);
     expect(positions).toEqual({ '1': 'Maeda' });
-    expect(memberIds, 'queued behind the add, which the outbox strips once refused').toEqual({ '1': 'new-1' });
-    // The add goes first and is refused; the save then lands by name alone.
-    await act(async () => { refuse(); });
-    expect(noticeText(), 'the refused add, said in the row').toEqual([`Lineup saved, but Senpo (Maeda) could not be linked to a team member (${SERVER_SENTENCE}). Scores will still record normally.`]);
+    expect(memberIds, 'by name only').toBeUndefined();
+    expect(noticeText(), 'nothing is said before the save lands').toEqual([]);
     await act(async () => { land(); });
     await settle();
     expect(akaInput().value, 'bout 1 shows the name').toBe('Maeda');
     expect(noticeText(), 'once the save lands').toEqual(['Saved by name only: the team member list could not be loaded. Scores will still record normally.']);
+  });
+});
+
+// A name typed on bout 1 waits for the team's members (operator decision V1), and its
+// lineup save is queued only once the wait is over. Record bout and End match wait with
+// it, as Finish does on a regular sheet: an advance sent first would be worked out on a
+// lineup without that fighter.
+describe('kachinuki Record bout and End match while a name typed on bout 1 waits for the team\'s members', () => {
+  it('holds both until the members arrive and the name is saved', async () => {
+    let answer;
+    window.API.fetchSquads = vi.fn(() => new Promise((resolve) => { answer = resolve; }));
+    const bout1 = { position: 1, sideA: '', sideAMemberId: 'a1', sideB: '', sideBMemberId: 'b1', ipponsA: [], ipponsB: ['M'] };
+    await mount(kachinukiMatch('running', [bout1]));
+    const recordBout = () => [...document.querySelectorAll('.score-nav__actions button')].find((b) => b.textContent === 'Record bout');
+    const endMatch = () => document.querySelector('[data-testid="kachinuki-end-match-button"]');
+    expect(recordBout().disabled, 'a scored bout can be recorded').toBe(false);
+    expect(endMatch().disabled).toBe(false);
+
+    await typeName(akaInput(), 'Maeda');
+    expect(window.API.putMatchLineup, 'the name waits for the members').not.toHaveBeenCalled();
+    expect(recordBout().disabled, 'Record bout waits with it').toBe(true);
+    expect(endMatch().disabled, 'and End match').toBe(true);
+
+    await act(async () => { answer({ 'team-A': blank('a'), 'team-B': blank('b') }); });
+    await settle();
+    expect(window.API.putMatchLineup, 'the name is saved once the members are read').toHaveBeenCalledTimes(1);
+    expect(recordBout().disabled).toBe(false);
+    expect(endMatch().disabled).toBe(false);
   });
 });
 

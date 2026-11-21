@@ -1,15 +1,15 @@
 // The team score sheet keeps its own lists of each side's team members, and a name
-// typed in a bout row is resolved against the list of that side's team. Nothing a pick
-// does waits on the network (bc-evts stage 3 review 2, R1: "ALL goes to the outbox ...
-// but never blocks the UI"). The rules, in a real DOM:
+// typed in a bout row is resolved against the list of that side's team. The rules, in a
+// real DOM:
 //
-//  1. A name typed while the team's members are being read is saved by name alone, with
-//     no member id and the members-unavailable warning: resolved against none, a new name
-//     would be minted where the member's seeded slot is free instead of naming that slot,
-//     and the name of a member the team has would be refused by the server as a second
-//     member of that name. Once a list has been shown the name is placed by the member it
-//     belongs to; after a read that failed the sheet goes on without them, as it always
-//     did, and says so.
+//  1. A name typed while the team's members are being read waits for them (operator
+//     decision V1, bounded by the read's deadline), the row showing it meanwhile:
+//     resolved against none, a new name would be minted where the member's seeded slot
+//     is free instead of naming that slot, and the name of a member the team has would
+//     be refused by the server as a second member of that name. Once a list has been
+//     shown the name is placed by the member it belongs to, or added; after a read that
+//     failed or was not answered, whatever the cause, it is saved by name only, nobody
+//     is added, and the row says so in one sentence.
 //
 //  2. A side given another team (the feeding match of a knockout corrected on another
 //     device seats another team on it) holds nothing of the old team's members: they
@@ -171,20 +171,44 @@ async function openRead(match = teamMatch(), extra = {}) {
 // sheet takes that read's answer, not the one it made as it opened.
 const liveRead = () => memberReads[memberReads.length - 1];
 
-describe('team editor: a name typed before the team\'s members were read never waits for them', () => {
-  it('saves the name alone, with no member id and the warning, while the members are being read', async () => {
+const SAVED_BY_NAME_ONLY = 'Saved by name only: the team member list could not be loaded. Scores will still record normally.';
+const button = (root, text) => [...root.querySelectorAll('button')].find((b) => b.textContent.trim() === text);
+
+describe('team editor: a name typed before the team\'s members were read waits for them (operator decision V1)', () => {
+  it('waits while the members are being read, showing the name and holding Close, then places the member the team has by its id', async () => {
     const { container } = await openRead();
 
     await typeName(bout(container, 0, 'shiro'), 'Kai Mori');
 
+    expect(window.API.putMatchLineup, 'nothing is saved while the read is out').not.toHaveBeenCalled();
     expect(window.API.addTeamMember, 'nothing is minted against no list').not.toHaveBeenCalled();
-    expect(window.API.renameTeamMember).not.toHaveBeenCalled();
+    expect(bout(container, 0, 'shiro').value, 'the row shows the name it waits with').toBe('Kai Mori');
+    expect(button(container, 'Close').disabled, 'Close waits for it').toBe(true);
+    expect(button(container, 'Cancel').disabled, 'and Cancel').toBe(true);
+
+    await act(async () => { liveRead().resolve(teams(SHIRO_NAMED)); });
+    await flush();
+
+    expect(window.API.addTeamMember, 'Kai Mori is the member the team has, not a new one').not.toHaveBeenCalled();
     const [, teamId, , positions, , memberIds] = window.API.putMatchLineup.mock.calls[0];
     expect(teamId).toBe('team-B');
     expect(positions).toEqual({ senpo: 'Kai Mori' });
-    expect(memberIds, 'no id: the members were not read').toBeUndefined();
-    expect(notices(container)).toHaveLength(1);
-    expect(notices(container)[0]).toContain('team member list could not be loaded');
+    expect(memberIds).toEqual({ senpo: 'b2' });
+    expect(notices(container), 'a name linked to its member says nothing').toEqual([]);
+    expect(button(container, 'Close').disabled).toBe(false);
+  });
+
+  it('adds a name that is new to the team once the members arrive, and says nothing of a name only save', async () => {
+    const { container } = await openRead();
+    await typeName(bout(container, 0, 'shiro'), 'Newcomer');
+    expect(window.API.addTeamMember).not.toHaveBeenCalled();
+
+    await act(async () => { liveRead().resolve(teams(SHIRO_NAMED)); });
+    await flush();
+
+    expect(window.API.addTeamMember, 'added once the list shows').toHaveBeenCalledWith('comp1', 'team-B', 'Newcomer', '', expect.any(Object));
+    expect(window.API.putMatchLineup.mock.calls[0][5]).toEqual({ senpo: 'new-1' });
+    expect(notices(container), 'a name added to the team says nothing').toEqual([]);
   });
 
   it('places the member the team has by its id once the members were read', async () => {
@@ -217,23 +241,44 @@ describe('team editor: a name typed before the team\'s members were read never w
     expect(label(container, 0, 'shiro')).toBe('T2.1');
   });
 
-  it('goes on without the members when they could not be read, as it always did, and says so', async () => {
+  it.each([
+    ['failed', () => new TypeError('Failed to fetch')],
+    ['was refused because team-members.yaml cannot be read', () => Object.assign(new Error('The team members could not be read.'), { code: 'team_members_unreadable', status: 409 })],
+  ])('saves a name typed after the read %s by name only, adds nobody, and says so in one sentence', async (_why, error) => {
     const { container } = await openRead();
-    await act(async () => { liveRead().reject(new TypeError('Failed to fetch')); });
+    await act(async () => { liveRead().reject(error()); });
     await flush();
 
     await typeName(bout(container, 0, 'shiro'), 'Newcomer');
 
-    expect(window.API.addTeamMember, 'the name is added against no list, at once').toHaveBeenCalledWith('comp1', 'team-B', 'Newcomer', '', expect.any(Object));
-    expect(notices(container)).toHaveLength(1);
-    expect(notices(container)[0]).toContain('team member list could not be loaded');
+    expect(window.API.addTeamMember, 'no member is added without a list').not.toHaveBeenCalled();
+    expect(window.API.renameTeamMember).not.toHaveBeenCalled();
+    const [, teamId, , positions, , memberIds] = window.API.putMatchLineup.mock.calls[0];
+    expect(teamId).toBe('team-B');
+    expect(positions).toEqual({ senpo: 'Newcomer' });
+    expect(memberIds, 'by name only').toBeUndefined();
+    expect(notices(container)).toEqual([SAVED_BY_NAME_ONLY]);
+  });
+
+  it('saves a name that waited by name only once the read fails, and adds nobody', async () => {
+    const { container } = await openRead();
+    await typeName(bout(container, 0, 'shiro'), 'Newcomer');
+    expect(window.API.putMatchLineup).not.toHaveBeenCalled();
+
+    await act(async () => { liveRead().reject(new TypeError('Failed to fetch')); });
+    await flush();
+
+    expect(window.API.addTeamMember).not.toHaveBeenCalled();
+    const [, , , positions, , memberIds] = window.API.putMatchLineup.mock.calls[0];
+    expect(positions).toEqual({ senpo: 'Newcomer' });
+    expect(memberIds).toBeUndefined();
+    expect(notices(container)).toEqual([SAVED_BY_NAME_ONLY]);
   });
 
   // Stage 3 review 3, F1: a members read that is never answered is ended at the
-  // deadline of any bounded request, as one that fails is, so a name typed after it
-  // goes on without the members and says so, rather than being saved by name alone
-  // for the sheet's whole life.
-  it('goes on without the members once their read is not answered by its deadline, and says so', async () => {
+  // deadline of any bounded request, as one that fails is, so a name waiting for it
+  // goes on by name only and says so, rather than waiting for the sheet's whole life.
+  it('saves a name that waited by name only once the read is not answered by its deadline, and adds nobody', async () => {
     vi.useFakeTimers();
     const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(0); });
     let container;
@@ -243,15 +288,19 @@ describe('team editor: a name typed before the team\'s members were read never w
       });
       await act(async () => { competition.resolve(KNOCKOUT_DETAIL); });
       await settle();
-      await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS); });
       await type(bout(container, 0, 'shiro'), 'Newcomer');
+      await settle();
+      expect(window.API.putMatchLineup, 'it waits').not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS); });
       await settle();
     } finally {
       vi.useRealTimers();
     }
-    expect(window.API.addTeamMember, 'the read is over: the name is added against no list').toHaveBeenCalledWith('comp1', 'team-B', 'Newcomer', '', expect.any(Object));
-    expect(notices(container)).toHaveLength(1);
-    expect(notices(container)[0]).toContain('team member list could not be loaded');
+    expect(window.API.addTeamMember, 'the read is over without a list: nobody is added').not.toHaveBeenCalled();
+    const [, , , positions, , memberIds] = window.API.putMatchLineup.mock.calls[0];
+    expect(positions).toEqual({ senpo: 'Newcomer' });
+    expect(memberIds).toBeUndefined();
+    expect(notices(container)).toEqual([SAVED_BY_NAME_ONLY]);
   });
 
   // Stage 3 review 3, F2: a member whose add the server refused (or an operator
@@ -259,7 +308,7 @@ describe('team editor: a name typed before the team\'s members were read never w
   // takes it off the side's list, so it is never offered again.
   it('drops a member whose add never landed from the side\'s list', async () => {
     const { container } = await openRead();
-    await act(async () => { liveRead().reject(new TypeError('Failed to fetch')); });
+    await act(async () => { liveRead().resolve(teams(SHIRO_NAMED)); });
     await flush();
     await typeName(bout(container, 0, 'shiro'), 'Newcomer');
     expect(window.API.addTeamMember).toHaveBeenCalled();
@@ -275,6 +324,218 @@ describe('team editor: a name typed before the team\'s members were read never w
     const after = await offers(container, 0, 'shiro');
     expect(after.some((o) => o.includes('T2.6')), 'no member is offered under the id that never was').toBe(false);
     expect(after.some((o) => o.includes('Newcomer')), 'the name the row holds is still offered, by name').toBe(true);
+  });
+
+  // Two names typed on one side while the members are read both wait, and resume on the
+  // same answer. Each puts its own position on the lineup held, so neither wipes the other
+  // from view or takes the other's member id, with the saves only queued (the outbox
+  // answers pending, and the sheet shows each pick on the lineup it holds).
+  it('places two names typed on one side while the members are read, each on its own member', async () => {
+    window.API.putMatchLineup = vi.fn(async () => ({ pending: true, settled: new Promise(() => {}) }));
+    // The first name is new to the team, and its add answers last: its pick lands after
+    // the second's.
+    const add = deferred();
+    window.API.addTeamMember = vi.fn(() => add.promise);
+    const { container } = await openRead();
+    await typeName(bout(container, 0, 'shiro'), 'Newcomer');
+    await typeName(bout(container, 1, 'shiro'), 'Kai Mori');
+    expect(window.API.putMatchLineup, 'both wait').not.toHaveBeenCalled();
+    expect(bout(container, 0, 'shiro').value).toBe('Newcomer');
+    expect(bout(container, 1, 'shiro').value).toBe('Kai Mori');
+
+    await act(async () => { liveRead().resolve(teams(SHIRO_NAMED)); });
+    await flush();
+    await act(async () => { add.resolve({ id: 'new-1', index: 6, name: 'Newcomer' }); });
+    await flush();
+
+    const sent = window.API.putMatchLineup.mock.calls.map((c) => [c[3], c[5]]);
+    expect(sent).toEqual([
+      [{ jiho: 'Kai Mori' }, { jiho: 'b2' }],
+      [{ senpo: 'Newcomer' }, { senpo: 'new-1' }],
+    ]);
+    expect(bout(container, 0, 'shiro').value, 'the first name is shown').toBe('Newcomer');
+    expect(bout(container, 1, 'shiro').value, 'and the second still is').toBe('Kai Mori');
+    expect(label(container, 0, 'shiro'), 'the first holds the member it was given').toBe('T2.6');
+    expect(label(container, 1, 'shiro'), 'and so does the second').toBe('T2.2');
+    expect(notices(container)).toEqual([]);
+  });
+
+  it('puts back the one of two waiting names that is refused, and keeps the other', async () => {
+    window.API.putMatchLineup = vi.fn(async () => ({ pending: true, settled: new Promise(() => {}) }));
+    lineups = { 'team-B': { positions: { fukusho: 'Kai Mori' }, memberIds: { fukusho: 'b2' } } };
+    const { container } = await openRead();
+    await typeName(bout(container, 0, 'shiro'), 'Newcomer');
+    await typeName(bout(container, 1, 'shiro'), 'Kai Mori');
+    expect(bout(container, 1, 'shiro').value, 'shown while it waits').toBe('Kai Mori');
+
+    await act(async () => { liveRead().resolve(teams(SHIRO_NAMED)); });
+    await flush();
+
+    const sent = window.API.putMatchLineup.mock.calls.map((c) => [c[3], c[5]]);
+    expect(sent, 'only the name that is not fielded elsewhere is saved').toEqual([[{ senpo: 'Newcomer' }, { senpo: 'new-1' }]]);
+    expect(bout(container, 1, 'shiro').value, 'the refused name is put back').toBe('');
+    expect(bout(container, 0, 'shiro').value, 'the other stays').toBe('Newcomer');
+    expect(label(container, 0, 'shiro')).toBe('T2.6');
+    expect(bout(container, 3, 'shiro').value, 'the fighter already placed is where they were').toBe('Kai Mori');
+    expect(notices(container)).toEqual(['Kai Mori is already at Fukusho.']);
+  });
+
+  // A read made again (the password changed after a sign-in) gets a new wait: a name
+  // typed while it is out waits for its list instead of going by name only.
+  it('waits for a members read made again after one that failed', async () => {
+    const view = await openRead();
+    await act(async () => { liveRead().reject(new Error('Invalid password')); });
+    await flush();
+    const reads = memberReads.length;
+    await act(async () => {
+      view.rerender(<ScoreEditorModal match={teamMatch()} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="new-pw" />);
+    });
+    await flush();
+    expect(memberReads.length, 'the new password reads the members again').toBe(reads + 1);
+
+    await typeName(bout(view.container, 0, 'shiro'), 'Kai Mori');
+    expect(window.API.putMatchLineup, 'the name waits for the new read').not.toHaveBeenCalled();
+
+    await act(async () => { liveRead().resolve(teams(SHIRO_NAMED)); });
+    await flush();
+    expect(window.API.addTeamMember).not.toHaveBeenCalled();
+    expect(window.API.putMatchLineup.mock.calls[0][5], 'placed by its member').toEqual({ senpo: 'b2' });
+    expect(notices(view.container)).toEqual([]);
+  });
+
+  const clearBout = (root, n, color) => act(async () => {
+    fireEvent.click(root.querySelectorAll('.team-sub-match')[n].querySelector(`.team-sub-match__side--${color} .lineup-name__clear`));
+  });
+
+  // A later pick at the same position takes the place of a name still waiting there: the
+  // waiting one, once the list arrives, adds nobody, saves nothing and says nothing.
+  it('drops a waiting name the operator cleared during the wait', async () => {
+    const { container } = await openRead();
+    await typeName(bout(container, 0, 'shiro'), 'Kia Mori');
+    await clearBout(container, 0, 'shiro');
+    await flush();
+    expect(bout(container, 0, 'shiro').value).toBe('');
+
+    await act(async () => { liveRead().resolve(teams(SHIRO_NAMED)); });
+    await flush();
+
+    expect(window.API.addTeamMember, 'the typo is never added').not.toHaveBeenCalled();
+    expect(window.API.putMatchLineup.mock.calls.some((c) => c[3].senpo === 'Kia Mori'), 'nor saved over the clear').toBe(false);
+    expect(bout(container, 0, 'shiro').value, 'the box stays empty').toBe('');
+    expect(notices(container)).toEqual([]);
+    expect(button(container, 'Close').disabled, 'Close is free once the superseded pick is over').toBe(false);
+  });
+
+  it('saves only the second of two names typed at one position during the wait', async () => {
+    const { container } = await openRead();
+    await typeName(bout(container, 0, 'shiro'), 'Kia Mori');
+    await typeName(bout(container, 0, 'shiro'), 'Kai Mori');
+    expect(window.API.putMatchLineup, 'both wait').not.toHaveBeenCalled();
+
+    await act(async () => { liveRead().resolve(teams(SHIRO_NAMED)); });
+    await flush();
+
+    expect(window.API.addTeamMember, 'the typo is never added').not.toHaveBeenCalled();
+    const sent = window.API.putMatchLineup.mock.calls.map((c) => [c[3], c[5]]);
+    expect(sent).toEqual([[{ senpo: 'Kai Mori' }, { senpo: 'b2' }]]);
+    expect(bout(container, 0, 'shiro').value).toBe('Kai Mori');
+    expect(label(container, 0, 'shiro')).toBe('T2.2');
+    expect(notices(container)).toEqual([]);
+  });
+
+  it('adds and saves once for the same name typed twice at one position during the wait', async () => {
+    const { container } = await openRead();
+    await typeName(bout(container, 0, 'shiro'), 'Newcomer');
+    await typeName(bout(container, 0, 'shiro'), 'Newcomer');
+
+    await act(async () => { liveRead().resolve(teams(SHIRO_NAMED)); });
+    await flush();
+
+    expect(window.API.addTeamMember).toHaveBeenCalledTimes(1);
+    const sent = window.API.putMatchLineup.mock.calls.map((c) => [c[3], c[5]]);
+    expect(sent).toEqual([[{ senpo: 'Newcomer' }, { senpo: 'new-1' }]]);
+    expect(button(container, 'Close').disabled).toBe(false);
+  });
+
+  it('puts a refused retype back to what the position held before the first name', async () => {
+    lineups = { 'team-B': { positions: { senpo: 'Ren Abe', jiho: 'Kai Mori' }, memberIds: { senpo: 'b1', jiho: 'b2' } } };
+    const { container } = await openRead();
+    expect(bout(container, 0, 'shiro').value).toBe('Ren Abe');
+    await typeName(bout(container, 0, 'shiro'), 'Kia Mori');
+    await typeName(bout(container, 0, 'shiro'), 'Kai Mori');
+
+    await act(async () => { liveRead().resolve(teams(SHIRO_NAMED)); });
+    await flush();
+
+    expect(window.API.addTeamMember).not.toHaveBeenCalled();
+    expect(window.API.putMatchLineup).not.toHaveBeenCalled();
+    expect(notices(container)).toEqual(['Kai Mori is already at Jiho.']);
+    expect(bout(container, 0, 'shiro').value, 'not Kia Mori, which was only ever shown').toBe('Ren Abe');
+    expect(label(container, 0, 'shiro')).toBe('T2.1');
+    expect(button(container, 'Close').disabled).toBe(false);
+  });
+
+  // A name that waited is judged against the lineup held when the list arrives, not the one
+  // held when it was typed: a fighter taken off another position meanwhile is free to place.
+  it('places a waiting name on the member another position gave up while it waited', async () => {
+    window.API.putMatchLineup = vi.fn(async () => ({ pending: true, settled: new Promise(() => {}) }));
+    lineups = { 'team-B': { positions: { jiho: 'Kai Mori' }, memberIds: { jiho: 'b2' } } };
+    const { container } = await openRead();
+    expect(bout(container, 1, 'shiro').value).toBe('Kai Mori');
+
+    await typeName(bout(container, 0, 'shiro'), 'Kai Mori');
+    await clearBout(container, 1, 'shiro');
+    await flush();
+    expect(bout(container, 1, 'shiro').value, 'jiho was cleared while senpo waited').toBe('');
+
+    await act(async () => { liveRead().resolve(teams(SHIRO_NAMED)); });
+    await flush();
+
+    const senpo = window.API.putMatchLineup.mock.calls.filter((c) => 'senpo' in c[3]).map((c) => [c[3], c[5]]);
+    expect(senpo, 'placed on the member jiho gave up').toEqual([[{ senpo: 'Kai Mori' }, { senpo: 'b2' }]]);
+    expect(notices(container), 'not refused as fielded elsewhere').toEqual([]);
+    expect(bout(container, 0, 'shiro').value).toBe('Kai Mori');
+  });
+
+  // A typed name holds Close and Cancel until its lineup save is queued, not only until the
+  // members arrive: a member add it is waiting on still has the save to make.
+  it('holds Close until the waiting name\'s save is queued, past the members arriving', async () => {
+    const add = deferred();
+    window.API.addTeamMember = vi.fn(() => add.promise);
+    const { container } = await openRead();
+    await typeName(bout(container, 0, 'shiro'), 'Newcomer');
+
+    await act(async () => { liveRead().resolve(teams(SHIRO_NAMED)); });
+    await flush();
+    expect(window.API.addTeamMember).toHaveBeenCalled();
+    expect(window.API.putMatchLineup, 'the save waits for the add').not.toHaveBeenCalled();
+    expect(button(container, 'Close').disabled, 'Close still waits').toBe(true);
+    expect(button(container, 'Cancel').disabled, 'and Cancel').toBe(true);
+
+    await act(async () => { add.resolve({ id: 'new-1', index: 6, name: 'Newcomer' }); });
+    await flush();
+    expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
+    expect(button(container, 'Close').disabled, 'free once the save is queued').toBe(false);
+  });
+
+  // A save another position makes while a name waits answers the server's whole lineup,
+  // which does not hold the waiting name yet: the row keeps showing it, and it is saved
+  // once the list arrives.
+  it('keeps showing a waiting name when another position\'s save answers the server\'s lineup', async () => {
+    lineups = { 'team-B': { positions: { jiho: 'Kai Mori' }, memberIds: { jiho: 'b2' } } };
+    const { container } = await openRead();
+    await typeName(bout(container, 0, 'shiro'), 'Newcomer');
+    await clearBout(container, 1, 'shiro');
+    await flush();
+    expect(window.API.putMatchLineup.mock.calls.some((c) => 'jiho' in c[3]), 'the clear is saved at once').toBe(true);
+    expect(bout(container, 0, 'shiro').value, 'the waiting name is still shown').toBe('Newcomer');
+
+    await act(async () => { liveRead().resolve(teams(SHIRO_NAMED)); });
+    await flush();
+    const senpo = window.API.putMatchLineup.mock.calls.filter((c) => 'senpo' in c[3]).map((c) => [c[3], c[5]]);
+    expect(senpo).toEqual([[{ senpo: 'Newcomer' }, { senpo: 'new-1' }]]);
+    expect(bout(container, 0, 'shiro').value).toBe('Newcomer');
+    expect(notices(container)).toEqual([]);
   });
 
   it('places the name against the list shown once one has been shown, whatever read is out', async () => {
@@ -372,8 +633,8 @@ describe('team editor: a side given another team holds nothing of the old team\'
       expect(after).toHaveLength(5);
     });
 
-    // bc-evts stage 3 review 2, R1: nothing waits for the new team's members either.
-    it('saves a name typed for the new team by name alone while its members are being read, and by id once they are', async () => {
+    // Operator decision V1: a name typed for the new team waits for its members too.
+    it('holds a name typed for the new team while its members are being read, and saves it by id once they are', async () => {
       let view;
       await act(async () => { view = render(host('team-X', 'T3')); });
       await act(async () => { competition.resolve(KNOCKOUT_DETAIL); });
@@ -385,16 +646,14 @@ describe('team editor: a side given another team holds nothing of the old team\'
 
       await typeName(bout(document, 0, 'aka'), 'Yuri Two');
       expect(window.API.addTeamMember, 'nothing is minted against no list').not.toHaveBeenCalled();
-      expect(window.API.putMatchLineup.mock.calls[0][1]).toBe('team-Y');
-      expect(window.API.putMatchLineup.mock.calls[0][5], 'no id: the new team\'s members were not read yet').toBeUndefined();
+      expect(window.API.putMatchLineup, 'it waits for the new team\'s members').not.toHaveBeenCalled();
 
       await act(async () => { liveRead().resolve(everyTeam); });
       await flush();
-      await typeName(bout(document, 1, 'aka'), 'Yuri Two');
 
       expect(window.API.addTeamMember, 'Yuri Two is the member the new team has').not.toHaveBeenCalled();
-      expect(window.API.putMatchLineup.mock.calls[1][1]).toBe('team-Y');
-      expect(window.API.putMatchLineup.mock.calls[1][5]).toEqual({ jiho: 'y2' });
+      expect(window.API.putMatchLineup.mock.calls[0][1]).toBe('team-Y');
+      expect(window.API.putMatchLineup.mock.calls[0][5]).toEqual({ senpo: 'y2' });
     });
 
     it('lets a pick through when the side keeps its team', async () => {
@@ -605,7 +864,9 @@ describe('team editor: a side that carries only its name', () => {
   // name is saved without a member. A side takes its list only once its team is known: it
   // carries an id, or the roster named a participant for it. Nothing waits for that
   // (bc-evts stage 3 review 2, R1): before the roster arrives the side's lineup is not read
-  // and a pick is refused at once; once it names the team, a pick writes for it.
+  // and a pick is refused at once; once it names the team, a pick writes for it. A typed
+  // name waits for the team's members (operator decision V1), up to the deadline when the
+  // team is never known, and then goes by name only.
   describe('takes no members list until its team is known, and a pick writes for the team as it is known then', () => {
     it('takes none, refuses a name typed before the roster names the team, and writes the next under the participant id', async () => {
       await act(async () => { render(host(onlyName('Team N'))); });
@@ -667,20 +928,41 @@ describe('team editor: a side that carries only its name', () => {
       expect(window.API.putMatchLineup.mock.calls[0][5]).toEqual({ senpo: 'n2' });
     });
 
-    it('saves the name alone, with the warning, when the team is never known', async () => {
+    it('saves the name by name only, with the one sentence, once its wait ends when the team is never known', async () => {
       await act(async () => { render(host(onlyName('Team N'))); });
       await act(async () => { competition.resolve(roster()); });
       await flush();
       await act(async () => { memberReads.forEach((read) => read.resolve(lists)); });
       await flush();
 
-      await typeName(bout(document, 0, 'aka'), 'Nao Two');
+      vi.useFakeTimers();
+      try {
+        await type(bout(document, 0, 'aka'), 'Nao Two');
+        await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+        expect(window.API.putMatchLineup, 'the name waits for a list the side never takes').not.toHaveBeenCalled();
+        await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS); });
+      } finally {
+        vi.useRealTimers();
+      }
+      await flush();
 
       expect(window.API.addTeamMember, 'nothing is minted against no list').not.toHaveBeenCalled();
       expect(window.API.putMatchLineup.mock.calls[0][3]).toEqual({ senpo: 'Nao Two' });
       expect(window.API.putMatchLineup.mock.calls[0][5]).toBeUndefined();
-      expect(notices(document)).toHaveLength(1);
-      expect(notices(document)[0]).toContain('team member list could not be loaded');
+      expect(notices(document)).toEqual([SAVED_BY_NAME_ONLY]);
+
+      // The wait that reached its deadline is over: the next name does not wait again.
+      vi.useFakeTimers();
+      try {
+        await type(bout(document, 1, 'aka'), 'Nao Three');
+        await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+        expect(window.API.putMatchLineup, 'saved at once, by name only').toHaveBeenCalledTimes(2);
+        expect(button(document.body, 'Close').disabled, 'and nothing is held').toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(window.API.putMatchLineup.mock.calls[1][3]).toEqual({ jiho: 'Nao Three' });
+      expect(window.API.putMatchLineup.mock.calls[1][5]).toBeUndefined();
     });
   });
 });

@@ -6538,6 +6538,12 @@ paths:
                       type: array
                       items:
                         $ref: '#/components/schemas/TeamMember'
+        '400':
+          description: Malformed competition id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: '`invalid admin password`: missing or wrong.'
           content:

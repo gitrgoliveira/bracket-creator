@@ -1058,9 +1058,10 @@ describe('a lineup followed from another device that names a member created ther
   });
 });
 
-// A members list the panel could not read (team-members.yaml unreadable) is not a team
-// with no members: the panel says the list could not be loaded, in the Lineups page's
-// sentence, never "This team has no registered members".
+// A members list the panel could not read is not a team with no members: the panel says
+// the list could not be loaded, in the Lineups page's sentence (naming team-members.yaml
+// when the server says that file cannot be read), never "This team has no registered
+// members".
 describe('the at-court panel when the team members cannot be read', () => {
   it('says the members list could not be loaded, not that the team has none', async () => {
     api.fetchSquads.mockRejectedValue(new Error('internal error'));
@@ -1068,6 +1069,9 @@ describe('the at-court panel when the team members cannot be read', () => {
     const utils = await mountPanel();
 
     expect(utils.getByTestId('lineup-members-unavailable').textContent).toBe(MEMBERS_UNAVAILABLE_NOTICE);
+    // Operator decision V1: no member can be added then, so the sentence says what a
+    // typed name does instead, and warns of no second slot.
+    expect(MEMBERS_UNAVAILABLE_NOTICE).toBe('The team member list could not be loaded, so the list is not shown. You can still type names and save the lineup; they are saved by name only.');
     expect(utils.queryByText(/no registered members/)).toBeNull();
   });
 

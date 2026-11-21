@@ -19,7 +19,6 @@ const realReact = global.React;
 async function setupSuite() {
   const runtime = makeReactive();
   global.React = runtime.React;
-  global.window = global.window || {};
   global.window.isHikiwake = vi.fn((t) => t === 'hikiwake');
   vi.resetModules();
   const mod = await import('../match_scoreboard.jsx');

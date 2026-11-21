@@ -311,7 +311,7 @@ export async function resolveTypedMemberName(compId, teamId, key, value, squad, 
 // this exact value-in/body-out contract -- including "a mint failure never
 // blocks the write" -- is pinned directly, without mounting
 // TeamScoreEditorModal, which vitest's hook stubs cannot drive through a
-// full interaction (see tie_button_no_term.test.jsx). It lives here, not in
+// full interaction (see tie_button_no_term.node.test.jsx). It lives here, not in
 // the scoring module, because it IS the lineup-write authority every other
 // writer (the Up Next panel's save, the Lineups page's add path) already
 // pointed at in prose -- a resolver pointing at a scoring component module

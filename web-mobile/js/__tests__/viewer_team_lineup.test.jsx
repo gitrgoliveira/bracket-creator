@@ -190,7 +190,6 @@ describe('viewer: BoutSubRow canonical layout (mp-13y)', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     global.window.isHikiwake = vi.fn(() => false);
     vi.resetModules();
     ({ BoutSubRow } = await import('../viewer.jsx'));
@@ -306,7 +305,6 @@ describe('display: findCurrentBoutIndex (mp-13y)', () => {
   beforeEach(async () => {
     vi.resetModules();
     global.React = { createElement: vi.fn(() => ({})), useState: vi.fn(() => [null, vi.fn()]), useEffect: vi.fn(), useMemo: (f) => f(), useRef: vi.fn(() => ({ current: null })), useCallback: (f) => f, memo: (c) => c };
-    global.window = global.window || {};
     global.window.renderQR = vi.fn();
     ({ findCurrentBoutIndex } = await import('../display.jsx'));
   });

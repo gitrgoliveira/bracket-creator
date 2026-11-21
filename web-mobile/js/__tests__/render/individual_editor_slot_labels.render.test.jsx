@@ -14,7 +14,7 @@ import { installWindowStubs } from '../helpers/stub_globals.js';
 //
 // The array index stays the identity for key/removePt, and "slot 0 is the
 // OUTER cell" stays the convention in code comments and in
-// result_slot.test.jsx. This pins the USER-FACING number only: both sides
+// result_slot.node.test.jsx. This pins the USER-FACING number only: both sides
 // count 1 then 2 in reading order.
 
 const STUBBED_GLOBALS = {

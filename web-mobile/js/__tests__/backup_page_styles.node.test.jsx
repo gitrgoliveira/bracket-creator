@@ -3,7 +3,7 @@
 // breadcrumb above it is tappable and legible.
 //
 // jsdom lays nothing out, so this pins the rules in the stylesheet (the
-// pattern of operator_tap_floor.test.jsx); the acceptance is the browser
+// pattern of operator_tap_floor.node.test.jsx); the acceptance is the browser
 // measurement on a phone.
 
 import { describe, it, expect } from 'vitest';

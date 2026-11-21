@@ -46,7 +46,6 @@ describe('a team-match name mark survives clipping (bc-cse #4)', () => {
     beforeEach(async () => {
       runtime = makeReactive();
       global.React = runtime.React;
-      global.window = global.window || {};
       global.window.matchScoreStr = vi.fn(() => '');
       global.window.boutMiddle = vi.fn(() => 'vs');
       global.window.queueLabelCompact = null;
@@ -100,7 +99,6 @@ describe('a team-match name mark survives clipping (bc-cse #4)', () => {
     beforeEach(async () => {
       runtime = makeReactive();
       global.React = runtime.React;
-      global.window = global.window || {};
       global.window.matchScoreStr = vi.fn(() => '');
       global.window.queueLabelCompact = null;
       global.window.teamMatchMarks = vi.fn(() => ({ shiro: '', aka: 'Fus.' }));

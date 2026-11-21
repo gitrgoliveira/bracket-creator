@@ -11,13 +11,20 @@
 //     the server judges them), asserted explicitly;
 //   - no write naming the id reaches the server before the add that mints it;
 //   - nothing stalls (no tab holds a write at the end) and no write is lost.
+//
+// This module is the gate's harness. The rows (`ALL`) are split round-robin over
+// the shard files `minted_member_permutations.shard-<k>-of-<n>.test.jsx`, each of
+// which calls `defineMintedShard(import.meta.url)`, so vitest runs the slices in
+// parallel workers. The guard `minted_member_permutations.shards.test.jsx` pins
+// the shard files, the row count, and that the slices together are `ALL`.
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import path from 'node:path';
-import { FETCH_TIMEOUT_MS } from '../write_result.jsx';
+import { FETCH_TIMEOUT_MS } from '../../write_result.jsx';
+import { shardOf, shardFromUrl } from './shards.js';
 
 // Loaded by its file path under a query per tab, so each tab is its own
 // instance of the module.
-const CLIENT = path.resolve(__dirname, '../api_client.jsx');
+const CLIENT = path.resolve(__dirname, '../../api_client.jsx');
 
 const MATCH = {
     id: 'm1', compId: 'c1', status: 'running', court: '', modifiedAt: 1,
@@ -362,7 +369,8 @@ function wrongOf(row) {
     return null;
 }
 
-const ALL = [];
+// Every row the gate runs, `[scenario, write, timing, twoTab]`, in order.
+export const ALL = [];
 for (const sc of Object.keys(S)) {
     for (const w of Object.keys(WRITES)) {
         ALL.push([sc, w, 'T1', false]);
@@ -377,54 +385,67 @@ for (const sc of Object.keys(S)) {
     }
 }
 
-describe('a member id this device minted, in every state its add can reach, named by every write', () => {
-    let saved;
-    beforeAll(() => {
-        vi.useFakeTimers();
-        saved = { fetch: global.fetch, ES: global.EventSource, ls: global.localStorage };
-        global.EventSource = class { constructor() { this.close = () => {}; } };
-        global.EventSource.OPEN = 1;
-    });
-    // The outbox says what it keeps and retries; none of it is under test here.
-    let quietened = [];
-    beforeEach(() => {
-        quietened = [vi.spyOn(console, 'warn').mockImplementation(() => {}), vi.spyOn(console, 'error').mockImplementation(() => {})];
-    });
-    afterEach(() => { for (const s of quietened) s.mockRestore(); });
-    afterAll(() => {
-        vi.useRealTimers();
-        global.fetch = saved.fetch;
-        global.EventSource = saved.ES;
-        global.localStorage = saved.ls;
-    });
+// One shard of the gate: the k-th of n round-robin slices of `ALL`, k and n
+// read from the calling file's own name. It keeps the gate's shape: one `it`
+// per scenario the slice holds, in scenario order, each over that scenario's
+// rows in the slice in `ALL` order, and last the aggregate over the slice's
+// rows, which needs the scenario `it`s to have run first.
+export function defineMintedShard(url) {
+    const { k, n } = shardFromUrl(url);
+    const mine = shardOf(ALL, k, n);
+    describe('a member id this device minted, in every state its add can reach, named by every write', () => {
+        let saved;
+        beforeAll(() => {
+            vi.useFakeTimers();
+            saved = { fetch: global.fetch, ES: global.EventSource, ls: global.localStorage };
+            global.EventSource = class { constructor() { this.close = () => {}; } };
+            global.EventSource.OPEN = 1;
+        });
+        // The outbox says what it keeps and retries; none of it is under test here.
+        let quietened = [];
+        beforeEach(() => {
+            quietened = [vi.spyOn(console, 'warn').mockImplementation(() => {}), vi.spyOn(console, 'error').mockImplementation(() => {})];
+        });
+        afterEach(() => { for (const s of quietened) s.mockRestore(); });
+        afterAll(() => {
+            vi.useRealTimers();
+            global.fetch = saved.fetch;
+            global.EventSource = saved.ES;
+            global.localStorage = saved.ls;
+        });
 
-    const rows = [];
-    for (const sc of Object.keys(S)) {
-        it(`${sc}: no id stripped from a member the server holds, no dead id sent, nothing stalls or is lost`, async () => {
-            const wrong = [];
-            for (const args of ALL.filter((a) => a[0] === sc)) {
-                const row = await runOne(...args);
-                rows.push(row);
-                const bad = wrongOf(row);
-                if (bad) wrong.push(`${row.w} ${row.timing}${row.twoTab ? ' two tabs' : ''}: ${bad} [${row.each.join(',')}]${row.queued.length ? ` queued=${row.queued.join(',')}` : ''}`);
-            }
-            expect(wrong).toEqual([]);
-        }, 120000);
-    }
+        const rows = [];
+        for (const sc of Object.keys(S)) {
+            const scRows = mine.filter((a) => a[0] === sc);
+            if (scRows.length === 0) continue;
+            it(`${sc}: no id stripped from a member the server holds, no dead id sent, nothing stalls or is lost`, async () => {
+                const wrong = [];
+                for (const args of scRows) {
+                    const row = await runOne(...args);
+                    rows.push(row);
+                    const bad = wrongOf(row);
+                    if (bad) wrong.push(`${row.w} ${row.timing}${row.twoTab ? ' two tabs' : ''}: ${bad} [${row.each.join(',')}]${row.queued.length ? ` queued=${row.queued.join(',')}` : ''}`);
+                }
+                expect(wrong).toEqual([]);
+            }, 120000);
+        }
 
-    it('says what the rule accepts, explicitly: a dead id goes only where every read failed', () => {
-        const counts = {};
-        for (const r of rows) counts[r.outcome] = (counts[r.outcome] || 0) + 1;
-        const wrongRows = rows.filter((r) => wrongOf(r));
-        const bySc = {};
-        for (const r of wrongRows) bySc[r.sc] = (bySc[r.sc] || 0) + 1;
-        const accepted = rows.filter((r) => r.rule && !wrongOf(r) && !r.outcome.startsWith('OK'));
-        console.info(`minted member permutations: ${rows.length} runs, ${wrongRows.length} wrong, ${accepted.length} rule-accepted`,
-            JSON.stringify(counts), JSON.stringify(bySc));
-        const dead = rows.filter((r) => r.outcome === 'DEAD_ID' || r.outcome === 'DEAD_MEMBER_WRITE');
-        expect(dead.every((r) => r.rule === 'readFails')).toBe(true);
-        const stripped = rows.filter((r) => r.outcome === 'STRIPPED_EXISTING' || r.outcome === 'LOST');
-        expect(stripped.every((r) => r.rule === 'commitAfterRead')).toBe(true);
-        expect(rows.length).toBe(ALL.length);
+        it('says what the rule accepts, explicitly: a dead id goes only where every read failed', () => {
+            const counts = {};
+            for (const r of rows) counts[r.outcome] = (counts[r.outcome] || 0) + 1;
+            const wrongRows = rows.filter((r) => wrongOf(r));
+            const bySc = {};
+            for (const r of wrongRows) bySc[r.sc] = (bySc[r.sc] || 0) + 1;
+            const accepted = rows.filter((r) => r.rule && !wrongOf(r) && !r.outcome.startsWith('OK'));
+            console.info(`minted member permutations, shard ${k} of ${n}: ${rows.length} runs, ${wrongRows.length} wrong, ${accepted.length} rule-accepted`,
+                JSON.stringify(counts), JSON.stringify(bySc));
+            const dead = rows.filter((r) => r.outcome === 'DEAD_ID' || r.outcome === 'DEAD_MEMBER_WRITE');
+            expect(dead.every((r) => r.rule === 'readFails')).toBe(true);
+            const stripped = rows.filter((r) => r.outcome === 'STRIPPED_EXISTING' || r.outcome === 'LOST');
+            expect(stripped.every((r) => r.rule === 'commitAfterRead')).toBe(true);
+            expect(rows.length).toBe(mine.length);
+            expect(rows.map((r) => [r.sc, r.w, r.timing, r.twoTab])).toEqual(
+                Object.keys(S).flatMap((sc) => mine.filter((a) => a[0] === sc)));
+        });
     });
-});
+}

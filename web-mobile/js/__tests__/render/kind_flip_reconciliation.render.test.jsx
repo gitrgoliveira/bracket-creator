@@ -23,7 +23,7 @@ import { installSettingsHarness, mountSettings } from './settings_mount_harness.
 //   teamSize 0, rejected by ValidateTeamMatchType.
 //
 // `normalizeConfigForKind` itself is pinned by unit tests in
-// competition_shape.test.jsx; those prove the FUNCTION is correct in
+// competition_shape.node.test.jsx; those prove the FUNCTION is correct in
 // isolation. They do NOT prove the kind pills on the Settings page actually
 // feed it -- a regression that re-wired the pills to skip normalization at
 // the saveNow boundary would leave every one of those unit tests green.
@@ -142,7 +142,7 @@ describe('bc-symm: the Settings kind pills route through normalizeConfigForKind'
     // teamMatchType at all) leaves this at the stored "kachinuki" instead,
     // which ValidateTeamMatchType rejects below teamSize 2 -- so this line
     // fails whenever the WIRING regresses, not merely when the function
-    // does (which competition_shape.test.jsx already covers in isolation).
+    // does (which competition_shape.node.test.jsx already covers in isolation).
     expect(
       payload.teamMatchType,
       'the PUT still carries the stale teamMatchType "kachinuki": ValidateTeamMatchType on the server rejects ' +

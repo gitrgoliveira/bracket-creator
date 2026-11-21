@@ -2,7 +2,7 @@
 // from internal/domain/score_event.go and internal/engine/score_replay.go, the
 // mark ids, and applyPending (what a board shows: the server's last confirmed
 // match with this device's pending taps on top). The replay itself is pinned
-// against Go by score_replay_golden.test.jsx.
+// against Go by score_replay_golden.node.test.jsx.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';

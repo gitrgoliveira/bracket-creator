@@ -2137,10 +2137,18 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
         expect(stored.find(([key]) => key.includes('mforce'))[1].payload).not.toHaveProperty('forceDownstreamReopen');
 
         // A reload: a fresh module rehydrates the stored entry and replays it.
+        // The module sends the replay while it loads, before the import below
+        // hands it back, so the refusal is held until the test has subscribed:
+        // under the vmThreads pool the import takes enough turns for an
+        // unheld refusal to settle first, and with no editor listening the
+        // outbox tells it through the queue alert instead (_tellRefusal), so
+        // the listener never heard it.
         const replays = [];
+        let answerReplay;
+        const replayAnswered = new Promise((resolve) => { answerReplay = resolve; });
         mockFetch((_url, opts) => {
             replays.push(JSON.parse(opts.body));
-            return Promise.resolve({
+            return replayAnswered.then(() => ({
                 ok: false,
                 status: 409,
                 json: () => Promise.resolve({
@@ -2151,12 +2159,13 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
                     displaced: 'Aoki Taro',
                     qualifierChange: [{ pool: 'Pool A', rank: 1, place: '1st', from: { name: 'Aoki Taro' }, to: { name: 'Bob' } }],
                 }),
-            });
+            }));
         });
         vi.resetModules();
         const m = await import('../api_client.jsx');
         const failures = [];
         const unsubFail = m.subscribeTerminalWriteFailed((info) => failures.push(info));
+        answerReplay();
         await tick(50);
         unsubFail();
         warnSpy.mockRestore();

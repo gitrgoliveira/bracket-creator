@@ -1,30 +1,7 @@
-import { vi, beforeEach, afterEach } from 'vitest';
+import { vi } from 'vitest';
 import './vitest.setup.storage.js';
-
-// Fail tests that produce unexpected console.warn or console.error.
-// Tests that intentionally trigger warnings mock console themselves
-// (vi.spyOn(console, 'warn').mockImplementation(...)), which replaces
-// the spy installed here, so the afterEach check only fires for
-// genuinely unexpected output.
-let warnSpy, errorSpy;
-
-beforeEach(() => {
-  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-});
-
-afterEach(() => {
-  const warns = warnSpy.mock?.calls ?? [];
-  const errors = errorSpy.mock?.calls ?? [];
-  warnSpy.mockRestore();
-  errorSpy.mockRestore();
-  if (warns.length > 0) {
-    throw new Error(`Unexpected console.warn (${warns.length} call(s)):\n${warns.map((a) => a.join(' ')).join('\n')}`);
-  }
-  if (errors.length > 0) {
-    throw new Error(`Unexpected console.error (${errors.length} call(s)):\n${errors.map((a) => a.join(' ')).join('\n')}`);
-  }
-});
+// The console.warn/console.error guard lives in one module, shared with the node project.
+import './vitest.setup.console.js';
 
 // Mock React since it's used as a global in the browser
 let _idSeq = 0;

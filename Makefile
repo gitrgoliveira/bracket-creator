@@ -6,8 +6,8 @@ BIN_PATH := ./bin
 GO_VERSION := 1.27.4
 # The test runs give way to other work; empty it to run at full priority:
 # make go/test NICE=
-# Only the two `go test` lines use it (the heavy phase); lint, the JS tests and
-# the security scans run at normal priority.
+# The two `go test` lines and the two JS test runs (js/test, web-mobile and web)
+# use it (the heavy phases); lint and the security scans run at normal priority.
 NICE ?= nice -n 10
 # The test runs collect garbage less often, trading memory for CPU: measured
 # on 8 cores, the Go step 61 s to 49 s, the race step 239 s to 201 s, with the
@@ -210,8 +210,8 @@ js/security: js/sec ## Run all Javascript security checks
 
 js/test: js/deps ## Run JavaScript unit tests
 	@echo "Running JavaScript tests..."
-	@cd web-mobile && NODE_NO_WARNINGS=1 npm test
-	@cd web && NODE_NO_WARNINGS=1 npm test
+	@cd web-mobile && NODE_NO_WARNINGS=1 $(NICE) npm test
+	@cd web && NODE_NO_WARNINGS=1 $(NICE) npm test
 
 js/check-imports: web-mobile/node_modules/.package-lock.json ## Check named imports of every web-mobile module resolve, CHECK_MODULES matches the folder, script tags agree, no module reads a cycle sibling while it loads
 	@echo "Checking cross-module imports..."

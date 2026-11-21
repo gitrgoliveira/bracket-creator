@@ -12,7 +12,7 @@
 // a glob like *.jsx) opened a phantom block that swallowed source to the next
 // "*/". match_scoreboard.jsx kept 8,355 of its 51,347 bytes that way, so the
 // repo-wide sweeps below read almost none of it. Pinned by retentionRatio.
-// competition_parity.test.jsx carried an independent copy of this same
+// competition_parity.node.test.jsx carried an independent copy of this same
 // block-first bug; it now imports stripComments from here instead.
 //
 // Line comments are still matched from the line START, so a "https://" in
@@ -67,7 +67,7 @@ export const cssBlock = (css, selector) => {
 // admin_schedule_page.jsx, ...) would read those too. So only the entries
 // listed in SPLIT_ENTRIES have a family; every other module is its own, and
 // adding an entry to the list is a deliberate act that
-// source_family.test.jsx pins to the exact modules it reads.
+// source_family.node.test.jsx pins to the exact modules it reads.
 
 /** The entries that were split into `<stem>_*.jsx` modules. */
 export const SPLIT_ENTRIES = ['api_client.jsx', 'admin_scoring_team.jsx', 'admin_shiaijo.jsx'];

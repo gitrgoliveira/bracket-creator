@@ -4,7 +4,7 @@
   "forge": "github",
   "issues": "beads",
   "gate": "make go/test",
-  "targetedTests": "go -C <wt> test -run TestName ./internal/<pkg>/... ; npm --prefix <wt>/web-mobile test -- js/__tests__/<file>.test.jsx ; npm --prefix <wt>/web-mobile run test:render -- js/__tests__/render/<file>.render.test.jsx (never cd; the full gate only before claiming done or pushing)",
+  "targetedTests": "go -C <wt> test -run TestName ./internal/<pkg>/... ; npm --prefix <wt>/web-mobile test -- js/__tests__/<file>. ; npm --prefix <wt>/web-mobile run test:render -- js/__tests__/render/<file>.render.test.jsx (never cd; the full gate only before claiming done or pushing)",
   "evidence": "make docs/screenshots SINCE=main (or make docs/media SINCE=main) for docs images; PR screenshots from a real browser through the running app's UI (make run-mobile) via the pr-screenshots skill, never injected data",
   "docsBuild": "make docs/build",
   "prTemplate": ".github/pull_request_template.md",

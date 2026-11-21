@@ -1,7 +1,7 @@
 // bc-pnum: extend the squad member label to the team scoring surfaces.
 //
 // TeamScoreEditorModal cannot be mounted in vitest (see
-// tie_button_no_term.test.jsx's header / build_inline_lineup_write.test.jsx),
+// tie_button_no_term.node.test.jsx's header / build_inline_lineup_write.test.jsx),
 // so this pins the pure logic the row renderer composes at each of its two
 // call sites (renderReadOnlyBout, the editable rowSides builder) via
 // admin_scoring_team.jsx's `squadLabelFor`:

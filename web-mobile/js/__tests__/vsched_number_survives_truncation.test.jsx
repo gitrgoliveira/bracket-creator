@@ -35,7 +35,6 @@ describe('the competitor number is a chip, not trailing text', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     global.window.matchScoreStr = vi.fn(() => '');
     global.window.boutMiddle = vi.fn(() => 'vs');
     global.window.queueLabelCompact = null;

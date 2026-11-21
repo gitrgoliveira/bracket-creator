@@ -6,7 +6,6 @@ import { compMatches } from '../viewer_utils.jsx';
 // find-my-matches / schedule alongside the final.
 describe('compMatches: bronze (3rd-place) knockout', () => {
   beforeEach(() => {
-    global.window = global.window || {};
     global.window.roundLabel = (i, n) => (i === n - 1 ? 'Final' : `Round ${i + 1}`);
     global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
   });

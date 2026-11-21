@@ -21,7 +21,6 @@ describe('bc-cse: TWMatch score cell is live while running, not just at completi
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     global.window.queueLabelCompact = null;
     vi.resetModules();
     // Side-effect import: publishes the real window.matchScoreStr that

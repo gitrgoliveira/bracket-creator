@@ -266,7 +266,7 @@ export function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {})
       }
       // The one emoji the app keeps: document.title is drawn by the browser's
       // own chrome (the tab strip), which page fonts and SVG cannot reach.
-      // Allow-listed by emoji_free.test.jsx.
+      // Allow-listed by emoji_free.node.test.jsx.
       const titlePrefix = m.status === "running" ? "🔴 NOW: " : "(1) Your match is next: ";
       document.title = titlePrefix + (originalTitleRef.current || "Tournament");
     }

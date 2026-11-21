@@ -3,7 +3,7 @@
 // picker (submitInlineLineup, inside TeamScoreEditorModal in
 // admin_scoring_team.jsx) sends to putMatchLineup. Pinned directly here
 // rather than through the editor: TeamScoreEditorModal cannot be mounted in
-// vitest (see tie_button_no_term.test.jsx's header) because the hook stubs
+// vitest (see tie_button_no_term.node.test.jsx's header) because the hook stubs
 // only support initial renders and this flow needs a full interaction.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

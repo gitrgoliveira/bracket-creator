@@ -42,7 +42,6 @@ describe('ResetPasswordForm', () => {
     vi.resetModules();
     ({ ResetPasswordForm } = await import('../reset.jsx'));
 
-    global.window = global.window || {};
     global.window.API = { resetPassword: vi.fn(async () => true) };
     global.window.location = { pathname: '/reset', origin: 'http://test' };
 

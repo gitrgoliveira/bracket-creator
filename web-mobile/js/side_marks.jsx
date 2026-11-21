@@ -11,7 +11,7 @@
 // evaluate FIRST, so a path from the console to bracket.jsx would overwrite the
 // stub (the console's header states the rule). The helpers used to be read off
 // `window` there, behind a guard that painted nothing when the global was
-// missing; they are imported from here instead. side_marks_leaf.test.jsx pins
+// missing; they are imported from here instead. side_marks_leaf.node.test.jsx pins
 // the one-import rule.
 //
 // bracket.jsx imports these six, keeps every `window.X = X` line (the display

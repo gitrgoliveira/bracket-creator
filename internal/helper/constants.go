@@ -1,5 +1,11 @@
 package helper
 
+// WorkbookFont is the one font family every workbook is set in: the default
+// font and every cell style. Arial is on Windows and macOS, and LibreOffice on
+// Linux prints it in Liberation Sans, which has Arial's widths, so a sheet
+// lays out alike in Excel and in the Export PDFs.
+const WorkbookFont = "Arial"
+
 // MaxPlayersPerTree is the maximum leaf count on a single tree sheet.
 // 16 players form a balanced bracket that fits on one A4 landscape page.
 const MaxPlayersPerTree = 16

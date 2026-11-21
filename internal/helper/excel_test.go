@@ -1443,7 +1443,7 @@ func TestCreateNamesToPrint_LongNameWraps(t *testing.T) {
 	}{
 		{"Men's Individual", false, 110},
 		{"European Kendo Championship Mens Individual X", false, 110}, // 45 characters
-		{strings.Repeat("Kendo Open ", 6)[:60], true, 47},
+		{strings.Repeat("Kendo Open ", 6)[:60], true, 52},
 	} {
 		f := excelize.NewFile()
 		f.NewSheet("data")

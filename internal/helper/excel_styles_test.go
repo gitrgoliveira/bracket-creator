@@ -97,7 +97,7 @@ func TestNamesToPrintColumnsFitOnePage(t *testing.T) {
 
 // TestCompetitionTagFit pins the competition-name tag's sizing rule, measured
 // in LibreOffice (see competitionTagFitConstant): one line shrunk to fit from
-// 110pt up to 45 characters, then wrapped at 370/sqrt(characters) points
+// 110pt up to 45 characters, then wrapped at 410/sqrt(characters) points
 // rounded down, counting characters, not bytes. A change to either constant
 // must be measured again, not just made to pass here.
 func TestCompetitionTagFit(t *testing.T) {
@@ -110,11 +110,11 @@ func TestCompetitionTagFit(t *testing.T) {
 		{strings.Repeat("x", 39), false, 110},
 		{strings.Repeat("W", 45), false, 110},
 		{strings.Repeat("Ö", 45), false, 110}, // 90 bytes, 45 characters
-		{strings.Repeat("W", 46), true, 54},
-		{strings.Repeat("x", 60), true, 47},
-		{strings.Repeat("x", 100), true, 37},
-		{strings.Repeat("x", 200), true, 26},
-		{strings.Repeat("x", 1000), true, 11},
+		{strings.Repeat("W", 46), true, 60},
+		{strings.Repeat("x", 60), true, 52},
+		{strings.Repeat("x", 100), true, 41},
+		{strings.Repeat("x", 200), true, 28},
+		{strings.Repeat("x", 1000), true, 12},
 	} {
 		wrap, size := competitionTagFit(tc.tag)
 		assert.Equalf(t, tc.wrap, wrap, "%d characters wraps", len([]rune(tc.tag)))
@@ -147,7 +147,7 @@ func TestGetCompetitionTagStyle(t *testing.T) {
 	assert.False(t, style.Alignment.WrapText)
 	assert.Equal(t, "center", style.Alignment.Horizontal)
 	assert.Equal(t, "center", style.Alignment.Vertical)
-	assert.Equal(t, "Calibri", style.Font.Family)
+	assert.Equal(t, "Arial", style.Font.Family)
 	assert.Equal(t, 110.0, style.Font.Size)
 	assert.Len(t, style.Border, 4)
 
@@ -159,7 +159,7 @@ func TestGetCompetitionTagStyle(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, style.Alignment.WrapText)
 	assert.False(t, style.Alignment.ShrinkToFit)
-	assert.Equal(t, 37.0, style.Font.Size)
+	assert.Equal(t, 41.0, style.Font.Size)
 }
 
 // styleCacheHolds reports whether the style cache still has an entry for the

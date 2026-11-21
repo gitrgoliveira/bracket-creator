@@ -327,7 +327,7 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool, poolCoords map[string]cellC
 
 	// Pool header style: bold italic, 12 pt, silver fill, thick borders, right-aligned.
 	headerCellStyle, err := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Family: "Calibri", Bold: true, Italic: true, Size: 12},
+		Font: &excelize.Font{Family: WorkbookFont, Bold: true, Italic: true, Size: 12},
 		Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"C0C0C0"}},
 		Border: []excelize.Border{
 			{Type: "left", Style: 2, Color: "000000"},
@@ -342,7 +342,7 @@ func AddPoolsToSheet(f *excelize.File, pools []Pool, poolCoords map[string]cellC
 	}
 	// Pool content style: 12 pt, thick borders on all sides.
 	contentCellStyle, err := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Family: "Calibri", Size: 12},
+		Font: &excelize.Font{Family: WorkbookFont, Size: 12},
 		Border: []excelize.Border{
 			{Type: "left", Style: 2, Color: "000000"},
 			{Type: "right", Style: 2, Color: "000000"},

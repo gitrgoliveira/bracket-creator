@@ -292,6 +292,7 @@ examples: go/build ## Build locally and create example files
 	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -t 5 -f ./test-data/mock_data_small.csv --title-prefix "Knockout Example Small" -n K -o ./knockout-example-small.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -r -p 3 -w 2 -c 2 -f ./test-data/mock_data_medium_zekken.csv --title-prefix "Pools Example Medium" -n K -o ./pools-example-medium.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 -f ./test-data/mock_data_medium_zekken.csv --title-prefix "Knockout Example Medium" -n K -o ./knockout-example-medium.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-pools -d -p 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_medium_teams.csv --title-prefix "Pools Example Medium Teams" -n K -o ./pools-example-medium-teams.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_large_zekken.csv --title-prefix "Pools Example Large Teams" -n K -o ./pools-example-large-teams.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_large_zekken.csv --title-prefix "Pools Example Large Teams Max Size" -n K -o ./pools-example-large-teams-max-size.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -c 2 -f ./test-data/mock_data_large_zekken.csv --title-prefix "Pools Example Large Max Size" -n K -o ./pools-example-large-max-size.xlsx

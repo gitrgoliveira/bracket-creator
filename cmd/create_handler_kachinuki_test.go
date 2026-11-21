@@ -379,6 +379,12 @@ func TestCreateHandler_WithoutTeamMatchTypeMatchesTheExamples(t *testing.T) {
 			"playersPerPool": {"3"}, "winnersPerPool": {"2"}, "courts": {"1"}, "teamMatches": {"3"},
 			"titlePrefix": {"Pools Example Teams Of 3 Round Robin"}, "numberPrefix": {"K"},
 		}},
+		// create-pools -d -p 3 -w 2 -t 5 -c 2, teams of five on two shiaijo
+		{"pools-example-medium-teams.xlsx", "mock_data_medium_teams.csv", url.Values{
+			"tournamentType": {"pools"}, "determined": {"on"},
+			"playersPerPool": {"3"}, "winnersPerPool": {"2"}, "courts": {"2"}, "teamMatches": {"5"},
+			"titlePrefix": {"Pools Example Medium Teams"}, "numberPrefix": {"K"},
+		}},
 		// create-knockout -d -t 5 (two shiaijo by default)
 		{"knockout-example-small.xlsx", "mock_data_small.csv", url.Values{
 			"tournamentType": {"knockout"}, "determined": {"on"}, "courts": {"2"}, "teamMatches": {"5"},

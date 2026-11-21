@@ -82,6 +82,12 @@ const sharedResolve = {
 //    against 66.0 s; the shards already end well inside the wall.
 //  - fewer workers (maxWorkers: 4, under forks): 108.6 s. The cores are
 //    saturated.
+// CI reads this pool too (no --pool flag in validate.yaml). Measured on CI
+// (ubuntu-latest, 4 cores, 16 GB), two runs of one commit, the whole suite in
+// one job: vmThreads 187 s and 178 s, peak summed RSS 6.2 and 6.5 GB (40 % of
+// the runner); forks 227 s and 352 s; threads 193 s and 215 s. Under vmThreads,
+// 2 to 4 jobs gave 83 to 50 s; one job was kept because the check run waits
+// for its slowest job (`validate`) anyway.
 // Re-measure before changing any of it.
 const POOL = 'vmThreads';
 export default defineConfig({

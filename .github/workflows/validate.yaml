@@ -168,64 +168,38 @@ jobs:
       fail-fast: false
       matrix:
         # name: job name and coverage file coverage-<name>.txt. flag: the Codecov
-        # flag. upload: whether the job uploads coverage. path: the package
-        # pattern to test; a measurement entry may have no path and carry
-        # exclude instead, the top-level internal package names joined by "|"
-        # that it leaves out of ./internal/...
+        # flag. path: the package pattern to test; the "internal" jobs split
+        # ./internal/... in three, each package whole in one job, and the rest
+        # entry carries exclude instead, the top-level internal package names
+        # joined by "|" that it leaves out. All three upload under the flag
+        # "internal", so Codecov merges them into one internal figure.
         #
-        # TEMPORARY MEASUREMENT LAYOUT (replaced once the job counts are
-        # chosen): "internal" stays as the control and the only internal
-        # coverage upload; the six internal-* entries below it time three
-        # layouts of the same package set, each job alone on its runner.
-        #   layout 2 = internal-engine + internal-rest-2
-        #   layout 3 = internal-engine + internal-mobileapp + internal-rest-3
-        #   layout 4 = internal-engine + internal-mobileapp + internal-helper
-        #              + internal-rest-4
+        # Measured on this runner, two CI runs of the same commit (slowest
+        # "Run tests" step): one job for all of internal took 259 s and 271 s;
+        # engine, mobileapp and the rest in three jobs took 226 s and 242 s. A
+        # package is never split, so no layout goes below engine alone (158 to
+        # 175 s). A fourth job (helper apart) timed the same as three, and two
+        # jobs (engine apart) were unsteady: 201 s and 291 s.
         packages:
           - name: cmd
             flag: cmd
-            upload: true
             path: ./cmd/...
             timeout: 20m
-          - name: internal
-            flag: internal
-            upload: true
-            path: ./internal/...
-            timeout: 10m
-          - name: integration
-            flag: integration
-            upload: true
-            path: ./tests/...
-            timeout: 10m
           - name: internal-engine
-            flag: internal-engine
-            upload: false
+            flag: internal
             path: ./internal/engine/...
             timeout: 10m
           - name: internal-mobileapp
-            flag: internal-mobileapp
-            upload: false
+            flag: internal
             path: ./internal/mobileapp/...
             timeout: 10m
-          - name: internal-helper
-            flag: internal-helper
-            upload: false
-            path: ./internal/helper/...
-            timeout: 10m
-          - name: internal-rest-2
-            flag: internal-rest-2
-            upload: false
-            exclude: engine
-            timeout: 10m
-          - name: internal-rest-3
-            flag: internal-rest-3
-            upload: false
+          - name: internal-rest
+            flag: internal
             exclude: engine|mobileapp
             timeout: 10m
-          - name: internal-rest-4
-            flag: internal-rest-4
-            upload: false
-            exclude: engine|mobileapp|helper
+          - name: integration
+            flag: integration
+            path: ./tests/...
             timeout: 10m
     steps:
       - name: Checkout Source
@@ -260,7 +234,6 @@ jobs:
           go test $PKGS -timeout=${{ matrix.packages.timeout }} -race -coverprofile=coverage-${{ matrix.packages.name }}.txt -covermode=atomic
 
       - name: Upload coverage to Codecov (${{ matrix.packages.name }})
-        if: matrix.packages.upload
         uses: codecov/codecov-action@v7
         with:
           files: ./coverage-${{ matrix.packages.name }}.txt
@@ -274,116 +247,22 @@ jobs:
   # | |_| |___) |   | |  __/\__ \ |_
   #  \___/|____/    |_|\___||___/\__|
   #
-  # TEMPORARY MEASUREMENT LAYOUT (replaced once the job counts are chosen).
-  # web-mobile's vitest (unit, node and render projects, so missing window.*
-  # references in component render paths are caught in CI) runs as a matrix of
-  # (pool, job count, job index): forks and vmThreads at 1, 2, 3 and 4 jobs,
-  # plus one whole-suite threads job. "1/1" is the whole suite in one job, the
-  # control. Every job names its pool on the command line, so the timing does
-  # not depend on the pool vitest.config.js holds, and every job prints the
-  # peak of its process tree's summed RSS, so a job that dies of memory is told
-  # from one that fails a test. The job totals of one count must sum to the
-  # control's. web/'s tests and the lint steps are in test-js-web-lint below,
-  # so they run once, not once per job.
+  # Runs both JS suites. web-mobile (unit, node and render projects) so missing
+  # window.* references in component render paths are caught in CI; web/
+  # because the CLI wrapper's form validation restates rules the Go side owns
+  # (the legal shiaijo counts among them), and a restatement nothing executes
+  # drifts silently.
+  #
+  # One job, and the pool comes from web-mobile/vitest.config.js (vmThreads),
+  # so CI runs the pool the local gate runs and no --pool flag appears here.
+  # Measured on this runner (ubuntu-latest, 4 cores, 16 GB), two CI runs of the
+  # same commit, "Run JS tests" step, whole suite in one job:
+  #   vmThreads 187 s and 178 s (peak summed RSS 6.2 and 6.5 GB, 40 % of the
+  #   runner's memory); forks 227 s and 352 s; main's last run took 360 s.
+  # Splitting the suite in 2 to 4 jobs under vmThreads gave 83 to 50 s, but the
+  # check run waits for the slowest job anyway, `validate` (about 260 s), so one
+  # job costs no wait and one runner. Re-measure before splitting it again.
   test-js:
-    name: test-js (${{ matrix.pool }} ${{ matrix.index }}/${{ matrix.total }})
-    permissions:
-      contents: read
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { pool: forks, index: 1, total: 1 }
-          - { pool: forks, index: 1, total: 2 }
-          - { pool: forks, index: 2, total: 2 }
-          - { pool: forks, index: 1, total: 3 }
-          - { pool: forks, index: 2, total: 3 }
-          - { pool: forks, index: 3, total: 3 }
-          - { pool: forks, index: 1, total: 4 }
-          - { pool: forks, index: 2, total: 4 }
-          - { pool: forks, index: 3, total: 4 }
-          - { pool: forks, index: 4, total: 4 }
-          - { pool: vmThreads, index: 1, total: 1 }
-          - { pool: vmThreads, index: 1, total: 2 }
-          - { pool: vmThreads, index: 2, total: 2 }
-          - { pool: vmThreads, index: 1, total: 3 }
-          - { pool: vmThreads, index: 2, total: 3 }
-          - { pool: vmThreads, index: 3, total: 3 }
-          - { pool: vmThreads, index: 1, total: 4 }
-          - { pool: vmThreads, index: 2, total: 4 }
-          - { pool: vmThreads, index: 3, total: 4 }
-          - { pool: vmThreads, index: 4, total: 4 }
-          - { pool: threads, index: 1, total: 1 }
-    steps:
-      - name: Checkout Source
-        uses: actions/checkout@v7
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: "26"
-          cache: npm
-          cache-dependency-path: web-mobile/package-lock.json
-
-      - name: Install JS dependencies (web-mobile)
-        run: cd web-mobile && npm ci
-
-      - name: Run JS tests (${{ matrix.pool }} ${{ matrix.index }}/${{ matrix.total }})
-        working-directory: web-mobile
-        env:
-          POOL: ${{ matrix.pool }}
-          INDEX: ${{ matrix.index }}
-          TOTAL: ${{ matrix.total }}
-        run: |
-          set -u
-          peak_file="$(mktemp)"
-          echo 0 > "$peak_file"
-          npm test -- "--pool=${POOL}" "--shard=${INDEX}/${TOTAL}" &
-          root=$!
-          # Sample the summed RSS of the test command and everything below it
-          # about every half second, and keep the peak.
-          (
-            peak=0
-            while true; do
-              kb=$(ps -eo pid=,ppid=,rss= | awk -v root="$root" '
-                { parent[$1] = $2; rss[$1] = $3 }
-                END {
-                  keep[root] = 1
-                  grew = 1
-                  while (grew) {
-                    grew = 0
-                    for (p in parent)
-                      if (!(p in keep) && (parent[p] in keep)) { keep[p] = 1; grew = 1 }
-                  }
-                  for (p in keep) sum += rss[p]
-                  print sum + 0
-                }')
-              if [ "${kb:-0}" -gt "$peak" ]; then
-                peak=$kb
-                echo "$peak" > "$peak_file"
-              fi
-              sleep 0.5
-            done
-          ) &
-          sampler=$!
-          status=0
-          wait "$root" || status=$?
-          kill "$sampler" 2>/dev/null || true
-          wait "$sampler" 2>/dev/null || true
-          peak_mib=$(( $(cat "$peak_file") / 1024 ))
-          echo "Peak summed RSS (${POOL} ${INDEX}/${TOTAL}): ${peak_mib} MiB"
-          echo "Peak summed RSS (${POOL} ${INDEX}/${TOTAL}): ${peak_mib} MiB" >> "$GITHUB_STEP_SUMMARY"
-          exit "$status"
-
-  # Runs once, whatever the job counts above: web/'s tests (the CLI wrapper's
-  # form validation restates rules the Go side owns, the legal shiaijo counts
-  # among them, and a restatement nothing executes drifts silently) and the
-  # same lint and import checks `make go/test` runs locally. Before the lint
-  # step CI ran none of them, so a PR pushed without the local gate merged
-  # green with lint errors.
-  test-js-web-lint:
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -403,12 +282,18 @@ jobs:
       - name: Install JS dependencies (web-mobile)
         run: cd web-mobile && npm ci
 
+      - name: Run JS tests (unit, node and render)
+        run: cd web-mobile && npm test
+
       - name: Install JS dependencies (web)
         run: cd web && npm ci
 
       - name: Run web tests
         run: cd web && npm test
 
+      # The same lint and import checks `make go/test` runs locally. Before
+      # this step CI ran none of them, so a PR pushed without the local gate
+      # merged green with lint errors.
       - name: Lint JS and check cross-module imports
         run: make js/lint js/check-imports
 

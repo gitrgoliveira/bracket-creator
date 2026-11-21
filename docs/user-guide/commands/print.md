@@ -48,7 +48,7 @@ Provide **exactly one**:
 | Type | Output |
 |------|--------|
 | `registration` | The data sheet from every workbook |
-| `names` | The "Names to Print" sheets, A3 landscape, with title pages. Each sheet also opens with a page of three competition tags when the workbook was made with a title prefix |
+| `names` | The "Names to Print" sheets, A3 landscape, with title pages. Each sheet also opens with a page of three competition tags. A workbook from `create-pools` or `create-knockout` has them only when it was made with a title prefix; a workbook built from `--tournament-data` always has them |
 | `tags` | The competitor "Tags" sheets, with title pages (team workbooks excluded). Tags carry a [QR code](../organisers/run-tournament.md#export-and-print) when the tournament's public URL is set. |
 | `pools-trees` | Pool Draw + Tree sheets (a participant booklet), page-numbered |
 | `full-bracket` | Pool Draw + Pool/Elimination Matches + Trees, page-numbered |

@@ -951,6 +951,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#when-the-team-member-list-cannot-be-loaded" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When the team member list cannot be loaded
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#incomplete-and-uneven-teams" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2339,6 +2350,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#when-the-team-member-list-cannot-be-loaded" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When the team member list cannot be loaded
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#incomplete-and-uneven-teams" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2473,7 +2495,8 @@
 <li>The lineup entered for that match.</li>
 <li>The latest lineup the team had before it: one entered for an earlier match of the team, or its <strong>Starting lineup</strong>.</li>
 </ol>
-<p>The lineup panel for a match says where the lineup it shows comes from: <strong>Lineup for this match</strong>, <strong>Same as</strong> the earlier match it is carried from, or <strong>Starting lineup</strong>. The score sheet, the viewer, the court display, the streaming overlay and the Kachinuki Detail sheet of the export all use the same lineup.</p>
+<p>The lineup panel for a match says where the lineup it shows comes from: <strong>Lineup for this match</strong>, <strong>Same as</strong> the earlier match it is carried from, or <strong>Starting lineup</strong>. The score sheet, the viewer, the court display, the streaming overlay and the Kachinuki Detail sheet of the export all use the same lineup. In the panel, a box that holds a team member reads with the member's number, for example "T1.3 Sano", or "T1.3" alone while that member has no name yet; before the draw gives the team a number it reads "Slot 3 Sano".</p>
+<p>A kachinuki team with no saved lineup fights in member number order: member 1 first, then each member up to the team size, whether or not the member has a name yet. A reserve fights only where you place them, in the lineup or on a bout; number order never seats one. A saved lineup that leaves places empty has those places filled the same way, by the lowest-numbered member up to the team size that the lineup does not already place elsewhere. In the lineup panel of a kachinuki match, each empty place shows in amber the member who fights there if you change nothing, for example "T1.1 Ishida". Amber means the place is open to editing and holds that member by default. The default is only shown: nothing is saved until you pick someone, and picking a member replaces it. After each pick the panel works out the other defaults again, so they follow what you have chosen. While it is working them out, or if it cannot, an empty place shows a plain "Add player…" box; the panel tries again a few seconds later, up to three times. Typing a name over a default whose member has no name yet gives that member the name, so nobody new is added to the team. Fixed-order team matches keep an empty place as an empty box.</p>
 <p><img alt="The Lineups tab: a team and lineup selector above a completed fighting order, with a competitor picked for each of the five positions (Senpo, Jiho, Chuken, Fukusho, Taisho) from a numbered list, and the Team members list beneath it with a Rename and a Clear name control on each named position." src="../../../screenshots/team-lineup.png" /></p>
 <p>To go back to the previous match's lineup, choose <strong>Use the previous match's lineup</strong>, on the <strong>Lineups</strong> page or at the top of the lineup panel. It appears while the lineup shown is the match's own, asks first, and removes that lineup, so the match carries the team's previous lineup again. Every later match that has no lineup of its own follows it.</p>
 <p>Saving a lineup writes only the positions you changed. If someone saves a change to another position of the same lineup from a different device, both changes are kept, whichever save arrives first, even when yours is sent later because this device was offline. If you both changed the same position, the change made last is kept, whichever arrives last. The first time you save a match's own lineup, the positions you did not change keep what the match carried when you made your change, so a change to the starting lineup or to an earlier match's lineup that was made before yours still reaches them when it arrives later, and one made after yours does not. A save made while this device is offline says "Not sent yet: saved on this device, and sent when the connection returns." and is sent once the connection is back.</p>
@@ -2533,6 +2556,69 @@ sheet a winner-stays-on competition adds to its export.</p>
 position by its place in the order alone, Slot 1 upwards. A five-person team
 runs to Slot 7, its five positions plus the two reserves. The numbered form
 appears once the draw is generated.</p>
+<h3 id="when-the-team-member-list-cannot-be-loaded">When the team member list cannot be loaded</h3>
+<p>The match lineup panel, the Lineups page and the score sheet each read the
+team's members when they open. A name you type is matched against that list,
+so all three wait for it before they place the name, for up to about 12
+seconds:</p>
+<ul>
+<li>On the lineup panel, <strong>Save lineup</strong> reads <strong>Saving…</strong> and the boxes are
+  locked.</li>
+<li>On the Lineups page, <strong>Add</strong> reads <strong>Adding…</strong>, and <strong>Save lineup</strong> and the
+  other positions are greyed out.</li>
+<li>On the score sheet, the name stays in its box while <strong>Close</strong>, <strong>Cancel</strong>,
+  <strong>Prev</strong> and <strong>Next</strong> are greyed out, with <strong>Finish</strong> (or <strong>Save
+  correction</strong>) and the representative bout buttons on a regular team match,
+  or <strong>Record bout</strong> and <strong>End match</strong> on a kachinuki match.</li>
+</ul>
+<p>Once the list arrives, the name picks its member, names a blank numbered place,
+or adds a member, as described under <a href="#team-members">Team members</a>, with no
+note.</p>
+<p>If the list cannot be loaded, whatever the reason (a dropped connection, a list
+that does not arrive in time, or a team members file the server cannot read),
+the name you typed is saved in the lineup by that name alone, and nobody is
+added to the team. When a typed name was saved that way, one note says so:
+"Saved by name only: the team member list could not be loaded. Scores will
+still record normally." On the Lineups page, <strong>+ Add new member…</strong> places the
+name in its position by name only while the list cannot be loaded, shown as
+"Unresolved:" followed by the name, and <strong>Save lineup</strong> saves it so.</p>
+<p>A name saved by name only is not linked to any team member. In a kachinuki
+match, where a team fights in member number order wherever its lineup names
+nobody, it does not count as the member it names, so number order can seat
+that same person a second time. Once the team members can be read again,
+whether the connection came back or the file was corrected, open the lineup
+and pick the team member in place of each name saved by name only, or, for a
+person who is not a team member yet, add them with <strong>+ Add new member…</strong> on
+the Lineups page or type the name again on the score sheet. On the Lineups page each such name shows as "Unresolved:" followed by
+the name; on the lineup panel or the score sheet you pick the member from the
+list in that place. Do this before the next <strong>Record bout</strong>.</p>
+<p>While the list cannot be loaded, the lineup panel shows a plain "Add player…"
+box in each empty place, and the Lineups page shows the notice where the
+<strong>Team members</strong> list would be. Both say one of two things. When the list only failed to
+load: "The team member list could not be loaded, so the list is not shown. You
+can still type names and save the lineup; they are saved by name only." When
+the server cannot read the file: "The team members could not be read, so the
+list is not shown and no member can be added or renamed. You can still type
+names and save the lineup; they are saved by name only. The organiser needs to
+check team-members.yaml in the tournament data."</p>
+<p>A team's members are kept in <code>competitions/&lt;competition id&gt;/team-members.yaml</code>
+inside the data folder: the folder given with <code>--folder</code> or
+<code>TOURNAMENT_DATA_DIR</code> when the app was started, or with neither, the folder it
+was started from (refer to the <a href="../../commands/mobile-app/#flags">mobile-app command</a>).
+When it cannot be read, the server log has an error line, "team-members.yaml
+cannot be read", with the request path, which names the competition, and the
+reason. Correct the file, or ask whoever runs the server to. The app reads it
+again the next time a screen asks for the team's members, for example when you
+open the lineup panel, the Lineups page or the score sheet again, with no
+restart. Then pick the team member in place of each name saved by name only,
+as described above.</p>
+<p>Restoring the competition from a backup also brings its team members back, but
+it puts back every result and lineup of the competition as the backup holds
+them too, so anything recorded since the backup was made is lost or changed.
+Check the restore plan first: it says how many recorded results each
+competition will lose or change. Refer to
+<a href="../backup-and-restore/#restoring-from-a-file">Restoring from a file</a> and
+<a href="../backup-and-restore/#what-is-restored-and-what-is-not">What is restored and what is not</a>.</p>
 <h3 id="incomplete-and-uneven-teams">Incomplete and uneven teams</h3>
 <p>Team sizes are not fixed. A lineup can leave any position empty. Teams in the same competition can field different numbers of fighters, and the app never blocks a save or disqualifies a team over a vacancy. Fill in as many positions as each team brings and save. You can edit a lineup at any time, including after the match has started, so you can complete or adjust the order as a round is running. Every bout still needs a result or a decision. When only one team leaves a position empty, the court operator records a <strong>Fusensho</strong> for the team whose fighter is present. When both teams leave a position empty, the court operator records that bout as a <strong>Tie</strong>, which counts as an individual draw for both teams. An empty position also shows a box directly on its score sheet row, labelled with its own number, so you can name the fighter without leaving the bout you are scoring.</p>
 <p>If your rules require a full team or set conditions on which positions may be left open, apply those off the app. The app treats the lineup you save as authoritative and scores against it.</p>
@@ -2602,21 +2688,22 @@ appears once the draw is generated.</p>
 <h3 id="scoring-a-kachinuki-encounter">Scoring a kachinuki encounter</h3>
 <p>Kachinuki encounters are scored one bout at a time. Score the current bout, then choose one of two actions:</p>
 <ul>
-<li><strong>Record bout</strong> keeps the encounter going. The winner stays on and the app adds the next pairing; if the bout was a draw, both fighters retire and the next pair comes up. When the app cannot work out who fights next, for example when a team brings fighters it has not seen, use <strong>Add next bout manually</strong> and pick or type both players on the new row.</li>
+<li><strong>Record bout</strong> keeps the encounter going. The winner stays on and the app adds the next pairing; if the bout was a draw, both fighters retire and the next pair comes up. When the app cannot work out who fights next, for example when a team brings fighters it has not seen, use <strong>+ Add next bout manually</strong> and pick or type both players on the new row.</li>
 <li><strong>End match</strong> finishes the encounter on the last scored bout. The winning team is the one that won that bout; you do not pick it, the app reads it from the score.</li>
 </ul>
-<p>The first bout is always fought by the first fighter in each team's lineup for that match, so you do not pick them on the score sheet. Every device scoring the match shows the same two names, and points scored on the first bout from two devices at the same moment both count. When an encounter starts, the app keeps each team's lineup at that moment as the encounter's own lineup. From then on, changing a team's starting lineup, or an earlier match's lineup, no longer changes this encounter; it still reaches the team's matches that have not started, exactly as before. A change to the starting lineup that was made before the encounter started still counts for it when it reaches the app later, for example from a device that was offline, and one made after the encounter started never does, even if it reached the app first. To change who fought, change this match's own lineup, on the first bout's name box, in the lineup panel or on the <strong>Lineups</strong> page: the first bout is renamed on every device and keeps its points, even after the encounter has finished, and so is a fighter who won it and stayed on for the bouts after it. A finished encounter's result does not change. A fighter you picked yourself for a later bout is left as you picked them. The match's <strong>History</strong> lists each name the app set, for example "Bout 1: Shiro fighter set from the lineup (Baba)". <strong>Use the previous match's lineup</strong> on an encounter that has started counts as changing its lineup: the encounter takes the lineup its team would carry at that moment as its own, and its first bout is renamed on every device; a later change to the starting lineup does not change it again. An encounter sent back to the queue keeps the lineup it started with, and starting it again changes nothing. An encounter that started before your app was updated keeps the names its first bout has until you save its own lineup.</p>
-<p>A bout you add with <strong>Add next bout manually</strong> reaches the other devices with the first thing you enter on it, a point or a fighter, so two devices that add the same next bout at the same moment both keep what they entered on it. After <strong>Remove this bout</strong>, the same bout is added again by picking its fighters: a point entered there by a device that had not yet seen the removal is not counted, that device is told, and the point is kept in the match's <strong>History</strong>.</p>
+<p>The first bout is always fought by the first fighter in each team's lineup for that match (member 1 when the team has no lineup), so you do not pick them on the score sheet. Every device scoring the match shows the same two names, and points scored on the first bout from two devices at the same moment both count. When an encounter starts, the app keeps each team's lineup at that moment as the encounter's own lineup. From then on, changing a team's starting lineup, or an earlier match's lineup, no longer changes this encounter; it still reaches the team's matches that have not started, exactly as before. A change to the starting lineup that was made before the encounter started still counts for it when it reaches the app later, for example from a device that was offline, and one made after the encounter started never does, even if it reached the app first. To change who fought, change this match's own lineup, on the first bout's name box, in the lineup panel or on the <strong>Lineups</strong> page: the first bout is renamed on every device and keeps its points, even after the encounter has finished, and so is a fighter who won it and stayed on for the bouts after it. A finished encounter's result does not change. A fighter you picked yourself for a later bout is left as you picked them. The match's <strong>History</strong> lists each name the app set, for example "Bout 1: Shiro fighter set from the lineup (Baba)". <strong>Use the previous match's lineup</strong> on an encounter that has started counts as changing its lineup: the encounter takes the lineup its team would carry at that moment as its own, and its first bout is renamed on every device; a later change to the starting lineup does not change it again. An encounter sent back to the queue keeps the lineup it started with, and starting it again changes nothing.</p>
+<p>A bout you add with <strong>+ Add next bout manually</strong> reaches the other devices with the first thing you enter on it, a point or a fighter, so two devices that add the same next bout at the same moment both keep what they entered on it. After <strong>Remove this bout</strong>, the same bout is added again by picking its fighters: a point entered there by a device that had not yet seen the removal is not counted, that device is told, and the point is kept in the match's <strong>History</strong>.</p>
 <p>The bouts you have already fought stay on screen as read-only rows above the current bout. The encounter reads like a regular team sheet, and you can check the winner-stays-on order at a glance.</p>
-<p>Just above the current bout, a short line shows each team's fighter on the shiai-jo, how many fighters its lineup has left after them, and who they are, next fighter first, for example "Shiro: T1.2 Ueda on, 1 left (T1.3 Sato) · Aka: T2.1 Kudo on, last fighter". Each fighter carries their team member number, as on the bout rows. The line is read from the lineup and the bouts recorded so far, the same reading the app pairs the next bout from. It is a guide only: it never ends the encounter, and you still decide when the encounter is over. A team with no lineup entered shows only its fighter on, and when neither team has one the line is not shown.</p>
+<p>Just above the current bout, a short line shows each team's fighter on the shiai-jo, how many fighters its lineup has left after them, and who they are, next fighter first, for example "Shiro: T1.2 Ueda on, 1 left (T1.3 Sato) · Aka: T2.1 Kudo on, last fighter". Each fighter carries their team member number, as on the bout rows. The line is read from the lineup and the bouts recorded so far, the same reading the app pairs the next bout from. It is a guide only: it never ends the encounter, and you still decide when the encounter is over. A team with no lineup entered is read in <a href="#team-lineups">member number order</a>, and the places a saved lineup leaves empty are filled in that order too.</p>
 <p>While a bout is being fought, the line names both of its fighters as on, whatever the score. After <strong>Record bout</strong>, the fighter who lost goes off and the winner stays on, and after a draw both go off. Some cases read differently:</p>
 <ul>
-<li><strong>A team has nobody left.</strong> When <strong>Record bout</strong> takes the last fighter in a team's lineup off, no pairing follows. The bout you recorded joins the read-only rows, and one line stands where the current bout was, for example "Aka has no fighters left. End match finishes the encounter." <strong>Record bout</strong> is greyed out, because that bout is already recorded; if the team does have another fighter, use <strong>Add next bout manually</strong>. You can still tap the recorded bout to correct it like any earlier bout: a correction that changes who won, or makes it a draw, makes it the current bout again, to record anew, while a different technique for the same winner does not. Until the editor has read the lineups, when it is opened again or on another device, the bout you recorded shows as the current bout, and tapping <strong>Record bout</strong> again changes nothing.</li>
+<li><strong>A team has nobody left.</strong> When <strong>Record bout</strong> takes the last fighter in a team's lineup off, no pairing follows. The bout you recorded joins the read-only rows, and one line stands where the current bout was, for example "Aka has no fighters left. End match finishes the encounter." <strong>Record bout</strong> is greyed out, because that bout is already recorded; if the team does have another fighter, use <strong>+ Add next bout manually</strong>. You can still tap the recorded bout to correct it like any earlier bout: a correction that changes who won, or makes it a draw, makes it the current bout again, to record anew, while a different technique for the same winner does not. Until the editor has read the lineups, when it is opened again or on another device, the bout you recorded shows as the current bout, and tapping <strong>Record bout</strong> again changes nothing.</li>
 <li><strong>A draw leaves one team with nobody.</strong> That team's last fighter stays on for the next pairing.</li>
-<li><strong>The losing team has no saved lineup.</strong> Without a lineup for the team that lost the bout, the app cannot tell whether that team has anyone left, so the bout you recorded stays the current bout, with <strong>Record bout</strong> greyed out because nothing can follow it, and you continue with <strong>Add next bout manually</strong> or <strong>End match</strong>. <strong>Record bout</strong> comes back if a lineup saved later gives that team another fighter.</li>
+<li><strong>A team has no saved lineup.</strong> It fights in member number order, and a lineup that leaves places empty is filled the same way, as <a href="#team-lineups">Team lineups</a> explains. A reserve you pick on a bout, rather than place in the lineup, does not count against "no fighters left". Picking or typing a fighter on a bout still overrides the order, and a saved lineup always wins. <strong>Record bout</strong> pairs the winner with the next member of the team that lost, or says that team has no fighters left.</li>
+<li><strong>The team members or the lineups could not be read.</strong> The score sheet shows a warning once for that match, and the server log names the file. With the lineups unreadable it reads "The lineups could not be read, so who fights next is not worked out. Add each bout's pairing by hand." Neither team then fields anyone: there is no line above the current bout, and <strong>Record bout</strong> records the bout you scored but adds no next pairing. With the team members unreadable, and a lineup that leaves a place to fill, it reads "Team members could not be read, so fighters are not seated by member number. Add each bout's pairing by hand." No place is filled by member number, so <strong>Record bout</strong> brings in only the fighters a saved lineup names, and the line above the current bout lists only them; after a team with no saved lineup loses a bout, no pairing follows. Either way scoring carries on, and the line that a team has no fighters left never takes the place of the current bout. Use <strong>+ Add next bout manually</strong> to pick or type both fighters of a bout the app does not add. The first bout can be named by hand too once a lineup read has failed. With the team members unreadable, a name you type on the first bout is saved in the match's lineup by that name alone, nobody is added to the team, and the row under the bout says "Saved by name only: the team member list could not be loaded. Scores will still record normally." To repair the file, read the server log's error line: it names the competition and says why the file could not be read. Correct that file, or ask whoever runs the server to. Once the file can be read again, the next <strong>Record bout</strong> pairs by member number again. While the lineups cannot be read, the lineup panel of the match shows an error instead of the lineup, since it is the page that edits that file. For what the lineup panel, the Lineups page and the score sheet do with a typed name while the team members cannot be loaded, and where the file is, refer to <a href="#when-the-team-member-list-cannot-be-loaded">When the team member list cannot be loaded</a>.</li>
 <li><strong>A tie leaves both teams with nobody.</strong> The bout stays the current bout, in pools, leagues and knockouts alike, and the line names both of its fighters as on. <strong>Encho</strong> is there if you want the pair to fight on, <strong>Record bout</strong> is greyed out because nothing can follow it, and <strong>End match</strong> decides the rest: a drawn encounter in a pool or league, held back in a knockout, which needs a winner. Scoring a point on that tie, or starting <strong>Encho</strong>, makes it a bout being fought again: both fighters stay on and <strong>Record bout</strong> records it anew.</li>
 </ul>
-<p>If the app adds a pairing you did not want, for example an extra bout after the encounter was really over, use <strong>× Remove this bout</strong> to take it back. It only removes a bout that has no score yet, so nothing you have recorded is lost. When the bout you remove is the pairing <strong>Record bout</strong> added, the bout before it becomes the current bout again, as if <strong>Record bout</strong> had not been pressed, so the line above names both of its fighters as on until you record it again. When you remove a bout you added with <strong>Add next bout manually</strong> after a team had nobody left, the sheet goes back to how it was before you added it: the recorded bout stays recorded and the line still names the team with nobody left. Editing a lineup in between does not change this. If the match's history does not show how the bout you removed was added, for example because that history could not be saved, the recorded bout stays recorded; tap it to correct it.</p>
+<p>If the app adds a pairing you did not want, for example an extra bout after the encounter was really over, use <strong>× Remove this bout</strong> to take it back. It only removes a bout that has no score yet, so nothing you have recorded is lost. When the bout you remove is the pairing <strong>Record bout</strong> added, the bout before it becomes the current bout again, as if <strong>Record bout</strong> had not been pressed, so the line above names both of its fighters as on until you record it again. When you remove a bout you added with <strong>+ Add next bout manually</strong> after a team had nobody left, the sheet goes back to how it was before you added it: the recorded bout stays recorded and the line still names the team with nobody left. Editing a lineup in between does not change this. If the match's history does not show how the bout you removed was added, for example because that history could not be saved, the recorded bout stays recorded; tap it to correct it.</p>
 <p><img alt="The kachinuki score editor: the bouts already fought shown as read-only rows above the current bout (which carries the ippon buttons for each side), a muted line just above the current bout naming each team's fighter on, the fighters left and who is next, the × Remove this bout undo for a pairing added by mistake, and the Record bout and End match footer actions." src="../../../screenshots/kachinuki-scoring-buttons.png" /></p>
 <p>To fix a bout you have already recorded, without ending the encounter, tap its row. It reopens in place with the same scoring controls as the current bout. You can adjust the points or change who won, and each change is sent the moment you make it, like a tap on the current bout, with no Save step. Each fought bout carries a black triangle in its number column: it points right when the bout is collapsed and down when it is open. Tap it to expand the bout for a correction, and tap it again to collapse it when you are finished.</p>
 <p><img alt="The kachinuki score editor with an earlier bout reopened for correction: the bout sits in an accent frame with its ippon buttons for each side and a downward black triangle in its number column that collapses it again, while the other fought bouts stay as read-only rows above and below, each with a rightward triangle, and the line naming each team's fighter on and fighters left sits just above the current bout." src="../../../screenshots/kachinuki-correct-bout.png" /></p>
@@ -2625,7 +2712,7 @@ appears once the draw is generated.</p>
 <ul>
 <li><strong>Record bout</strong> retires both fighters and brings the next pair up.</li>
 <li><strong>Encho</strong> keeps the same pair fighting on that bout until one of them takes a point. It is offered on any tied bout: whether a pair fights on is your call, and the app records it. Use it whenever your rules say the pairing must have a result, in any stage. Tapped Encho by mistake, or twice? <strong>Undo encho</strong>, beside it, takes back one overtime period per tap while nothing has been scored in overtime; taking back the last one returns the bout to its tie. Its place beside Encho is kept empty until there is something to undo, so no button moves under your finger when it appears.</li>
-<li><strong>End match</strong> finishes the encounter on the tie. In pools and leagues this records a drawn encounter. In a knockout the bracket needs a winner, so End match is held back while the last bout is tied; continue with Record bout or Encho instead. When both teams have nobody left, <strong>Record bout</strong> adds no pairing: use <strong>Encho</strong>, or <strong>Add next bout manually</strong> if a team has another fighter.</li>
+<li><strong>End match</strong> finishes the encounter on the tie. In pools and leagues this records a drawn encounter. In a knockout the bracket needs a winner, so End match is held back while the last bout is tied; continue with Record bout or Encho instead. When both teams have nobody left, <strong>Record bout</strong> adds no pairing: use <strong>Encho</strong>, or <strong>+ Add next bout manually</strong> if a team has another fighter.</li>
 </ul>
 <p><img alt="The kachinuki score editor on a tied knockout bout: the line above bout 1 reads &quot;Shiro: T2.1 Mori on, 4 left (T2.2 Ueno, T2.3 Kimura, T2.4 Aoki, T2.5 Saito) · Aka: T1.1 Ishida on, 4 left (T1.2 Kono, T1.3 Sano, T1.4 Hara, T1.5 Abe)&quot;, the notice that a knockout cannot end in a draw sits above the Record bout and Encho buttons, and the End match button is held back." src="../../../screenshots/kachinuki-knockout-tie-encho.png" /></p>
 <p>There is no representative bout (daihyosen) in kachinuki: a tied pairing that must produce a result is settled by encho on that same bout, not by a separate rep bout.</p>

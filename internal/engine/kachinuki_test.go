@@ -292,8 +292,8 @@ func TestFilterRemainingFighters_UnrepairedRowRetiresByName(t *testing.T) {
 }
 
 // TestFilterRemainingFighters_LegacyRowWithNoMemberID pins that retirement
-// still works for a row with NO member id (an unrepaired legacy row, or
-// the bout-log-only heuristic): the filter falls back to the name exactly
+// still works for a row with NO member id (an unrepaired legacy row, or a
+// typed fighter name): the filter falls back to the name exactly
 // as it always did before bc-tmid.
 func TestFilterRemainingFighters_LegacyRowWithNoMemberID(t *testing.T) {
 	boutLog := []state.SubMatchResult{

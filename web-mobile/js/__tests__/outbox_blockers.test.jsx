@@ -137,6 +137,29 @@ describe('a write naming a member this device minted follows its add (G1)', () =
         warned.mockRestore();
     });
 
+    // bc-kno1 Q5 (a): an unreadable team-members.yaml answers the add 409
+    // team_members_unreadable, which is final like any other refusal: the add
+    // leaves the queue and the lineup save behind it goes by name alone.
+    it('an add refused because the members cannot be read leaves the queue, and the lineup save goes without its id', async () => {
+        const sent = server((req) => (req.method === 'POST'
+            ? answer(409, { error: 'team_members_unreadable', message: 'The team members could not be read, so the team member was not saved.' })
+            : lineupOk(req)));
+        const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw', { onRefusal: () => true });
+        member.settled.catch(() => {});
+        await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Ren Abe' }, 'pw', { senpo: member.id }, ['senpo']);
+        await reconnect();
+        await reconnect();
+        expect(sent.filter((r) => r.method === 'POST'), 'the add is sent once and not retried').toHaveLength(1);
+        const put = sent.find((r) => r.method === 'PUT');
+        expect(put, 'the lineup save is sent').toBeTruthy();
+        expect(put.body.positions).toEqual({ senpo: 'Ren Abe' });
+        expect((put.body.memberIds || {}).senpo || '', 'the id of the member never added is gone').toBe('');
+        expect(stored()).toEqual([]);
+        expect(API.hasHeldWrite('c1', 'm1')).toBe(false);
+        warned.mockRestore();
+    });
+
     it('a numbered row naming the minted member keeps its name and loses the id', async () => {
         const sent = server((req) => (req.method === 'POST'
             ? answer(409, { error: 'team_member_limit', message: 'This team has no room for another member.' })

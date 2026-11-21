@@ -507,7 +507,8 @@ test.describe('knockout-mixed-team', () => {
       record({ step: 'F4 EP2 open panel', action: 'Enter lineup (semifinal)', variant: 'correct', shiroBoxes });
       // Aka: pick numbered blank slots by number, name them later on the sheet.
       await T.pickFromNameBox(T.panelInput(page, 1, 'Senpo'), '.1');
-      const pickedLabel = (await T.panelSide(page, 1).locator('.pmf__opt-label').first().innerText().catch(() => '')).trim();
+      // The number shows once, in the box (a nameless member's box reads it as its placeholder).
+      const pickedLabel = ((await T.panelInput(page, 1, 'Senpo').getAttribute('placeholder').catch(() => '')) || '').trim();
       await T.panelSave(page, 1);
       await shot(page, 'f4-panel-aka-senpo-by-number');
       record({ step: 'F4 EP2 pick by number', action: 'pick Aka Senpo slot .1 (no name)', variant: 'correct', pickedLabel });

@@ -11,7 +11,7 @@
 // called directly, never through `API`. Never import api_client.jsx from here
 // (it would run the outbox twice).
 
-import { _fetchJson, _readLineup } from './api_client_requests.jsx';
+import { _fetchJson, _readLineup, _refusalError } from './api_client_requests.jsx';
 import { _outboxWrite, _queuedLineupSave } from './api_client_enqueue.jsx';
 import {
     _withListedMembersForgotten, _memberWrite, _newClientId, _shownMember,
@@ -62,8 +62,9 @@ export const teamsApi = {
             headers: password ? { 'X-Tournament-Password': password } : {}
         });
         if (!res.ok) {
+            // A refusal keeps its code (team_members_unreadable names the file).
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to load team members");
+            throw _refusalError(err, "Failed to load team members");
         }
         const data = await res.json();
         // A member the server lists exists, whatever was known of them.
@@ -140,6 +141,30 @@ export const teamsApi = {
     // starting lineup). A 404 means the competition does not exist.
     async fetchLineupInForce(compID, teamId, matchId) {
         return _readLineup(`/api/competitions/${compID}/teams/${teamId}/lineup-in-force/${matchId}`);
+    },
+    // Who a kachinuki team fields by member number in the empty places of a
+    // lineup form (operator answers D2 and D3): a READ that carries the form,
+    // `{ positions, memberIds }` as it stands, saved or not, and writes nothing
+    // (engine.KachinukiFieldedPlaces, the fill bout 1 is seated from). Answers
+    // the position key to member id map (`{}` when nothing is filled); null on any
+    // failure, a timeout or a non-OK answer, since a default is a convenience and
+    // never a reason to show an error (the panel shows no default and asks again).
+    // Public, bounded like every read (_fetchJson), never queued.
+    async fetchFieldedLineup(compID, teamId, matchId, form = {}) {
+        try {
+            const { res, body } = await _fetchJson(
+                `/api/competitions/${encodeURIComponent(compID)}/teams/${encodeURIComponent(teamId)}/fielded-lineup/${encodeURIComponent(matchId)}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ positions: form.positions || {}, memberIds: form.memberIds || {} }),
+                });
+            const places = body && body.fieldedMemberIds;
+            if (!res.ok || !places || typeof places !== 'object' || Array.isArray(places)) return null;
+            return places;
+        } catch (_e) {
+            return null;
+        }
     },
     // bc-kfnl: a kachinuki encounter's fighters each side has left, for the
     // advisory line above the live bout (kachinuki_advisory.jsx). The server

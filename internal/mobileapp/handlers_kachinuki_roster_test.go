@@ -21,7 +21,10 @@ import (
 
 // seedKachinukiRosterComp stores a kachinuki competition "k1" with two teams,
 // a starting lineup for team A only, and one running pool encounter whose
-// first bout A1 won.
+// first bout A1 won. Team B has no lineup, so it fields its seeded, nameless
+// members by member number (K1, Q1): bout 1 holds its member 1, as the seat
+// puts it there, and bout 2 its member 2, as Record bout appended it. Both
+// rows name the member by id alone, as the server stores a nameless fighter.
 func seedKachinukiRosterComp(t *testing.T, store *state.Store) (a1, a2 domain.TeamMember) {
 	t.Helper()
 	aID, bID := helper.NewUUID4(), helper.NewUUID4()
@@ -43,14 +46,33 @@ func seedKachinukiRosterComp(t *testing.T, store *state.Store) (a1, a2 domain.Te
 		Positions: map[domain.Position]string{domain.PositionNumbered(1): "A1", domain.PositionNumbered(2): "A2"},
 		MemberIDs: map[domain.Position]string{domain.PositionNumbered(1): a1.ID, domain.PositionNumbered(2): a2.ID},
 	}, 2))
+	b1, b2 := seededMember(t, store, "k1", bID, 1), seededMember(t, store, "k1", bID, 2)
 	require.NoError(t, store.SavePoolMatches("k1", []state.MatchResult{{
 		ID: "Pool A-0", SideA: "Ryu", SideAID: aID, SideB: "Tora", SideBID: bID, Status: state.MatchStatusRunning,
 		SubResults: []state.SubMatchResult{
-			{Position: 1, SideA: "A1", SideAMemberID: a1.ID, SideB: "B1", Winner: "A1", WinnerMemberID: a1.ID, Decision: "fought"},
-			{Position: 2, SideA: "A1", SideAMemberID: a1.ID, SideB: "B2"},
+			{Position: 1, SideA: "A1", SideAMemberID: a1.ID, SideBMemberID: b1.ID, Winner: "A1", WinnerMemberID: a1.ID, Decision: "fought"},
+			{Position: 2, SideA: "A1", SideAMemberID: a1.ID, SideBMemberID: b2.ID},
 		},
 	}}))
 	return a1, a2
+}
+
+// seededMember is the team's member with the given member number, as the
+// store seeds it (nameless, team size + 2 per team). A participant read runs
+// the seeding for a team the roster save added.
+func seededMember(t *testing.T, store *state.Store, compID, teamID string, number int) domain.TeamMember {
+	t.Helper()
+	_, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	squads, err := store.LoadSquads(compID)
+	require.NoError(t, err)
+	for _, m := range squads[teamID] {
+		if m.Index == number {
+			return m
+		}
+	}
+	require.Failf(t, "no seeded member", "team %s holds no member %d", teamID, number)
+	return domain.TeamMember{}
 }
 
 func getRoster(r http.Handler, path string) *httptest.ResponseRecorder {
@@ -90,9 +112,15 @@ func TestKachinukiRosterGET(t *testing.T) {
 		require.Len(t, body.SideA.Remaining, 1, "the fighter on is not in the queue")
 		assert.Equal(t, "A2", body.SideA.Remaining[0].Name)
 		assert.Equal(t, a2.ID, body.SideA.Remaining[0].MemberID)
-		assert.False(t, body.SideB.LineupFound, "team B has no lineup")
+		// Team B has no lineup saved, so it fields its members by number: it
+		// fields members (lineupFound), member 1 retired on bout 1 and member 2
+		// is on, so nobody of its team size of two is left in the queue.
+		assert.True(t, body.SideB.LineupFound, "team B fields its members by number")
 		require.NotNil(t, body.SideB.On)
-		assert.Equal(t, "B2", body.SideB.On.Name)
+		stored, err := store.LoadPoolMatches("k1")
+		require.NoError(t, err)
+		assert.Equal(t, seededMember(t, store, "k1", stored[0].SideBID, 2).ID, body.SideB.On.MemberID)
+		assert.Empty(t, body.SideB.On.Name, "a nameless member is named by id alone")
 		assert.Empty(t, body.SideB.Remaining)
 		assert.Contains(t, w.Body.String(), `"remaining":[]`, "an empty queue is [] on the wire, never null")
 		// Bout 2 has no outcome yet: Record bout would append nothing, and an
@@ -149,7 +177,7 @@ func TestKachinukiRosterGET(t *testing.T) {
 	})
 	t.Run("a recorded last bout takes its loser off", func(t *testing.T) {
 		// A1 beats B2 in bout 1 of a second encounter and Record bout records
-		// it, with nothing appended (Tora has nobody left).
+		// it.
 		matches, err := store.LoadPoolMatches("k1")
 		require.NoError(t, err)
 		matches = append(matches, state.MatchResult{

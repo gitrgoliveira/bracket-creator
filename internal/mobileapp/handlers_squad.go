@@ -52,6 +52,7 @@ package mobileapp
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -100,6 +101,13 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			return
 		}
 		squads, err := store.LoadSquads(compID)
+		if errors.Is(err, state.ErrTeamMembersUnreadable) {
+			// 409 with the member writes' code, so the lineup screens can name
+			// the file rather than say only that the list could not be loaded.
+			slog.Error("mobileapp: team-members.yaml cannot be read", "method", c.Request.Method, "path", c.Request.URL.Path, "err", err)
+			c.JSON(errTeamMembersUnreadableRead.status, errTeamMembersUnreadableRead.body())
+			return
+		}
 		if err != nil {
 			internalError(c, err)
 			return
@@ -366,6 +374,24 @@ var errMemberAlreadyNamed = &selfRunRefusal{
 	message: "This team member already has a name. Ask the tournament organizer to change it.",
 }
 
+// errTeamMembersUnreadableWrite refuses a member add, rename or cleared name
+// when team-members.yaml cannot be read: the code the score and lineup writes
+// answer for the same file (errTeamMembersUnreadable), worded for a member
+// write. The team sheet names a fighter by name alone meanwhile.
+var errTeamMembersUnreadableWrite = &selfRunRefusal{
+	status:  errTeamMembersUnreadable.status,
+	code:    errTeamMembersUnreadable.code,
+	message: "The team members could not be read, so the team member was not saved. The organiser needs to check team-members.yaml in the tournament data.",
+}
+
+// errTeamMembersUnreadableRead answers GET team-members when team-members.yaml
+// cannot be read: the same status and code, worded for a read.
+var errTeamMembersUnreadableRead = &selfRunRefusal{
+	status:  errTeamMembersUnreadable.status,
+	code:    errTeamMembersUnreadable.code,
+	message: "The team members could not be read. The organiser needs to check team-members.yaml in the tournament data.",
+}
+
 // respondSquadWriteError maps an AddTeamMember/RenameTeamMember/
 // NameUnnamedTeamMember/ClearTeamMemberName error to its HTTP status.
 // ErrTeamNotFound (the team id names no participant), ErrTeamMemberNotFound,
@@ -405,6 +431,14 @@ func respondSquadWriteError(c *gin.Context, err error) {
 	}
 	if errors.Is(err, state.ErrCompetitionFinished) {
 		c.JSON(errCompetitionFinished.status, errCompetitionFinished.body())
+		return
+	}
+	if errors.Is(err, state.ErrTeamMembersUnreadable) {
+		// 409, never the 500 the outbox retries for as long as the page is
+		// open: the file stays unreadable until it is repaired, and a member
+		// add stuck on a retry held every lineup save naming the member.
+		slog.Error("mobileapp: team-members.yaml cannot be read", "method", c.Request.Method, "path", c.Request.URL.Path, "err", err)
+		c.JSON(errTeamMembersUnreadableWrite.status, errTeamMembersUnreadableWrite.body())
 		return
 	}
 	if errors.Is(err, state.ErrTeamMemberClearAfterStart) {

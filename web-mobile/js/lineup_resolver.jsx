@@ -191,6 +191,41 @@ export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
   });
 }
 
+// numberedMemberName: a squad entry (squadRosterEntries) as a lineup box reads
+// it, its member number before its name ("T1.3 Sano"), the number alone for a
+// nameless member ("T1.3", no trailing space).
+export function numberedMemberName(entry) {
+  if (!entry) return "";
+  return [entry.label, entry.name].filter(Boolean).join(" ");
+}
+
+// teamCarriesName: whether a name typed into a lineup place is one a member of
+// the team already carries (compared trimmed and case-insensitively, as the
+// save's resolver places a typed name). Such a name is placed by its member, so
+// a nameless default is never taken for it.
+export function teamCarriesName(squadEntries, name) {
+  const wanted = String(name || "").trim().toLowerCase();
+  return !!wanted && (squadEntries || []).some(e => e && e.name && e.name.toLowerCase() === wanted);
+}
+
+// fieldedDefaults: what each EMPTY place of a kachinuki lineup form shows as its
+// default, from the server's answer of who it fields there (`fielded`, position
+// key to member id, API.fetchFieldedLineup) and the team's squad entries. A
+// place the form holds (a name or a member id) has none, nor does a place whose
+// member the entries do not hold (it could not be labelled). Each default is
+// `{ id, label, nameless }`.
+export function fieldedDefaults({ fielded, squadEntries, positions, memberIds, positionKeys }) {
+  const out = {};
+  for (const key of positionKeys || []) {
+    if (String(positions?.[key] || "").trim() || memberIds?.[key]) continue;
+    const id = fielded?.[key];
+    const entry = id ? (squadEntries || []).find(e => e && e.id === id) : null;
+    if (!entry) continue;
+    out[key] = { id, label: numberedMemberName(entry), nameless: !entry.name };
+  }
+  return out;
+}
+
 // MEMBER_ALREADY_NAMED: the code a participant's rename of a team member who
 // already has a name is refused with (errMemberAlreadyNamed,
 // internal/mobileapp/handlers_squad.go). The refusal's sentence is the
@@ -224,6 +259,21 @@ export function mergeLineupIdsForPosition(existingIds, posKey, resolvedId) {
   if (resolvedId) updated[posKey] = resolvedId;
   else delete updated[posKey];
   return updated;
+}
+
+// withLineupPosition: `lineup` (null for none) with ONE position's name and member
+// id taken from `from` (a lineup, or any { positions, memberIds }), dropped where
+// `from` has none (a picked blank member's "" name is kept, as buildInlineLineupWrite
+// keeps it), every other position as `lineup` holds it. The team sheet puts a pick on
+// the lineup held for its side this way, so two picks on one side that resume in turn
+// (two names typed while the members are read) each change their own position and
+// neither undoes the other's.
+export function withLineupPosition(lineup, posKey, from) {
+  const positions = { ...lineup?.positions };
+  const fromPositions = from?.positions || {};
+  if (Object.prototype.hasOwnProperty.call(fromPositions, posKey)) positions[posKey] = fromPositions[posKey];
+  else delete positions[posKey];
+  return { ...lineup, positions, memberIds: mergeLineupIdsForPosition(lineup?.memberIds, posKey, from?.memberIds?.[posKey]) };
 }
 
 // resolveTypedMemberName: the one step that resolves a name typed into a team
@@ -331,10 +381,10 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
   let resolvedId = pickedMemberId;
   let nextSquad = Array.isArray(squad) ? squad : [];
   let failures = [];
-  // `opts.resolve === false`: the side's members have not been read, so a typed
-  // name is placed by name alone (no id), never resolved against no list,
-  // where it would mint a member the seeded slot or a named member already is
-  // (bc-evts stage 3 review 2, R1: nothing waits for the read).
+  // `opts.resolve === false`: the side's members could not be read (the sheet
+  // waited for them, operator decision V1), so a typed name is placed by name
+  // only (no id) and no member is added, never resolved against no list,
+  // where it would mint a member the seeded slot or a named member already is.
   if (!pickedMemberId && value && opts.resolve !== false) {
     // A failed resolve still writes the name: mergeLineupIdsForPosition below
     // clears this position's id, and the load-time repair fills it in later.

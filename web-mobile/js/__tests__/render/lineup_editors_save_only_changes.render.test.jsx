@@ -38,6 +38,7 @@ import { answered, namedLater } from '../helpers/team_members.js';
 import { lineupPutStub } from '../helpers/lineup_server.js';
 import { QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE } from '../../write_result.jsx';
 import * as AppVersion from '../../app_version.jsx';
+import { MEMBERS_UNAVAILABLE_NOTICE, MEMBERS_UNREADABLE_NOTICE } from '../../lineup_draft.jsx';
 
 const SQUAD = [
   { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -327,7 +328,9 @@ describe('the at-court panel', () => {
     });
     await flush();
 
-    expect(panelRow(utils, 1).getByText('Slot 6'), 'the member the Save minted is still listed').toBeTruthy();
+    // The number shows once, in the box, and nowhere under the position name.
+    expect(utils.getByTestId('match-lineup-pos-team-a-1').querySelector('[data-number]').getAttribute('data-number'), 'the member the Save minted is still listed').toBe('Slot 6');
+    expect(panelRow(utils, 1).queryByText('Slot 6')).toBeNull();
     expect(panelRow(utils, 1).getByRole('button', { name: 'Rename Senpo player' })).toBeTruthy();
   });
 
@@ -1032,7 +1035,10 @@ describe('a lineup followed from another device that names a member created ther
 
     expect(utils.getByLabelText('Chuken player').value).toBe('Zed');
     const row = utils.getByTestId('match-lineup-pos-team-a-2');
-    expect(within(row).getByText('Slot 5')).toBeTruthy();
+    // The number shows once, in the box, and nowhere under the position name.
+    expect(row.querySelector('[data-number]').getAttribute('data-number')).toBe('Slot 5');
+    expect(within(row).queryByText('Slot 5')).toBeNull();
+    expect(row.querySelector('.pmf__opt-label')).toBeNull();
     expect(within(row).getByRole('button', { name: 'Rename Chuken player' })).toBeTruthy();
   });
 
@@ -1049,6 +1055,101 @@ describe('a lineup followed from another device that names a member created ther
     expect(utils.getByTestId('lineup-position-1').value, 'the lineup that was read').toBe('mem-4');
     expect(utils.getByTestId('squad-member-mem-1'), 'the list that was read before').toBeTruthy();
     expect(utils.queryByTestId('lineup-members-unavailable')).toBeNull();
+  });
+});
+
+// A members list the panel could not read is not a team with no members: the panel says
+// the list could not be loaded, in the Lineups page's sentence (naming team-members.yaml
+// when the server says that file cannot be read), never "This team has no registered
+// members".
+describe('the at-court panel when the team members cannot be read', () => {
+  it('says the members list could not be loaded, not that the team has none', async () => {
+    api.fetchSquads.mockRejectedValue(new Error('internal error'));
+    api.fetchLineupInForce.mockResolvedValue(null);
+    const utils = await mountPanel();
+
+    expect(utils.getByTestId('lineup-members-unavailable').textContent).toBe(MEMBERS_UNAVAILABLE_NOTICE);
+    // Operator decision V1: no member can be added then, so the sentence says what a
+    // typed name does instead, and warns of no second slot.
+    expect(MEMBERS_UNAVAILABLE_NOTICE).toBe('The team member list could not be loaded, so the list is not shown. You can still type names and save the lineup; they are saved by name only.');
+    expect(utils.queryByText(/no registered members/)).toBeNull();
+  });
+
+  it('still says a team that has no members has none', async () => {
+    api.fetchSquads.mockResolvedValue({ 'team-a': [] });
+    api.fetchLineupInForce.mockResolvedValue(null);
+    const utils = await mountPanel();
+
+    expect(utils.queryByTestId('lineup-members-unavailable')).toBeNull();
+    expect(utils.getByText(/This team has no registered members/)).toBeTruthy();
+  });
+
+  it('names team-members.yaml when the server says the file cannot be read', async () => {
+    api.fetchSquads.mockRejectedValue(membersUnreadable());
+    api.fetchLineupInForce.mockResolvedValue(null);
+    const utils = await mountPanel();
+
+    expect(utils.getByTestId('lineup-members-unavailable').textContent).toBe(MEMBERS_UNREADABLE_NOTICE);
+  });
+
+  it('saves a typed name by name alone, adds no member, and says so in the one sentence', async () => {
+    api.fetchSquads.mockRejectedValue(membersUnreadable());
+    const utils = await mountPanel();
+    await typeName(utils, 1, 'Kudo');
+
+    await click(saveButton(utils));
+
+    expect(api.addTeamMember, 'no member add is sent').not.toHaveBeenCalled();
+    expect(api.renameTeamMember).not.toHaveBeenCalled();
+    expect(putOf(api.putMatchLineup.mock.calls[0])).toEqual({ positions: { 1: 'Kudo' }, memberIds: undefined });
+    expect(utils.getByTestId('match-lineup-warning-team-a').textContent).toBe(SAVED_BY_NAME_ONLY);
+  });
+});
+
+// The note after a Save when the team members could not be read (operator decision U2).
+const SAVED_BY_NAME_ONLY = 'Saved by name only: the team member list could not be loaded. Scores will still record normally.';
+
+// The read of the team members refused 409 team_members_unreadable, as fetchSquads
+// throws it: the server's sentence, and its code beside it.
+function membersUnreadable() {
+  return Object.assign(
+    new Error('The team members could not be read. The organiser needs to check team-members.yaml in the tournament data.'),
+    { code: 'team_members_unreadable' },
+  );
+}
+
+// The Lineups page says the same as the panel: which file cannot be read when the
+// server says so, else that the list could not be loaded.
+describe('the Lineups page when the team members cannot be read', () => {
+  it('names team-members.yaml when the server says the file cannot be read', async () => {
+    api.fetchSquads.mockRejectedValue(membersUnreadable());
+    const utils = await mountPage();
+
+    expect(utils.getByTestId('lineup-members-unavailable').textContent).toBe(MEMBERS_UNREADABLE_NOTICE);
+    expect(utils.queryByText(/This team has no members yet/)).toBeNull();
+  });
+
+  it('places an added name by name alone, adds no member, and Save says so in the one sentence', async () => {
+    api.fetchSquads.mockRejectedValue(membersUnreadable());
+    const utils = await mountPage();
+    await pick(utils, 1, '__add__');
+    await act(async () => { fireEvent.change(utils.getByLabelText('New member name for Senpo'), { target: { value: 'Kudo' } }); });
+    await click(utils.getByRole('button', { name: 'Add' }));
+
+    expect(window.confirmDialog, 'nothing to confirm: no member is added').not.toHaveBeenCalled();
+    await click(saveButton(utils));
+
+    expect(api.addTeamMember, 'no member add is sent').not.toHaveBeenCalled();
+    expect(api.renameTeamMember).not.toHaveBeenCalled();
+    expect(putOf(api.putTeamLineup.mock.calls[0])).toEqual({ positions: { 1: 'Kudo' }, memberIds: undefined });
+    expect(utils.getByTestId('lineup-member-warning').textContent).toBe(SAVED_BY_NAME_ONLY);
+  });
+
+  it('says the list could not be loaded for any other failure', async () => {
+    api.fetchSquads.mockRejectedValue(new Error('internal error'));
+    const utils = await mountPage();
+
+    expect(utils.getByTestId('lineup-members-unavailable').textContent).toBe(MEMBERS_UNAVAILABLE_NOTICE);
   });
 });
 

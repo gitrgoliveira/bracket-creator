@@ -625,14 +625,15 @@ func TestPublicLineupGET_UnknownCompetition(t *testing.T) {
 	r, _, _ := setupLineupTestRouter(t)
 
 	for _, tc := range []struct {
-		name, path string
+		name, method, path string
 	}{
-		{"round", "/api/competitions/no-such-comp/teams/teamA/lineups/1"},
-		{"match", "/api/competitions/no-such-comp/teams/teamA/match-lineups/m1"},
-		{"in force", "/api/competitions/no-such-comp/teams/teamA/lineup-in-force/m1"},
+		{"round", http.MethodGet, "/api/competitions/no-such-comp/teams/teamA/lineups/1"},
+		{"match", http.MethodGet, "/api/competitions/no-such-comp/teams/teamA/match-lineups/m1"},
+		{"in force", http.MethodGet, "/api/competitions/no-such-comp/teams/teamA/lineup-in-force/m1"},
+		{"fielded", http.MethodPost, "/api/competitions/no-such-comp/teams/teamA/fielded-lineup/m1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req := jsonReq(tc.method, tc.path, map[string]any{"positions": map[string]string{}})
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 
@@ -815,6 +816,10 @@ func (failingLineupEngine) KachinukiRoster(string, string) (engine.KachinukiRost
 
 func (failingLineupEngine) LineupInForce(string, string, string) (engine.InForceLineup, error) {
 	return engine.InForceLineup{}, errors.New("read lineups.yaml: input/output error")
+}
+
+func (failingLineupEngine) KachinukiFieldedPlaces(string, string, string, domain.TeamLineup) (map[domain.Position]string, error) {
+	return nil, errors.New("read lineups.yaml: input/output error")
 }
 
 // A read that fails is the server's fault: a 500, not an empty "nothing saved"

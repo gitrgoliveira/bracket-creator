@@ -31,6 +31,25 @@ func fighters(names ...string) []kachinukiFighter {
 	return out
 }
 
+// saveOwnMatchLineup saves team teamID's lineup as match matchID's own (as the
+// start pins it), naming names at the first len(names) places in bout order
+// (domain.PositionForBout), for a fixture whose bout rows name those fighters.
+// A side fields only the lineup its participant id holds (operator decision
+// K2): with none and no team members, it fields nobody and the advance appends
+// nothing.
+func saveOwnMatchLineup(t *testing.T, store *state.Store, compID, matchID, teamID string, teamSize int, names ...string) {
+	t.Helper()
+	positions := make(map[domain.Position]string, len(names))
+	for i, n := range names {
+		pos, ok := domain.PositionForBout(teamSize, i+1)
+		require.True(t, ok, "a %d-person team has a place %d", teamSize, i+1)
+		positions[pos] = n
+	}
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: teamID, MatchID: matchID, Positions: positions,
+	}, teamSize))
+}
+
 // setupKachinukiComp builds an engine + store and saves a kachinuki
 // competition with an empty pool-matches file, the setup every kachinuki
 // advancement/export test shares. opts mutate the competition before it is
@@ -221,22 +240,21 @@ func startedMixedKnockout(t *testing.T) (*Engine, *state.Store, string) {
 // advance does, so the tests below pin that composition. It derives the
 // remaining un-retired roster per side
 // for a team match. Returns (sideA, sideB, foundA, foundB): found is per
-// side, true when that side's roster was resolved from a saved TeamLineup and
-// false when it fell back to the bout-log-only heuristic. The advance logs
-// foundA || foundB. The queues come from kachinukiRosterQueues, which the
-// advisory read (KachinukiRoster) builds from too.
+// side, true when that side fields someone (kachinukiSideQueue.fromLineup)
+// and false when its queue is empty. The queues come from
+// kachinukiRosterQueues, which the advisory read (KachinukiRoster) builds
+// from too.
 //
-// A lineup in force that fields nobody (a match's own empty lineup,
-// positions: {}) is FOUND here and yields an empty queue, so the advance reads
-// that side as exhausted and appends nothing; the advisory read instead
-// reports such a side as having no lineup (see KachinukiRosterSide).
+// The helper knows no team members (it passes a nil members reader), so
+// nothing is filled by member number here: a side whose lineup fields nobody
+// (a match's own empty lineup, positions: {}, or none) has an EMPTY queue
+// (operator decision K2). The number-order fill is pinned through the store
+// in kachinuki_fielded_test.go.
 //
-// Priority per side (GAP 1 / GAP 2a):
-//  1. The lineup in force for the side's team at this match (see
-//     lineup_in_force.go: the match's own lineup, else the one the team
-//     carries from its previous match or round), matched by the side's
-//     participant id; a side with no id has none.
-//  2. Bout-log-only heuristic (anyone who appeared in a bout, minus retired).
+// Each side's queue is the lineup it fields (kachinukiFielded: the match's own
+// lineup, else, while the match has not started, the one the team carries from
+// its previous match or its starting lineup), matched by the side's
+// participant id; a side with no id has none.
 //
 // The full ordered roster (from lineup.OrderedMembers, bc-tmid pass 2) is
 // filtered by IsMemberRetired against RetiredPlayersFromBoutLog's sets to
@@ -247,7 +265,58 @@ func startedMixedKnockout(t *testing.T) (*Engine, *state.Store, string) {
 // one member of this roster alone. See IsMemberRetired for why both tiers
 // are needed and what the gate protects.
 func kachinukiRemainingRoster(comp *state.Competition, parent *state.MatchResult, rule *lineupRule) (remainingA, remainingB []kachinukiFighter, foundA, foundB bool) {
-	queueA, queueB := kachinukiRosterQueues(comp, parent, rule)
+	queueA, queueB := kachinukiRosterQueues(comp, parent, kachinukiLineups{lineupRule: rule}, nil)
 	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
-	return queueA.remaining(retiredA), queueB.remaining(retiredB), queueA.found, queueB.found
+	return queueA.remaining(retiredA), queueB.remaining(retiredB), queueA.fromLineup(), queueB.fromLineup()
+}
+
+// storedKachinukiQueues is a TEST helper: the queues the advance reads for the
+// stored match matchID, built as advanceKachinukiOnce builds them (the stored
+// lineups and draw, the team members read lazily from the store).
+func storedKachinukiQueues(t *testing.T, eng *Engine, compID, matchID string) kachinukiQueues {
+	t.Helper()
+	comp, err := eng.store.LoadCompetition(compID)
+	require.NoError(t, err)
+	located, err := eng.findTeamMatch(compID, matchID)
+	require.NoError(t, err)
+	require.NotNil(t, located, "match %s is stored", matchID)
+	rule := eng.readKachinukiLineups("test", compID, comp.IsKnockoutEnabled(), located.PoolMatches, located.Bracket)
+	return readKachinukiQueues(comp, located.Result, rule, readKachinukiMembers(eng.store.LoadSquads, compID, "test"))
+}
+
+// queueNames lists the names of a queue's fighters, in queue order.
+func queueNames(q kachinukiSideQueue) []string {
+	out := make([]string, len(q.fighters))
+	for i, f := range q.fighters {
+		out[i] = f.Name
+	}
+	return out
+}
+
+// queueMemberIDs lists the member ids of a queue's fighters, in queue order.
+func queueMemberIDs(q kachinukiSideQueue) []string {
+	out := make([]string, len(q.fighters))
+	for i, f := range q.fighters {
+		out[i] = f.MemberID
+	}
+	return out
+}
+
+// teamMemberIDs lists the ids of members 1..n of team teamID, in member number
+// order, as the store seeds and holds them.
+func teamMemberIDs(t *testing.T, store *state.Store, compID, teamID string, n int) []string {
+	t.Helper()
+	squads, err := store.LoadSquads(compID)
+	require.NoError(t, err)
+	byIndex := map[int]string{}
+	for _, m := range squads[teamID] {
+		byIndex[m.Index] = m.ID
+	}
+	out := make([]string, 0, n)
+	for i := 1; i <= n; i++ {
+		id, ok := byIndex[i]
+		require.True(t, ok, "team %s has a member %d", teamID, i)
+		out = append(out, id)
+	}
+	return out
 }

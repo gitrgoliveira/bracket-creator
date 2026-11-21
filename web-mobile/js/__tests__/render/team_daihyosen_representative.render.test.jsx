@@ -315,6 +315,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await waitFor(() => expect(screen.getByTestId('team-editor-lineup-warning').textContent).toContain('may have been added as a new team member'));
     expect(screen.getByTestId('team-editor-lineup-warning').getAttribute('data-tone')).toBe('warn');
     expect(screen.getByTestId('team-editor-lineup-warning').textContent).not.toContain('Lineup saved');
+    expect(screen.getByTestId('team-editor-lineup-warning').textContent).not.toContain('Saved by name only');
     await clickFinishTwice();
     const dh = dhEntryOf(finishPatchOf(onSubmit));
     expect(dh.sideBMemberId).toBe('m9');
@@ -538,6 +539,171 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.click(screen.getByText('Close')); });
     expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining({ message: 'Your unsaved entries will be discarded. Leave this match anyway?' }));
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // Operator decision V3: the typed representative stays as it was. On a side whose team the
+  // roster never names, a bout fighter's wait for the members ends at its own deadline (the
+  // fighter goes by name only), but no read of the members is over: the representative is
+  // still refused as while they are being read, and no member add is sent.
+  it('R23b: a representative typed after a bout fighter\'s wait reached its own deadline is still refused as being read', async () => {
+    const match = makeMatch({ sideA: { name: 'Team A' }, subResults: [DH_EMPTY] });
+    await mount(match);
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    const boutOne = document.querySelectorAll('.team-sub-match')[0].querySelector('.team-sub-match__side--aka input');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await act(async () => {
+        fireEvent.focus(boutOne);
+        fireEvent.change(boutOne, { target: { value: 'Mei' } });
+        fireEvent.keyDown(boutOne, { key: 'Enter' });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(FETCH_TIMEOUT_MS);
+        for (let i = 0; i < 50; i += 1) await Promise.resolve();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(window.API.putMatchLineup, 'the fighter went by name only').toHaveBeenCalledTimes(1);
+
+    const input = dhInput('AKA');
+    await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
+    const add = await screen.findByText(/Add “Eve”/);
+    await act(async () => { fireEvent.click(add.closest('button')); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
+    expect(window.API.addTeamMember, 'no member add is sent').not.toHaveBeenCalled();
+    const said = [...document.querySelectorAll('[data-testid="team-editor-lineup-warning"]')].map((n) => n.textContent);
+    expect(said).toContain('"Eve" was not placed: the team\'s members are still being read. Try again once the list shows.');
+  });
+
+  // Each side's wait ends on its own: the first read listed side B while side A's team was
+  // not known, and the read made once the roster names it fails. Side A's wait is over
+  // (failed), so its typed representative goes on as after any failed read (R9), not
+  // refused as still being read for good.
+  it('R23c: a side whose read fails after the other side was listed is not left waiting', async () => {
+    let arrive;
+    window.API.fetchCompetitionDetails.mockReturnValueOnce(new Promise((r) => { arrive = r; }));
+    window.API.fetchSquads.mockReset()
+      .mockResolvedValueOnce(SQUADS)
+      .mockRejectedValue(new TypeError('Failed to fetch'));
+    window.API.addTeamMember.mockResolvedValue({ id: 'm9', name: 'Eve', index: 3 });
+    await mount(makeMatch({ sideA: { name: 'Team A' }, subResults: [DH_EMPTY] }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    const reads = window.API.fetchSquads.mock.calls.length;
+    await act(async () => {
+      arrive({ id: 'comp1', config: { format: 'knockout', teamMatchType: 'fixed', naginata: false, players: [{ id: 't1', name: 'Team A' }, { id: 't2', name: 'Team B' }] } });
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(window.API.fetchSquads.mock.calls.length, 'the roster naming side A reads the members again').toBeGreaterThan(reads);
+
+    const input = dhInput('AKA');
+    await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
+    const add = await screen.findByText(/Add “Eve”/);
+    await act(async () => { fireEvent.click(add.closest('button')); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
+    const said = [...document.querySelectorAll('[data-testid="team-editor-lineup-warning"]')].map((n) => n.textContent);
+    expect(said.some((t) => t.includes('still being read')), 'not refused as being read').toBe(false);
+    expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't1', 'Eve', '', expect.any(Object));
+    await waitFor(() => expect(screen.getByTestId('team-editor-lineup-warning').textContent, 'and warns, as after any failed read (V3)').toContain('may have been added as a new team member'));
+  });
+
+  // A member picked from the list takes the place of a name still waiting at its
+  // position. The list can hold members while a read is out: the first read failed, a
+  // typed representative added Eve, and a new password reads the members again.
+  describe('a member picked from the list in place of a waiting typed name', () => {
+    const view = (password) => (
+      <ScoreEditorModal match={makeMatch({ subResults: [DH_EMPTY] })} onClose={vi.fn()} onSubmit={vi.fn()} password={password} />
+    );
+    const boutShiro = () => document.querySelectorAll('.team-sub-match')[0].querySelector('.team-sub-match__side--shiro input');
+    const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    async function setUp() {
+      window.API.fetchSquads.mockReset().mockRejectedValueOnce(new TypeError('Failed to fetch'));
+      window.API.addTeamMember.mockResolvedValue({ id: 'm9', name: 'Eve', index: 3 });
+      let utils;
+      await act(async () => { utils = render(view('')); });
+      await settle();
+      const input = dhInput('SHIRO');
+      await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
+      const add = await screen.findByText(/Add “Eve”/);
+      await act(async () => { fireEvent.click(add.closest('button')); });
+      await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledTimes(1));
+      let resolve;
+      window.API.fetchSquads.mockReturnValue(new Promise((r) => { resolve = r; }));
+      await act(async () => { utils.rerender(view('pw2')); });
+      await settle();
+      await act(async () => {
+        fireEvent.focus(boutShiro());
+        fireEvent.change(boutShiro(), { target: { value: 'Sano' } });
+        fireEvent.keyDown(boutShiro(), { key: 'Enter' });
+      });
+      await settle();
+      expect(boutShiro().value, 'Sano waits for the read made again').toBe('Sano');
+      expect(window.API.putMatchLineup).not.toHaveBeenCalled();
+      return (squads) => act(async () => { resolve(squads); });
+    }
+    async function pickEve() {
+      await act(async () => { fireEvent.focus(boutShiro()); fireEvent.change(boutShiro(), { target: { value: '' } }); });
+      const option = [...document.querySelectorAll('.team-sub-match')[0].querySelectorAll('.team-sub-match__side--shiro .pmf__option')]
+        .find((o) => o.textContent.includes('Eve'));
+      await act(async () => { fireEvent.click(option); });
+      await settle();
+    }
+    const saves = () => window.API.putMatchLineup.mock.calls.map((c) => [c[3], c[5]]);
+
+    it('saves the member by its id, and the waiting name adds nobody and saves nothing once the list arrives', async () => {
+      const arrive = await setUp();
+      // Queued, so the pick is shown on the lineup held (this stub's landed answer is empty).
+      window.API.putMatchLineup.mockResolvedValueOnce({ pending: true, settled: new Promise(() => {}) });
+      await pickEve();
+      expect(saves()).toEqual([[{ 1: 'Eve' }, { 1: 'm9' }]]);
+
+      await arrive(SQUADS);
+      await settle();
+      expect(window.API.addTeamMember, 'Sano is never added').toHaveBeenCalledTimes(1);
+      expect(saves(), 'nor saved').toEqual([[{ 1: 'Eve' }, { 1: 'm9' }]]);
+      expect(boutShiro().value).toBe('Eve');
+      expect(screen.getByRole('button', { name: 'Close' }).disabled, 'Close is free').toBe(false);
+    });
+
+    // The duplicate guard refuses the pick: the picker offers only members placed nowhere
+    // else, so the refusal comes from a list drawn before another position's save of the
+    // same member landed (Eve picked at the second bout, answered after the list showed).
+    it('puts the position back as it was before the waiting name when the pick is refused as placed elsewhere', async () => {
+      await setUp();
+      const row = (n) => document.querySelectorAll('.team-sub-match')[n];
+      const boutTwo = () => row(1).querySelector('.team-sub-match__side--shiro input');
+      const eveIn = (n) => [...row(n).querySelectorAll('.team-sub-match__side--shiro .pmf__option')].find((o) => o.textContent.includes('Eve'));
+      let land;
+      window.API.putMatchLineup.mockReturnValueOnce(new Promise((r) => { land = r; }));
+      await act(async () => { fireEvent.focus(boutTwo()); fireEvent.change(boutTwo(), { target: { value: '' } }); });
+      await act(async () => { fireEvent.click(eveIn(1)); });
+      await settle();
+      expect(window.API.putMatchLineup, 'the second bout\'s save is out').toHaveBeenCalledTimes(1);
+
+      await act(async () => { fireEvent.focus(boutShiro()); fireEvent.change(boutShiro(), { target: { value: '' } }); });
+      const stale = eveIn(0);
+      expect(stale, 'Eve is offered at the first bout, her save not landed yet').toBeTruthy();
+      await act(async () => {
+        land({ pending: true, settled: new Promise(() => {}) });
+        for (let i = 0; i < 20; i += 1) await Promise.resolve();
+        fireEvent.click(stale);
+      });
+      await settle();
+
+      expect(window.API.putMatchLineup, 'the refused pick saves nothing').toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('team-editor-lineup-warning').textContent).toMatch(/^Eve is already at /);
+      expect(boutShiro().value, 'not Sano, which was only ever shown').toBe('');
+    });
+
+    it('puts the position back as it was before the waiting name when the pick is not saved', async () => {
+      await setUp();
+      window.API.putMatchLineup.mockRejectedValueOnce(new Error('The lineup could not be saved.'));
+      await pickEve();
+      expect(boutShiro().value, 'not Sano, which was only ever shown').toBe('');
+      expect(screen.getByTestId('team-editor-lineup-warning').textContent).toBe('The lineup could not be saved.');
+    });
   });
 
   it('R23: a representative typed while the members are still being read is not named once the editor has closed', async () => {

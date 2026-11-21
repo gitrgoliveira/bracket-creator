@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { collectText } from './helpers/vdom.js';
 import { answered } from './helpers/team_members.js';
+import { MEMBERS_UNAVAILABLE_NOTICE } from '../lineup_draft.jsx';
 
 const realReact = global.React;
 
@@ -460,9 +461,11 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
   it('says the team-member list could not be loaded, rather than that the team is empty', async () => {
     global.window.API.fetchSquads.mockRejectedValue(new Error('network down'));
     const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {});
-    const text = collectText(runtime.currentTree() || tree);
-    expect(text).toContain('could not be loaded');
-    expect(text).not.toContain('This team has no members yet');
+    const now = runtime.currentTree() || tree;
+    const notice = findHosts(now, 'div').find(d => d.props?.['data-testid'] === 'lineup-members-unavailable');
+    expect(notice, 'the notice stands where the list would be').toBeTruthy();
+    expect(collectText(notice)).toBe(MEMBERS_UNAVAILABLE_NOTICE);
+    expect(collectText(now)).not.toContain('This team has no members yet');
   });
 
   it('operation 1 (SELECT) of a still-unnamed squad slot is a placement: Save writes it by id with an empty name (bc-dnst)', async () => {
@@ -505,7 +508,11 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
   const memberWarning = (tree) =>
     findHosts(tree, 'div').find(d => d.props?.['data-testid'] === 'lineup-member-warning');
 
-  it('shows the squad-unavailable warning after a save that still succeeded, when the squad failed to load', async () => {
+  // Operator decisions V1 and U2: "Saved by name only" is said only when the save
+  // really carried a name with no member id. A save that clears a position carries
+  // none, so it says nothing, even with the squad failed to load (the name only
+  // case itself is pinned in lineup_editors_wait_for_members.render.test.jsx).
+  it('says nothing of a name only save after a save that placed no name, even when the squad failed to load', async () => {
     global.window.API.fetchSquads.mockRejectedValue(new Error('network error'));
     const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { lineup: NAMES_ONLY });
 
@@ -516,12 +523,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     const tree2 = runtime.currentTree();
     // The save itself still succeeded (never blocked by the squad failure).
     expect(global.window.API.putTeamLineup).toHaveBeenCalled();
-    const warning = memberWarning(tree2);
-    expect(warning).toBeTruthy();
-    const text = collectText(warning);
-    expect(text).toContain('Lineup saved');
-    expect(text).toContain('team member list could not be loaded');
-    expect(text).toContain('Scores will still record normally');
+    expect(memberWarning(tree2)).toBeFalsy();
   });
 
   // bc-cse: a member selected at one position must not be offered again at

@@ -21,9 +21,11 @@ package kachinukigate
 //  1. bout 1's fighter on each side is the first fighter of that match's
 //     lineup: its own saved lineup, else the lineup it started with (or the
 //     snapshot "Use the previous match's lineup" took), else (while it has
-//     not started) the lineup in force by the carry rule; a match started
-//     before this rule is renamed only by an edit of its own lineup; a match
-//     sent back to the queue keeps following only its own lineup;
+//     not started) the lineup in force by the carry rule; a match that has
+//     started with no lineup kept fields each team's members by member
+//     number, so bout 1 holds each team's member 1 (Q4 (b)) until an edit of
+//     its own lineup; a match sent back to the queue keeps following only its
+//     own lineup;
 //  2. no operator tap is refused for a fighter, and every tap ends as the
 //     closed-match rule says (a tap stamped before a finish that did not see
 //     it is turned away, beforeBaseline; one stamped after it, matchClosed);
@@ -118,18 +120,21 @@ type gateLineup struct {
 
 // gateWorld is one ordering's competition and what the steps have done so far.
 type gateWorld struct {
-	t       *testing.T
-	r       *gin.Engine
-	store   *state.Store
-	eng     *engine.Engine
-	comp    string
-	legacy  bool // the match started before this rule: running, bout 1 named, no lineup kept
-	teamA   string
-	teamB   string
-	members map[string]string // name -> member id (team A and B)
-	base    int64             // the device stamps' frame, in the past
-	arrived map[string]bool
-	order   []string
+	t      *testing.T
+	r      *gin.Engine
+	store  *state.Store
+	eng    *engine.Engine
+	comp   string
+	legacy bool // the match started before this rule: running, no lineup kept at its start
+	// numberOne is each team's member 1 (team id -> member id): the fighter
+	// a match with no lineup of its own, once started, fields first.
+	numberOne map[string]string
+	teamA     string
+	teamB     string
+	members   map[string]string // name -> member id (team A and B)
+	base      int64             // the device stamps' frame, in the past
+	arrived   map[string]bool
+	order     []string
 	// The model: team A's starting lineup's first fighter, the latest change
 	// BY STAMP (operator decision L1; an unstamped save is stamped with the
 	// server's time as it lands), with its stamp, every change of it that has
@@ -609,21 +614,30 @@ func (w *gateWorld) check() {
 	m := w.stored(gateMatch)
 	// 1. Bout 1's names.
 	if _, ok := boutRow(m, 1); ok {
-		wantA := ""
+		row, _ := boutRow(m, 1)
+		kind := "bout 1 (started here)"
+		if w.legacy {
+			kind = "bout 1 (started before this rule)"
+		}
 		switch {
 		case w.own != nil:
-			wantA = w.own.name
-		case w.legacy:
-			wantA = "Aoki"
-		}
-		if wantA != "" && boutName(m, 1, "a") != wantA {
-			kind := "bout 1 (started here)"
-			if w.legacy {
-				kind = "bout 1 (started before this rule)"
+			if boutName(m, 1, "a") != w.own.name {
+				w.fail(kind, "bout 1 Shiro is %q, want %q", boutName(m, 1, "a"), w.own.name)
 			}
-			w.fail(kind, "bout 1 Shiro is %q, want %q", boutName(m, 1, "a"), wantA)
+		case w.legacy:
+			// No lineup of its own: team A's nameless member 1, by number.
+			if row.SideA != "" || row.SideAMemberID != w.numberOne[w.teamA] {
+				w.fail(kind, "bout 1 Shiro is %q (%s), want team A's member 1 by number", row.SideA, row.SideAMemberID)
+			}
 		}
-		if got := boutName(m, 1, "b"); got != "Fujii" {
+		// Team B keeps no lineup of its own: the start pins its starting
+		// lineup (Fujii); a match started before this rule kept none, so it
+		// fields team B's nameless member 1 by number.
+		if w.legacy {
+			if row.SideB != "" || row.SideBMemberID != w.numberOne[w.teamB] {
+				w.fail("bout 1 Aka", "bout 1 Aka is %q (%s), want team B's member 1 by number", row.SideB, row.SideBMemberID)
+			}
+		} else if got := boutName(m, 1, "b"); got != "Fujii" {
 			w.fail("bout 1 Aka", "bout 1 Aka is %q, want Fujii", got)
 		}
 	}
@@ -741,6 +755,34 @@ func newGateWorld(t *testing.T, r *gin.Engine, store *state.Store, eng *engine.E
 		first,
 		{ID: gateLater, SideA: "Tora", SideB: "Kuma", SideAID: ids["Tora"], SideBID: ids["Kuma"], Status: state.MatchStatusScheduled},
 	}))
+	squads, err := store.LoadSquads(comp)
+	require.NoError(t, err)
+	w.numberOne = map[string]string{}
+	for team, members := range squads {
+		for _, m := range members {
+			if m.Index == 1 {
+				w.numberOne[team] = m.ID
+			}
+		}
+	}
+	if legacy {
+		// A running match whose bout 1 holds names no rule gives (Aoki and
+		// Fujii, typed by hand, with no lineup kept at its start) is a shape
+		// production cannot reach: no kachinuki match was fought with this app
+		// before the start pin (Q4 (b)), and the server seats bout 1 at every
+		// write that reaches the match. The world is kept for what it still
+		// drives (a started match with no lineup of its own: Use the previous
+		// match's lineup, an own lineup save, the taps around it) and starts
+		// as the first reseat leaves it, each team's member 1 by number, so
+		// "a reseat after any step changes nothing" holds from the first step.
+		_, err := eng.ReseatKachinukiOpeners(comp, "")
+		require.NoError(t, err)
+		row, ok := boutRow(w.stored(gateMatch), 1)
+		require.True(t, ok)
+		require.Equal(t, w.numberOne[w.teamA], row.SideAMemberID, "the reseat seats team A's member 1")
+		require.Equal(t, w.numberOne[w.teamB], row.SideBMemberID, "the reseat seats team B's member 1")
+		require.Empty(t, row.SideA+row.SideB, "a nameless member is seated by id alone")
+	}
 	return w
 }
 

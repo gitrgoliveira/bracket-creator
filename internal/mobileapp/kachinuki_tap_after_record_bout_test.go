@@ -45,6 +45,9 @@ func TestKachinukiTapOnTheNewestPairingAfterTwoRecordBoutsLands(t *testing.T) {
 				ID: "P1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
 				SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "W-1"}},
 			}}))
+			// The running match carries the lineup its start kept (this test is
+			// about the next-position rule, not who is seated).
+			kachinukiMatchOwnsLineups(t, store, compID, "P1-0")
 			now := time.Now().UnixMilli()
 			record := func(stamp int64, subs ...map[string]any) state.MatchResult {
 				w := putScore(t, r, compID, "P1-0", map[string]any{

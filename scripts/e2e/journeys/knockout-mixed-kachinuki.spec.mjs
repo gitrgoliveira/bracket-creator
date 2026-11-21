@@ -16,6 +16,8 @@
 // final that M1 feeds is already running. M2 ends the other way the rules
 // allow, with the taisho drawing, staying on, and then being defeated. The
 // final is played out and a spectator's phone sees the finished knockout.
+// J5b then plays a second competition's match with no lineup and no member
+// named, in member number order.
 //
 // Functional defects found here were filed as beads and kept as tests named
 // after them ('<bead-id>: ...'), each a self-contained reproduction placed
@@ -56,7 +58,7 @@ import { closeNameList } from '../fixtures/team.mjs';
 import {
   BOUT_CHANGE, awardBoutIppon, boutFilled, clearBoutMarks, boutIpponButton, boutMiddle, boutNames, closeLineupPanel, correctingBout,
   currentBout, doneRowWinner, doneRows, editor, enchoButton, enchoUndoButton, endMatch, endMatchButton, lineupSide, lineupSource,
-  openLineupFromUpNext, recordBout, recordBoutButton, removeBoutButton, reopenButton, tieButton,
+  noPairingLine, openLineupFromUpNext, recordBout, recordBoutButton, removeBoutButton, reopenButton, tieButton,
   typeLineup, winBout,
 } from '../fixtures/kachinuki.mjs';
 
@@ -1399,6 +1401,81 @@ test.describe('J5 kachinuki from the court console', () => {
     // Last: the deferred guards (above) fail the test only now, after the
     // final and its viewer check ran.
     expect(guardFailures, 'regression guards that failed').toEqual([]);
+  });
+});
+
+// J5b, a kachinuki match with NO lineup saved and no member named (bc-kno1,
+// operator decision K1 (a)): the team fights in member number order. A second
+// competition in the same tournament, seeded only through the interface, after
+// J5 has freed shiaijo A: two teams of three, one match, nobody named, no
+// lineup. The server seats member 1 of each team on bout 1, shown by number
+// alone (N1.1 against N2.1, a nameless member's label), Record bout appends
+// member 2 of the loser against the winner, and the last member's loss reads
+// "no fighters left". The fighters are read by their member labels, since a
+// nameless fighter's name box is empty (boutNames reads it as '').
+test.describe('J5b kachinuki with no lineup: member number order', () => {
+  const NO_LINEUP_TEAMS = [['Team Kogarashi', 'Kita Dojo'], ['Team Shigure', 'Minami Dojo']];
+  const label = (row, side) => row.locator(`[data-testid="team-sub-match-member-label-${side}"]`).first();
+  // A member label: the team's number, then the member number ("N2.1").
+  const LABEL = /^(N\d+)\.(\d+)$/;
+  const parse = async (row, side) => {
+    const text = (await label(row, side).innerText()).trim();
+    const m = LABEL.exec(text);
+    expect(m, `${side} reads as a member label, got "${text}"`).not.toBeNull();
+    return { team: m[1], member: Number(m[2]) };
+  };
+
+  test('bout 1 seats member 1 of each team; Record bout appends the next member against the winner', async ({ page }) => {
+    // A folder of its own: journeyShots empties the folder it is given, and J5's
+    // screenshots are judged from theirs.
+    const shot = journeyShots(`${JOURNEY}-no-lineup`);
+    await login(page);
+    const id = await createCompetition(page, {
+      name: 'Team Kachinuki No Lineup', kind: 'team', format: 'knockout', teamSize: 3,
+      teamMatchType: 'kachinuki', courts: ['A'], numberPrefix: 'N',
+    });
+    await pasteRoster(page, id, NO_LINEUP_TEAMS);
+    await generateDraw(page, id);
+    await startCompetition(page, id);
+
+    await openShiaijo(page, 'A');
+    await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
+    await expect(recordBoutButton(page)).toBeVisible();
+
+    // The server seats bout 1 just after the start, with events of its own.
+    let shiroTeam;
+    let akaTeam;
+    await test.step('bout 1 reads member 1 of each team, by number alone', async () => {
+      await expect.poll(async () => (await label(currentBout(page), 'shiro').innerText()).trim(), { timeout: EXPECT_TIMEOUT_MS })
+        .toMatch(/^N\d+\.1$/);
+      await expect.poll(async () => (await label(currentBout(page), 'aka').innerText()).trim(), { timeout: EXPECT_TIMEOUT_MS })
+        .toMatch(/^N\d+\.1$/);
+      shiroTeam = (await parse(currentBout(page), 'shiro')).team;
+      akaTeam = (await parse(currentBout(page), 'aka')).team;
+      expect(shiroTeam).not.toBe(akaTeam);
+      // Nobody is named: the boxes are empty, and Record bout waits for a score only.
+      expect(await boutNames(currentBout(page))).toEqual({ shiro: '', aka: '' });
+      await expect(recordBoutButton(page)).toBeDisabled();
+      await shot(page, 'no-lineup-bout-1-by-number');
+    });
+
+    for (const member of [2, 3]) {
+      await test.step(`Shiro wins; bout ${member} is Shiro's member 1 against Aka's member ${member}`, async () => {
+        await winBout(page, 'shiro');
+        await expect.poll(async () => (await label(currentBout(page), 'aka').innerText()).trim(), { timeout: EXPECT_TIMEOUT_MS })
+          .toBe(`${akaTeam}.${member}`);
+        expect(await parse(currentBout(page), 'shiro')).toEqual({ team: shiroTeam, member: 1 });
+        expect(await doneRows(page).count()).toBe(member - 1);
+      });
+    }
+
+    await test.step("Aka's last member loses: no fighters left, End match finishes", async () => {
+      await winBout(page, 'shiro');
+      await expect(noPairingLine(page)).toHaveText('Aka has no fighters left. End match finishes the encounter.');
+      await shot(page, 'no-lineup-aka-exhausted');
+      await endMatch(page);
+      await settled(page);
+    });
   });
 });
 

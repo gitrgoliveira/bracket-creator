@@ -4,11 +4,12 @@
 import { LineupNameInput } from './admin_scoring_shared.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
 import { Icon } from './icon.jsx';
-import { scoreRowMatchLabel } from './pool_ids.jsx';
-import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel } from './lineup_resolver.jsx';
+import { scoreRowMatchLabel, teamMatchTypeFor } from './pool_ids.jsx';
+import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel, fieldedDefaults, teamCarriesName } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
+import { kachinukiMembersKey } from './kachinuki_advisory.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
-import { queuedNotice, writePending, writeHeldOnDeviceOnly } from './write_result.jsx';
+import { queuedNotice, writePending, writeHeldOnDeviceOnly, isOffline } from './write_result.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
@@ -18,6 +19,68 @@ const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
 // What an editor standing alone holds open: nothing.
 const holdsNothing = () => undefined;
+
+const NO_PLACES = Object.freeze({});
+// A failed fielded read is asked again this many times, this long after.
+const FIELDED_RETRIES = 3;
+const FIELDED_RETRY_MS = 5000;
+// The Save's own fielded read is waited for this long, no longer: a save is an
+// offline-first write and never waits on a slow link for a read.
+const SAVE_READ_MS = 2000;
+
+// fieldedForm: the lineup form as the fielded read is asked it: the positions that
+// hold a name or a member id (a name trimmed), and the member id of each.
+function fieldedForm(values, memberIds) {
+  const positions = {};
+  Object.entries(values || {}).forEach(([key, name]) => {
+    const trimmed = String(name || "").trim();
+    if (trimmed || memberIds?.[key]) positions[key] = trimmed;
+  });
+  const ids = {};
+  Object.entries(memberIds || {}).forEach(([key, id]) => {
+    if (!id) return;
+    ids[key] = id;
+    if (!(key in positions)) positions[key] = "";
+  });
+  return { positions, ids };
+}
+
+// useFieldedPlaces: who the server fields by member number in the empty places
+// of a kachinuki lineup form (operator answers D2 and D3), asked with the form as
+// it stands (`values`, `memberIds`), saved or not, once the lineup was read and
+// again after every change to it or to the team's members. The answer is held
+// with the form it was asked for and shown only while the form is still that one,
+// so a place shows no default while the read for the latest change is out, and an
+// answer for an older form is never shown. A read that fails shows "Add player…"
+// and is asked again, FIELDED_RETRY_MS later, up to FIELDED_RETRIES times (a form
+// or members change asks at once, as for any change).
+function useFieldedPlaces({ enabled, compId, teamId, matchId, values, memberIds, membersKey }) {
+  const [answer, setAnswer] = useState({ key: "", places: NO_PLACES });
+  const { positions, ids } = fieldedForm(values, memberIds);
+  const formKey = enabled ? JSON.stringify([compId, teamId, matchId, positions, ids, membersKey]) : "";
+  useEffect(() => {
+    if (!formKey) return undefined;
+    let live = true;
+    let timer = 0;
+    const form = JSON.parse(formKey);
+    // A read that throws or rejects is a failed read too (API.fetchFieldedLineup
+    // answers null): no defaults, then another try. The tries belong to this form:
+    // a changed form ends them and starts again.
+    const ask = (retries) => {
+      Promise.resolve()
+        .then(() => window.API.fetchFieldedLineup(form[0], form[1], form[2], { positions: form[3], memberIds: form[4] }))
+        .then((places) => places || null, () => null)
+        .then((places) => {
+          if (!live) return;
+          setAnswer({ key: formKey, places: places || NO_PLACES });
+          if (!places && retries < FIELDED_RETRIES) timer = setTimeout(() => ask(retries + 1), FIELDED_RETRY_MS);
+        });
+    };
+    ask(0);
+    return () => { live = false; clearTimeout(timer); };
+  }, [formKey]);
+  return formKey && answer.key === formKey ? answer.places : NO_PLACES;
+}
 
 // MatchLineupSideEditor: inline lineup editor for one team side within
 // the per-match lineup panel, for a single (compId, teamId, matchId) triple. The
@@ -64,10 +127,10 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // device saved: this panel's picker (LineupNameInput) stays typeable, unlike the
   // Lineups page's strict select-by-id dropdown (AdminLineup), so doSave resolves a
   // typed name to its member id against it. A squad that could not be read must
-  // not block loading OR saving the lineup: the resolver simply mints for every
-  // name it cannot find against an empty list, and bc-cse's `squadUnavailable`
-  // records that this happened, so doSave's warning names the real root cause
-  // instead of reporting every position the resolver then "failed" to match.
+  // not block loading OR saving the lineup: a Save waits for the read (bounded,
+  // operator decision V1), and without a list it saves every typed name by name
+  // only, adds no member, and its note says so in one sentence (U2);
+  // `squadUnavailable` is what puts the notice above the boxes.
   const form = useLineupForm({
     compId, teamId, matchId, positionKeys, password,
     matchLabel: match ? scoreRowMatchLabel(match) : "", teamName: team?.name || team?.Name,
@@ -75,7 +138,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const {
     values, setValues, memberIds, setMemberIds,
     error, setError, warning: lineupWarning, setWarning: setLineupWarning,
-    squad, changeMembers, squadUnavailable,
+    squad, changeMembers, squadUnavailable, membersNotice,
   } = form;
   // RENAME (bc-dnst, operator decision 2026-09-15): a member's name can be
   // corrected from this panel as well as from the Lineups page (the score sheet
@@ -145,6 +208,18 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     return byKey;
   }, [positions, suggestions, values, memberIds]);
   const rosterForPosition = (posKey) => rostersByPosition[posKey];
+  // A kachinuki match's empty places show who the server fields there by member
+  // number (operator answers D2 and D3; fixed-order matches are unchanged). Asked
+  // only of a lineup that was read: the blank boxes of a failed read are not empty.
+  const kachinuki = (match?.teamMatchType || teamMatchTypeFor(comp)) === "kachinuki";
+  const membersKey = kachinukiMembersKey(squad);
+  const fielded = useFieldedPlaces({
+    enabled: kachinuki && form.read, compId, teamId, matchId, values, memberIds, membersKey,
+  });
+  const defaults = useMemo(
+    () => fieldedDefaults({ fielded, squadEntries, positions: values, memberIds, positionKeys: positions.map(p => p.key) }),
+    [fielded, squadEntries, values, memberIds, positions]
+  );
   // The member a position holds, when it is a squad member with a name: the
   // only case Rename applies to (a blank slot is named by typing into it).
   const namedMemberAt = (posKey) => {
@@ -190,6 +265,45 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       setError(e?.message || "Failed to rename team member");
     }
   };
+  // A name typed into an empty place while the fielded read was out took no member
+  // (onSelect: no default was shown to take one from). The Save asks the server
+  // once more, with those places left empty, and a place whose default is a
+  // nameless member takes it, so the name goes to the member the place would have
+  // shown, as for a name typed after the default showed, and not to the slot seeded
+  // for the position. A name a member already carries is placed by the resolver, and
+  // a named default is someone else, so neither is asked; a read that fails,
+  // is not answered within SAVE_READ_MS, or is not asked at all while the browser
+  // is offline leaves the resolver's own rule. This read is the Save's second wait
+  // on the network, after the one for the team's members, and adds at most
+  // SAVE_READ_MS before the save reaches the outbox (none while offline). Asked only
+  // once the team's members were read and a list shown, of the list as that read left
+  // it (form.squadRef), not the one this render held. Answers the ids to add, by
+  // position key.
+  const typedNamesAtDefaults = async ({ positions: composed, memberIds: composedIds, changed }) => {
+    const members = form.squadRef.current;
+    const typedKeys = changed.filter(key => {
+      const name = (composed[key] || "").trim();
+      return name && !composedIds[key] && !teamCarriesName(members, name);
+    });
+    if (typedKeys.length === 0 || isOffline()) return {};
+    const open = { ...composed };
+    typedKeys.forEach(key => { delete open[key]; });
+    const asked = fieldedForm(open, composedIds);
+    let timer = 0;
+    const places = await Promise.race([
+      Promise.resolve()
+        .then(() => window.API.fetchFieldedLineup(compId, teamId, matchId, { positions: asked.positions, memberIds: asked.ids }))
+        .catch(() => null),
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), SAVE_READ_MS); }),
+    ]);
+    clearTimeout(timer);
+    const seated = {};
+    typedKeys.forEach(key => {
+      const entry = members.find(e => e && e.id === places?.[key]);
+      if (entry && !entry.name) seated[key] = entry.id;
+    });
+    return seated;
+  };
   // What a Save carries is the positions the operator changed and nothing else
   // (form.lineupToSave, operator decision 2026-10-07): the server puts them on the
   // lineup it holds when the save arrives, so a position another device changed
@@ -207,7 +321,17 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     setLineupWarning("");
     setSaving(true);
     try {
-      const { positions: composed, memberIds: composedIds, changed } = form.lineupToSave();
+      const toSave = form.lineupToSave();
+      const { positions: composed, changed } = toSave;
+      // A typed name is resolved against the team's members, so it waits for their read
+      // (operator decision V1), under "Saving…", bounded by the read's deadline. A
+      // changed position that holds a name was typed or picked from the list, and a
+      // pick means the list was shown, so only a typed name ever waits. Without a list
+      // (the read failed or was not answered, whatever the cause) every typed name is
+      // saved by name only and no member is added.
+      const names = changed.some(key => (composed[key] || "").trim());
+      const listed = names ? await form.membersRead() : form.membersListed();
+      const composedIds = { ...toSave.memberIds, ...(kachinuki && listed ? await typedNamesAtDefaults(toSave) : {}) };
       // The lineup as the form shows it once the typed names are resolved, vacant
       // positions left out: the lineup the duplicate guard below is asked of. What is
       // sent is the positions the operator changed (changedLineupSave, below).
@@ -236,8 +360,8 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         // goes through the resolver with this id as the position's current
         // member, so it renames that member (a blank one) rather than the
         // slot seeded for the position, and never the wrong fighter.
-        const picked = pickedId ? squadEntries.find(e => e.id === pickedId) : null;
-        const unchanged = !!picked && (!v || v.toLowerCase() === picked.name.toLowerCase());
+        const picked = pickedId ? form.squadRef.current.find(e => e && e.id === pickedId) : null;
+        const unchanged = !!picked && (!v || v.toLowerCase() === (picked.name || "").toLowerCase());
         if (pickedId && unchanged) {
           positionsOut[key] = v;
           memberIdsOut[key] = pickedId;
@@ -246,15 +370,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           positionsForResolver[key] = v;
         }
       });
-      // A typed name is resolved against the team's members only once the read of them
-      // is over: while it is out, against no list, a new name would be minted where the
-      // position's seeded slot is free, and the name of a member the team has would be
-      // refused by the server as a second one. Nothing waits for that read (bc-evts
-      // stage 3 review 2, R1): while it is out the typed names are saved by name alone;
-      // after a read that failed they go on without the members, as they always did.
-      // The warning below says so either way.
-      const listed = form.membersReadOver();
-      const membersUnavailable = squadUnavailable || (Object.keys(positionsForResolver).length > 0 && !listed);
+      // The typed names that go by name only: every one, when no list was read (the
+      // note after the save says so, operator decisions V1 and U2).
+      const byNameOnly = !listed && Object.keys(positionsForResolver).length > 0;
       // The member the resolver will put each typed name on, asked of the list the
       // resolver is given (the team's members as the Save's read of them left them) through
       // the resolver's own decision (typedNameTarget). A minted member collides with
@@ -303,6 +421,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // behaves today. bc-cse: the failure is no longer discarded either --
       // `memberFailures` carries it through to the warning shown below on
       // a successful save.
+      // Without a list nothing is resolved (operator decision V1): against none a name
+      // the team has would be added again, and over a file the server cannot read an
+      // add would only be refused, so the typed names are saved by name only.
       let memberFailures = [];
       if (Object.keys(positionsForResolver).length > 0 && listed) {
         try {
@@ -375,7 +496,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           if (typeof showToast === "function") showToast("Match lineup saved");
         }, () => {});
         const composer = window.AdminLineupHelpers?.memberIdentityWarning;
-        if (typeof composer === "function") setLineupWarning(composer(memberFailures, membersUnavailable, teamSize));
+        if (typeof composer === "function") setLineupWarning(composer(memberFailures, byNameOnly, teamSize));
         return;
       }
       // Reflect exactly what was persisted: the whole lineup the server holds now,
@@ -384,7 +505,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       if (typeof showToast === "function") showToast("Match lineup saved");
       const composer = window.AdminLineupHelpers?.memberIdentityWarning;
       if (typeof composer === "function") {
-        setLineupWarning(composer(memberFailures, membersUnavailable, teamSize));
+        setLineupWarning(composer(memberFailures, byNameOnly, teamSize));
       }
     } catch (e) {
       setError(e?.message || "Failed to save lineup");
@@ -439,18 +560,18 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           // labelable descendant, the Rename button. Only the position name is a
           // label, pointed at the name box by id.
           <div key={p.key} data-testid={`match-lineup-pos-${teamId}-${p.key}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-            {/* The picked member's number (bc-dnst) sits UNDER the position
-                name, inside the label's fixed column: a picked blank slot has
-                no name, so without it the box reads empty after the pick and
-                the operator cannot see which slot the position holds. Stacked
-                rather than beside the box so it adds no width: the box keeps
-                its intrinsic width as flex basis, so a chip beside it grew the
-                column's minimum past the modal and brought in a scrollbar. */}
+            {/* The picked member's number (bc-dnst) is shown once, in the box
+                (numberLabel below): a picked blank slot has no name, so without
+                it the box reads empty after the pick and the operator cannot
+                see which slot the position holds, and a named member reads
+                "T1.3 Sano" there. Nothing repeats it under the position name.
+                The box keeps its intrinsic width as flex basis, so a chip
+                beside it grew the column's minimum past the modal and brought
+                in a scrollbar; the number rides inside the box instead. */}
             <span style={{ minWidth: 72, fontWeight: 600, color: "var(--ink-2)", fontSize: 12, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
               <label htmlFor={`match-lineup-name-${teamId}-${p.key}`}>{p.label}</label>
-              {pickedLabel ? <span className="pmf__opt-label">{pickedLabel}</span> : null}
               {/* Rename lives in the same fixed column, so it adds no width
-                  to the row (see the chip note above). */}
+                  to the row (see the note above). */}
               {namedMemberAt(p.key) && renamingKey !== p.key ? (
                 <button type="button" className="btn btn--ghost btn--sm lineup-rename-btn"
                   onClick={() => startRename(p.key)} disabled={busy}
@@ -478,6 +599,8 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
               value={values[p.key] || ""}
               roster={rosterForPosition(p.key)}
               ariaLabel={`${p.label} player`}
+              numberLabel={pickedLabel}
+              fieldedLabel={defaults[p.key]?.label || ""}
               clearable={!!memberIds[p.key]}
               disabled={locked}
               onSelect={(name, entry) => {
@@ -494,8 +617,16 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
                 // name against that member (a blank one is renamed, so the
                 // name attaches to the number the operator was shown), and
                 // only a position with no id at all resolves from scratch.
+                // A name typed into a place that shows a NAMELESS default names that
+                // member: the place takes its id, so save() renames it, as a name
+                // typed over a picked blank member does, and the team's numbers stay
+                // with its people. Over a named default it is someone else, and so is
+                // a name a member of the team already carries (save() places that one).
+                const typedKnown = teamCarriesName(squadEntries, trimmed);
+                const shown = typedKnown ? null : defaults[p.key];
                 setMemberIds(ids => {
                   if (entry && entry.id) return { ...ids, [p.key]: entry.id };
+                  if (trimmed && !ids[p.key] && shown && shown.nameless) return { ...ids, [p.key]: shown.id };
                   if (trimmed) return ids;
                   const next = { ...ids };
                   delete next[p.key];
@@ -506,7 +637,14 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
             )}
           </div>
         ); })}
-        {suggestions.length === 0 && (
+        {/* A list that failed to load is not an empty team: saying it has no
+            members would be false (the Lineups page's rule, one sentence, which
+            names team-members.yaml when that file cannot be read). */}
+        {squadUnavailable ? (
+          <div className="field__hint field__hint--warn" data-testid="lineup-members-unavailable">
+            {membersNotice}
+          </div>
+        ) : suggestions.length === 0 && (
           <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
             This team has no registered members: type each competitor&apos;s name directly.
           </div>
@@ -604,7 +742,10 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
           <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>{variant === "inline" ? "Done" : <><Icon name="x" size={14} />Close</>}</button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+        {/* minmax(0, 1fr), not 1fr: a column's own minimum would otherwise grow past
+            half the panel (the member number in each box widens it) and push the
+            right column out of the dialog. */}
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 24 }}>
           <div style={{ borderRight: "1px solid var(--line)", paddingRight: 20 }}>
             <h3 className="column-label">
               Shiro (white)

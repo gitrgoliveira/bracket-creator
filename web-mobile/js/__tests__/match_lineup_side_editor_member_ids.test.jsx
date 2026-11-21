@@ -210,10 +210,10 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
 
   it('shows the ONE root-cause sentence, not a per-position list, when the squad itself failed to load', async () => {
     global.window.API.fetchSquads = vi.fn().mockRejectedValue(new Error('network error'));
-    // Even if a resolver failure ALSO carried a per-position reason, the
-    // squad-unavailable sentence must win: every position looked "new" to
-    // the resolver for the SAME root cause, so a per-position list would
-    // just repeat it.
+    // Without a list the typed name is not resolved at all (operator decision
+    // V1): it is saved by name only and no member is added, so a resolver
+    // failure, had it run, could never reach the note: the one sentence says
+    // the root cause.
     global.window.AdminLineupHelpers.resolveMemberIdsForPositions = vi.fn().mockResolvedValue({
       memberIds: {},
       squad: [],
@@ -229,10 +229,11 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
 
     tree = runtime.currentTree();
     expect(global.window.API.putMatchLineup).toHaveBeenCalled(); // never blocked
+    expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions, 'nothing is resolved, nobody added').not.toHaveBeenCalled();
     const warning = memberWarning(tree);
     expect(warning).toBeTruthy();
     const text = collectText(warning);
-    expect(text).toContain('team member list could not be loaded');
+    expect(text).toBe('Saved by name only: the team member list could not be loaded. Scores will still record normally.');
     expect(text).not.toContain('Sato'); // no per-position enumeration
   });
 

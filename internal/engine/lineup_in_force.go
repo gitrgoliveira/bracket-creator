@@ -189,23 +189,8 @@ func (r *lineupRule) inForce(teamID, matchID string) InForceLineup {
 	return InForceLineup{Lineup: best, Source: source, Found: true}
 }
 
-// lineupRuleOrNone builds the rule for a caller that holds the pool matches and
-// the bracket and keeps working without lineups, the kachinuki advance and the
-// Kachinuki Detail export. knockout is whether the competition plays a knockout
-// stage. A lineups.yaml that cannot be read is logged, naming caller, and answers
-// no lineup, so the roster falls back to the bout log and no position is
-// labelled.
-func (e *Engine) lineupRuleOrNone(caller, compID string, knockout bool, poolMatches []state.MatchResult, bracket *state.Bracket) *lineupRule {
-	lineups, err := e.store.LoadTeamLineups(compID)
-	if err != nil {
-		log.Printf("%s compId=%s: lineups.yaml load error: %v; resolving no lineup", caller, compID, err)
-		return &lineupRule{}
-	}
-	return newLineupRuleFrom(lineups, poolMatches, bracket, knockout)
-}
-
-// readLineupRule calls read with the rule built like lineupRuleOrNone's, over
-// the stored lineups where they are cached (ReadTeamLineups, no copy), and
+// readLineupRule calls read with the rule built like readKachinukiLineups's,
+// over the stored lineups where they are cached (ReadTeamLineups, no copy), and
 // hands back a lineups.yaml that cannot be read as an error. read must not
 // modify a lineup the rule holds, nor keep the rule after it returns. The
 // kachinuki roster read (KachinukiRoster) uses it: a read that answered "no

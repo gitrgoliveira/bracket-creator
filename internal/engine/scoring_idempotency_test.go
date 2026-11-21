@@ -177,11 +177,15 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 		// Bout 2: A-Jiho beats B-Chuken (A-Jiho stays; B-Senpo is still live).
 		// After bout 2 both sides still have players → AdvanceKachinuki produces
 		// out.Next (position 3), and MaybeAdvanceKachinuki appends it.
+		saveOwnMatchLineup(t, store, compID, "P1-0", redTeamID, 5, "A-Senpo", "A-Jiho")
+		saveOwnMatchLineup(t, store, compID, "P1-0", whiteTeamID, 5, "B-Senpo", "B-Chuken")
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 			{
-				ID:    "P1-0",
-				SideA: "RedTeam",
-				SideB: "WhiteTeam",
+				ID:      "P1-0",
+				SideA:   "RedTeam",
+				SideAID: redTeamID,
+				SideB:   "WhiteTeam",
+				SideBID: whiteTeamID,
 				SubResults: []state.SubMatchResult{
 					{Position: 1, SideA: "A-Senpo", SideB: "B-Senpo", Winner: "B-Senpo", Decision: "fought"},
 					{Position: 2, SideA: "A-Jiho", SideB: "B-Chuken", Winner: "A-Jiho", Decision: "fought"},

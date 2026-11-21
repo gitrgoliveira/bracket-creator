@@ -24,6 +24,7 @@ info:
     - **`GET /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}`**: public read; `PUT`/`DELETE` are protected (in self-run mode the `PUT` is open, see below).
     - **`GET /api/competitions/{id}/teams/{tid}/lineup-in-force/{matchId}`**: public read; the lineup a team fields at a match.
     - **`GET /api/competitions/{id}/matches/{mid}/kachinuki-roster`**: public read, in self-run mode too; a kachinuki encounter's fighters each side has left.
+    - **`POST /api/competitions/{id}/teams/{tid}/fielded-lineup/{matchId}`**: public read, in self-run mode too, that writes nothing; who a kachinuki team fields by member number in the empty places of a lineup form.
     - **`GET /api/competitions/{id}/swiss/standings`**: public read; always public.
     - **`GET /api/tournament/announcement`**: public read; returns the currently active admin broadcast announcement (204 when none/expired).
 
@@ -5017,8 +5018,12 @@ paths:
       description: >
         For a kachinuki (winner stays on) team match: each side's fighter on
         the court (`on`, from the last numbered bout) and the fighters behind
-        them who have not retired (`remaining`), read from the lineup in force
-        for the side's team at this match and the bouts so far. A fighter
+        them who have not retired (`remaining`), read from the lineup the
+        side's team fields at this match (the match's own lineup, else, before
+        the match starts, the lineup in force there; its empty places filled
+        by member number; a team with no saved lineup fields its
+        members by member number, member 1 first, up to the team size) and the
+        bouts so far. A fighter
         retires on losing a bout, and both fighters retire on a drawn bout.
         The last numbered bout is the one being fought, and both its fighters
         are `on` whatever its score (the score of a running bout already names a
@@ -5031,11 +5036,14 @@ paths:
         has retired both.
         `remaining` is in queue order and never holds the fighter on: its
         first entry is the fighter the server pairs next if the fighter on
-        loses. A side whose team has no lineup in force, or one that fields
-        nobody, answers `lineupFound: false` and an empty `remaining`, because
-        the bouts alone do not say how many fighters a team has. The answer is
-        a guide only: the server never ends an encounter on it. A public read,
-        in a self-run tournament too, since the public score sheet shows it.
+        loses. A side that fields nobody (the lineups could not be read, or
+        its lineup names nobody and the team members could not be read or
+        hold no member to fill a place) answers `lineupFound: false` and an empty `remaining`. When a file the
+        read needed could not be read, the read carries on without it and
+        answers 200 with `warning`, never an error: scoring never stops on this
+        read. The answer is a guide only: the server never ends an encounter on
+        it. A public read, in a self-run tournament too, since the public score
+        sheet shows it.
         `nextPairing` and each side's `exhausted` are the server's own Record
         bout decision on the match as stored, read without writing: the
         sheet disables Record bout on a recorded bout when `nextPairing` is
@@ -5070,7 +5078,26 @@ paths:
                       bout would, so it is current only as of the read. False
                       for a completed match, a match with no numbered bout, and
                       a last bout with no outcome, no fighter, or a winner the
-                      server cannot place on either side.
+                      server cannot place on either side. Under a `warning` it
+                      is still the server's decision, but the sheet does not
+                      disable Record bout on it: the operator adds the next
+                      pairing by hand.
+                  warning:
+                    type: string
+                    description: >
+                      Present when a file the read needed could not be read
+                      (each is logged as an error naming the file); the sheet
+                      shows it as a warning. One sentence at a time. When the
+                      team members could not be read (a place was left to fill
+                      by member number): "Team members could not be read, so
+                      fighters are not seated by member number. Add each
+                      bout's pairing by hand." When the lineups could not be
+                      read: "The lineups could not be read, so who fights next
+                      is not worked out. Add each bout's pairing by hand."; then
+                      both sides answer `lineupFound: false`, an empty
+                      `remaining` and `exhausted: false`, and `on` still names
+                      the live bout's fighters. While a warning is present no
+                      side is `exhausted`.
         '400':
           description: >
             An invalid competition id, or a competition whose team matches
@@ -5083,9 +5110,9 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           description: >
-            The match or the competition's lineups could not be read. A
-            lineups file that cannot be read is an error here, never an answer
-            of no lineup.
+            The competition or its draw could not be read. A lineups or team
+            members file that cannot be read is no error here: the answer is
+            200 with `warning`.
           content:
             application/json:
               schema:
@@ -6381,6 +6408,178 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/competitions/{id}/teams/{tid}/fielded-lineup/{matchId}:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+      - in: path
+        name: tid
+        required: true
+        schema:
+          type: string
+        description: Team ID (the team's participant id).
+      - in: path
+        name: matchId
+        required: true
+        schema:
+          type: string
+        description: Match ID the lineup form is for.
+    post:
+      tags: [competitions]
+      summary: Who a kachinuki team fields by member number in a lineup form's empty places
+      description: |
+        A READ that carries a body: it writes nothing and announces nothing. The
+        lineup panel sends its form as it stands, saved or not, after every change,
+        and shows each answered member as the default of that place.
+
+        A kachinuki team with no lineup, or with empty places in its lineup, fights
+        in member number order: each empty place, in fighting order, takes the
+        lowest-numbered member from 1 to the team size (named or not) that the
+        lineup does not hold at another place. Reserves are never placed this way.
+        The answer is worked out as if the form were the match's own lineup, by the
+        same fill the server seats bout 1 and appends each next fighter from, so it
+        names exactly who the server would field there.
+
+        `fieldedMemberIds` maps each place the form leaves empty (no name and no
+        member id) that would be filled to the member's id. A place the form holds
+        is never in it; a typed name with no id holds its place and keeps no member
+        from another. It is an empty object, never absent or null, when nothing
+        would be filled: a fixed-order competition, a match the draw does not hold,
+        a team that is not a side of the match, a form with no empty place, or a
+        team-members file that could not be read (logged on the server).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The lineup form, keyed like a lineup save. Both maps may be absent or empty.
+              properties:
+                positions:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Position key to the name shown at that place (empty for a nameless member).
+                memberIds:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Position key to the member id placed there.
+      responses:
+        '200':
+          description: The places the server fills by member number.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [fieldedMemberIds]
+                properties:
+                  fieldedMemberIds:
+                    type: object
+                    additionalProperties:
+                      type: string
+                    description: Position key to member id, for each empty place of the form the server fills.
+              example:
+                fieldedMemberIds:
+                  jiho: 6f1c2e9a-3b4d-4e5f-8a7b-1c2d3e4f5a6b
+                  chuken: 0a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d
+        '400':
+          description: >-
+            The body is not JSON, or the form names a position the team size has no
+            place for, or one member at two places.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Competition not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: The body is larger than 64 KB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The lineups or the draw could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/competitions/{id}/team-members:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    get:
+      tags: [competitions]
+      summary: List every team's members
+      description: |
+        The members of every team of the competition, keyed by the team's
+        participant id, each with its `modifiedAt` stamp. Organiser only, in
+        a self-run tournament too: the public page reads a team's members
+        from the viewer payload instead.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: The members of every team.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  teamMembers:
+                    type: object
+                    description: Team participant id to that team's members.
+                    additionalProperties:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/TeamMember'
+        '400':
+          description: Malformed competition id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: '`invalid admin password`: missing or wrong.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No competition with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            The competition's `team-members.yaml` cannot be read
+            (`team_members_unreadable`, the code the member writes answer,
+            with a `message` to show). The error is logged naming the file.
+            The lineup screens say which file the organiser needs to check,
+            and a lineup can still be saved by name only.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [team_members_unreadable]
+                  message:
+                    type: string
+        '500':
+          description: Any other failure to read the team members.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/competitions/{id}/teams/{tid}/members:
     parameters:
       - $ref: '#/components/parameters/CompetitionId'
@@ -6478,7 +6677,11 @@ paths:
             Or another team's member, or a participant of the competition,
             already has this `id` (`member_id_conflict`, with a `message`). Or, self-run with an empty password, the competition has finished
             (`competition_finished`) or the team is at its limit
-            (`team_member_limit`), each with a `message` to show.
+            (`team_member_limit`), each with a `message` to show. Or, for any
+            caller, the competition's `team-members.yaml` cannot be read
+            (`team_members_unreadable`, with a `message` to show): nothing is
+            written, and the error is logged naming the file. A retry cannot
+            land until the file is repaired, so it is a refusal, never a 500.
           content:
             application/json:
               schema:
@@ -6488,7 +6691,7 @@ paths:
                     type: string
                   message:
                     type: string
-                    description: The sentence the public page shows as it is (competition_finished, team_member_limit).
+                    description: The sentence the public page shows as it is (competition_finished, team_member_limit, team_members_unreadable).
 
   /api/competitions/{id}/teams/{tid}/members/{memberId}:
     parameters:
@@ -6567,7 +6770,9 @@ paths:
             member already has a name. Ask the tournament organizer to change
             it."), or the competition has finished (`competition_finished`).
             Or, for any caller, another member of the team already has this
-            name (`error` only).
+            name (`error` only), or the competition's `team-members.yaml`
+            cannot be read (`team_members_unreadable`, with a `message`;
+            nothing is written).
           content:
             application/json:
               schema:
@@ -6577,7 +6782,7 @@ paths:
                     type: string
                   message:
                     type: string
-                    description: The sentence the public page shows as it is (member_already_named, competition_finished).
+                    description: The sentence the public page shows as it is (member_already_named, competition_finished, team_members_unreadable).
     delete:
       tags: [competitions]
       summary: Clear a team member's name
@@ -6621,7 +6826,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: The competition has started, so a member's name can no longer be cleared.
+          description: >
+            The competition has started, so a member's name can no longer be
+            cleared. Or the competition's `team-members.yaml` cannot be read
+            (`team_members_unreadable`, with a `message`; nothing is written).
           content:
             application/json:
               schema:
@@ -8373,16 +8581,19 @@ components:
           description: >
             Whether the side has nobody left, as the server's Record bout
             decision reads it: the last numbered bout is recorded, it was a
-            win, this side lost it, and the lineup in force (`lineupFound`)
-            has nobody behind the loser, so Record bout appended nothing.
-            False without a lineup (the bouts alone know only the fighters
-            already seen), after a recorded draw (both fighters stay on), and
+            win, this side lost it, and the side fields members (`lineupFound`)
+            with nobody behind the loser, so Record bout appended nothing.
+            False for a side that fields nobody, while the answer carries a
+            `warning` (a file that could not be read may hold fighters the
+            queue does not), after a recorded draw (both fighters stay on), and
             while the last bout is not recorded. At most one side is exhausted.
         lineupFound:
           type: boolean
           description: >
-            Whether a lineup that fields at least one fighter is in force for
-            the side's team at this match.
+            Whether the side fields at least one fighter at this match: from
+            its lineup, or by member number (so true for a team with no saved
+            lineup too). False when it fields nobody, for example over a
+            lineups file that could not be read.
         on:
           description: >
             The side's fighter in the last numbered bout, as that bout names

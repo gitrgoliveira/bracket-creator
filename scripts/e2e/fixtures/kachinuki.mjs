@@ -88,20 +88,36 @@ export const reopenButton = (page) => page.getByTestId('kachinuki-reopen-button'
 // the name moves to the placeholder (LineupNameInput in
 // admin_scoring_shared.jsx: `value={open ? query : value}`, `placeholder=
 // {value || "Add player…"}`), so an empty value falls back to the
-// placeholder.
+// placeholder. A placeholder that is a DEFAULT (the lineup panel's member the
+// server fields in an empty kachinuki place, `.lineup-name--fielded`) or the
+// number of a nameless member the panel's box holds (`.lineup-name--numbered`)
+// is no name: the box holds none.
+export async function nameBoxText(input) {
+  const v = (await input.inputValue()).trim();
+  if (v) return v;
+  const noName = await input.evaluate((el) => !!el.closest('.lineup-name--fielded, .lineup-name--numbered'));
+  if (noName) return '';
+  const ph = ((await input.getAttribute('placeholder')) || '').trim();
+  return ph === 'Add player…' ? '' : ph;
+}
+
 export async function boutNames(row) {
   const read = async (side) => {
     const cell = row.locator(`.team-sub-match__side--${side} .tsm-name`).first();
     const input = cell.locator('input.pmf__input');
-    if (await input.count()) {
-      const v = (await input.inputValue()).trim();
-      if (v) return v;
-      const ph = ((await input.getAttribute('placeholder')) || '').trim();
-      return ph === 'Add player…' ? '' : ph;
-    }
+    if (await input.count()) return nameBoxText(input.first());
     return (await cell.locator('.tsm-name__static').first().innerText()).trim();
   };
   return { shiro: await read('shiro'), aka: await read('aka') };
+}
+
+// The names a lineup panel side holds, place by place (`lineupSide`): a default
+// reads as empty, never as a name.
+export async function lineupNames(side) {
+  const inputs = side.locator('input.pmf__input');
+  const names = [];
+  for (let i = 0; i < await inputs.count(); i += 1) names.push(await nameBoxText(inputs.nth(i)));
+  return names;
 }
 
 // Who a fought row marks as the winner ('shiro' | 'aka' | ''), read from the

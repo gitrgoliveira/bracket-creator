@@ -210,17 +210,18 @@ describe('team editor: a members read that predates the sheet\'s own write does 
   });
 
   // A name typed before the first list arrives waits for it, until the deadline of any
-  // request (team_editor_members_read_first.render.test.jsx). Once it has given up, the
-  // sheet knows no member and adds one, and the list answering late lacks it.
-  // bc-evts stage 3 review 2, R1: nothing waits for the members. A name typed after
-  // the opening read failed goes on without them (as it always did) and adds the
-  // member; a list read later, which lacks it, does not take it away.
-  it('keeps a member added before the first list arrived, which lacks it', async () => {
+  // request (team_editor_members_read_first.render.test.jsx). A name typed after the
+  // opening read failed is saved by name only and adds nobody (operator decision V1); a
+  // list read later shows the team and adds nobody either.
+  it('saves a name typed after the first read failed by name only, and a list read later adds nobody', async () => {
     await act(async () => {
       render(<ScoreEditorModal match={teamMatch()} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="" />);
     });
     await act(async () => { memberFailures[0](new TypeError('Failed to fetch')); });
     await act(async () => { competition.resolve(DETAIL); });
+    await flush();
+    // The competition arriving read the members again; that read fails too.
+    await act(async () => { memberFailures[1](new TypeError('Failed to fetch')); });
     await flush();
     const input = bout(document, 0, 'shiro');
     await act(async () => {
@@ -229,14 +230,19 @@ describe('team editor: a members read that predates the sheet\'s own write does 
       fireEvent.keyDown(input, { key: 'Enter' });
     });
     await flush();
-    expect(window.API.addTeamMember).toHaveBeenCalledTimes(1);
+    expect(window.API.addTeamMember, 'nobody is added without a list').not.toHaveBeenCalled();
+    expect(window.API.putMatchLineup.mock.calls[0][5], 'by name only').toBeUndefined();
 
-    await act(async () => { memberReads[1](teams(SHIRO_NAMED)); });
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('lineup-updated', { detail: { competitionId: 'comp1' } }));
+    });
+    await act(async () => { memberReads[memberReads.length - 1](teams(SHIRO_NAMED)); });
     await flush();
 
-    expect(label(document, 0, 'shiro'), 'the row still carries the added member').toBe('T2.6');
+    expect(window.API.addTeamMember).not.toHaveBeenCalled();
+    expect(bout(document, 0, 'shiro').value, 'the row keeps the name').toBe('Newcomer');
     await act(async () => { fireEvent.focus(bout(document, 2, 'shiro')); });
-    expect(offered(document, 2, 'shiro').some((o) => o.includes('Sho Ueda')), 'the list brings the rest of the team').toBe(true);
+    expect(offered(document, 2, 'shiro').some((o) => o.includes('Sho Ueda')), 'the list brings the team').toBe(true);
   });
 
   it('still shows a member another device added, beside the write', async () => {
@@ -629,13 +635,19 @@ describe('team editor: the admin sheet follows the members another device change
     });
     await act(async () => { memberFailures[0](new TypeError('Failed to fetch')); });
     await flush();
+    // The competition arriving reads the members again, an opening read of its own,
+    // which a name typed meanwhile waits for; it fails too.
     await act(async () => { competition.resolve(DETAIL); });
+    await flush();
+    expect(memberReads).toHaveLength(2);
+    await act(async () => { memberFailures[1](new TypeError('Failed to fetch')); });
     await flush();
 
     await typeName(bout(utils.container, 0, 'shiro'), 'Ito');
 
+    expect(window.API.addTeamMember, 'no member is added without a list').not.toHaveBeenCalled();
     expect(notices(utils.container)).toHaveLength(1);
-    expect(notices(utils.container)[0].textContent).toContain('team member list could not be loaded');
+    expect(notices(utils.container)[0].textContent).toBe('Saved by name only: the team member list could not be loaded. Scores will still record normally.');
   });
 });
 

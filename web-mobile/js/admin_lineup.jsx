@@ -55,10 +55,10 @@ import { normalizeParticipantName } from './data.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
 import { queuedNotice, writePending, writeHeldOnDeviceOnly } from './write_result.jsx';
-import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice, membersNotReadNotice } from './lineup_draft.jsx';
+import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 
-const { useState, useMemo } = React;
+const { useState, useMemo, useRef } = React;
 
 
 // Term: kendo-glossary tooltip wrapper. Lazy lookup so the script
@@ -380,17 +380,21 @@ function memberWriteFailure(position, name, e) {
 // which survives only as a code name (operator ruling, bc-dnst), and never
 // "member id", which is internal jargon.
 //
-// squadUnavailable takes priority over `failures` and is checked first: when
-// the squad itself could not be loaded this session, EVERY name in the
-// lineup looked new to the resolver, so a per-position list would just be
-// the same root cause repeated once per slot -- misleading, since it reads
-// as N unrelated problems instead of the one real one. One sentence naming
-// the actual cause replaces the whole list in that case.
+// byNameOnly takes priority over `failures` and is checked first: it is true
+// only when the save really carried a typed name with no member id because
+// the team's members could not be loaded (their read failed or was not
+// answered, whatever the cause; operator decision V1), in which case no member
+// was added and there is nothing per position to list. One sentence names the
+// cause instead: that the lineup was saved by name only, and why (operator
+// decision U2, round ship-kno1-review-1: one sentence true whether the list
+// failed to load or the file cannot be read), then that scores are unaffected.
+// A save that linked or added every typed name passes false, and says nothing
+// unless a member write failed.
 //
 // Returns "" when there is nothing to say.
-function memberIdentityWarning(failures, squadUnavailable, teamSize) {
-  if (squadUnavailable) {
-    return "Lineup saved, but the team member list could not be loaded, so no position could be linked to a team member this time. Scores will still record normally.";
+function memberIdentityWarning(failures, byNameOnly, teamSize) {
+  if (byNameOnly) {
+    return "Saved by name only: the team member list could not be loaded. Scores will still record normally.";
   }
   const list = (Array.isArray(failures) ? failures : []).filter(f => f && f.position);
   if (list.length === 0) return "";
@@ -446,14 +450,14 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
   // a lineup another device saved, so a member created there is not shown as an
   // empty slot. Independent of teamSize: a squad may hold reserves beyond however
   // many positions exist. bc-cse gap closure: `squadUnavailable` is whether the
-  // squad failed to load this session. Fed into memberIdentityWarning below,
-  // alongside a save's own per-position `failures`, so a squad fetch failure --
-  // which otherwise silently leaves every existing member looking "new" -- is
-  // disclosed rather than discarded. A save is never blocked on it.
+  // squad failed to load this session, and puts its notice (`membersNotice`) where
+  // the list would be, so a squad fetch failure -- which otherwise reads as a team
+  // with no members -- is disclosed rather than discarded. A save is never blocked
+  // on it: an add made meanwhile places the name by name only (commitAdd).
   const {
     values, setValues, memberIds, setMemberIds, memberIdsRef,
     error, setError, warning: saveWarning, setWarning: setSaveWarning,
-    squad, changeMembers, squadUnavailable,
+    squad, changeMembers, squadUnavailable, membersNotice,
   } = form;
   const [saving, setSaving] = useState(false);
   // A removal of the match's own lineup is in flight.
@@ -489,9 +493,17 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
   // outbox entry shown at once (bc-evts stage 3 review 2, R1), so none is "out"
   // here and no control waits for one.
 
-  // An add being placed (its confirm open, or its resolve running): the save waits
-  // for it, since an add finished after a save would not be placed.
+  // An add being placed (waiting for the team's members, its confirm open, or its
+  // resolve running): the save and the other positions' pickers wait for it, since an
+  // add finished after a save would not be placed.
   const memberBusy = addBusy;
+
+  // The positions commitAdd placed by name only, because the team's members could not
+  // be loaded (operator decision V1). A Save that carries one of them gives the one
+  // note (U2); a position changed again since leaves this set (selectMember,
+  // clearPosition), so a list that arrived late, or a name restored from a draft, says
+  // nothing it did not do.
+  const placedByNameOnly = useRef(new Set());
 
   const squadSorted = useMemo(() => squadMemberOptions(squad), [squad]);
 
@@ -518,12 +530,14 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
   // A change to a position ends the refusal shown for the lineup as it was: the
   // next Save judges the lineup again.
   const selectMember = (posKey, member) => {
+    placedByNameOnly.current.delete(posKey);
     setError("");
     setValues(v => ({ ...v, [posKey]: member.name }));
     setMemberIds(ids => ({ ...ids, [posKey]: member.id }));
   };
 
   const clearPosition = (posKey) => {
+    placedByNameOnly.current.delete(posKey);
     setError("");
     setValues(v => ({ ...v, [posKey]: "" }));
     setMemberIds(ids => ({ ...ids, [posKey]: "" }));
@@ -565,17 +579,30 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
     const posKey = addingPos;
     const name = addingName.trim();
     if (!posKey || !name) { setAddingPos(null); setAddingName(""); return; }
-    // The name is judged against the team's members, so a read of them must have
-    // shown a list: against none, a member the team has would be added again (and
-    // the server would refuse it as a second member of that name), and a position
-    // whose seeded slot is free would mint rather than name it. Nothing waits for
-    // that read (bc-evts stage 3 review 2, R1): before it, the add is refused at
-    // once and the typed name kept, so it can be added again as soon as the list
-    // shows. A read that failed for good goes without the list, as it always did.
-    // Refused at once, never waited for (bc-evts stage 3 review 2, R1), in the one
-    // wording the team sheet uses too (membersNotReadNotice).
-    if (!form.membersReadOver()) {
-      setError(membersNotReadNotice(name));
+    // The name is judged against the team's members, so it waits for their read
+    // (operator decision V1), under "Adding…", bounded by the read's deadline: against
+    // no list, a member the team has would be added again (and the server would refuse
+    // it as a second member of that name), and a position whose seeded slot is free
+    // would mint rather than name it.
+    let listed = form.membersListed();
+    if (!listed) {
+      setAddBusy(true);
+      try {
+        listed = await form.membersRead();
+      } finally {
+        setAddBusy(false);
+      }
+    }
+    // No list (the read failed or was not answered, whatever the cause, the file the
+    // server cannot read included): no member can be added or named, so the name is
+    // placed by name only and Save writes it so (operator decisions V1, U1, U2).
+    if (!listed) {
+      placedByNameOnly.current.add(posKey);
+      setError("");
+      setValues(v => ({ ...v, [posKey]: name }));
+      setMemberIds(ids => ({ ...ids, [posKey]: "" }));
+      setAddingPos(null);
+      setAddingName("");
       return;
     }
     const members = form.squadRef.current;
@@ -735,6 +762,12 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
       }
       const body = changedLineupSave(named, shownIds, changed);
       const idsOut = Object.keys(body.memberIds).length > 0 ? body.memberIds : undefined;
+      // A changed position that "+ Add new member…" placed by name only because the
+      // list could not be loaded (commitAdd, placedByNameOnly). The note after the save
+      // says so (operator decisions V1, U2), and only then: its reason is the list that
+      // did not load, so a name with no id from another cause (a draft restored) does
+      // not take it, and one placed so keeps it after a list that arrives later.
+      const byNameOnly = body.changed.some((k) => placedByNameOnly.current.has(k) && body.positions[k] && !body.memberIds[k]);
       // bc-evts M5: the save is an outbox entry, answered at once (pending). A
       // refusal comes later: it is said here and the lineup read again, so what
       // the form showed as saved goes (claimed, so the outbox does not say it too).
@@ -748,6 +781,8 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
       const updated = matchId
         ? await window.API.putMatchLineup(compId, teamId, matchId, body.positions, password, idsOut, body.changed, { onRefusal })
         : await window.API.putTeamLineup(compId, teamId, STARTING_ROUND, body.positions, password, idsOut, body.changed, { onRefusal });
+      // Handed over: the positions it carried are saved as they are.
+      body.changed.forEach((k) => placedByNameOnly.current.delete(k));
       // Handed to the outbox: the form takes what it sent as saved at once, and
       // the server's whole lineup comes with its announcement of the save, read
       // while the form holds no new edit. A save the browser could not store is
@@ -766,7 +801,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
           if (!stored || stored.discarded) return;
           if (typeof showToast === "function") showToast("Lineup saved");
         }, () => {});
-        setSaveWarning(memberIdentityWarning([], squadUnavailable));
+        setSaveWarning(memberIdentityWarning([], byNameOnly));
         return;
       }
       // What the server answered is the whole lineup it holds now, the positions this
@@ -777,10 +812,10 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
       // bc-cse gap closure: this surface's own SELECT/ADD/RENAME operations
       // already surface a mint/rename failure immediately (see commitAdd's
       // and commitRename's own `error` handling above); what a save here
-      // cannot see is a squad that failed to load THIS session, which is
-      // why memberIdentityWarning is fed `failures: []` unconditionally and
-      // `squadUnavailable` is the one signal that varies.
-      setSaveWarning(memberIdentityWarning([], squadUnavailable));
+      // says is that a name went by name only, which is why
+      // memberIdentityWarning is fed `failures: []` unconditionally and
+      // `byNameOnly` is the one signal that varies.
+      setSaveWarning(memberIdentityWarning([], byNameOnly));
     } catch (e) {
       setError(e?.message || "Failed to save lineup");
     } finally {
@@ -875,7 +910,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
                     className="input"
                     data-testid={`lineup-position-${p.key}`}
                     aria-label={`${p.label} player`}
-                    disabled={locked}
+                    disabled={locked || memberBusy}
                     value={memberId}
                     onChange={(e) => onPickerChange(p.key, e.target.value)}
                   >
@@ -921,10 +956,11 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
               them to mint a brand-new permanent numbered slot for a member
               who already exists on the server (a member can be cleared but
               never removed). The deleted Settings section said which of the
-              two it was; say it here. */}
+              two it was; say it here, naming team-members.yaml when that file
+              cannot be read. */}
           {squadSorted.length === 0 && squadUnavailable && (
             <div className="field__hint field__hint--warn" data-testid="lineup-members-unavailable">
-              The team member list could not be loaded, so this may not be the whole team. Reload before adding a member, or you may add a second slot for someone who already has one.
+              {membersNotice}
             </div>
           )}
           {squadSorted.length === 0 && !squadUnavailable && (

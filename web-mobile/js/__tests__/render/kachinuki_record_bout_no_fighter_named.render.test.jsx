@@ -125,10 +125,15 @@ describe('Record bout on a bout that names no fighter, under a roster warning', 
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
   }
 
-  it('says the score is saved and no pairing was added', async () => {
+  // Under the warning a second Record bout adds no pairing either, even once the
+  // fighters are named (the server works out no next fighter), so the sheet points to
+  // the button that does add one.
+  it('says the score is saved, no pairing was added, and to add the next bout by hand', async () => {
     await tapRecord(kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: ['M'], ipponsB: [] }]), warned);
     expect(toastSnapshot()).toMatchObject({ type: 'warning' });
-    expect(toastSnapshot().message).toContain('no fighter is named on this bout');
+    expect(toastSnapshot().message).toBe('The score is saved, but no fighter is named on this bout, so no next pairing was added. Pick or type who fought and tap Record bout again, then tap + Add next bout manually and pick or type both fighters of the next bout.');
+    expect(screen.getByTestId('kachinuki-add-bout-button').textContent, 'the button the sentence names').toContain('+ Add next bout manually');
+    expect(screen.getByTestId('kachinuki-add-bout-button').disabled, 'and it is open').toBe(false);
   });
 
   it('says nothing for a bout that names a fighter', async () => {

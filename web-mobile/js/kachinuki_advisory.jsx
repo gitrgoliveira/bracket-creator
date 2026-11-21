@@ -57,8 +57,12 @@ export function kachinukiFighterKnown(f) {
 // (side.on, which the SERVER picked out of the queue by the engine's identity
 // rule) and, with a lineup, the fighters left behind them (side.remaining,
 // which never holds the fighter on; the first is next). Returns null when
-// there is nothing to say for the side.
-export function kachinukiAdvisorySide({ side, squad, teamNumber }) {
+// there is nothing to say for the side. `warned` is true when the answer
+// carries a `warning` (a file could not be read): the queue then holds only
+// what the server could read, so an empty one proves nothing and the side is
+// never called "last fighter" or "no fighters left" (the twin of the server
+// never answering `exhausted` under a warning).
+export function kachinukiAdvisorySide({ side, squad, teamNumber, warned = false }) {
   if (!side) return null;
   const on = kachinukiFighterKnown(side.on) ? side.on : null;
   const onLabel = on ? kachinukiFighterLabel({ squad, teamNumber, memberId: on.memberId, name: on.name }) : "";
@@ -68,6 +72,9 @@ export function kachinukiAdvisorySide({ side, squad, teamNumber }) {
   const remaining = Array.isArray(side.remaining) ? side.remaining : [];
   const left = remaining.map(f => kachinukiFighterLabel({ squad, teamNumber, memberId: f.memberId, name: f.name }) || "-");
   const head = onLabel ? `${onLabel} on` : "";
+  if (warned && left.length === 0) {
+    return onLabel ? { on: onLabel, left, text: head } : null;
+  }
   let tail;
   if (left.length === 0) tail = onLabel ? "last fighter" : "no fighters left";
   else tail = `${left.length} left (${left.join(", ")})`;
@@ -82,8 +89,9 @@ export function kachinukiAdvisorySide({ side, squad, teamNumber }) {
 export function kachinukiAdvisoryModel({ roster, squadA, squadB, teamNumberA, teamNumberB }) {
   if (!roster || !roster.sideA || !roster.sideB) return null;
   if (!roster.sideA.lineupFound && !roster.sideB.lineupFound) return null;
-  const shiro = kachinukiAdvisorySide({ side: roster.sideB, squad: squadB, teamNumber: teamNumberB });
-  const aka = kachinukiAdvisorySide({ side: roster.sideA, squad: squadA, teamNumber: teamNumberA });
+  const warned = typeof roster.warning === "string" && roster.warning.trim() !== "";
+  const shiro = kachinukiAdvisorySide({ side: roster.sideB, squad: squadB, teamNumber: teamNumberB, warned });
+  const aka = kachinukiAdvisorySide({ side: roster.sideA, squad: squadA, teamNumber: teamNumberA, warned });
   const parts = [shiro && `Shiro: ${shiro.text}`, aka && `Aka: ${aka.text}`].filter(Boolean);
   if (parts.length === 0) return null;
   return { shiro, aka, text: parts.join(ADVISORY_SEPARATOR) };

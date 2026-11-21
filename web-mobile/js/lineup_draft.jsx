@@ -300,6 +300,12 @@ export function newMembersWait() {
   return wait;
 }
 
+// The ONE wording of a team whose members list could not be read, shown where an empty
+// list would otherwise read as a team with no members: the Lineups page and the match's
+// lineup panel. An empty list and one that failed to load look alike, and telling the
+// operator the team is empty invites a second slot for a member who already has one.
+export const MEMBERS_UNAVAILABLE_NOTICE = "The team member list could not be loaded, so this may not be the whole team. Reload before adding a member, or you may add a second slot for someone who already has one.";
+
 // The ONE wording of a typed name refused because the team's members are still being
 // read (stage 3 review 3, F1): the Lineups page's add row and the team sheet's typed
 // representative both say it, and the typed name stays where it was typed.

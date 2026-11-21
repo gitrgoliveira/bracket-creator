@@ -298,9 +298,14 @@ function predatesAnswer(match, override) {
   return override.at > 0 && !!match && isOlderRunningCopy(match, override.match.status, override.at, override.match.scoreVersion);
 }
 
-// What Record bout is answered with when the bout names no fighter: the score
-// is saved, but there is nobody to carry into the next pairing.
-const RECORD_BOUT_NO_FIGHTER_NOTICE = "The score is saved, but no fighter is named on this bout, so no next pairing was added. Pick or type who fought, then tap Record bout again.";
+// What Record bout is answered with when the bout names no fighter, said only under a
+// roster warning (the one case a bout can name nobody): the score is saved, but there
+// is nobody to carry into the next pairing. Under the warning nobody is seated by member
+// number, so naming the fighters and tapping Record bout again records the bout (the
+// first tap does not mark it recorded) but adds no pairing either (only a fighter a
+// saved lineup names is brought in, and none named this bout): the next pairing is
+// added by hand.
+const RECORD_BOUT_NO_FIGHTER_NOTICE = "The score is saved, but no fighter is named on this bout, so no next pairing was added. Pick or type who fought and tap Record bout again, then tap + Add next bout manually and pick or type both fighters of the next bout.";
 
 // What a pick is answered with when its side's lineup was never read and the
 // pick's own read fails: with no lineup held, the pick could be neither checked

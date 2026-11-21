@@ -38,6 +38,7 @@ import { answered, namedLater } from '../helpers/team_members.js';
 import { lineupPutStub } from '../helpers/lineup_server.js';
 import { QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE } from '../../write_result.jsx';
 import * as AppVersion from '../../app_version.jsx';
+import { MEMBERS_UNAVAILABLE_NOTICE } from '../../lineup_draft.jsx';
 
 const SQUAD = [
   { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -1054,6 +1055,29 @@ describe('a lineup followed from another device that names a member created ther
     expect(utils.getByTestId('lineup-position-1').value, 'the lineup that was read').toBe('mem-4');
     expect(utils.getByTestId('squad-member-mem-1'), 'the list that was read before').toBeTruthy();
     expect(utils.queryByTestId('lineup-members-unavailable')).toBeNull();
+  });
+});
+
+// A members list the panel could not read (team-members.yaml unreadable) is not a team
+// with no members: the panel says the list could not be loaded, in the Lineups page's
+// sentence, never "This team has no registered members".
+describe('the at-court panel when the team members cannot be read', () => {
+  it('says the members list could not be loaded, not that the team has none', async () => {
+    api.fetchSquads.mockRejectedValue(new Error('internal error'));
+    api.fetchLineupInForce.mockResolvedValue(null);
+    const utils = await mountPanel();
+
+    expect(utils.getByTestId('lineup-members-unavailable').textContent).toBe(MEMBERS_UNAVAILABLE_NOTICE);
+    expect(utils.queryByText(/no registered members/)).toBeNull();
+  });
+
+  it('still says a team that has no members has none', async () => {
+    api.fetchSquads.mockResolvedValue({ 'team-a': [] });
+    api.fetchLineupInForce.mockResolvedValue(null);
+    const utils = await mountPanel();
+
+    expect(utils.queryByTestId('lineup-members-unavailable')).toBeNull();
+    expect(utils.getByText(/This team has no registered members/)).toBeTruthy();
   });
 });
 

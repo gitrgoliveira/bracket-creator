@@ -5019,8 +5019,9 @@ paths:
         For a kachinuki (winner stays on) team match: each side's fighter on
         the court (`on`, from the last numbered bout) and the fighters behind
         them who have not retired (`remaining`), read from the lineup the
-        side's team fields at this match (the lineup in force, its empty places
-        filled by member number; a team with no saved lineup fields its
+        side's team fields at this match (the match's own lineup, else, before
+        the match starts, the lineup in force there; its empty places filled
+        by member number; a team with no saved lineup fields its
         members by member number, member 1 first, up to the team size) and the
         bouts so far. A fighter
         retires on losing a bout, and both fighters retire on a drawn bout.
@@ -5035,9 +5036,9 @@ paths:
         has retired both.
         `remaining` is in queue order and never holds the fighter on: its
         first entry is the fighter the server pairs next if the fighter on
-        loses. A side that fields nobody (its team members and lineups could
-        not be read, or a lineup names nobody and no member can fill it)
-        answers `lineupFound: false` and an empty `remaining`. When a file the
+        loses. A side that fields nobody (the lineups could not be read, or
+        its lineup names nobody and the team members could not be read or
+        hold no member to fill a place) answers `lineupFound: false` and an empty `remaining`. When a file the
         read needed could not be read, the read carries on without it and
         answers 200 with `warning`, never an error: scoring never stops on this
         read. The answer is a guide only: the server never ends an encounter on
@@ -6606,7 +6607,11 @@ paths:
             Or another team's member, or a participant of the competition,
             already has this `id` (`member_id_conflict`, with a `message`). Or, self-run with an empty password, the competition has finished
             (`competition_finished`) or the team is at its limit
-            (`team_member_limit`), each with a `message` to show.
+            (`team_member_limit`), each with a `message` to show. Or, for any
+            caller, the competition's `team-members.yaml` cannot be read
+            (`team_members_unreadable`, with a `message` to show): nothing is
+            written, and the error is logged naming the file. A retry cannot
+            land until the file is repaired, so it is a refusal, never a 500.
           content:
             application/json:
               schema:
@@ -6616,7 +6621,7 @@ paths:
                     type: string
                   message:
                     type: string
-                    description: The sentence the public page shows as it is (competition_finished, team_member_limit).
+                    description: The sentence the public page shows as it is (competition_finished, team_member_limit, team_members_unreadable).
 
   /api/competitions/{id}/teams/{tid}/members/{memberId}:
     parameters:
@@ -6695,7 +6700,9 @@ paths:
             member already has a name. Ask the tournament organizer to change
             it."), or the competition has finished (`competition_finished`).
             Or, for any caller, another member of the team already has this
-            name (`error` only).
+            name (`error` only), or the competition's `team-members.yaml`
+            cannot be read (`team_members_unreadable`, with a `message`;
+            nothing is written).
           content:
             application/json:
               schema:
@@ -6705,7 +6712,7 @@ paths:
                     type: string
                   message:
                     type: string
-                    description: The sentence the public page shows as it is (member_already_named, competition_finished).
+                    description: The sentence the public page shows as it is (member_already_named, competition_finished, team_members_unreadable).
     delete:
       tags: [competitions]
       summary: Clear a team member's name
@@ -6749,7 +6756,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: The competition has started, so a member's name can no longer be cleared.
+          description: >
+            The competition has started, so a member's name can no longer be
+            cleared. Or the competition's `team-members.yaml` cannot be read
+            (`team_members_unreadable`, with a `message`; nothing is written).
           content:
             application/json:
               schema:

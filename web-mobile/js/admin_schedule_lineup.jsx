@@ -10,7 +10,7 @@ import { renameMemberFields } from './lineup_rename.jsx';
 import { kachinukiMembersKey } from './kachinuki_advisory.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
 import { queuedNotice, writePending, writeHeldOnDeviceOnly, isOffline } from './write_result.jsx';
-import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
+import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice, MEMBERS_UNAVAILABLE_NOTICE } from './lineup_draft.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
 import { useUnsavedInput } from './app_version.jsx';
@@ -627,7 +627,13 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
             )}
           </div>
         ); })}
-        {suggestions.length === 0 && (
+        {/* A list that failed to load is not an empty team: saying it has no
+            members would be false (the Lineups page's rule, one sentence). */}
+        {squadUnavailable ? (
+          <div className="field__hint field__hint--warn" data-testid="lineup-members-unavailable">
+            {MEMBERS_UNAVAILABLE_NOTICE}
+          </div>
+        ) : suggestions.length === 0 && (
           <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
             This team has no registered members: type each competitor&apos;s name directly.
           </div>

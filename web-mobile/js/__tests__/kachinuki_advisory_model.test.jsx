@@ -145,6 +145,24 @@ describe('kachinukiAdvisoryModel', () => {
     });
     expect(out.text).toBe('Shiro: T1.1 Taki on, 2 left (T1.2 Ueda, T1.3 Sato) · Aka: T2.1 Kudo on');
   });
+  it('never calls a side out of fighters while the answer carries a warning', () => {
+    // Team members unreadable: a saved lineup naming one fighter who has lost
+    // leaves that side's queue empty, which proves nothing about the team.
+    const warned = {
+      warning: 'Team members could not be read, so fighters are not seated by member number. Add each bout\'s pairing by hand.',
+      sideA: { ...side(true), on: { name: 'Kudo', memberId: 'a1' } },
+      sideB: { ...side(true), on: null },
+    };
+    const out = kachinukiAdvisoryModel({ roster: warned, ...numbers });
+    expect(out.text).toBe('Aka: T2.1 Kudo on');
+    expect(out.text).not.toMatch(/no fighters left|last fighter/);
+    const queued = kachinukiAdvisoryModel({
+      roster: { ...warned, sideB: { ...side(true, { name: 'Ueda', memberId: 'b2' }), on: { name: 'Taki', memberId: 'b1' } } },
+      ...numbers,
+    });
+    expect(queued.text).toBe('Shiro: T1.1 Taki on, 1 left (T1.2 Ueda) · Aka: T2.1 Kudo on');
+    expect(kachinukiAdvisoryModel({ roster: { ...warned, sideA: { ...side(true), on: null } }, ...numbers })).toBeNull();
+  });
   it('never asks for a lineup, whatever the sides hold', () => {
     const shapes = [
       { sideA: { ...side(false), on: roster.sideA.on }, sideB: roster.sideB },

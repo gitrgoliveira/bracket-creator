@@ -1117,8 +1117,10 @@ taps turned away later, and for which writes are outbox entries.
 The server adds events of its own to the same log, under the session `server` and with no
 sequence number: the fighters of a kachinuki encounter's first bout, which are the first fighters
 of the match's lineup and which no device sends. That lineup is the one the match fields, with
-its empty places filled by member number as described above, so on a match with no lineup at
-all they are each team's member 1, whether or not that member has a name. The server adds
+its empty places filled by member number as
+[Tournament and competition structure](#2-tournament-and-competition-structure) describes for
+kachinuki, so on a match with no lineup at all they are each team's member 1, whether or not
+that member has a name. The server adds
 them only where the first bout holds other names: when a write makes or changes that bout, and
 when a lineup or team member changes. They are ordered against the taps like any tap and never
 turn one away; they name who fought, never a score, so they reach a finished encounter too

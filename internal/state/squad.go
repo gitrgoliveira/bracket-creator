@@ -103,6 +103,13 @@ var ErrTeamNotFound = errors.New("no team with that id in this competition")
 // than requireSetupLocked's stricter check is deliberate, not an oversight.
 var ErrTeamMemberClearAfterStart = errors.New("cannot clear a team member's name once the competition has started")
 
+// ErrTeamMembersUnreadable wraps every failure to read or parse an existing
+// team-members.yaml (parseSquadsFile), so a member write over it is answered
+// a definite refusal rather than an internal error: the file stays as it is
+// until it is repaired, so a retry can never land (operator decision Q5 (a):
+// the operator carries on and names fighters by hand).
+var ErrTeamMembersUnreadable = errors.New("team-members.yaml cannot be read")
+
 // teamMembersFile is the on-disk YAML shape: a single top-level key so the file
 // is self-describing and can grow a sibling key later without a format
 // break (mirrors teamLineupFile's own reasoning). Marshaling a
@@ -146,17 +153,22 @@ func parseLegacySquadsBytes(data []byte) (map[string][]domain.TeamMember, error)
 
 // parseSquadsFile reads and parses team-members.yaml at path. A missing file is
 // "no squad recorded yet" and returns an empty map, matching
-// parseTeamLineupsFile's contract for the identical situation.
+// parseTeamLineupsFile's contract for the identical situation. A file that is
+// there but cannot be read or parsed is ErrTeamMembersUnreadable.
 func (s *Store) parseSquadsFile(path string) (map[string][]domain.TeamMember, error) {
 	data, err := s.root.readFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string][]domain.TeamMember{}, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrTeamMembersUnreadable, err)
 	}
 	teamMembersParses.Add(1)
-	return parseSquadsBytes(data)
+	members, err := parseSquadsBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrTeamMembersUnreadable, err)
+	}
+	return members, nil
 }
 
 // teamMembersParses counts the parses of a team-members.yaml read from disk,

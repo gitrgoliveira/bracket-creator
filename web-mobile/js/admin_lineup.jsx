@@ -55,7 +55,7 @@ import { normalizeParticipantName } from './data.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
 import { queuedNotice, writePending, writeHeldOnDeviceOnly } from './write_result.jsx';
-import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice, membersNotReadNotice } from './lineup_draft.jsx';
+import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice, membersNotReadNotice, MEMBERS_UNAVAILABLE_NOTICE } from './lineup_draft.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 
 const { useState, useMemo } = React;
@@ -924,7 +924,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
               two it was; say it here. */}
           {squadSorted.length === 0 && squadUnavailable && (
             <div className="field__hint field__hint--warn" data-testid="lineup-members-unavailable">
-              The team member list could not be loaded, so this may not be the whole team. Reload before adding a member, or you may add a second slot for someone who already has one.
+              {MEMBERS_UNAVAILABLE_NOTICE}
             </div>
           )}
           {squadSorted.length === 0 && !squadUnavailable && (

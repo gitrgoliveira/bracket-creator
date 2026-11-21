@@ -96,5 +96,3 @@ The tournament app's in-app export needs LibreOffice **in the running server**. 
 ## LibreOffice requirement
 
 `print` renders through **LibreOffice** (`soffice`). Install it with your platform's package manager (ensuring `soffice` is on `PATH`), or set `$LIBREOFFICE_PATH` to the `soffice` binary. If LibreOffice is not found, the command exits with installation instructions. The published [`bracket-creator-mobile-pdf`](../install/hosting.md) image bundles it.
-
-Install the Carlito font too (`fonts-crosextra-carlito` on Debian and Ubuntu). The workbooks are set in Calibri, and Carlito has the same widths. Without it, LibreOffice prints a wider face, and a long competition name on the name sheets' competition tags can split across two lines or run outside its box. The published image includes Carlito.

@@ -326,7 +326,7 @@ When there is nothing to size the template from, fewer than two places (no expec
 PDF exports (registration sheets, name sheets, competitor tags, pool and match sheets, and bracket trees) are available to admins only. Rendering requires LibreOffice:
 
 - Use the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest` container image, which includes LibreOffice.
-- Or install LibreOffice on the host and ensure `soffice` is on the system path. Install the Carlito font as well (`fonts-crosextra-carlito` on Debian and Ubuntu): without it a long competition name on the competition tags can split or run outside its box.
+- Or install LibreOffice on the host and ensure `soffice` is on the system path.
 
 The lean container image omits LibreOffice and returns a clear message when a PDF is requested.
 

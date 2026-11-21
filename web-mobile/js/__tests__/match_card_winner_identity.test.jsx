@@ -32,7 +32,6 @@ describe('MatchCard winner highlight: id-less/mixed pairs never light the wrong 
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     vi.resetModules();
     ({ MatchCard, PlayerLine } = await import('../bracket.jsx'));
   });

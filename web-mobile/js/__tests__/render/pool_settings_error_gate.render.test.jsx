@@ -13,7 +13,7 @@ import { installSettingsHarness, mountSettings, makeSettingsCompetition } from '
 // requires a pool size of at least 1") reached the operator verbatim -- the
 // exact combination the create form already refused client-side.
 //
-// competition_shape.test.jsx proves poolSettingsError itself is correct in
+// competition_shape.node.test.jsx proves poolSettingsError itself is correct in
 // isolation. It does NOT prove the Settings screen's Save button and inline
 // error actually route through it -- this file closes that gap by driving
 // the real component: mount AdminSettings with a stored knockout

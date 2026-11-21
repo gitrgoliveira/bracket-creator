@@ -24,7 +24,7 @@
 // carry the span and it is pinned positively.
 //
 // Removed markup and deleted CSS leave no failing test behind on their own,
-// which is why this file exists (same reason as running_state_static.test.jsx).
+// which is why this file exists (same reason as running_state_static.node.test.jsx).
 // These are SOURCE and STYLESHEET assertions. The surfaces that have a mount
 // harness are pinned in their own render suites (admin_scoring_modal.render,
 // admin_scoring_engi.render, admin_shiaijo.test); what a source sweep catches

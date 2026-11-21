@@ -25,7 +25,6 @@ describe('bracket MatchCard engi pair stacking', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
     window.engiPairParts = (name) => {
       const s = String(name || '');
@@ -73,7 +72,6 @@ describe('PlayerLine: outer number placement and no colour badge (bc-rvfx)', () 
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
     vi.resetModules();
     ({ PlayerLine } = await import('../bracket.jsx'));

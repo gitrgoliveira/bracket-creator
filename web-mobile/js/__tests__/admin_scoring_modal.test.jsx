@@ -1432,7 +1432,7 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
 // decide whether a later match's side is the withdrawn competitor -- never
 // an OR that could count a name hit even when both sides carry ids and
 // differ. These fixtures pin that call-site usage, on top of
-// sameCompetitor's own coverage in competitor_identity.test.jsx.
+// sameCompetitor's own coverage in competitor_identity.node.test.jsx.
 describe('sameCompetitor (default-win identity matching, bc-pnum)', () => {
   it('decides by id when both the withdrawn player and the side carry one', () => {
     const side = { id: 'S2', name: 'Sato' };
@@ -1507,7 +1507,7 @@ describe('isKoTieBlocked (Finish gate for knockout ties)', () => {
 
 
 describe('hanteiSlot (the editor\'s winner test over the shared slot rule)', () => {
-  // The placement rule itself is pinned in result_slot.test.jsx, shared with
+  // The placement rule itself is pinned in result_slot.node.test.jsx, shared with
   // the viewer/display scoreboard. This only covers what the editor adds: a
   // side that did not win the hantei carries no mark.
   it('returns -1 for a side that did not win the hantei', () => {

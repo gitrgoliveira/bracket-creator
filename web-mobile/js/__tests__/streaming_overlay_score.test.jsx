@@ -43,7 +43,6 @@ describe('StreamingOverlay individual-match score', () => {
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] } : { had: false };
@@ -161,7 +160,6 @@ describe('StreamingOverlay team bout name: a stored team name is never shown as 
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] } : { had: false };
@@ -230,7 +228,6 @@ describe('StreamingOverlay team bout name: a rename reaches the current bout (bc
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] } : { had: false };
@@ -299,7 +296,6 @@ describe('StreamingOverlay team bout: Aka squad label sits after the name, not b
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] } : { had: false };
@@ -367,7 +363,6 @@ describe('StreamingOverlay individual match: competitor number sits on the outer
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
-    global.window = global.window || {};
     STUBBED.forEach(k => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] } : { had: false };

@@ -4,6 +4,8 @@
 // Vitest 4 copied them as plain writable properties, and the suites swap a
 // stub in that way, so turn each back into a writable data property holding
 // the same jsdom object. Shared by vitest.setup.js and vitest.setup.render.js.
+// Setup always runs on the project's own origin: the one test that needs an
+// opaque origin moves the document there afterwards, with jsdom.reconfigure.
 for (const name of ['localStorage', 'sessionStorage']) {
   Object.defineProperty(globalThis, name, {
     value: globalThis[name],

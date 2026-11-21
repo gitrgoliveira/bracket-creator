@@ -1,4 +1,4 @@
-// timer_pool.test.jsx: unit tests for createTimerPool (mp-wng6).
+// timer_pool.node.test.jsx: unit tests for createTimerPool (mp-wng6).
 //
 // The pool backs the main SSE effect's jittered refetch timers in app.jsx.
 // The load-bearing property is self-pruning: a FIRED timer must remove its

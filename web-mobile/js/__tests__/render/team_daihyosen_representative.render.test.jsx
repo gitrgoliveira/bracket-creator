@@ -263,7 +263,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
 
   it('R6b: a typed representative is a rep.pick naming the member its add mints (the outbox takes the id off one that never lands)', async () => {
     // What happens to the queued pick when the add never lands is the outbox's
-    // (mintedStrip, pinned by minted_member_permutations.test.jsx): the sheet
+    // (mintedStrip, pinned by the minted-member gate, helpers/minted_member_permutations.js): the sheet
     // hands it over as made.
     window.API.addTeamMember.mockResolvedValue({ id: 'm9', name: 'Eve', index: 3 });
     const match = makeMatch({ subResults: [DH_EMPTY] });

@@ -86,8 +86,8 @@ const sharedResolve = {
 // (ubuntu-latest, 4 cores, 16 GB), two runs of one commit, the whole suite in
 // one job: vmThreads 187 s and 178 s, peak summed RSS 6.2 and 6.5 GB (40 % of
 // the runner); forks 227 s and 352 s; threads 193 s and 215 s. Under vmThreads,
-// 2 to 4 jobs gave 50 to 84 s for the slowest job's test step; one job was kept because the check run waits
-// for its slowest job (`validate`) anyway.
+// 2 to 4 jobs gave 84 to 50 s for the slowest job's test step; one job was
+// kept because the check run waits for its slowest job (`validate`) anyway.
 // Re-measure before changing any of it.
 const POOL = 'vmThreads';
 export default defineConfig({

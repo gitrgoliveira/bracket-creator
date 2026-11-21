@@ -41,8 +41,9 @@ beforeEach(async () => {
     vi.resetModules();
 
     // Every global the test swaps goes through vi.stubGlobal and is undone by
-    // vi.unstubAllGlobals() in afterEach. A plain `global.x = ...` throws under
-    // the VM pools, where the global is the jsdom window.
+    // vi.unstubAllGlobals() in afterEach, so a leaked stub never reaches the
+    // next test. (Only `window`, `performance` and `location` are getter-only
+    // under the VM pools; vitest.config.js says which.)
     class FakeES {
         constructor() { this.readyState = 0; this.close = () => {}; }
     }

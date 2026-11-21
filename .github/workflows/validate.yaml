@@ -170,8 +170,8 @@ jobs:
         # name: job name and coverage file coverage-<name>.txt. flag: the Codecov
         # flag. path: the package pattern to test; the "internal" jobs split
         # ./internal/... in three, each package whole in one job, and the rest
-        # entry carries exclude instead, the top-level internal package names
-        # joined by "|" that it leaves out. All three upload under the flag
+        # entry carries exclude too, the top-level internal package names
+        # joined by "|" that it leaves out of its path. All three upload under the flag
         # "internal", so Codecov merges them into one internal figure.
         #
         # Measured on this runner on 2026-11-21, two CI runs of the same
@@ -195,6 +195,7 @@ jobs:
             timeout: 10m
           - name: internal-rest
             flag: internal
+            path: ./internal/...
             exclude: engine|mobileapp
             timeout: 10m
           - name: integration
@@ -223,13 +224,16 @@ jobs:
           GOGC: "400"
           PACKAGE_PATH: ${{ matrix.packages.path }}
           PACKAGE_EXCLUDE: ${{ matrix.packages.exclude }}
+        # An explicit bash shell, for pipefail: a go list that fails after
+        # printing some packages must fail the step, not test the shorter list.
+        shell: bash
         run: |
+          PKGS="$PACKAGE_PATH"
           if [ -n "$PACKAGE_EXCLUDE" ]; then
+            # Drops the excluded top-level packages from the entry's own path.
             # The anchored pattern keeps "engine" from matching another
             # package whose name merely contains it.
-            PKGS=$(go list ./internal/... | grep -v -E "^$(go list -m)/internal/(${PACKAGE_EXCLUDE})(/|$)")
-          else
-            PKGS="$PACKAGE_PATH"
+            PKGS=$(go list "$PACKAGE_PATH" | grep -v -E "^$(go list -m)/internal/(${PACKAGE_EXCLUDE})(/|$)")
           fi
           go test $PKGS -timeout=${{ matrix.packages.timeout }} -race -coverprofile=coverage-${{ matrix.packages.name }}.txt -covermode=atomic
 
@@ -259,7 +263,7 @@ jobs:
   # CI runs of the same commit, "Run JS tests" step, whole suite in one job:
   #   vmThreads 187 s and 178 s (peak summed RSS 6.2 and 6.5 GB, 40 % of the
   #   runner's memory); forks 227 s and 352 s; main's last run took 360 s.
-  # Splitting the suite in 2 to 4 jobs under vmThreads gave 83 to 50 s, but the
+  # Splitting the suite in 2 to 4 jobs under vmThreads gave 84 to 50 s, but the
   # check run waits for the slowest job anyway, `validate` (about 260 s), so one
   # job costs no wait and one runner. Re-measure before splitting it again.
   test-js:

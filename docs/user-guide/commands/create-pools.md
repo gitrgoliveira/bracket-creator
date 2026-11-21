@@ -133,5 +133,5 @@ The generated Excel file contains:
 | Pool Draw | Pool assignments grouped by court |
 | Pool Matches | Individual match schedule |
 | Elimination Matches | Knockout bracket match schedule |
-| Names to Print | A3-ready name labels |
+| Names to Print | A3-ready name labels, opened by a page of three competition tags when a title prefix is set |
 | Tree (one per court) | Visual bracket tree for display |

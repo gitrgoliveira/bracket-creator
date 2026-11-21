@@ -72,5 +72,5 @@ Competitor numbers follow that seeded bracket order, not the order participants 
 | Data | Raw participant list |
 | Time Estimator | Expected duration per phase |
 | Elimination Matches | Match schedule |
-| Names to Print | A3-ready name labels |
+| Names to Print | A3-ready name labels, opened by a page of three competition tags when a title prefix is set |
 | Tree (one per court) | Visual bracket tree |

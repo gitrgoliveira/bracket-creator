@@ -2016,7 +2016,9 @@ func printNameEntries(f *excelize.File, sheetName string, players []Player, sani
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, buildNameFormula(player.Name, sanitized, coord)))
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, nameCell, nameCell, nameIDStyle))
 
-		if row%NamesToPrintRowsPerPage == 0 {
+		// Counted from the first competitor, not the sheet's first row, so the
+		// competitors stay three to a page whatever the tags above them take.
+		if (i+1)%NamesToPrintRowsPerPage == 0 {
 			handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", row+1)))
 		}
 	}

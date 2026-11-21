@@ -373,14 +373,8 @@ func buildNameIDStyle(f *excelize.File) int {
 // a competitor's or the competition's tag: centred in a thick border at the
 // given size, wrapping when wrap is set and shrinking to fit otherwise.
 func buildNameBoxStyle(f *excelize.File, wrap bool, size float64) int {
-	alignment := &excelize.Alignment{Horizontal: "center", Vertical: "center"}
-	if wrap {
-		alignment.WrapText = true
-	} else {
-		alignment.ShrinkToFit = true
-	}
 	return mustNewStyle(f, &excelize.Style{
-		Alignment: alignment,
+		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: wrap, ShrinkToFit: !wrap},
 		Font:      &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: size},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 2},

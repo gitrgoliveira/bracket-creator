@@ -19,7 +19,7 @@ left alone, so git stays quiet. A PDF with a new page count, or with any page
 whose pixels moved, is copied over the committed one together with its
 thumbnail, and the run lists it:
 
-    7 unchanged, 2 copied into docs/samples/
+    8 unchanged, 1 copied into docs/samples/
       ...
     copied - look at these, and at the page that shows them:
       pools-example-medium/print_full_bracket.pdf: CHANGED, page 3, 4 of 11 (thumbnail: page 3)
@@ -37,10 +37,12 @@ With the tools the repository already needs, nothing more:
 - pdfcpu, the Go module the app uses to put its PDFs together, splits the PDF
   into one file per page (`go run github.com/pdfcpu/pdfcpu/cmd/pdfcpu split`, at
   the version `go.mod` names).
-- LibreOffice, which `print` needs anyway, draws each one-page PDF as a PNG at
-  96 dots per inch (an A4 page is 794 by 1123 pixels). Its PNG export draws a
-  document's first page only and ignores a page range, which is why the split
-  comes first.
+- LibreOffice, which `print` needs anyway, draws each page as a PNG at 96 dots
+  per inch (an A4 page is 794 by 1123 pixels). Each one-page PDF is placed as a
+  picture on a drawing page of its own size, and the drawing is converted:
+  opening the PDF directly lays its text out again and moves letters. Its PNG
+  export draws a document's first page only and ignores a page range, which is
+  why the split comes first.
 
 LibreOffice is found the way `print` finds it: `$LIBREOFFICE_PATH`, then
 `soffice` on the path, then the usual install locations.

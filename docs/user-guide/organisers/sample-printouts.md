@@ -2,7 +2,7 @@
 
 These are the PDFs printed for two example competitions, so you can see what each one looks like before you print your own. **Export PDFs** in the tournament app and the [`print`](../commands/print.md) command print the same sheets. Select a picture to open the whole PDF.
 
-Each picture shows one page. The rest of the PDF repeats it for every pool, shiai-jo or competitor.
+Each picture shows one page; the text above it says what the rest of that PDF holds.
 
 ## Individual competition
 
@@ -10,7 +10,7 @@ Each picture shows one page. The rest of the PDF repeats it for every pool, shia
 
 ### Registration sheet
 
-The list of competitors with their pool, dojo, zekken name and number. A4.
+The list of competitors with their pool, name, dojo, zekken name and number. A4.
 
 [![The registration sheet: one line per competitor with their pool, name, dojo, zekken name and number.](../../samples/pools-example-medium/print_registration.png){ width="360" }](../../samples/pools-example-medium/print_registration.pdf)
 
@@ -22,7 +22,7 @@ A3 landscape. After a title page, each shiai-jo's sheets open with this page: th
 
 ### Competitor tags
 
-Each competitor's number, printed large, one page for each competitor. A4.
+Each competitor's number, printed large, one page for each competitor. A4. A tag also carries a QR code when the tournament's public URL is set; this sample has none.
 
 [![A tag page showing the number K1 twice.](../../samples/pools-example-medium/print_tags.png){ width="360" }](../../samples/pools-example-medium/print_tags.pdf)
 
@@ -40,7 +40,7 @@ Everything the tables need to run the day on paper: the pool draw, every pool's 
 
 ## Team competition
 
-12 teams of five in pools of three, the first two of each pool going through to a knockout, on two shiai-jo. Printed from the example workbook [pools-example-medium-teams.xlsx](https://github.com/gitrgoliveira/bracket-creator/blob/main/pools-example-medium-teams.xlsx). There are no competitor tags: tags are printed for individual competitors only.
+12 teams of five in pools of three, the first two of each pool going through to a knockout, on two shiai-jo. Printed from the example workbook [pools-example-medium-teams.xlsx](https://github.com/gitrgoliveira/bracket-creator/blob/main/pools-example-medium-teams.xlsx). There are no competitor tags: tags are printed for individual competitors only (with `print`, a workbook counts as a team one when its name contains `team` or it is named with `--team-file`).
 
 ### Registration sheet
 

@@ -93,7 +93,7 @@ function pdfcpu(...args) {
   return execFileSync('go', ['run', 'github.com/pdfcpu/pdfcpu/cmd/pdfcpu', ...args], {
     cwd: ROOT,
     encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'inherit'],
     maxBuffer: 64 * 1024 * 1024,
   });
 }
@@ -146,9 +146,15 @@ function pagePictures(pdf, dir) {
   execFileSync(
     SOFFICE,
     [`-env:UserInstallation=${PROFILE}`, '--headless', '--convert-to', 'png', '--outdir', pngs, ...fodgs],
-    { stdio: 'ignore' },
+    { stdio: ['ignore', 'ignore', 'inherit'] },
   );
-  return fodgs.map((f) => path.join(pngs, `${path.basename(f, '.fodg')}.png`));
+  const pictures = fodgs.map((f) => path.join(pngs, `${path.basename(f, '.fodg')}.png`));
+  // LibreOffice can exit 0 having drawn nothing for a page: stop before a
+  // missing picture reads as a changed page and half-updates docs/samples/.
+  for (const png of pictures) {
+    if (!fs.existsSync(png)) throw new Error(`LibreOffice drew no ${png} from ${pdf}`);
+  }
+  return pictures;
 }
 
 // Whether the new print's pages differ from the committed sample's, and how.
@@ -179,7 +185,7 @@ try {
     fs.mkdirSync(input, { recursive: true });
     fs.copyFileSync(workbook, path.join(input, path.basename(workbook)));
     execFileSync(BIN, ['print', '--type=all', `--input=${input}`, `--output-dir=${printed}`], {
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'inherit'],
     });
 
     const target = path.join(DOCS, sample.name);

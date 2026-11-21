@@ -174,8 +174,8 @@ jobs:
         # joined by "|" that it leaves out. All three upload under the flag
         # "internal", so Codecov merges them into one internal figure.
         #
-        # Measured on this runner, two CI runs of the same commit (slowest
-        # "Run tests" step): one job for all of internal took 259 s and 271 s;
+        # Measured on this runner on 2026-11-21, two CI runs of the same
+        # commit (slowest "Run tests" step): one job for all of internal took 259 s and 271 s;
         # engine, mobileapp and the rest in three jobs took 226 s and 242 s. A
         # package is never split, so no layout goes below engine alone (158 to
         # 175 s). A fourth job (helper apart) timed the same as three, and two
@@ -255,8 +255,8 @@ jobs:
   #
   # One job, and the pool comes from web-mobile/vitest.config.js (vmThreads),
   # so CI runs the pool the local gate runs and no --pool flag appears here.
-  # Measured on this runner (ubuntu-latest, 4 cores, 16 GB), two CI runs of the
-  # same commit, "Run JS tests" step, whole suite in one job:
+  # Measured on 2026-11-21 on this runner (ubuntu-latest, 4 cores, 16 GB), two
+  # CI runs of the same commit, "Run JS tests" step, whole suite in one job:
   #   vmThreads 187 s and 178 s (peak summed RSS 6.2 and 6.5 GB, 40 % of the
   #   runner's memory); forks 227 s and 352 s; main's last run took 360 s.
   # Splitting the suite in 2 to 4 jobs under vmThreads gave 83 to 50 s, but the

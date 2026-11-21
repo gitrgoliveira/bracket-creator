@@ -323,7 +323,7 @@ When there is nothing to size the template from, fewer than two places (no expec
 
 ### PDF
 
-PDF exports (registration sheets, name sheets, competitor tags, pool and match sheets, and bracket trees) are available to admins only. Rendering requires LibreOffice:
+PDF exports (registration sheets, name sheets, competitor tags, pool and match sheets, and bracket trees) are available to admins only. To see what each one looks like before you print, open the [sample printouts](sample-printouts.md). Rendering requires LibreOffice:
 
 - Use the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest` container image, which includes LibreOffice.
 - Or install LibreOffice on the host and ensure `soffice` is on the system path.

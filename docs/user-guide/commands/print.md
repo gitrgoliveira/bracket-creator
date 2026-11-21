@@ -6,7 +6,7 @@ Renders bracket Excel workbooks into grouped, print-ready **PDFs** (competitor t
 bracket-creator print --type <type> (--input <dir> | --tournament-data <dir>) [flags]
 ```
 
-This is the command-line counterpart of the tournament app's **Export PDFs** button. Both share the same rendering engine. Use the CLI when you want PDFs without running the server, or when you want to generate them on a separate, LibreOffice-equipped machine. Refer to [When to use the CLI](#when-to-use-the-cli).
+This is the command-line counterpart of the tournament app's **Export PDFs** button. Both share the same rendering engine. Use the CLI when you want PDFs without running the server, or when you want to generate them on a separate, LibreOffice-equipped machine. Refer to [When to use the CLI](#when-to-use-the-cli). The [sample printouts](../organisers/sample-printouts.md) show a page of each PDF it writes.
 
 ## Input modes
 

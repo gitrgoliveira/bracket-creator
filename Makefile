@@ -49,7 +49,7 @@ endif
 SHA256_CHECK := $(if $(shell command -v sha256sum 2>/dev/null),sha256sum,shasum -a 256) -c --quiet -
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/prose docs/clean docs/screenshots docs/videos docs/media docs/media-copies e2e e2e/deps run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/prose docs/clean docs/screenshots docs/videos docs/media docs/media-copies docs/samples e2e e2e/deps run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -433,6 +433,12 @@ docs/media: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate every captured screens
 	@# One run with no KIND, rather than depending on the two targets above:
 	@# those would start node and a browser twice over two disjoint halves.
 	@node $(SHOTS_DIR)/run.mjs $(if $(KIND),'KIND=$(KIND)',) $(SHOTS_ARGS)
+
+# The sample printouts the docs show (docs/samples/), printed from the example
+# workbooks. Only a PDF whose pages changed is copied into docs/, with its
+# thumbnail; see scripts/samples/README.md. Needs LibreOffice, as print does.
+docs/samples: go/build ## Reprint the docs' sample printouts from the example workbooks and copy in the ones whose pages changed
+	@node scripts/samples/run.mjs
 
 # The landing page serves lighter copies of its media beside the captured
 # originals: a WebP of each picture and an MP4 (H.264) of the clip, for a

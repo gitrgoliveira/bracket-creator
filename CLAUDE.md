@@ -103,6 +103,7 @@ make docs/media        # Both. After a change to what a user sees: make docs/med
 # those and copy them into docs/. Videos are never compared: copy one only when
 # the change alters what it shows.
 make docs/media-copies # Then remake the landing page's WebP and MP4 copies of what you copied (needs cwebp, ffmpeg)
+make docs/samples      # Reprint the Sample printouts page's PDFs from the example workbooks; copies into docs/samples/ only those whose pages changed (scripts/samples/README.md; needs LibreOffice)
 
 # Run a single test
 go test -run TestName ./internal/helper/...

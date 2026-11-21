@@ -309,7 +309,7 @@ Two Excel downloads are available from the competition's **Export & print** tab:
 
 The results workbook keeps the scores and decisions as values, but the pool standings (wins, losses, ties and points, or the team columns), the Rank column and the Ranking lists stay live formulas over those scores, so you can check the sheet against the app. Where the sheet's own rank would differ from the app's, the workbook writes the app's rank and ranking as values instead and says why in a note beside the Ranking. That happens when a chusen, a tie-break bout or a representative bout decided the pool's order, or when competitors are level on every count. A pool decided by kiken, fusenpai or hantei is ranked by what the formulas count for that result, which can differ from the app, so check such a pool against the app.
 
-Every Names to Print sheet, in both workbooks and in the name sheets of Export PDFs, opens with one page of three tags holding the competition's name, to cut out and put up at the shiaijo. The competitors' name tags follow from the next page.
+Every Names to Print sheet, in both workbooks and in the name sheets of Export PDFs, opens with one page of three tags holding the competition's name, to cut out and put up at the shiaijo. The competitors' name tags follow from the next page. A shiaijo that has no Names to Print sheet, because nobody on it has a name to print (a shiaijo that runs only knockout bouts), gets no tags, and the blank template has none either.
 
 #### Before the draw
 

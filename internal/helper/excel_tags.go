@@ -181,7 +181,7 @@ func tagNumberStyle(f *excelize.File, stacked bool) (int, error) {
 				Vertical:   "top",
 				WrapText:   true,
 			},
-			Font: &excelize.Font{Family: "Calibri", Bold: true, Size: 160},
+			Font: &excelize.Font{Family: WorkbookFont, Bold: true, Size: 160},
 		})
 	}
 	return f.NewStyle(&excelize.Style{
@@ -195,7 +195,7 @@ func tagNumberStyle(f *excelize.File, stacked bool) (int, error) {
 			// visible and readable at the desk.
 			ShrinkToFit: true,
 		},
-		Font: &excelize.Font{Family: "Calibri",
+		Font: &excelize.Font{Family: WorkbookFont,
 			Bold: true,
 			Size: 250,
 		},

@@ -116,10 +116,12 @@ func TestExportedTagsNumbersMatchActualViewerPayload(t *testing.T) {
 	// it), so this sheet cannot be number-cross-checked the way Tags can
 	// without rendering it first (see the A9 LibreOffice render path for
 	// that). What CAN be pinned without a render is that the row count
-	// tracks the real viewer roster size, so a merge that silently dropped
+	// tracks the real viewer roster size (after the competition-name tags), so a merge that silently dropped
 	// or duplicated an entrant would still be caught here.
 	nameRows, err := f.GetRows(namesSheet)
 	require.NoError(t, err)
-	assert.Len(t, nameRows, len(wantNumbers),
+	// The sheet opens with the competition-name tags: rows, but not entrants.
+	require.GreaterOrEqual(t, len(nameRows), helper.CompetitionTagRows)
+	assert.Len(t, nameRows[helper.CompetitionTagRows:], len(wantNumbers),
 		"Names to Print must carry exactly one row per entrant on the viewer payload")
 }

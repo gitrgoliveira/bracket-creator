@@ -94,7 +94,7 @@ The kendo tournament guidelines this application is based on are in [running_a_k
 
 The app also prepares a day run on paper or from a shared sheet, and the command line serves scripts.
 
-**Paper only.** Set the tournament up in the app, print it with [Export PDFs and the Excel downloads](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/run-tournament/#export-and-print), and run the day with pens. Refer to [If you print your brackets instead](https://gitrgoliveira.github.io/bracket-creator/user-guide/start-here/first-tournament/#if-you-print-your-brackets-instead).
+**Paper only.** Set the tournament up in the app, print it with [Export PDFs and the Excel downloads](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/run-tournament/#export-and-print), and run the day with pens. The [sample printouts](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/sample-printouts/) show what is printed. Refer to [If you print your brackets instead](https://gitrgoliveira.github.io/bracket-creator/user-guide/start-here/first-tournament/#if-you-print-your-brackets-instead).
 
 **A shared Google Sheet.** Upload a competition's Excel workbook from the app to Google Drive and fill results in from any device, so every shiai-jo works from the same document. Refer to [Keep courts in sync](https://gitrgoliveira.github.io/bracket-creator/user-guide/start-here/first-tournament/#keep-courts-in-sync).
 

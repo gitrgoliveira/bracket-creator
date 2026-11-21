@@ -831,7 +831,8 @@ describe('team editor: a notice for a kachinuki bout shows once that bout is rea
   });
 
   it('a refusal on the first bout still shows, right after its row, when that bout is recorded', async () => {
-    window.API.fetchLineupInForce = vi.fn().mockRejectedValue(new Error('offline'));
+    // The read is still out (a read that failed lets bout 1 be named by hand instead).
+    window.API.fetchLineupInForce = vi.fn(() => new Promise(() => {}));
     const first = { position: 1, sideA: '', sideB: '', ipponsA: [], ipponsB: [] };
     const { rerender } = await mountKachinuki([first]);
 

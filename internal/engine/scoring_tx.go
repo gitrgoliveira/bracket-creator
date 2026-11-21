@@ -112,7 +112,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// brought to what its lineup says (operator decision K1 (c),
 	// kachinuki_opener.go), only once the write stands.
 	if err == nil {
-		result.LineupWarning, err = e.afterMatchWrite(tx, compID, matchID, before, door, writeID, stamp)
+		result.LineupWarning, err = e.afterMatchWrite(tx, compID, matchID, result, before, door, writeID, stamp)
 	}
 	if err == nil {
 		err = e.reconcileLeagueAfterWrite(tx, compID, league)

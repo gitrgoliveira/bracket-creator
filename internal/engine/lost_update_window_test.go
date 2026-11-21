@@ -175,8 +175,12 @@ func TestLostUpdate_KachinukiAdvanceDoesNotReopenAFinishThatLanded(t *testing.T)
 		eng, store, _ := setupTestEngine(t)
 		compID := "lu-kachinuki-pool"
 		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, TeamMatchType: state.TeamMatchTypeKachinuki, TeamSize: 5}))
+		// Each side fields its own lineup, so without the re-check the advance
+		// WOULD append bout 3 (A-Jiho against B-Senpo).
+		saveOwnMatchLineup(t, store, compID, "P1-0", redTeamID, 5, "A-Senpo", "A-Jiho")
+		saveOwnMatchLineup(t, store, compID, "P1-0", whiteTeamID, 5, "B-Senpo", "B-Chuken")
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
-			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusRunning, SubResults: subs(),
+			ID: "P1-0", SideA: "RedTeam", SideAID: redTeamID, SideB: "WhiteTeam", SideBID: whiteTeamID, Status: state.MatchStatusRunning, SubResults: subs(),
 		}}))
 		wait := landWriteAtTheSeam(t, eng, compID, func() error {
 			_, err := store.UpdatePoolMatchByID(compID, "P1-0", func(m *state.MatchResult) error { finish(m); return nil })
@@ -196,8 +200,10 @@ func TestLostUpdate_KachinukiAdvanceDoesNotReopenAFinishThatLanded(t *testing.T)
 		compID := "lu-kachinuki-ko"
 		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, TeamMatchType: state.TeamMatchTypeKachinuki, TeamSize: 5}))
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+		saveOwnMatchLineup(t, store, compID, "B1", redTeamID, 5, "A-Senpo", "A-Jiho")
+		saveOwnMatchLineup(t, store, compID, "B1", whiteTeamID, 5, "B-Senpo", "B-Chuken")
 		require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{{
-			ID: "B1", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusRunning, SubResults: subs(),
+			ID: "B1", SideA: "RedTeam", SideAID: redTeamID, SideB: "WhiteTeam", SideBID: whiteTeamID, Status: state.MatchStatusRunning, SubResults: subs(),
 		}}}}))
 		wait := landWriteAtTheSeam(t, eng, compID, func() error {
 			_, err := store.UpdateBracketMatchByID(compID, "B1", func(bm *state.BracketMatch) {
@@ -246,8 +252,11 @@ func TestLostUpdate_KachinukiAdvanceReadsAgainAfterALandedCorrection(t *testing.
 			positions[domain.PositionNumbered(i+1)] = name
 			memberIDs[domain.PositionNumbered(i+1)] = m.ID
 		}
+		// The match's own lineup, as the start pins it (pinStartLineups): a
+		// started match never follows a carried lineup (K1 (c)), so the queues
+		// read this one, not the members' number order.
 		require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
-			TeamID: teamID, Round: 0, Positions: positions, MemberIDs: memberIDs,
+			TeamID: teamID, MatchID: "P1-0", Positions: positions, MemberIDs: memberIDs,
 		}, 2))
 		return ids
 	}

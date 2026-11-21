@@ -315,6 +315,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await waitFor(() => expect(screen.getByTestId('team-editor-lineup-warning').textContent).toContain('may have been added as a new team member'));
     expect(screen.getByTestId('team-editor-lineup-warning').getAttribute('data-tone')).toBe('warn');
     expect(screen.getByTestId('team-editor-lineup-warning').textContent).not.toContain('Lineup saved');
+    expect(screen.getByTestId('team-editor-lineup-warning').textContent).not.toContain('Saved by name only');
     await clickFinishTwice();
     const dh = dhEntryOf(finishPatchOf(onSubmit));
     expect(dh.sideBMemberId).toBe('m9');

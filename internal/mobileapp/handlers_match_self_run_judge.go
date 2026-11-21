@@ -184,10 +184,17 @@ func (e *landedWriteRefusal) Unwrap() error { return e.refusal }
 // The invariant that makes the gate equivalent to judging every write: the
 // engine never lands a member id the judge would refuse that the payload did
 // not introduce. It adds an id to a row only by copying the one the stored row
-// holds at that position (preserveKachinukiMemberIDs) or by deriving the
+// holds at that position (preserveKachinukiMemberIDs), by deriving the
 // winner's from the row's own landed side ids (ResolveMemberWinnerID,
-// ReconcileWinnerMemberID), which the judge accepts. So a write that introduces
-// none leaves the staged match unread. The echo is the common case: the team
+// ReconcileWinnerMemberID), or, in a kachinuki match, by its own seating from
+// the lineup the match fields, its empty places filled by member number
+// (engine.kachinukiFielded): bout 1's seat and the rename along its winner's
+// streak (ReseatKachinukiOpenersTx), and the pairing Record bout appends
+// (MaybeAdvanceKachinuki). A seated id is always one the side's own team holds,
+// so the judge accepts it at any position (pinned in the engine by
+// TestEngineLandsNoMemberIDThePayloadDidNotIntroduce). The seat owns bout 1: a
+// payload's foreign id there does not land, and so is never refused. So a write
+// that introduces none leaves the staged match unread. The echo is the common case: the team
 // editor stamps member ids on every row that has a lineup, and a gate that
 // fired on any id would parse pool-matches.csv (and bracket.json for a knockout
 // match) again under the competition's write lock on nearly every autosave.

@@ -7019,6 +7019,27 @@ details[open] > summary::before { transform: rotate(90deg); }
   color: var(--warn);
   opacity: 0.85;
 }
+/* The member the server fields in an empty kachinuki place (the lineup panel),
+   and the number of a nameless member a box holds: on the empty box's amber
+   treatment, but in the input's own ink, not greyed, since it is who fights
+   there unless the operator picks or types another. */
+.lineup-name--empty.lineup-name--fielded .pmf__input::placeholder,
+.lineup-name--empty.lineup-name--numbered .pmf__input::placeholder {
+  color: var(--ink);
+  opacity: 1;
+}
+/* A filled box reads with its member number before the name ("T1.3 Sano"):
+   the number is the bar's data-number, so the input's value stays the name. */
+.lineup-name__bar[data-number]::before {
+  content: attr(data-number);
+  align-self: center;
+  flex: none;
+  padding-left: 4px;
+  font-size: 13px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .lineup-name__clear {
   border: none;
   background: transparent;

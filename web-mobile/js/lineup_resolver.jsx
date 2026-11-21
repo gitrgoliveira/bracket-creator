@@ -191,6 +191,41 @@ export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
   });
 }
 
+// numberedMemberName: a squad entry (squadRosterEntries) as a lineup box reads
+// it, its member number before its name ("T1.3 Sano"), the number alone for a
+// nameless member ("T1.3", no trailing space).
+export function numberedMemberName(entry) {
+  if (!entry) return "";
+  return [entry.label, entry.name].filter(Boolean).join(" ");
+}
+
+// teamCarriesName: whether a name typed into a lineup place is one a member of
+// the team already carries (compared trimmed and case-insensitively, as the
+// save's resolver places a typed name). Such a name is placed by its member, so
+// a nameless default is never taken for it.
+export function teamCarriesName(squadEntries, name) {
+  const wanted = String(name || "").trim().toLowerCase();
+  return !!wanted && (squadEntries || []).some(e => e && e.name && e.name.toLowerCase() === wanted);
+}
+
+// fieldedDefaults: what each EMPTY place of a kachinuki lineup form shows as its
+// default, from the server's answer of who it fields there (`fielded`, position
+// key to member id, API.fetchFieldedLineup) and the team's squad entries. A
+// place the form holds (a name or a member id) has none, nor does a place whose
+// member the entries do not hold (it could not be labelled). Each default is
+// `{ id, label, nameless }`.
+export function fieldedDefaults({ fielded, squadEntries, positions, memberIds, positionKeys }) {
+  const out = {};
+  for (const key of positionKeys || []) {
+    if (String(positions?.[key] || "").trim() || memberIds?.[key]) continue;
+    const id = fielded?.[key];
+    const entry = id ? (squadEntries || []).find(e => e && e.id === id) : null;
+    if (!entry) continue;
+    out[key] = { id, label: numberedMemberName(entry), nameless: !entry.name };
+  }
+  return out;
+}
+
 // MEMBER_ALREADY_NAMED: the code a participant's rename of a team member who
 // already has a name is refused with (errMemberAlreadyNamed,
 // internal/mobileapp/handlers_squad.go). The refusal's sentence is the

@@ -29,6 +29,19 @@ func r11KachinukiSetup(t *testing.T, ko, requeue bool) r10Scene {
 	require.NoError(t, err)
 	c.TeamMatchType = state.TeamMatchTypeKachinuki
 	require.NoError(t, h.store.SaveCompetition(c))
+	// Each team's lineup for the match names its bout-1 fighter as the writes
+	// type it ("r1", "t1", no member id), as the start pins the lineup in force
+	// (pinStartLineups). This test is about reopen convergence, not seating: the
+	// seat then leaves bout 1 as the writes name it. Without a lineup of its own
+	// the started match would field its members by number, and bout 1 would
+	// read the team's nameless member 1, whose win is stored as the TEAM name
+	// plus the member id (bc-dnst), not "r1".
+	for team, opener := range map[string]string{wrTeamAID: "r1", wrTeamBID: "t1"} {
+		require.NoError(t, h.store.SetTeamLineup(h.compID, domain.TeamLineup{
+			TeamID: team, MatchID: h.matchID,
+			Positions: map[domain.Position]string{domain.PositionNumbered(1): opener},
+		}, 3))
+	}
 	if ko {
 		b, err := h.store.LoadBracket(h.compID)
 		require.NoError(t, err)

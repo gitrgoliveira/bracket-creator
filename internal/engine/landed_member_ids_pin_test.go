@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 
@@ -24,15 +25,24 @@ import (
 // ReconcileWinnerMemberID (the winner's id, derived from the row's own landed
 // side ids, which the judge accepts) and the merge's copies of the groups a
 // write does not apply, state.CopyGroup and SetRepPick (the stored row's ids
-// and picks). The load repair (state.resolveSubMemberIDs) runs once per
-// competition per process, before the write under test, on rows that already
-// carry their ids, and fills only a row's own team's members.
+// and picks). On a kachinuki match the write also seats bout 1 from the lineup
+// the match fields (afterMatchWrite through seatOpenerAfterWrite: its own
+// lineup, its empty places filled by member number, and the stayer of bout 1's
+// streak renamed with it), which
+// lands the side's own team's members. The load repair
+// (state.resolveSubMemberIDs) runs once per competition per process, before the
+// write under test, on rows that already carry their ids, and fills only a
+// row's own team's members.
 //
 // What the fixture is built to reach:
-//   - Both teams' starting lineups and team members are saved. The store mints
-//     the members' ids, so no row carries one: an id taken from a lineup or from
-//     the members by anything inside the write would be a FOREIGN id (neither
-//     the payload's nor the stored match's), which the invariant refuses.
+//   - Both teams' lineups for the match (as the start pins them) and team
+//     members are saved, every place named, so the seat changes nothing. The
+//     store mints the members' ids, so no row carries one: an id taken from a
+//     lineup or from the members by anything inside the write would be a FOREIGN
+//     id (neither the payload's nor the stored match's), which the invariant
+//     refuses unless it is the side's own team's member on a kachinuki match.
+//     One kachinuki case stores no lineup at all, so the seat really lands the
+//     seeded, nameless member 1 of each team.
 //     MaybeAdvanceKachinuki is NOT called: its lineup ids are added after the
 //     transaction, in the handler, and this pins what the write itself lands.
 //   - The match is stored at mmT0 and every write but one is stamped, so the
@@ -48,12 +58,34 @@ import (
 // The invariant, per landed row and judged field (either side's member id, and
 // the winner's): the id is empty, or the payload's row at that position carried
 // it, or the stored row at that position held it, or (the winner only) it is one
-// of the landed row's own side ids.
+// of the landed row's own side ids, or (a kachinuki side only, at any position)
+// the side's own team holds it. That last arm is the server's own seating from
+// the fielded lineup (bout 1's seat and its streak rename, kachinuki_opener.go,
+// and the advance's appended pairing), whose ids are always the side's own
+// team's members: exactly what the judge accepts (rowMembersOutsideTeams
+// refuses only an id the side's team does not hold). It is position
+// independent, because the seat renames along the streak and Record bout
+// appends team-owned ids at later positions.
 
-// assertNoIntroducedMemberID fails for any landed member id at a judged field
-// that neither the payload nor the stored match supplied.
-func assertNoIntroducedMemberID(t *testing.T, stored, payload, landed []state.SubMatchResult) {
-	t.Helper()
+// pinTeams are the landed match's side team ids and the competition's team
+// members, for the kachinuki arm of the invariant. A nil *pinTeams adds no arm.
+type pinTeams struct {
+	aID, bID string
+	members  map[string][]domain.TeamMember
+}
+
+// holds answers whether the team with participant id teamID holds a member
+// with id memberID.
+func (p *pinTeams) holds(teamID, memberID string) bool {
+	if p == nil || teamID == "" || memberID == "" {
+		return false
+	}
+	return slices.ContainsFunc(p.members[teamID], func(m domain.TeamMember) bool { return m.ID == memberID })
+}
+
+// introducedMemberIDs lists, one line each, every landed member id at a judged
+// field that the invariant does not account for.
+func introducedMemberIDs(stored, payload, landed []state.SubMatchResult, teams *pinTeams) []string {
 	supplied := func(got string, field func(state.SubMatchResult) string, row state.SubMatchResult) bool {
 		return got == "" ||
 			got == field(state.SubResultAt(payload, row.Position)) ||
@@ -62,14 +94,53 @@ func assertNoIntroducedMemberID(t *testing.T, stored, payload, landed []state.Su
 	sideA := func(r state.SubMatchResult) string { return r.SideAMemberID }
 	sideB := func(r state.SubMatchResult) string { return r.SideBMemberID }
 	winner := func(r state.SubMatchResult) string { return r.WinnerMemberID }
+	var out []string
 	for _, row := range landed {
-		assert.True(t, supplied(row.SideAMemberID, sideA, row),
-			"position %d: side A member id %q was supplied by neither the payload nor the stored row", row.Position, row.SideAMemberID)
-		assert.True(t, supplied(row.SideBMemberID, sideB, row),
-			"position %d: side B member id %q was supplied by neither the payload nor the stored row", row.Position, row.SideBMemberID)
+		if !supplied(row.SideAMemberID, sideA, row) && (teams == nil || !teams.holds(teams.aID, row.SideAMemberID)) {
+			out = append(out, fmt.Sprintf("position %d: side A member id %q was supplied by neither the payload, the stored row, nor side A's own team", row.Position, row.SideAMemberID))
+		}
+		if !supplied(row.SideBMemberID, sideB, row) && (teams == nil || !teams.holds(teams.bID, row.SideBMemberID)) {
+			out = append(out, fmt.Sprintf("position %d: side B member id %q was supplied by neither the payload, the stored row, nor side B's own team", row.Position, row.SideBMemberID))
+		}
 		ownFighter := row.WinnerMemberID == row.SideAMemberID || row.WinnerMemberID == row.SideBMemberID
-		assert.True(t, supplied(row.WinnerMemberID, winner, row) || ownFighter,
-			"position %d: winner member id %q was supplied by neither the payload, the stored row, nor the row's own landed fighters", row.Position, row.WinnerMemberID)
+		if !supplied(row.WinnerMemberID, winner, row) && !ownFighter {
+			out = append(out, fmt.Sprintf("position %d: winner member id %q was supplied by neither the payload, the stored row, nor the row's own landed fighters", row.Position, row.WinnerMemberID))
+		}
+	}
+	return out
+}
+
+// assertNoIntroducedMemberID fails for any landed member id at a judged field
+// that the invariant does not account for.
+func assertNoIntroducedMemberID(t *testing.T, stored, payload, landed []state.SubMatchResult, teams *pinTeams) {
+	t.Helper()
+	for _, line := range introducedMemberIDs(stored, payload, landed, teams) {
+		t.Error(line)
+	}
+}
+
+// The kachinuki arm accepts only the side's OWN team's members, at any
+// position: another team's member, or an id no team holds, is still refused,
+// on bout 1 and on a later bout alike.
+func TestPinInvariant_AKachinukiSideTakesOnlyItsOwnTeamsMembers(t *testing.T) {
+	teams := &pinTeams{aID: wrTeamAID, bID: wrTeamBID, members: map[string][]domain.TeamMember{
+		wrTeamAID: {{ID: "a-1", Index: 1}, {ID: "a-2", Index: 2}},
+		wrTeamBID: {{ID: "b-1", Index: 1}},
+	}}
+	rows := func(pos int, a, b string) []state.SubMatchResult {
+		return []state.SubMatchResult{{Position: pos, SideAMemberID: a, SideBMemberID: b}}
+	}
+	for _, pos := range []int{1, 3} {
+		assert.Empty(t, introducedMemberIDs(nil, nil, rows(pos, "a-2", "b-1"), teams),
+			"position %d: each side's own team's members pass", pos)
+		assert.Len(t, introducedMemberIDs(nil, nil, rows(pos, "b-1", ""), teams), 1,
+			"position %d: the other team's member on side A is refused", pos)
+		assert.Len(t, introducedMemberIDs(nil, nil, rows(pos, "", "a-1"), teams), 1,
+			"position %d: the other team's member on side B is refused", pos)
+		assert.Len(t, introducedMemberIDs(nil, nil, rows(pos, "k-sato", "o-tanaka"), teams), 2,
+			"position %d: ids no team holds are refused", pos)
+		assert.Len(t, introducedMemberIDs(nil, nil, rows(pos, "a-1", "b-1"), nil), 2,
+			"position %d: with no arm (fixed order) a team's own member the payload did not bring is refused", pos)
 	}
 }
 
@@ -106,8 +177,9 @@ var pinOpenerIDs = map[string]string{wrTeamAID: "k-sato", wrTeamBID: "o-tanaka"}
 
 // pinHome seeds a team match of the given type, running since mmT0 and holding
 // the stored rows, on the pool branch (a league) or the bracket branch (a
-// knockout), with both teams' starting lineups and team members saved.
-func pinHome(t *testing.T, knockout bool, matchType state.TeamMatchType, stored []state.SubMatchResult) mmHome {
+// knockout), with both teams' lineups for the match and team members saved, or,
+// with noLineup, no lineup at all and only the members the store seeds.
+func pinHome(t *testing.T, knockout bool, matchType state.TeamMatchType, stored []state.SubMatchResult, noLineup bool) mmHome {
 	t.Helper()
 	eng, store, dir := setupTestEngine(t)
 	h := mmHome{eng: eng, store: store, dir: dir}
@@ -123,8 +195,15 @@ func pinHome(t *testing.T, knockout bool, matchType state.TeamMatchType, stored 
 	}
 	wrSaveTeams(t, store, h.compID)
 	for _, p := range pinPeople {
+		if noLineup {
+			break
+		}
+		// The lineup is the match's OWN, as the start pins it (pinStartLineups):
+		// a started match with nothing of its own fields an empty lineup filled by
+		// member number (kachinukiFielded, K1 (c)), never a carried starting
+		// lineup, and production never stores a running match without its pin.
 		lineup := domain.TeamLineup{
-			TeamID: p.teamID, Round: 0,
+			TeamID: p.teamID, MatchID: h.matchID,
 			Positions: map[domain.Position]string{}, MemberIDs: map[domain.Position]string{},
 		}
 		for i, name := range p.names {
@@ -253,6 +332,12 @@ func TestEngineLandsNoMemberIDThePayloadDidNotIntroduce(t *testing.T) {
 		// pin is not vacuously true of a write that dropped every id: the
 		// carry-over mechanisms it guards are really exercised.
 		inherited map[int]pinIDs
+		// noLineup stores no lineup at all, so the seat fields each team's
+		// members by number (kachinukiFielded); seated then gives the ids the
+		// landed rows must hold from each team's member 1 (by team id), since the
+		// store mints them.
+		noLineup bool
+		seated   func(first map[string]string) map[int]pinIDs
 	}{
 		{
 			name:      "kachinuki: a write echoing the stored member ids",
@@ -285,6 +370,22 @@ func TestEngineLandsNoMemberIDThePayloadDidNotIntroduce(t *testing.T) {
 			write:     pinWriteSpec{at: pinBetween, rows: stripIDs(ito(kachinukiRows()))},
 			held:      []string{"bout:1"},
 			inherited: map[int]pinIDs{1: {"k-sato", "o-tanaka", "k-sato"}, 2: {"k-sato", "o-ito", "o-ito"}},
+		},
+		{
+			// The headline case of number order (bc-kno1): no lineup anywhere and
+			// the seeded, nameless members. The seat lands each team's member 1 on
+			// bout 1 and carries team A's onto bout 2, where Sato stayed on, so
+			// the write lands ids neither the payload nor the stored rows held:
+			// the server's own seating, always the side's own team's members.
+			name:      "kachinuki: no lineup, the seat fields each team's member 1 and renames the streak",
+			matchType: state.TeamMatchTypeKachinuki,
+			noLineup:  true,
+			stored:    stripIDs(kachinukiRows()),
+			write:     pinWriteSpec{at: mmT1, changed: []string{"bout:2"}, rows: stripIDs(ito(kachinukiRows()))},
+			seated: func(first map[string]string) map[int]pinIDs {
+				a, b := first[wrTeamAID], first[wrTeamBID]
+				return map[int]pinIDs{1: {a, b, a}, 2: {a, "", ""}}
+			},
 		},
 		{
 			name:        "fixed order with a representative bout: a write echoing the stored member ids",
@@ -338,7 +439,7 @@ func TestEngineLandsNoMemberIDThePayloadDidNotIntroduce(t *testing.T) {
 					continue
 				}
 				t.Run(b.name, func(t *testing.T) {
-					h := pinHome(t, b.knockout, tt.matchType, tt.stored)
+					h := pinHome(t, b.knockout, tt.matchType, tt.stored, tt.noLineup)
 					for _, s := range tt.setup {
 						require.NoError(t, h.write(pinWrite(h, s)))
 					}
@@ -346,17 +447,44 @@ func TestEngineLandsNoMemberIDThePayloadDidNotIntroduce(t *testing.T) {
 					// setup writes it is no longer what the fixture stored.
 					before := h.load(t)
 					require.NotEmpty(t, before.SubResults)
+					inherited := tt.inherited
+					if tt.seated != nil {
+						// The load above seeded the team members (a roster save
+						// seeds them on the next load); each team's member 1 is
+						// nameless, so the case is about a nameless fighter.
+						first := map[string]string{}
+						squads, err := h.store.LoadSquads(h.compID)
+						require.NoError(t, err)
+						for _, teamID := range []string{wrTeamAID, wrTeamBID} {
+							for _, m := range squads[teamID] {
+								if m.Index == 1 {
+									first[teamID] = m.ID
+									require.Empty(t, m.Name, "team %s: member 1 is seeded nameless", teamID)
+								}
+							}
+							require.NotEmpty(t, first[teamID], "team %s holds a member 1 with an id", teamID)
+						}
+						inherited = tt.seated(first)
+					}
 
 					require.NoError(t, h.write(pinWrite(h, tt.write)),
 						"the write applies in part: a write held whole answers superseded")
 
 					landed := h.load(t)
 					require.NotEmpty(t, landed.SubResults)
-					assertNoIntroducedMemberID(t, before.SubResults, tt.write.rows, landed.SubResults)
+					var teams *pinTeams
+					if tt.matchType == state.TeamMatchTypeKachinuki {
+						members, err := h.store.LoadSquads(h.compID)
+						require.NoError(t, err)
+						teams = &pinTeams{aID: landed.SideAID, bID: landed.SideBID, members: members}
+						require.NotEmpty(t, teams.aID)
+						require.NotEmpty(t, teams.bID)
+					}
+					assertNoIntroducedMemberID(t, before.SubResults, tt.write.rows, landed.SubResults, teams)
 					assert.ElementsMatch(t, tt.held, pinHeld(t, h.history(t)),
 						"the groups the merge held, per the match's history")
 
-					for position, want := range tt.inherited {
+					for position, want := range inherited {
 						row := state.SubResultAt(landed.SubResults, position)
 						assert.Equal(t, want, pinIDs{row.SideAMemberID, row.SideBMemberID, row.WinnerMemberID},
 							"position %d: the ids the write was meant to carry over are still there", position)

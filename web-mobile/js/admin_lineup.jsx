@@ -385,12 +385,15 @@ function memberWriteFailure(position, name, e) {
 // lineup looked new to the resolver, so a per-position list would just be
 // the same root cause repeated once per slot -- misleading, since it reads
 // as N unrelated problems instead of the one real one. One sentence naming
-// the actual cause replaces the whole list in that case.
+// the actual cause replaces the whole list in that case: that the lineup was
+// saved by name only, and why (operator decision U2, round ship-kno1-review-1:
+// one sentence true whether the list failed to load or the file cannot be
+// read), then that scores are unaffected.
 //
 // Returns "" when there is nothing to say.
 function memberIdentityWarning(failures, squadUnavailable, teamSize) {
   if (squadUnavailable) {
-    return "Lineup saved, but the team member list could not be loaded, so no position could be linked to a team member this time. Scores will still record normally.";
+    return "Saved by name only: the team member list could not be loaded. Scores will still record normally.";
   }
   const list = (Array.isArray(failures) ? failures : []).filter(f => f && f.position);
   if (list.length === 0) return "";
@@ -453,7 +456,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
   const {
     values, setValues, memberIds, setMemberIds, memberIdsRef,
     error, setError, warning: saveWarning, setWarning: setSaveWarning,
-    squad, changeMembers, squadUnavailable,
+    squad, changeMembers, squadUnavailable, membersNotice,
   } = form;
   const [saving, setSaving] = useState(false);
   // A removal of the match's own lineup is in flight.
@@ -576,6 +579,17 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
     // wording the team sheet uses too (membersNotReadNotice).
     if (!form.membersReadOver()) {
       setError(membersNotReadNotice(name));
+      return;
+    }
+    // The server said team-members.yaml cannot be read: no member can be added or
+    // named, so the name is placed by name alone and Save writes it so (operator
+    // decisions U1, U2).
+    if (form.membersUnreadable) {
+      setError("");
+      setValues(v => ({ ...v, [posKey]: name }));
+      setMemberIds(ids => ({ ...ids, [posKey]: "" }));
+      setAddingPos(null);
+      setAddingName("");
       return;
     }
     const members = form.squadRef.current;
@@ -921,10 +935,11 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
               them to mint a brand-new permanent numbered slot for a member
               who already exists on the server (a member can be cleared but
               never removed). The deleted Settings section said which of the
-              two it was; say it here. */}
+              two it was; say it here, naming team-members.yaml when that file
+              cannot be read. */}
           {squadSorted.length === 0 && squadUnavailable && (
             <div className="field__hint field__hint--warn" data-testid="lineup-members-unavailable">
-              The team member list could not be loaded, so this may not be the whole team. Reload before adding a member, or you may add a second slot for someone who already has one.
+              {membersNotice}
             </div>
           )}
           {squadSorted.length === 0 && !squadUnavailable && (

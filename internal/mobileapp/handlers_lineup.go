@@ -10,7 +10,10 @@
 // those on the lineup stored when it arrives (lineupSave.base). A third public GET,
 // .../lineup-in-force/:matchId, answers which lineup the team fields at a match
 // (see lineupInForceRead), and a fourth, .../matches/:mid/kachinuki-roster, a
-// kachinuki encounter's fighters not yet retired (engine.KachinukiRoster).
+// kachinuki encounter's fighters not yet retired (engine.KachinukiRoster). A
+// public POST that writes nothing, .../fielded-lineup/:matchId, answers who the
+// server seats by member number in the empty places of a kachinuki lineup form
+// (engine.KachinukiFieldedPlaces).
 //
 // All store I/O goes through the TeamLineupStore + CompetitionStore
 // interfaces (deps.go) rather than the concrete *state.Store
@@ -222,6 +225,8 @@ func validLineupRequest(c *gin.Context, req LineupRequest) bool {
 // lineupInForceRead (see their docs); a 404 means the competition does not
 // exist. The kachinuki roster read is public for the same reason, and because
 // the self-run public score sheet mounts the same team editor that shows it.
+// So is POST .../fielded-lineup/:matchId, a read that carries the lineup
+// panel's form and answers a fieldedLineupRead, writing nothing.
 //
 // Slice 7.B / T127.
 func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, eng LineupEngine) {
@@ -289,13 +294,55 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		c.JSON(http.StatusOK, newLineupInForceRead(compID, teamID, matchID, in))
 	})
 
+	// Who the server fields in the empty places of a kachinuki lineup form
+	// (bc-kno1, operator decisions D2 and D3): the panel sends its current
+	// positions, saved or not, after every change, and shows each answered member
+	// as the place's default. A POST because it carries the form, but a read: it
+	// writes nothing and announces nothing. Public like the reads above.
+	r.POST("/competitions/:id/teams/:tid/fielded-lineup/:matchId", MaxBodyBytes(FieldedLineupMaxBodyBytes), func(c *gin.Context) {
+		compID, teamID, matchID, ok := parseMatchLineupParams(c)
+		if !ok {
+			return
+		}
+		if !requireExistingCompetition(c, comps, compID) {
+			return
+		}
+		var req fieldedLineupRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			if respondBodyTooLarge(c, err) {
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+			return
+		}
+		places, err := eng.KachinukiFieldedPlaces(compID, teamID, matchID, domain.TeamLineup{
+			TeamID: teamID, CompetitionID: compID, MatchID: matchID,
+			Positions: req.Positions, MemberIDs: req.MemberIDs,
+		})
+		var notFound *engine.NotFoundError
+		switch {
+		case errors.As(err, &notFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+		case err != nil && lineupSetStatus(err) == http.StatusBadRequest:
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case err != nil:
+			internalError(c, err)
+		default:
+			c.JSON(http.StatusOK, fieldedLineupRead{FieldedMemberIDs: places})
+		}
+	})
+
 	// The kachinuki queue (bc-kfnl, operator ruling 2026-09-24): each side's
 	// fighters who have not retired, read through the same engine call that
 	// appends the next pairing, for the advisory line the score sheet shows
-	// above the live bout. Read-only and advisory: nothing is decided on it.
-	// 200 with each side's {lineupFound, on, remaining}; 404 for an unknown
-	// competition or match; 400 for a competition that is not kachinuki; 500
-	// when the lineups cannot be read.
+	// above the live bout. Read-only and advisory: nothing is decided on it, and
+	// it never stops scoring. 200 with each side's {lineupFound, on, remaining,
+	// exhausted}, nextPairing, and a `warning` sentence when team-members.yaml or
+	// lineups.yaml could not be read (each logged as an ERROR naming the file):
+	// over unread lineups nobody is listed remaining and nobody is exhausted, so
+	// the operator adds each bout's pairing by hand. 404 for an unknown
+	// competition or match; 400 for a competition that is not kachinuki; 500 only
+	// when the competition or its draw cannot be read.
 	r.GET("/competitions/:id/matches/:mid/kachinuki-roster", func(c *gin.Context) {
 		compID, ok := requireValidCompID(c)
 		if !ok {
@@ -322,6 +369,25 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 			c.JSON(http.StatusOK, roster)
 		}
 	})
+}
+
+// FieldedLineupMaxBodyBytes caps the body of the public fielded-lineup read: a
+// lineup form, a name and a member id per place, far under 64 KB for any team.
+const FieldedLineupMaxBodyBytes int64 = 64 << 10
+
+// fieldedLineupRequest is the body of the fielded-lineup read: the lineup
+// panel's form as it stands, keyed like LineupRequest. Both maps may be absent
+// or empty (an empty form: every place is filled by number).
+type fieldedLineupRequest struct {
+	Positions map[domain.Position]string `json:"positions"`
+	MemberIDs map[domain.Position]string `json:"memberIds,omitempty"`
+}
+
+// fieldedLineupRead is the answer of the fielded-lineup read: each place the
+// form leaves empty that the server fills by member number, mapped to that
+// member's id. Never null: an empty object when nothing would be filled.
+type fieldedLineupRead struct {
+	FieldedMemberIDs map[domain.Position]string `json:"fieldedMemberIds"`
 }
 
 // lineupInForceRead is the response body of the lineup-in-force GET. It embeds

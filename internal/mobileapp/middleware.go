@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -78,9 +79,9 @@ const BrandingMaxFileBytes int64 = 1 << 20 // 1 MB
 //     so handlers that don't trust Content-Length (or where the client
 //     lied / used chunked encoding) still trip the limit during
 //     reading. Handlers that read past n get an *http.MaxBytesError
-//     surfaced via c.ShouldBindJSON; the existing 500 path renders the
-//     error reasonably even if not optimally, a follow-up could map
-//     that specific error to 413 inside BindJSON wrappers.
+//     surfaced via c.ShouldBindJSON; a handler maps it to the same 413
+//     with respondBodyTooLarge (a handler that does not answers with
+//     its own error status for it).
 //
 // Skips GET/HEAD/OPTIONS, which carry no body a handler reads, and a DELETE
 // without a body, since wrapping a missing body would surface false errors.
@@ -107,6 +108,25 @@ func MaxBodyBytes(n int64) gin.HandlerFunc {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, n)
 		c.Next()
 	}
+}
+
+// respondBodyTooLarge answers 413, the status MaxBodyBytes gives an honest
+// Content-Length, when err is the *http.MaxBytesError a handler's body read
+// hit (chunked, or a Content-Length that understated the body). It reports
+// whether it answered, so a bind failure reads:
+//
+//	if err := c.ShouldBindJSON(&req); err != nil {
+//		if respondBodyTooLarge(c, err) {
+//			return
+//		}
+//		...
+func respondBodyTooLarge(c *gin.Context, err error) bool {
+	var tooLarge *http.MaxBytesError
+	if !errors.As(err, &tooLarge) {
+		return false
+	}
+	c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+	return true
 }
 
 // adminGroup creates an /api route group with MaxBodyBytes(capBytes) wired

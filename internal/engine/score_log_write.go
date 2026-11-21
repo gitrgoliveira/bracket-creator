@@ -237,8 +237,11 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 	}
 	all := append(slices.Clone(lines), added...)
 	rp := ReplayScoring(stored, all, shape)
-	// Bout 1 of a kachinuki encounter takes the lineup's fighters in the same
-	// batch, as the server's own events (kachinuki_opener.go).
+	// Bout 1 of a kachinuki encounter takes the fighters the match fields (its
+	// lineup, its empty places by member number) in the same batch, as the
+	// server's own events (kachinuki_opener.go). Team members that cannot be
+	// read are logged as an ERROR and seat nobody by number; the batch goes on,
+	// and the operator is told by the roster read.
 	seat := openerSeatEventsTx(tx, comp, compID, matchID, &rp.Match, all)
 	if len(seat) > 0 {
 		for i := range seat {

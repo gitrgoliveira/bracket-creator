@@ -519,8 +519,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     const warning = memberWarning(tree2);
     expect(warning).toBeTruthy();
     const text = collectText(warning);
-    expect(text).toContain('Lineup saved');
-    expect(text).toContain('team member list could not be loaded');
+    expect(text).toContain('Saved by name only: the team member list could not be loaded.');
     expect(text).toContain('Scores will still record normally');
   });
 

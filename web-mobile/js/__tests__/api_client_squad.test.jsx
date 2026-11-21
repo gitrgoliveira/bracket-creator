@@ -47,6 +47,15 @@ describe('API.fetchSquads', () => {
     global.fetch = mockFetch(404, { error: 'competition not found' });
     await expect(API.fetchSquads('c1', 'pw')).rejects.toThrow('competition not found');
   });
+
+  it('keeps the code and the sentence of a 409 team_members_unreadable', async () => {
+    const message = 'The team members could not be read. The organiser needs to check team-members.yaml in the tournament data.';
+    global.fetch = mockFetch(409, { error: 'team_members_unreadable', message });
+    const err = await API.fetchSquads('c1', 'pw').catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.code).toBe('team_members_unreadable');
+    expect(err.message).toBe(message);
+  });
 });
 
 // The member writes (addTeamMember, renameTeamMember, clearTeamMember) are

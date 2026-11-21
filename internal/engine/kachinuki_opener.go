@@ -6,15 +6,24 @@ package engine
 // editing the lineup specifically for that match").
 //
 // The one rule (openerDraw.opener): each side's bout-1 fighter is the first
-// fighter, in fighting order (domain.TeamLineup.OrderedMembers, which is how
-// the advance and the roster read who fights first), of that match's lineup:
+// fighter, in fighting order (domain.TeamLineup.OrderedMembers), of the
+// lineup the match fields for that team (kachinukiFielded, the ONE reader the
+// advance's queues, the roster read and the export ask too, so all four agree;
+// operator decision K1 (a), 2026-11-18, round bc-kno1-2):
 //   - its own lineup: the one an operator saved for it, else the one it
 //     started with, which the server keeps as its own (its pin);
 //   - else, while it has not started, the lineup in force there by the carry
 //     rule (LineupInForce);
-//   - else nobody: a match that started with no lineup kept (before this
-//     rule, or with its own lineup taken away since) keeps the fighters bout 1
-//     holds, and only a save of its own lineup renames it.
+//   - else an empty lineup: a match that started with nothing of its own never
+//     follows a carried lineup;
+//   - and in every case the lineup's empty places are filled by member number
+//     (members 1 to the team size, named or not, the lowest number not placed
+//     elsewhere), so a team with no lineup opens with its member 1.
+// Nobody is seated, and bout 1 keeps the fighters it holds, only for a side
+// with no team id, a team with no members, or when team-members.yaml cannot be
+// read (logged as an ERROR; the operator is told by the roster read, Q5) and
+// the lineup names nobody. A pick or a typed name on bout 1 is a save of the
+// match's own lineup at its first place, so the rule names that fighter.
 //
 // No device names them: a tablet's taps on bout 1 are scoring only, so two
 // tablets striking on bout 1 at once both land there.
@@ -161,18 +170,22 @@ func openerSeatEvents(m *state.MatchResult, o KachinukiOpener, stamp int64) []do
 	return evs
 }
 
-// openerDraw is what the lineup rule reads: the lineups and the draw.
+// openerDraw is what the lineup rule reads: the lineups, the draw and the
+// team members (read lazily, only when a fielded lineup leaves a place empty).
 type openerDraw struct {
 	comp    *state.Competition
 	lineups map[string]domain.TeamLineup
 	pool    []state.MatchResult
 	bracket *state.Bracket
+	members *kachinukiMembers
 }
 
 // readOpenerDraw reads, in the transaction, what the opener of a kachinuki
 // match is worked out from. ok is false when there is nothing to work it out
 // from (not a kachinuki competition, or lineups.yaml unreadable, which is
-// logged): bout 1 then keeps its fighters and no pin is taken.
+// logged): bout 1 then keeps its fighters and no pin is taken. The team
+// members are read through the transaction on first need; a load error there
+// is logged as an ERROR and seats nobody by number (Q5), the write going on.
 func readOpenerDraw(h state.StoreTx, comp *state.Competition, compID string) (openerDraw, bool) {
 	if comp == nil || !comp.IsKachinuki() {
 		return openerDraw{}, false
@@ -182,7 +195,7 @@ func readOpenerDraw(h state.StoreTx, comp *state.Competition, compID string) (op
 		log.Printf("engine: kachinuki opener compId=%s: lineups.yaml load error: %v; bout 1 keeps its fighters", compID, err)
 		return openerDraw{}, false
 	}
-	d := openerDraw{comp: comp, lineups: lineups}
+	d := openerDraw{comp: comp, lineups: lineups, members: readKachinukiMembers(h.LoadSquads, compID, "engine.kachinukiOpener")}
 	if d.pool, err = h.LoadPoolMatches(compID); err != nil {
 		log.Printf("engine: kachinuki opener compId=%s: pool matches load error: %v; the draw is built from the files that loaded", compID, err)
 	}
@@ -197,31 +210,27 @@ func (d openerDraw) inForce(teamID, matchID string) InForceLineup {
 	return LineupInForceFrom(d.lineups, d.pool, d.bracket, d.comp.IsKnockoutEnabled(), teamID, matchID)
 }
 
-// opener is THE rule for bout 1's fighters (see the file comment): the first
-// fighter of the match's own lineup (saved, or the one it started with), else,
-// while the match has not started, of the lineup in force there; else nobody,
-// which renames nothing. A match sent back to the queue holding its bouts has
-// started (hasStarted): it never follows the carried lineup.
-func (d openerDraw) opener(matchID string, started bool, sideAID, sideBID string) KachinukiOpener {
+// lineupsUnread is false: a draw is only read when lineups.yaml was
+// (readOpenerDraw answers ok false otherwise), so kachinukiFielded may fill.
+func (d openerDraw) lineupsUnread() bool { return false }
+
+// opener is THE rule for bout 1's fighters of m (see the file comment): the
+// first fighter of the lineup m fields for each side (kachinukiFielded: its own
+// lineup, else, while it has not started, the lineup in force there, else an
+// empty one; its empty places filled by member number). A match sent back to
+// the queue holding its bouts has started (hasStarted): it never follows the
+// carried lineup. A side that fields nobody (no team id, no members, or team
+// members that could not be read over an empty lineup) is left as bout 1
+// holds it.
+func (d openerDraw) opener(m *state.MatchResult) KachinukiOpener {
 	first := func(teamID string) boutFighter {
-		if teamID == "" {
-			return boutFighter{}
-		}
-		in := d.inForce(teamID, matchID)
-		if !in.Found {
-			return boutFighter{}
-		}
-		if in.Source.MatchID != matchID && started {
-			// Started, with nothing of its own: nothing renames it.
-			return boutFighter{}
-		}
-		slots := in.Lineup.OrderedMembers(d.comp.TeamSize)
+		slots := kachinukiFielded(d, d.members, d.comp.TeamSize, m, teamID).OrderedMembers(d.comp.TeamSize)
 		if len(slots) == 0 {
 			return boutFighter{}
 		}
 		return boutFighter{Name: slots[0].Name, MemberID: slots[0].MemberID}
 	}
-	return KachinukiOpener{A: first(sideAID), B: first(sideBID)}
+	return KachinukiOpener{A: first(m.SideAID), B: first(m.SideBID)}
 }
 
 // ownLineup reports whether a lineup is stored for teamID at matchID itself:
@@ -379,17 +388,25 @@ func anchorStartedCopy(h state.StoreTx, d *openerDraw, compID, matchID, teamID s
 // openerSeatEventsTx is the server's fighter events that bring bout 1 of m (and
 // the stayer's streak from it) to what the rule says, stamped after every line
 // of the log and the match, or none when bout 1 already holds them, m has no
-// bout, or the competition is not kachinuki.
+// bout, or the competition is not kachinuki. A competition with no lineup
+// saved is seated too: its teams open in member number order.
 func openerSeatEventsTx(h state.StoreTx, comp *state.Competition, compID, matchID string, m *state.MatchResult, lines []state.ScoreLogLine) []domain.ScoreEvent {
 	if len(m.SubResults) == 0 {
 		return nil
 	}
 	d, ok := readOpenerDraw(h, comp, compID)
-	if !ok || len(d.lineups) == 0 {
+	if !ok {
 		return nil
 	}
+	at := m
+	if at.ID != matchID {
+		// The rule finds the match's own lineup by its id.
+		c := *m
+		c.ID = matchID
+		at = &c
+	}
 	stamp := max(serverNowMs(), m.ModifiedAt+1, newestLineStamp(lines)+1)
-	return openerSeatEvents(m, d.opener(matchID, hasStarted(m), m.SideAID, m.SideBID), stamp)
+	return openerSeatEvents(m, d.opener(at), stamp)
 }
 
 // afterMatchWrite runs after a match write that stands (its error nil), in the
@@ -398,8 +415,9 @@ func openerSeatEventsTx(h state.StoreTx, comp *state.Competition, compID, matchI
 // bout 1 is brought to what the rule says (seatOpenerAfterWrite; the
 // score-events door seats its own batch). before is the match's status before
 // the write; writeID and stamp are the write's own (resentStartWarning knows a
-// resend of the start by them).
-func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before matchBefore, door, writeID string, stamp int64) (string, error) {
+// resend of the start by them). result is the write's answer: a seat that
+// changed bout 1 brings it to the stored rows, never the payload's names and ids.
+func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, result *state.MatchResult, before matchBefore, door, writeID string, stamp int64) (string, error) {
 	comp, err := h.LoadCompetition(compID)
 	if err != nil || comp == nil || !comp.IsKachinuki() {
 		return "", nil
@@ -446,13 +464,32 @@ func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before
 			return "", err
 		}
 	}
-	if door != DoorEvent {
-		e.seatOpenerAfterWrite(h, compID, matchID)
+	if door != DoorEvent && e.seatOpenerAfterWrite(h, compID, matchID) {
+		// The seat has written; a failed re-read leaves the answer with the
+		// payload's bout-1 rows, so it is logged, not dropped.
+		if stored, _, err := e.lookupExistingResultIn(h, compID, matchID); err != nil {
+			log.Printf("engine: ERROR: kachinuki seat re-read compId=%s matchId=%s: %v; the answer carries the payload's bout 1, not the seated one", compID, matchID, err)
+		} else if stored != nil {
+			takeSeatedBouts(result, stored)
+		}
 	}
 	if refused != nil {
 		told = refused.warning(lead)
 	}
 	return told, nil
+}
+
+// takeSeatedBouts brings a write's answer to the stored match after the seat
+// rewrote bout 1: the rows, their marks and the stamps and versions the seat's
+// events moved. Everything else the answer carries stays as the write left it.
+func takeSeatedBouts(result, stored *state.MatchResult) {
+	result.SubResults = stored.SubResults
+	result.MarkIDs = stored.MarkIDs
+	result.ScoreVersion = stored.ScoreVersion
+	result.EventSeqs = stored.EventSeqs
+	result.TurnedAway = stored.TurnedAway
+	result.ModifiedAt = stored.ModifiedAt
+	result.GroupStamps = stored.GroupStamps
 }
 
 // resentStartWarning is the warning the write that last moved a kachinuki

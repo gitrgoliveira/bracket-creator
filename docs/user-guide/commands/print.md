@@ -48,7 +48,7 @@ Provide **exactly one**:
 | Type | Output |
 |------|--------|
 | `registration` | The data sheet from every workbook |
-| `names` | The "Names to Print" sheets, A3 landscape, with title pages |
+| `names` | The "Names to Print" sheets, A3 landscape, with title pages. Each sheet also opens with a page of three competition tags. A workbook from `create-pools` or `create-knockout` has them only when it was made with a title prefix; a workbook built from `--tournament-data` has them on every sheet it prints |
 | `tags` | The competitor "Tags" sheets, with title pages (team workbooks excluded). Tags carry a [QR code](../organisers/run-tournament.md#export-and-print) when the tournament's public URL is set. |
 | `pools-trees` | Pool Draw + Tree sheets (a participant booklet), page-numbered |
 | `full-bracket` | Pool Draw + Pool/Elimination Matches + Trees, page-numbered |
@@ -96,3 +96,5 @@ The tournament app's in-app export needs LibreOffice **in the running server**. 
 ## LibreOffice requirement
 
 `print` renders through **LibreOffice** (`soffice`). Install it with your platform's package manager (ensuring `soffice` is on `PATH`), or set `$LIBREOFFICE_PATH` to the `soffice` binary. If LibreOffice is not found, the command exits with installation instructions. The published [`bracket-creator-mobile-pdf`](../install/hosting.md) image bundles it.
+
+Install the Carlito font too (`fonts-crosextra-carlito` on Debian and Ubuntu). The workbooks are set in Calibri, and Carlito has the same widths. Without it, LibreOffice prints a wider face, and a long competition name on the name sheets' competition tags can split across two lines or run outside its box. The published image includes Carlito.

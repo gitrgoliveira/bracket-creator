@@ -24,7 +24,7 @@ bracket-creator create-pools [flags]
 | `--determined` | `-d` | `false` | Do not shuffle input order |
 | `--single-tree` | (none) | `false` | Produce one tree sheet instead of one per court |
 | `--number-prefix` | `-n` | (none) | Letter prefix for competitor numbers (for example, `K` produces K1, K2, …). When omitted, one is derived from `--title-prefix`; if `--title-prefix` is also omitted, the prefix is `K`. The CLI derives this from `--title-prefix` alone, with no knowledge of any other competition, so running this command more than once for the same tournament without a distinct `-n` each time produces the same K1, K2, … tags for every one of them; pass a distinct `-n` per competition (the tournament mobile app, unlike this command, checks prefixes already in use and avoids them automatically) |
-| `--title-prefix` | (none) | `""` | Prefix added to sheet titles |
+| `--title-prefix` | (none) | `""` | Prefix added to sheet titles. Also printed as the competition name on three tags that open each "Names to Print" sheet, without a trailing dash, colon, comma, `|` or `/`; leave it out and those tags are not printed |
 | `--third-place-match` | (none) | `false` | Play a 3rd-place (bronze) match after the semifinals, deciding a single 3rd place. Kendo's default is two joint 3rd places with no bronze match |
 
 ## Examples
@@ -133,5 +133,5 @@ The generated Excel file contains:
 | Pool Draw | Pool assignments grouped by court |
 | Pool Matches | Individual match schedule |
 | Elimination Matches | Knockout bracket match schedule |
-| Names to Print | A3-ready name labels |
+| Names to Print | A3-ready name labels, opened by a page of three competition tags when a title prefix is set |
 | Tree (one per court) | Visual bracket tree for display |

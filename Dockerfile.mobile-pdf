@@ -63,6 +63,7 @@ RUN apt-get update && \
         libreoffice-nogui \
         default-jre-headless \
         fonts-liberation \
+        fonts-crosextra-carlito \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 

@@ -55,7 +55,7 @@ func newCreateKnockoutCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.singleTree, "single-tree", "", false, "Create a single tree instead of dividing into multiple sheets (default false)")
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across: 1, 2, 4, 8 or 16 (default 2)")
-	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
+	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament, printed as the competition name on the tags that open each Names to Print sheet (default \"\")")
 	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", numberPrefixFlagHelp)
 	cmd.Flags().BoolVarP(&o.thirdPlaceMatch, "third-place-match", "", false, "Play a 3rd-place (bronze) match after the semifinals, deciding a single 3rd place. Kendo's default is two joint 3rd places with no bronze match; set this to decide a single 3rd instead (default false)")
 
@@ -238,7 +238,7 @@ func (o *knockoutOptions) createKnockout(entries []string) error {
 
 	// Convert all players for match-winner processing
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
-	helper.CreateNamesToPrint(f, players, o.withZekkenName, courtNames, playerCoords, o.numberPrefix)
+	helper.CreateNamesToPrint(f, players, o.withZekkenName, courtNames, playerCoords, o.numberPrefix, o.titlePrefix)
 
 	team := &state.Competition{TeamSize: o.teamMatches, TeamMatchType: o.teamMatchType}
 	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, team.TeamBoutRows(), plan, o.engi, o.thirdPlaceMatch)

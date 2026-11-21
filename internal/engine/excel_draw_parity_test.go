@@ -1191,7 +1191,8 @@ func TestPoolSheetFollowsPoolCourtReassignment(t *testing.T) {
 
 	// The per-shiaijo roster sheets follow too. The name cells are formulas into
 	// the data sheet, so this counts ENTRIES rather than reading names: with
-	// Pool D moved, shiaijo A holds three pools and shiaijo B one.
+	// Pool D moved, shiaijo A holds three pools and shiaijo B one. Each sheet
+	// opens with the competition-name tags, rows that are not entries.
 	rowsA, err := f.GetRows(helper.SheetNamesToPrint + " A")
 	require.NoError(t, err)
 	rowsB, err := f.GetRows(helper.SheetNamesToPrint + " B")
@@ -1205,9 +1206,9 @@ func TestPoolSheetFollowsPoolCourtReassignment(t *testing.T) {
 		}
 	}
 	require.NotZero(t, movedPoolSize)
-	assert.Equalf(t, totalPlayers-movedPoolSize, len(rowsA),
+	assert.Equalf(t, totalPlayers-movedPoolSize, len(rowsA)-helper.CompetitionTagRows,
 		"shiaijo A now runs every pool but one, so its roster sheet must list all of them")
-	assert.Equalf(t, movedPoolSize, len(rowsB),
+	assert.Equalf(t, movedPoolSize, len(rowsB)-helper.CompetitionTagRows,
 		"shiaijo B is left with a single pool, so its roster sheet must list only that one")
 }
 

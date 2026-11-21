@@ -2,6 +2,7 @@ package helper
 
 import (
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 	"weak"
@@ -92,6 +93,73 @@ func TestNamesToPrintColumnsFitOnePage(t *testing.T) {
 		a, b, a+b, namesToPrintPageWidthUnits)
 	assert.Equal(t, float64(namesToPrintNumberColWidth), a, "column A width must be the fixed constant")
 	assert.Equal(t, float64(namesToPrintNameColWidth), b, "column B width must be the fixed constant")
+}
+
+// TestCompetitionTagFit pins the competition-name tag's sizing rule, measured
+// in LibreOffice (see competitionTagFitConstant): one line shrunk to fit from
+// 110pt up to 45 characters, then wrapped at 370/sqrt(characters) points
+// rounded down, counting characters, not bytes. A change to either constant
+// must be measured again, not just made to pass here.
+func TestCompetitionTagFit(t *testing.T) {
+	for _, tc := range []struct {
+		tag  string
+		wrap bool
+		size float64
+	}{
+		{"A", false, 110},
+		{strings.Repeat("x", 39), false, 110},
+		{strings.Repeat("W", 45), false, 110},
+		{strings.Repeat("Ö", 45), false, 110}, // 90 bytes, 45 characters
+		{strings.Repeat("W", 46), true, 54},
+		{strings.Repeat("x", 60), true, 47},
+		{strings.Repeat("x", 100), true, 37},
+		{strings.Repeat("x", 200), true, 26},
+		{strings.Repeat("x", 1000), true, 11},
+	} {
+		wrap, size := competitionTagFit(tc.tag)
+		assert.Equalf(t, tc.wrap, wrap, "%d characters wraps", len([]rune(tc.tag)))
+		assert.Equalf(t, tc.size, size, "%d characters size", len([]rune(tc.tag)))
+	}
+
+	// Longer never prints larger: the measured sizes hold because each length
+	// gets no more than a shorter one did.
+	_, prev := competitionTagFit(strings.Repeat("x", competitionTagOneLineMaxRunes+1))
+	for n := competitionTagOneLineMaxRunes + 2; n <= 2000; n++ {
+		_, size := competitionTagFit(strings.Repeat("x", n))
+		require.LessOrEqualf(t, size, prev, "%d characters", n)
+		require.Positivef(t, size, "%d characters", n)
+		prev = size
+	}
+}
+
+// TestGetCompetitionTagStyle pins the tag style: the competitor name's font
+// and border, shrinking on one line or wrapping at the fitted size, and one
+// cached style per size, so names of one size share it.
+func TestGetCompetitionTagStyle(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	short := getCompetitionTagStyle(f, "Men's Individual")
+	assert.Equal(t, short, getCompetitionTagStyle(f, "Women's Team"), "one-line tags share one style")
+	style, err := f.GetStyle(short)
+	require.NoError(t, err)
+	assert.True(t, style.Alignment.ShrinkToFit)
+	assert.False(t, style.Alignment.WrapText)
+	assert.Equal(t, "center", style.Alignment.Horizontal)
+	assert.Equal(t, "center", style.Alignment.Vertical)
+	assert.Equal(t, "Calibri", style.Font.Family)
+	assert.Equal(t, 110.0, style.Font.Size)
+	assert.Len(t, style.Border, 4)
+
+	long := getCompetitionTagStyle(f, strings.Repeat("x", 100))
+	assert.Equal(t, long, getCompetitionTagStyle(f, strings.Repeat("y", 100)), "wrapped tags of one size share one style")
+	assert.NotEqual(t, short, long)
+	assert.NotEqual(t, long, getCompetitionTagStyle(f, strings.Repeat("x", 200)), "another size is another style")
+	style, err = f.GetStyle(long)
+	require.NoError(t, err)
+	assert.True(t, style.Alignment.WrapText)
+	assert.False(t, style.Alignment.ShrinkToFit)
+	assert.Equal(t, 37.0, style.Font.Size)
 }
 
 // styleCacheHolds reports whether the style cache still has an entry for the

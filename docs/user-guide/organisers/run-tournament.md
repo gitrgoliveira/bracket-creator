@@ -309,6 +309,8 @@ Two Excel downloads are available from the competition's **Export & print** tab:
 
 The results workbook keeps the scores and decisions as values, but the pool standings (wins, losses, ties and points, or the team columns), the Rank column and the Ranking lists stay live formulas over those scores, so you can check the sheet against the app. Where the sheet's own rank would differ from the app's, the workbook writes the app's rank and ranking as values instead and says why in a note beside the Ranking. That happens when a chusen, a tie-break bout or a representative bout decided the pool's order, or when competitors are level on every count. A pool decided by kiken, fusenpai or hantei is ranked by what the formulas count for that result, which can differ from the app, so check such a pool against the app.
 
+Every Names to Print sheet, in both workbooks and in the name sheets of Export PDFs, opens with one page of three tags holding the competition's name, to cut out and glue on the scoreboard, one for each side. The competitors' name tags follow from the next page. A shiai-jo that has no Names to Print sheet, because nobody on it has a name to print (a shiai-jo that runs only knockout bouts), gets no tags, and the blank template has none either.
+
 #### Before the draw
 
 A competition with no draw yet can still be downloaded. The tab says so, and the template it gives is blank: only empty places, with no names, seeds or numbers, in the layout the draw would print for that many entrants (the competition's pool size, qualifiers and courts, or the knockout bracket for knockout only). The number of places is the larger of the [**Expected participants**](#expected-participants-and-the-estimate-on-a-new-competition) set in the competition's Settings and everyone registered (everyone registered counts whether or not they are checked in). Type names into the workbook's data sheet and they flow through every sheet. The template is a layout to print or hand-fill, so it can differ from the draw you generate later: the draw may have a different number of competitors, and it places seeds and spreads dojos, which the blank layout cannot know.
@@ -324,7 +326,7 @@ When there is nothing to size the template from, fewer than two places (no expec
 PDF exports (registration sheets, name sheets, competitor tags, pool and match sheets, and bracket trees) are available to admins only. Rendering requires LibreOffice:
 
 - Use the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest` container image, which includes LibreOffice.
-- Or install LibreOffice on the host and ensure `soffice` is on the system path.
+- Or install LibreOffice on the host and ensure `soffice` is on the system path. Install the Carlito font as well (`fonts-crosextra-carlito` on Debian and Ubuntu): without it a long competition name on the competition tags can split or run outside its box.
 
 The lean container image omits LibreOffice and returns a clear message when a PDF is requested.
 

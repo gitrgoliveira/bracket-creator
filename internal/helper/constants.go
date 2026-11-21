@@ -1,5 +1,11 @@
 package helper
 
+// WorkbookFont is the one font family every workbook is set in: the default
+// font and every cell style. Arial is on Windows and macOS, and LibreOffice on
+// Linux prints it in Liberation Sans, which has Arial's widths, so a sheet
+// lays out alike in Excel and in the Export PDFs.
+const WorkbookFont = "Arial"
+
 // MaxPlayersPerTree is the maximum leaf count on a single tree sheet.
 // 16 players form a balanced bracket that fits on one A4 landscape page.
 const MaxPlayersPerTree = 16
@@ -142,11 +148,16 @@ const (
 // Layout: Name | V | P | vs | P | V | Name | Spacer = 8 columns.
 const CourtsColumnsPerCourt = 8
 
-// Column-width constants for match layout sheets.
+// Column-width constants for match layout sheets. The Elimination Matches
+// sheet's name columns are wider than the Pool Matches ones because a side
+// not yet decided prints its source as well as its name ("Pool X-2nd K70
+// Nathaniel Hawthorne", about 200pt in 12pt Arial against 184pt at 30): 34
+// holds the longest the example workbooks print.
 const (
-	matchNameColWidth   = 30
-	matchScoreColWidth  = 5
-	matchSpacerColWidth = 5
+	matchNameColWidth       = 30
+	eliminationNameColWidth = 34
+	matchScoreColWidth      = 5
+	matchSpacerColWidth     = 5
 )
 
 // ColHeaderFlags is the single-source column header label for the engi
@@ -188,6 +199,17 @@ const (
 
 	SheetRepresentativeBouts = "Representative Bouts"
 )
+
+// NamesToPrintRowsPerPage is how many rows a Names to Print page holds, a
+// competitor's tag or a competition-name tag each: the sheet breaks the page
+// after every this many rows.
+const NamesToPrintRowsPerPage = 3
+
+// CompetitionTagRows is how many competition-name tags open each Names to
+// Print sheet when the workbook has a competition name: one page of them, so
+// the competitor tags after them keep their own pages. Exactly one page, so a
+// reader of the workbook can tell the tags from the competitors by row.
+const CompetitionTagRows = NamesToPrintRowsPerPage
 
 // RepresentativeBoutRowLabel is what a representative bout's row prints where a
 // numbered bout prints its number: the bout is the extra one appended to a

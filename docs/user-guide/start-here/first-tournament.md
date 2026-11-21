@@ -49,7 +49,7 @@ Go to the **Scores** tab, open a match, and record the result. Refer to [Scoring
 
 Steps 1 to 5 run the whole tournament in the app. To run the day from paper instead, with no app at the courts, follow steps 1 to 4 up to **Generate draw** for every competition, then print from the app instead of starting the competitions:
 
-- **Export PDFs** on the dashboard renders the registration sheets, name sheets, competitor tags, pool and match sheets, and bracket trees of every competition as print-ready PDFs, from the draw you generated. A competition with no draw yet prints as empty places. It needs LibreOffice where the app runs: install it on the computer, or with Docker run the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf` image.
+- **Export PDFs** on the dashboard renders the registration sheets, name sheets, competitor tags, pool and match sheets, and bracket trees of every competition as print-ready PDFs, from the draw you generated. The [sample printouts](../organisers/sample-printouts.md) show a page of each. A competition with no draw yet prints as empty places. It needs LibreOffice where the app runs: install it on the computer, or with Docker run the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf` image.
 - **Download blank template (.xlsx)** on a competition's **Export & print** tab gives the same draw as a workbook with linked formulas for scoring by hand. Before the draw it gives empty places only, sized from the expected number of participants, and the tab warns if you have not shuffled the competitor list yet.
 
 Neither export covers a Swiss competition; follow its live standings instead. Refer to [Export and print](../organisers/run-tournament.md#export-and-print).

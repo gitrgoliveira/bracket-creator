@@ -528,7 +528,8 @@ func TestExportCompetitionXlsx_PureKnockoutRendersTagsAndNamesToPrint(t *testing
 	require.NotEmpty(t, namesSheet, "a knockout-only competition must still get a Names to Print sheet")
 	nameRows, err := f.GetRows(namesSheet)
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(nameRows), 5, "Names to Print must carry one row per entrant")
+	assert.Equal(t, 5, len(nameRows)-helper.CompetitionTagRows,
+		"Names to Print must carry one row per entrant after the competition-name tag rows")
 
 	// Data sheet: column B is the name, D is the number (AddPlayerDataToSheet,
 	// non-sanitized layout). Rows must be written in the SAME bracket-position

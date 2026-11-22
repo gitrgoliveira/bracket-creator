@@ -509,6 +509,16 @@ paths:
                 oneOf:
                   - $ref: '#/components/schemas/PublicNamesError'
                   - $ref: '#/components/schemas/PublicNamesSelfRunSwitchError'
+        '500':
+          description: >
+            Created self-run with `confirmShowNames: true`, but some competitions
+            could not be changed to show names (`competitions` lists them). The
+            tournament was not saved: send the request again to retry. Any other
+            server error carries the usual `error` alone.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicNamesApplyFailedError'
     put:
       tags: [tournament]
       summary: Update tournament configuration
@@ -624,6 +634,23 @@ paths:
                   - $ref: '#/components/schemas/PublicNamesApplyConfirmError'
                   - $ref: '#/components/schemas/PublicNamesError'
                   - $ref: '#/components/schemas/PublicNamesSelfRunSwitchError'
+        '500':
+          description: |
+            Some competitions could not be changed, told apart by whether the
+            settings were saved (the `error` sentence says which). `competitions`
+            lists the ids that were not changed. Any other server error carries
+            the usual `error` alone.
+
+            * With `confirmPublicNames: true`, the settings WERE saved (the new
+              `defaultPublicNames` is stored) and the competitions listed keep
+              their old option. Send the same save again with
+              `confirmPublicNames: true` to retry the rest.
+            * Creating the tournament self-run with `confirmShowNames: true`, the
+              settings were NOT saved: send the request again to retry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicNamesApplyFailedError'
 
   /api/tournament/reset:
     post:
@@ -8384,6 +8411,31 @@ components:
           items:
             $ref: '#/components/schemas/PublicNamesTarget'
 
+    PublicNamesApplyFailedError:
+      type: object
+      required: [error, competitions]
+      description: >
+        500 on `POST` or `PUT /api/tournament`: some competitions could not be
+        changed. A failure on one competition does not stop the others, and
+        `competitions` lists the ids of the ones that were not changed. On
+        `PUT`, the answer to a `confirmPublicNames` save, the tournament
+        settings were saved (the default moved) and the others are changed:
+        send the same save again with `confirmPublicNames: true` to retry the
+        rest. On `POST` or `PUT` that creates the tournament self-run with
+        `confirmShowNames: true`, the tournament was NOT saved (the competitions
+        are changed first, so none is left hiding names in a self-run
+        tournament): send the same save again, and the ones already changed
+        are skipped.
+      properties:
+        error:
+          type: string
+          description: The sentence to show, saying whether the settings were saved.
+        competitions:
+          type: array
+          description: Ids of the competitions that were not changed.
+          items:
+            type: string
+
     PublicNamesApplyConfirmError:
       type: object
       required: [code, error, competitions]
@@ -8776,7 +8828,7 @@ components:
             properties:
               code:
                 type: string
-                enum: [matches_running, matches_requeued, court_missing, mode_changes, prefix_reassigned]
+                enum: [matches_running, matches_requeued, court_missing, mode_changes, prefix_reassigned, public_names_self_run]
                 description: Warning code.
               competitionId:
                 type: string

@@ -331,14 +331,6 @@ func ApplyTournamentDefaults(t *Tournament) {
 	}
 }
 
-// Days returns the ordered list of DD-MM-YYYY calendar day strings
-// covered by the tournament, derived from Date + DurationDays. The list
-// has exactly DurationDays entries (Day 1 = Date, Day 2 = Date+1, …).
-//
-// Edge cases; never panics:
-//   - If Date is empty or unparseable, returns nil (no day list available).
-//   - If DurationDays < 1, returns nil.
-//
 // IsSelfRun reports whether the tournament runs in self-run mode. A nil
 // tournament (none created yet) is not self-run. This is the one Go spelling
 // of the question for engine code; the HTTP layer compares t.Mode against

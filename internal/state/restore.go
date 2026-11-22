@@ -137,6 +137,10 @@ const (
 	RestoreWarnCourtMissing     = "court_missing"
 	RestoreWarnModeChanges      = "mode_changes"
 	RestoreWarnPrefixReassigned = "prefix_reassigned"
+	// RestoreWarnPublicNamesSelfRun: the restored tournament is self-run and
+	// a competition, or the tournament default, hides competitor names, which
+	// only an officiated tournament may do.
+	RestoreWarnPublicNamesSelfRun = "public_names_self_run"
 )
 
 // RestoreWarning is one thing the operator is told before a restore runs.

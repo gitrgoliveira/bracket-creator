@@ -385,6 +385,47 @@ func TestPublicNames_OfficiatedTournamentCreatedOverHidingCompetitionsAsksNothin
 	assert.Equal(t, state.PublicNamesHidden, f.comp(t, "c1").PublicNames)
 }
 
+// The refusals that do not depend on the competitions are judged before any
+// competition is touched, so a first save the transform would refuse leaves
+// the competitions hiding names as they were.
+func TestPublicNames_FirstSelfRunSaveRefusedBeforeAnyCompetitionIsTouched(t *testing.T) {
+	f := newPublicNamesFixture(t, "")
+	f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout, PublicNames: state.PublicNamesHidden})
+	body := withStoredTournamentVersion(t, f.store, map[string]any{
+		"name": "New", "date": "01-06-2026", "courts": []string{"A"},
+		"mode": state.TournamentModeSelfRun, "confirmShowNames": true,
+	})
+	w := f.send(http.MethodPut, "/api/tournament", "", body)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "admin password is required")
+	assert.Equal(t, state.PublicNamesHidden, f.comp(t, "c1").PublicNames, "the competition keeps its option")
+	stored, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	assert.Nil(t, stored)
+
+	body["password"] = publicNamesPassword
+	w = f.send(http.MethodPut, "/api/tournament", "", body)
+	require.Less(t, w.Code, 300, w.Body.String())
+	assert.Equal(t, state.PublicNamesShown, f.comp(t, "c1").PublicNames)
+}
+
+// A hiding default a self-run tournament already holds (hand-edited, or
+// brought in by a restore) is never applied to the competitions, confirmed
+// save or not.
+func TestPublicNames_ConfirmedSaveNeverAppliesAStoredHidingDefaultToASelfRunTournament(t *testing.T) {
+	f := newPublicNamesFixture(t, state.TournamentModeSelfRun)
+	f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout})
+	stored, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	edited := *stored
+	edited.DefaultPublicNames = state.PublicNamesHidden
+	require.NoError(t, f.store.SaveTournament(&edited))
+
+	w := f.admin(http.MethodPut, "/api/tournament", tournamentPutBody(t, f, map[string]any{"confirmPublicNames": true}))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Empty(t, f.comp(t, "c1").PublicNames, "a self-run tournament's competition is not made to hide names")
+}
+
 func TestPublicNames_RevealLinks(t *testing.T) {
 	t.Run("per competition answers the one key", func(t *testing.T) {
 		f := newPublicNamesFixture(t, state.TournamentModeOfficiated)

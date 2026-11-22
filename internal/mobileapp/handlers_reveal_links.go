@@ -154,7 +154,8 @@ func applyPublicNamesDefault(store *state.Store, targets []publicNamesTarget, v 
 // and answers the competitions the save is to set to it once it lands. A
 // value that is not an option is 400; a hiding default in a self-run
 // tournament is 409 public_names_self_run (judged on a change only, so a
-// stored value the save leaves alone never locks the form); a moved default
+// stored value the save leaves alone never locks the form, and is never
+// applied to the competitions either); a moved default
 // that would change competitions is 409 public_names_apply_confirm listing
 // them until confirmed. ok is false when the answer has been written.
 func judgePublicNamesDefault(c *gin.Context, store *state.Store, stored, t *state.Tournament, confirmed bool) ([]publicNamesTarget, bool) {
@@ -180,6 +181,13 @@ func judgePublicNamesDefault(c *gin.Context, store *state.Store, stored, t *stat
 		return nil, false
 	}
 	if !moved && !confirmed {
+		return nil, true
+	}
+	// A hiding default a self-run tournament already holds (hand-edited, or
+	// brought in by a restore) is left alone, as the refusal above leaves it
+	// on a save that does not move it, and so is never applied to the
+	// competitions: public names are for officiated tournaments only.
+	if stored.IsSelfRun() && state.PublicNamesHidesNames(t.DefaultPublicNames) {
 		return nil, true
 	}
 	comps, err := loadAllCompetitions(store)

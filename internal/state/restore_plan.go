@@ -403,6 +403,30 @@ func checkRestoreTournamentSettings(
 	for _, id := range inPlace {
 		check(id, competitionName(live, id), live.comps[id])
 	}
+	if restored.IsSelfRun() {
+		warnHidden := func(id, name string, c *Competition) {
+			if c == nil || !c.HidesNames() {
+				return
+			}
+			w.plan.Warnings = append(w.plan.Warnings, RestoreWarning{
+				Code:          RestoreWarnPublicNamesSelfRun,
+				CompetitionID: id,
+				Message:       fmt.Sprintf("%s hides competitor names, but the restored tournament is self-run, and only an officiated tournament may hide names. Set its public names option back to showing names in its settings.", name),
+			})
+		}
+		for _, t := range w.targets {
+			warnHidden(t.dstID, ai.names[t.srcID], ai.comps[t.srcID])
+		}
+		for _, id := range inPlace {
+			warnHidden(id, competitionName(live, id), live.comps[id])
+		}
+		if PublicNamesHidesNames(restored.DefaultPublicNames) {
+			w.plan.Warnings = append(w.plan.Warnings, RestoreWarning{
+				Code:    RestoreWarnPublicNamesSelfRun,
+				Message: "The restored tournament is self-run but its default public names option hides competitor names, which only an officiated tournament may do. Set the default back to showing names in the tournament settings.",
+			})
+		}
+	}
 	if !req.LockedMode && (live.tourn == nil || live.tourn.Password == "") {
 		w.plan.Password = RestorePasswordNeedsOne
 	}

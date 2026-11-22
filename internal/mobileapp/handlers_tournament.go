@@ -929,12 +929,6 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		if !ok {
 			return
 		}
-		// A PUT may create the tournament; created self-run, the
-		// competitions already on disk that hide names show them first.
-		if !showNamesForSelfRun(c, store, stored, &t, req.ConfirmShowNames) {
-			return
-		}
-
 		// Preserve the stored Password when the incoming body omits it
 		// or sends "". The frontend AdminEditTournament uses
 		// `password: pass || undefined` (admin_setup.jsx:89) so an
@@ -967,6 +961,26 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		locked := verifier != nil && verifier.RedactStoredPassword()
 		if locked && t.Password != "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "password rotation is disabled in locked mode; restart with a new TOURNAMENT_PASSWORD_HASH"})
+			return
+		}
+		// A PUT may create the tournament; created self-run, the
+		// competitions already on disk that hide names show them first. The
+		// refusals that do not depend on the competitions are judged before
+		// any is touched, so a save the transform below would refuse leaves
+		// them as they were: with no tournament stored, a missing password
+		// and a pause the tournament's days cannot hold (the transform
+		// judges both again under the lock).
+		if stored == nil {
+			if !locked && t.Password == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": errPasswordRequired.Error()})
+				return
+			}
+			if verr := validatePauseDays(t.Pauses, nil, t.DurationDays); verr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": verr.Error()})
+				return
+			}
+		}
+		if !showNamesForSelfRun(c, store, stored, &t, req.ConfirmShowNames) {
 			return
 		}
 		// Track whether the persisted password actually changed so we

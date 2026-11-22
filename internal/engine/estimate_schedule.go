@@ -132,7 +132,6 @@ func estimateForPlayers(comp *state.Competition, tournament *state.Tournament, n
 		PoolSizeMode:     comp.PoolSizeMode,
 		PoolWinners:      poolWinners,
 		RoundRobin:       comp.RoundRobin,
-		PoolFormat:       comp.PoolFormat,
 		SwissRounds:      comp.SwissRounds,
 		ExtraQualifiers:  comp.ExtraQualifiers,
 		SeedRanks:        seedRanks,

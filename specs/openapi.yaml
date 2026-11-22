@@ -248,10 +248,6 @@ paths:
                   description: >-
                     Adds a 3rd-place match after the semifinals. The legacy
                     field name naginata=on is accepted as an alias.
-                poolFormat:
-                  type: string
-                  enum: [full, partial]
-                  description: partial draws the path-graph match set; otherwise roundRobin decides.
                 extraQualifiers:
                   type: string
                   enum: ["", larger-pools, fill-bracket]
@@ -264,6 +260,10 @@ paths:
                 roundRobin:
                   type: string
                   enum: ["on", "off"]
+                  description: >-
+                    `on` draws everyone against everyone in every pool. Any
+                    other value draws a ring: each competitor fights the two
+                    beside them (in a pool of 2 or 3, that is everyone).
                 poolSizeMode:
                   type: string
                   enum: [min, max]
@@ -1879,7 +1879,7 @@ paths:
         **Settings-update (body OMITS `players`):**
         The server applies these fields from the body onto the
         on-disk record: `name`, `date`, `startTime`, `poolSize`,
-        `poolWinners`, `poolSizeMode`, `poolFormat`, `extraQualifiers`,
+        `poolWinners`, `poolSizeMode`, `extraQualifiers`,
         `courts`, `roundRobin`, `withZekkenName`, `teamSize`,
         `numberPrefix`, `format`, `kind`,
         `poolMatchDurationSeconds`, `knockoutMatchDurationSeconds`,
@@ -1902,7 +1902,7 @@ paths:
         (including `poolMatchDurationSeconds` / `knockoutMatchDurationSeconds`,
         `checkInEnabled`, `swissRounds` and `numberPrefix`) is editable
         regardless of status through this endpoint; `poolSize`, `poolWinners`,
-        `poolSizeMode`, `poolFormat`, `extraQualifiers`, `courts`,
+        `poolSizeMode`, `extraQualifiers`, `courts`,
         `roundRobin`, `teamSize` and `withZekkenName`
         are additionally subject to the draw-ready
         output-affecting 409 (see below) while status is exactly
@@ -7231,16 +7231,14 @@ paths:
             On a mixed competition, at most `poolSize`, or `poolSize` + 1 when
             `poolSizeMode` is not `max`; 0 or absent means the default.
         - in: query
-          name: poolFormat
-          required: false
-          schema:
-            type: string
-            enum: [full, partial]
-        - in: query
           name: roundRobin
           required: false
           schema:
             type: boolean
+          description: >
+            On a mixed competition, true counts everyone against everyone in
+            every pool and false counts a ring, where each competitor fights the
+            two beside them. A league always counts everyone against everyone.
         - in: query
           name: extraQualifiers
           required: false
@@ -9121,6 +9119,11 @@ components:
             0 or absent means the default.
         roundRobin:
           type: boolean
+          description: >
+            How each pool of a mixed competition is drawn: true is everyone
+            against everyone, false is a ring where each competitor fights the
+            two beside them (in a pool of 2 or 3, that is everyone). A league
+            is always drawn everyone against everyone, whatever this holds.
         courts:
           type: array
           items:

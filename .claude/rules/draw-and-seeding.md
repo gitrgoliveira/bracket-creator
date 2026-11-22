@@ -1,6 +1,6 @@
 ---
 paths:
-  - "internal/helper/{seed,seed_warnings,tree,pool_distribution_tree_aware,pool_partial,pool_bounds,draw,draw_perpool,draw_qualifier_paths,numbers,rounds}*.go"
+  - "internal/helper/{seed,seed_warnings,tree,pool_distribution_tree_aware,pool_bounds,draw,draw_perpool,draw_qualifier_paths,numbers,rounds}*.go"
   - "internal/engine/{pools,numbering,knockout,knockout_skeleton,seed_warnings,league_schedule,chusen}*.go"
   - "docs/assets/javascripts/pool-draw-animation.js"
 ---

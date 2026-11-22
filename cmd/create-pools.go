@@ -26,7 +26,6 @@ type poolOptions struct {
 	seedsPath       string
 	outputWriter    *bufio.Writer
 	roundRobin      bool
-	poolFormat      string // "" / "full" → legacy roundRobin switch; "partial" → path-graph
 	withZekkenName  bool
 	singleTree      bool
 	determined      bool
@@ -332,12 +331,9 @@ func (o *poolOptions) createPools(entries []string) error {
 
 	// Create pool matches BEFORE the draw: R6's second bye criterion ranks by
 	// how many pool matches a pool's qualifier plays (D1), which helper.poolLoad
-	// reads off the drawn pool. Mirror the engine's authoritative PoolFormat ×
-	// RoundRobin mapping (internal/engine/pools.go) so an exported partial-pool
-	// competition gets the path-graph match set, not full round-robin.
-	if o.poolFormat == "partial" {
-		helper.CreatePartialPoolMatches(pools)
-	} else if o.roundRobin {
+	// reads off the drawn pool. Mirror the engine's RoundRobin mapping
+	// (internal/engine/pools.go).
+	if o.roundRobin {
 		helper.CreatePoolRoundRobinMatches(pools)
 	} else {
 		helper.CreatePoolMatches(pools)

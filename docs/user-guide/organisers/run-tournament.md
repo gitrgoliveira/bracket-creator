@@ -111,8 +111,9 @@ A competition moves through three phases:
 
 The **Settings** tab offers the same controls as the form you used to create the
 competition, so anything you chose at creation you can revisit later. That
-includes **Competition type** (individual or team), **Format**, and
-**Round-robin shape**.
+includes **Competition type** (individual or team), **Format**, and, for
+**Pools + Knockout**, **Who fights whom** (refer to [Mixed](formats.md#mixed) for
+its two choices).
 
 Three rules govern when a setting stops being editable:
 

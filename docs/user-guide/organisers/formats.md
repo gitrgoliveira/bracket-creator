@@ -30,6 +30,11 @@ Mixed runs two phases. First, competitors are divided into pools and play a roun
 
 Use mixed for most events. Pools give every competitor several matches before the knockout begins. Refer to [The pool draw](pool-draw.md) for how competitors are placed into pools, including how members of the same dojo are kept apart.
 
+**Who fights whom** sets how many matches each pool holds. Either way, every competitor in a pool fights the same number of times:
+
+- **Everyone fights everyone**: every competitor meets every other competitor in the pool. A pool of 4 has 6 matches.
+- **Each fights two**: competitors sit in a ring and each meets the two beside them, so everyone fights twice. A pool of 4 has 4 matches. In a pool of 2 or 3 this is the same as everyone fights everyone.
+
 The knockout half is not a fresh random draw. Each shiai-jo gets its own block of the bracket. A pool's winner stays in that block, and its other qualifiers cross into a partner shiai-jo's block. This keeps two competitors from the same pool apart for as long as the bracket allows. Byes are worked out within each block, and the seeds you set decide which quarter of the draw the top competitors land in. Refer to [The knockout draw](knockout-draw.md) for the full rules and worked examples.
 
 Because those blocks merge in pairs, a mixed competition must be assigned **1, 2, 4, 8 or 16 shiai-jo (courts)**. Two blocks produce one survivor, those survivors pair off again, and so on, so the count has to halve cleanly all the way down to a single final. Being even is not enough on its own: six blocks pair off into three, and three cannot pair off again, so 6 and 10 are refused just as 3, 5 and 7 are. A single shiai-jo is always allowed. Where each pool sends up two or more qualifiers, its block splits into two halves that act as partner shiai-jo. Where each pool sends up one, nothing crosses and the block is left whole.

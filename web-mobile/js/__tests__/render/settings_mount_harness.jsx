@@ -123,7 +123,6 @@ export function makeSettingsCompetition(overrides = {}) {
     withZekkenName: false,
     engi: false,
     roundRobin: true,
-    poolFormat: 'full',
     numberPrefix: 'K',
     ...overrides,
   };

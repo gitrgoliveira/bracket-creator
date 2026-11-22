@@ -1767,7 +1767,6 @@ describe('API Utils', () => {
           poolSize: 3,
           poolSizeMode: 'exact',
           poolWinners: 2,
-          poolFormat: 'round-robin',
           roundRobin: false,
           extraQualifiers: 4,
           twoThirdPlaces: true,
@@ -1791,7 +1790,6 @@ describe('API Utils', () => {
         expect(params.get('poolSize')).toBe('3');
         expect(params.get('poolSizeMode')).toBe('exact');
         expect(params.get('poolWinners')).toBe('2');
-        expect(params.get('poolFormat')).toBe('round-robin');
         expect(params.get('roundRobin')).toBe('false');
         expect(params.get('extraQualifiers')).toBe('4');
         expect(params.get('twoThirdPlaces')).toBe('true');

@@ -23,7 +23,6 @@ type configVersionPayload struct {
 	TeamSize                     int           `json:"teamSize"`
 	NumberPrefix                 string        `json:"numberPrefix"`
 	Format                       string        `json:"format"`
-	PoolFormat                   string        `json:"poolFormat"`
 	Kind                         string        `json:"kind"`
 	PoolMatchDurationSeconds     int           `json:"poolMatchDurationSeconds"`
 	KnockoutMatchDurationSeconds int           `json:"knockoutMatchDurationSeconds"`
@@ -60,7 +59,6 @@ func ConfigVersion(c *Competition) string {
 		TeamSize:                     c.TeamSize,
 		NumberPrefix:                 c.NumberPrefix,
 		Format:                       c.Format,
-		PoolFormat:                   c.PoolFormat,
 		Kind:                         c.Kind,
 		PoolMatchDurationSeconds:     c.PoolMatchDurationSeconds,
 		KnockoutMatchDurationSeconds: c.KnockoutMatchDurationSeconds,

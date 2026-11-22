@@ -31,7 +31,7 @@ func countErrorf(format string, args ...any) error {
 //
 //	"knockout", PlayerCount, SingleThirdPlace.
 //	"mixed", PlayerCount, PoolSize (>0), PoolSizeMode, PoolWinners,
-//	               RoundRobin, PoolFormat, ExtraQualifiers, SeedRanks,
+//	               RoundRobin, ExtraQualifiers, SeedRanks,
 //	               SingleThirdPlace.
 //	"league", PlayerCount only (single pool, always full round-robin).
 //	"swiss", PlayerCount, SwissRounds.
@@ -50,7 +50,6 @@ type EstimateMatchCountsInput struct {
 	PoolSizeMode string // state.Competition.PoolSizeMode: "max" or "min" (any other value including "" treated as "min")
 	PoolWinners  int    // state.Competition.PoolWinners (default 2 when 0)
 	RoundRobin   bool   // state.Competition.RoundRobin
-	PoolFormat   string // state.Competition.PoolFormat: "" | "full" | "partial"
 
 	// SwissRounds is the number of rounds for a swiss-format competition.
 	SwissRounds int
@@ -242,7 +241,7 @@ func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, knockoutMatchCo
 
 	totalPoolMatches := 0
 	for _, p := range realPools {
-		totalPoolMatches += poolMatchesPerPool(len(p.Players), in.RoundRobin, in.PoolFormat)
+		totalPoolMatches += poolMatchesPerPool(len(p.Players), in.RoundRobin)
 	}
 
 	totalKnockoutMatches := bracketMatchCount(numFinalists)
@@ -267,30 +266,20 @@ func knockoutRounds(players int) int {
 
 // poolMatchesPerPool returns the number of matches generated for a single
 // pool of `size` players under the given format settings. It mirrors the
-// three match-generator code paths in engine/pools.go:
+// two match-generator code paths in engine/pools.go:
 //
-//  1. state.PoolFormatPartial ("partial"): N-1 adjacent-pair matches.
-//     (CreatePartialPoolMatches / pool.GenerateAdjacentPairings)
-//  2. "full" or "" + RoundRobin == true: C(N,2) = N*(N-1)/2 full round-robin.
+//  1. RoundRobin == true: C(N,2) = N*(N-1)/2 full round-robin.
 //     (CreatePoolRoundRobinMatches)
-//  3. "full" or "" + RoundRobin == false: CreatePoolMatches pattern.
+//  2. RoundRobin == false: CreatePoolMatches pattern.
 //     - N==0 → 0
 //     - N==1 → 1 (degenerate self-match, kept for caller parity)
 //     - N==2 → 1
 //     - N==3 → 3
 //     - N==4 → 4
 //     - N>=5 → N
-func poolMatchesPerPool(size int, roundRobin bool, poolFormat string) int {
+func poolMatchesPerPool(size int, roundRobin bool) int {
 	if size <= 0 {
 		return 0
-	}
-
-	// Partial pool format overrides the RoundRobin flag (engine/pools.go:36-38).
-	if poolFormat == "partial" {
-		if size < 2 {
-			return 0
-		}
-		return size - 1
 	}
 
 	// Full round-robin.

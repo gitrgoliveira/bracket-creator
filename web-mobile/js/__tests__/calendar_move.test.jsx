@@ -28,7 +28,7 @@ describe('overlapSentence', () => {
 const BASE = {
   id: 'c1', name: "Men's Individual", date: '14-03-2026', startTime: '09:00', format: 'mixed',
   kind: 'individual', poolSize: 4, poolWinners: 2, poolSizeMode: 'min', courts: ['A', 'B'],
-  roundRobin: false, withZekkenName: false, teamSize: 0, numberPrefix: 'M', poolFormat: '',
+  roundRobin: false, withZekkenName: false, teamSize: 0, numberPrefix: 'M',
   poolMatchDurationSeconds: 180, knockoutMatchDurationSeconds: 240, swissRounds: 0, naginata: false,
   engi: false, checkInEnabled: false, twoThirdPlaces: true, teamMatchType: '',
   extraQualifiers: '', status: 'setup', configVersion: 'v1',

@@ -17,7 +17,7 @@ bracket-creator create-pools [flags]
 | `--max-players` | `-m` | (none) | Maximum players per pool. Mutually exclusive with `--players`. |
 | `--pool-winners` | `-w` | `2` | Players that qualify from each pool; refer to [Qualifiers per pool](#qualifiers-per-pool) |
 | `--extra-qualifiers` | (none) | `""` | Send extra qualifiers from oversized pools, or fit pool sizes exactly to the bracket; refer to [Extra qualifiers](#extra-qualifiers) |
-| `--round-robin` | `-r` | `false` | Force full round-robin in every pool |
+| `--round-robin` | `-r` | `false` | Everyone fights everyone in every pool. Without it, each competitor fights the two beside them in a ring (in a pool of 2 or 3, that is everyone) |
 | `--team-matches` | `-t` | `0` | Players per team (0 = individual tournament) |
 | `--with-zekken-name` | `-z` | `false` | Use second CSV column as zekken display name |
 | `--seeds` | (none) | (none) | CSV file with seed rankings |

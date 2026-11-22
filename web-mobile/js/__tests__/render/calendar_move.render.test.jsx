@@ -13,7 +13,7 @@ const STUBBED_GLOBALS = {
 const CONFIG = {
   name: 'Open', date: '14-03-2026', startTime: '09:00', format: 'mixed', kind: 'individual',
   poolSize: 4, poolWinners: 2, poolSizeMode: 'min', courts: ['A', 'B'], roundRobin: false,
-  withZekkenName: false, teamSize: 0, numberPrefix: 'O', poolFormat: '',
+  withZekkenName: false, teamSize: 0, numberPrefix: 'O',
   poolMatchDurationSeconds: 180, knockoutMatchDurationSeconds: 240, swissRounds: 0,
   naginata: false, engi: false, checkInEnabled: false, twoThirdPlaces: true,
   teamMatchType: '', extraQualifiers: '',

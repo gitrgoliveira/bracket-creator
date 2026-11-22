@@ -156,15 +156,7 @@ func TestValidateCompetitionDurations(t *testing.T) {
 // TestValidateCompetitionFormat_UnknownFormat verifies that unknown format
 // strings are rejected.
 func TestValidateCompetitionFormat_UnknownFormat(t *testing.T) {
-	code, err := validateCompetitionFormat("garbage", "")
-	assert.Error(t, err)
-	assert.Equal(t, http.StatusBadRequest, code)
-}
-
-// TestValidateCompetitionFormat_UnknownPoolFormat verifies that unknown pool
-// format strings are rejected.
-func TestValidateCompetitionFormat_UnknownPoolFormat(t *testing.T) {
-	code, err := validateCompetitionFormat("", "garbage")
+	code, err := validateCompetitionFormat("garbage")
 	assert.Error(t, err)
 	assert.Equal(t, http.StatusBadRequest, code)
 }
@@ -718,7 +710,7 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 		// All output-affecting fields match the stored comp; only Name differs.
 		// The gate compares effective values directly (no sentinels): the real
 		// client always PUTs the full config, and the omitted fields here
-		// (poolSizeMode/poolFormat/teamSize) match the stored zero values, so no
+		// (poolSizeMode/teamSize) match the stored zero values, so no
 		// output-affecting change is detected and the rename is allowed.
 		body, _ := json.Marshal(map[string]any{
 			"id":          cid,

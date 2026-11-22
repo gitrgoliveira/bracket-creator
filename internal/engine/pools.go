@@ -193,24 +193,16 @@ func formPools(comp *state.Competition, players []domain.Player) (pools []helper
 	return pools, drawCourts, nil
 }
 
-// createPoolMatches fills each pool's matches by the competition's pool format
-// (partial, round robin or full) and reports whether they carry a round.
+// createPoolMatches fills each pool's matches, everyone against everyone when
+// the competition is round robin and the ring (each fights two) otherwise, and
+// reports whether they carry a round.
 func createPoolMatches(comp *state.Competition, pools []helper.Pool) (hasRounds bool) {
-	switch comp.PoolFormat {
-	case state.PoolFormatPartial:
-		helper.CreatePartialPoolMatches(pools)
+	if comp.RoundRobin {
+		helper.CreatePoolRoundRobinMatches(pools)
 		return true
-	default:
-		// PoolFormatFull (default / unset) and any unrecognized value fall
-		// through to the legacy code path. RoundRobin remains the inner
-		// switch for backward compatibility (FR-052, R9).
-		if comp.RoundRobin {
-			helper.CreatePoolRoundRobinMatches(pools)
-			return true
-		}
-		helper.CreatePoolMatches(pools)
-		return false
 	}
+	helper.CreatePoolMatches(pools)
+	return false
 }
 
 // layoutPoolMatches lays the pools' matches out as the draw stores them, before

@@ -69,32 +69,3 @@ func CircleMethodRounds(n int) [][]IntPair {
 
 	return rounds
 }
-
-// PathGraphRounds generates a two-round schedule for the n-1 adjacent matches
-// of a path graph: (0,1), (1,2), …, (n-2, n-1).
-//
-// Round 0 contains even-indexed edges: (0,1),(2,3),…
-// Round 1 contains odd-indexed edges:  (1,2),(3,4),… (omitted if empty).
-//
-// Returns nil for n < 2.
-func PathGraphRounds(n int) [][]IntPair {
-	if n < 2 {
-		return nil
-	}
-
-	var round0, round1 []IntPair
-	for i := 0; i < n-1; i++ {
-		pair := IntPair{A: i, B: i + 1}
-		if i%2 == 0 {
-			round0 = append(round0, pair)
-		} else {
-			round1 = append(round1, pair)
-		}
-	}
-
-	rounds := [][]IntPair{round0}
-	if len(round1) > 0 {
-		rounds = append(rounds, round1)
-	}
-	return rounds
-}

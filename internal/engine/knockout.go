@@ -139,7 +139,7 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 		}
 	}
 	// A pool with NO matches on disk is "complete" ONLY when it has exactly one
-	// participant: round-robin (and partial) match generation skips pools of size
+	// participant: round-robin match generation skips pools of size
 	// 0/1, so a lone qualifier legitimately produces zero matches and is already
 	// decided (they are the pool's 1st place). A 0-participant pool, or a ≥2-player
 	// pool with no matches yet (draw not generated / mid-generation), is NOT

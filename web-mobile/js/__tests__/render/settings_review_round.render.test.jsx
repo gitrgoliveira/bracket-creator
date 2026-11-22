@@ -1,5 +1,5 @@
-import { act, fireEvent } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { act, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import { installSettingsHarness, mountSettings, makeSettingsCompetition } from './settings_mount_harness.jsx';
 
 // bc-symm-settings-create-parity, review round. Five defects the Format/Kind
@@ -302,21 +302,55 @@ describe('bc-symm review: "Pool size is a" resolves a stored empty value', () =>
   });
 });
 
-describe('bc-symm review: the round-robin guard wraps its own .field', () => {
-  it('renders no empty .field when the checkbox is hidden', async () => {
+describe('bc-rrsh: "Who fights whom" is one field over roundRobin', () => {
+  const shapePills = (container) => {
+    const group = Array.from(container.querySelectorAll('[role="group"]'))
+      .find((g) => g.closest('.field')?.textContent.includes('Who fights whom'));
+    return group ? Array.from(group.querySelectorAll('button')) : [];
+  };
+  const lit = (container) => shapePills(container).filter((b) => b.className.includes('is-active')).map((b) => b.textContent.trim());
+
+  it('renders no empty .field for a league', async () => {
     const { container } = await mountSettings(makeCompetition({ format: 'league' }), noop);
     const empties = Array.from(container.querySelectorAll('.field')).filter((el) => el.childElementCount === 0 && !el.textContent.trim());
-    expect(
-      empties.length,
-      'a .field with no children still carries the class\'s own margin; the sibling poolFormatVisible / swissRoundsVisible blocks all gate the wrapper, not just its contents'
-    ).toBe(0);
+    expect(empties.length, 'a .field with no children still carries the class\'s own margin').toBe(0);
   });
 
-  it('still renders the checkbox, inside a .field, for mixed + non-partial', async () => {
+  it('shows a competition saved with "Round-robin in pools" unticked as "Each fights two"', async () => {
     const { container } = await mountSettings(
-      makeCompetition({ format: 'mixed', poolFormat: 'full', poolSize: 4, poolWinners: 2 }), noop);
-    const label = Array.from(container.querySelectorAll('label')).find((l) => l.textContent.includes('Round-robin in pools'));
-    expect(label, 'expected the round-robin checkbox for mixed + full').toBeDefined();
-    expect(label.closest('.field'), 'the checkbox must still sit inside a .field').not.toBeNull();
+      makeCompetition({ format: 'mixed', roundRobin: false, poolSize: 4, poolWinners: 2 }), noop);
+    expect(shapePills(container).map((b) => b.textContent.trim()))
+      .toEqual(['Everyone fights everyone', 'Each fights two']);
+    expect(lit(container)).toEqual(['Each fights two']);
+    expect(container.textContent, 'the old checkbox must be gone').not.toContain('Round-robin in pools');
+  });
+
+  it.each(['draw-ready', 'pools'])('locks every pill once the competition is %s', async (status) => {
+    const { container } = await mountSettings(
+      makeCompetition({ status, format: 'mixed', roundRobin: false, poolSize: 4, poolWinners: 2 }), noop);
+    const pills = shapePills(container);
+    expect(pills.length).toBe(2);
+    expect(pills.every((b) => b.disabled), 'the pool shape decides the draw, so it locks with it').toBe(true);
+    expect(lit(container)).toEqual(['Each fights two']);
+  });
+
+  it('offers a league no choice: it is always everyone fights everyone', async () => {
+    const { container } = await mountSettings(makeCompetition({ format: 'league', roundRobin: true }), noop);
+    expect(shapePills(container)).toEqual([]);
+    expect(container.textContent).not.toContain('Who fights whom');
+  });
+
+  it('a pill writes the roundRobin the engine reads', async () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    const { container } = await mountSettings(
+      makeCompetition({ format: 'mixed', roundRobin: true, poolSize: 4, poolWinners: 2 }), onUpdate);
+    const ring = shapePills(container).find((b) => b.textContent.trim() === 'Each fights two');
+    await act(async () => { fireEvent.click(ring); });
+    expect(lit(container)).toEqual(['Each fights two']);
+    await saveAndCapture(container);
+    await waitFor(() => expect(onUpdate).toHaveBeenCalled());
+    const payload = onUpdate.mock.calls[0][0];
+    expect(payload.roundRobin).toBe(false);
+    expect('poolFormat' in payload, 'the removed field must not be sent').toBe(false);
   });
 });

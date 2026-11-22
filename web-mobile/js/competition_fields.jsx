@@ -56,6 +56,10 @@
 // same field and a page may hold more than one form.
 
 import { useStableId } from './stable_id.jsx';
+import {
+  LABEL_POOL_SHAPE, POOL_SHAPE_ALL, POOL_SHAPE_RING, POOL_SHAPE_OPTIONS,
+  poolShapeOf, poolShapeFields, poolShapeHint,
+} from './competition_shape.jsx';
 
 // PillButton: one radio pill. The ONE owner of "a pill says whether it is
 // chosen": the is-active class for the eye and aria-pressed for assistive tech
@@ -83,10 +87,9 @@ export function PillButton({ active, onClick, disabled, children, className, ...
 // option-list control on both screens uses.
 //
 // `isActive` is a predicate over the option VALUE rather than a bare
-// comparison against `value`, because three of the callers need something
+// comparison against `value`, because two of the callers need something
 // other than equality and each of those readings is a rule with a single
-// owner in competition_shape.jsx: resolvePoolFormat (a stored "" means
-// "full"), resolvePoolSizeMode (a stored "" means minimum, which is what the
+// owner in competition_shape.jsx: resolvePoolSizeMode (a stored "" means minimum, which is what the
 // engine does with it) and teamMatchTypeActive (anything that is not exactly
 // "kachinuki" is Regular).
 // Defaulting it to equality keeps the simple callers simple without letting
@@ -120,6 +123,42 @@ export function PillGroup({ label, options, value, isActive, onChange, disabled,
       </div>
       {hint ? <div className="field__hint">{hint}</div> : null}
     </div>
+  );
+}
+
+// PoolShapeGlyph: who fights whom in a pool of four, drawn: four competitors
+// as dots, a fight as a line between two. Everyone is the square with both
+// diagonals, the ring the square. It carries no meaning the label does not
+// (aria-hidden); it is there so the difference reads at a glance. Stroke and
+// fill are currentColor, so it follows the pill through its active look.
+const GLYPH_DOTS = [[4, 4], [14, 4], [14, 14], [4, 14]];
+const GLYPH_FIGHTS = {
+  [POOL_SHAPE_ALL]: "M4 4H14V14H4Z M4 4L14 14 M14 4L4 14",
+  [POOL_SHAPE_RING]: "M4 4H14V14H4Z",
+};
+export function PoolShapeGlyph({ shape }) {
+  return (
+    <svg className="pool-shape-glyph" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true" focusable="false">
+      <path d={GLYPH_FIGHTS[shape]} fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+      {GLYPH_DOTS.map(([cx, cy]) => <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="2" fill="currentColor" />)}
+    </svg>
+  );
+}
+
+// PoolShapeField: the "Who fights whom" pill row both screens render (bc-rrsh).
+// It reads the shape from roundRobin and hands back the field a pick writes
+// (competition_shape.jsx owns both directions), so neither screen spells the
+// mapping. `hintSuffix` carries the settings screen's lock note.
+export function PoolShapeField({ roundRobin, onChange, disabled, hintSuffix = "" }) {
+  const shape = poolShapeOf(roundRobin);
+  const options = POOL_SHAPE_OPTIONS.map((o) => ({
+    value: o.value,
+    label: <><PoolShapeGlyph shape={o.value} />{o.label}</>,
+  }));
+  return (
+    <PillGroup label={LABEL_POOL_SHAPE} options={options} value={shape}
+      onChange={(v) => onChange(poolShapeFields(v))} disabled={disabled}
+      hint={`${poolShapeHint(shape)}${hintSuffix}`} />
   );
 }
 

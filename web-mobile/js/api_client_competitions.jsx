@@ -322,7 +322,7 @@ export const competitionsApi = {
         const src = shape || {};
         const keys = [
             'format', 'participants', 'kind', 'teamSize', 'teamMatchType',
-            'poolSize', 'poolSizeMode', 'poolWinners', 'poolFormat', 'roundRobin',
+            'poolSize', 'poolSizeMode', 'poolWinners', 'roundRobin',
             'extraQualifiers', 'twoThirdPlaces', 'naginata', 'swissRounds',
             'poolMatchDurationSeconds', 'knockoutMatchDurationSeconds',
             'startTime', 'date',

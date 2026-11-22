@@ -315,11 +315,10 @@ type drawOccupant struct {
 // poolLoad is R6 criterion 2's "oversized pool" metric (D1): how many pool
 // matches that pool's qualifier plays.
 //
-// D1 defines it per pool format -- participant count under `full` (round
-// robin), generated match count under `partial`. Both orderings are identical:
-// a round robin of n generates n(n-1)/2 matches and a partial pool generates
-// n-1, and both are strictly increasing in n, so ranking by either metric picks
-// out the same oversized pools. Reading the generated count when it is present
+// The participant count and the generated match count order pools identically:
+// a round robin of n generates n(n-1)/2 matches and the ring n (from 3 up), and
+// both are strictly increasing in n, so ranking by either metric picks out the
+// same oversized pools. Reading the generated count when it is present
 // is what D1 asks for ("the count is the thing the rule is actually about"),
 // and falling back to the participant count covers the callers that draw before
 // the pool matches exist (the engine loads pools from pools.csv, which stores

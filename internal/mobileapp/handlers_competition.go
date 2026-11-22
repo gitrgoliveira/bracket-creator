@@ -214,13 +214,6 @@ func validateCompetitionDateInTournament(comp *state.Competition, tourn *state.T
 	return fmt.Errorf("date must be one of the tournament days (%s to %s)", days[0], days[len(days)-1])
 }
 
-// validateCompetitionFormat returns an HTTP status code + error
-// message for invalid Format / PoolFormat values. Empty values are
-// accepted (defaults applied on load). Unknown values return 400.
-//
-// FR-050a: swiss is now accepted; the caller must ALSO run
-// validateSwissConfig when format == swiss to enforce swissRounds >= 1.
-
 // validateCompetitionDurations enforces the band on the per-phase clock
 // durations of an INBOUND request body. Zero means "unset, use the scheduler
 // default" and is allowed. Out of band is rejected, never clamped: silently
@@ -244,21 +237,20 @@ func validateCompetitionDurations(comp *state.Competition) error {
 	return nil
 }
 
-func validateCompetitionFormat(format, poolFormat string) (int, error) {
+// validateCompetitionFormat returns an HTTP status code + error
+// message for an invalid Format value. An empty value is accepted
+// (defaults applied on load). An unknown value returns 400.
+//
+// FR-050a: swiss is now accepted; the caller must ALSO run
+// validateSwissConfig when format == swiss to enforce swissRounds >= 1.
+func validateCompetitionFormat(format string) (int, error) {
 	switch format {
 	case "", state.CompFormatKnockout,
 		state.CompFormatMixed, state.CompFormatLeague, state.CompFormatSwiss:
-		// ok
+		return 0, nil
 	default:
 		return http.StatusBadRequest, fmt.Errorf("unknown format %q", format)
 	}
-	switch poolFormat {
-	case "", state.PoolFormatFull, state.PoolFormatPartial:
-		// ok
-	default:
-		return http.StatusBadRequest, fmt.Errorf("unknown poolFormat %q", poolFormat)
-	}
-	return 0, nil
 }
 
 // validateCompetitionShape groups the four shape checks that both the POST
@@ -268,7 +260,7 @@ func validateCompetitionShape(comp *state.Competition) error {
 	if err := validateCompetitionDurations(comp); err != nil {
 		return err
 	}
-	if _, err := validateCompetitionFormat(comp.Format, comp.PoolFormat); err != nil {
+	if _, err := validateCompetitionFormat(comp.Format); err != nil {
 		return err
 	}
 	normalizePoolConfig(comp)
@@ -959,7 +951,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// through to "unknown kind" semantics.
 		comp.Kind = strings.TrimSpace(comp.Kind)
 		comp.Format = strings.TrimSpace(comp.Format)
-		comp.PoolFormat = strings.TrimSpace(comp.PoolFormat)
 		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
 		// bc-qual LP-5a: same defense-in-depth trim as the other enum-style
 		// fields above/below. The admin UI (admin_setup.jsx) only ever sends
@@ -1384,7 +1375,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// hand-crafted PUT requests.
 		comp.Kind = strings.TrimSpace(comp.Kind)
 		comp.Format = strings.TrimSpace(comp.Format)
-		comp.PoolFormat = strings.TrimSpace(comp.PoolFormat)
 		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
 		// bc-qual LP-5a: same defense-in-depth trim as the other enum-style
 		// fields above/below. The admin UI (admin_setup.jsx) only ever sends
@@ -1907,7 +1897,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// directly, no zero/empty sentinels. The settings merge
 					// below is a full replace, so a caller that sets an
 					// output-affecting field TO its zero/empty value (e.g.
-					// format:"" or poolFormat:"", both accepted by
+					// format:"", accepted by
 					// validateCompetitionFormat) would otherwise slip past a
 					// sentinel guard and corrupt the draw. The real client
 					// (admin_competition_settings.jsx finalNext) always PUTs
@@ -1943,7 +1933,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 							comp.ExtraQualifiers != current.ExtraQualifiers ||
 							courtsChanged ||
 							formatChanged ||
-							comp.PoolFormat != current.PoolFormat ||
 							comp.RoundRobin != current.RoundRobin ||
 							comp.TeamSize != current.TeamSize ||
 							kindChanged ||
@@ -2214,7 +2203,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					}
 				}
 				current.Format = comp.Format
-				current.PoolFormat = comp.PoolFormat
 				current.Kind = comp.Kind
 				// Seconds are the only duration representation that crosses the
 				// wire. The retired whole-minute fields are not merged: `current`

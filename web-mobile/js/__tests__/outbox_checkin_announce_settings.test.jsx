@@ -369,6 +369,17 @@ describe('the tournament settings (G4b)', () => {
         expect(entries[0][1].payload).toMatchObject({ venue: 'B', confirmPublicNames: true });
     });
 
+    it('a save that takes the place of a confirmed one with another default does not keep the confirmation', async () => {
+        await API.updateTournament(settings({ venue: 'A', defaultPublicNames: 'hidden', confirmPublicNames: true }), 'pw');
+        await tick(0);
+        const second = await API.updateTournament(settings({ venue: 'B', defaultPublicNames: 'person', tournamentVersion: 'v9' }), 'pw');
+        const entries = stored();
+        expect(entries).toHaveLength(1);
+        expect(entries[0][0]).toBe(second.key);
+        expect(entries[0][1].payload).toMatchObject({ venue: 'B', defaultPublicNames: 'person' });
+        expect('confirmPublicNames' in entries[0][1].payload).toBe(false);
+    });
+
     it('a document that returns to content it had before is saved from that version, not along the old moves', async () => {
         // v0 -> v1 -> v2 -> v0: the third save put the settings back as they were.
         const answers = ['v1', 'v2', 'v0'];

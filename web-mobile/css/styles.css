@@ -1270,6 +1270,19 @@ a:hover {
   outline-offset: 0;
 }
 
+/* A field that takes no input right now (a setting locked after the draw)
+   looks it: the muted surface and ink the aria-disabled .btn and the lineup
+   name box use, and the not-allowed cursor. Without it a locked field looked
+   exactly like an editable one and a tap did nothing. */
+.input:disabled,
+.textarea:disabled,
+.select:disabled,
+.field__input:disabled {
+  background: var(--surface-2);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
 /* Bare <input> elements inside the scoring surfaces (e.g. inline name/score
    fields without the .input class) had no visible focus state, keyboard and
    the M/K/D/T/H shortcut operators couldn't see where focus landed. Give them
@@ -1405,6 +1418,16 @@ a:hover {
   accent-color: var(--accent);
 }
 
+/* A locked tick box: its label reads muted and the cursor says so, as the
+   disabled .input above does. */
+.checkbox:has(input:disabled) {
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+.checkbox input:disabled {
+  cursor: not-allowed;
+}
+
 .radio-group {
   display: flex;
   gap: 8px;
@@ -1436,6 +1459,20 @@ a:hover {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-fg);
+}
+
+/* A locked pill row: the choices not taken sit on the muted surface, and the
+   one taken stays navy but faded as a disabled .btn is (0.6), so the row still
+   says which was chosen while plainly taking no tap. */
+.radio-pill:disabled {
+  background: var(--surface-2);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+.radio-pill.is-active:disabled {
+  background: var(--accent);
+  color: var(--accent-fg);
+  opacity: 0.6;
 }
 
 /* "Who fights whom" pills (PoolShapeField): a four-competitor pictogram

@@ -2134,7 +2134,7 @@ paths:
               the roster as it stands and its version.
 
             * Output-affecting settings (format, courts, pool
-              size/winners/mode, extra qualifiers, pool format, round-robin,
+              size/winners/mode, extra qualifiers, round-robin,
               team size, kind, team match type, zekken
               display) were changed while the competition is in `draw-ready`
               state; discard the draw first. `numberPrefix` is NOT one of
@@ -2145,6 +2145,12 @@ paths:
               (status past `setup`). Both repoint generation and scoring while
               results already exist, so neither can change after the fact.
             * `teamMatchType` was changed after the competition started.
+            * The shape the draw was made with (`roundRobin`, `poolSize`,
+              `poolWinners`, `poolSizeMode`, `extraQualifiers`, `teamSize`) or
+              its `courts` were changed after the competition started. The
+              pools and bracket being fought were drawn from them, and
+              `poolWinners` is read while the pools run. A bout changes
+              shiaijo by a court move, never by this list.
 
             A settings save that merely echoes an unchanged `format`, `kind` or
             `teamMatchType` back is never refused: every one of these gates
@@ -8885,10 +8891,13 @@ components:
 
             **Removing a shiaijo a competition still in progress still holds
             is refused with 400** (on POST as well as PUT, since POST is
-            re-POSTed against an existing record). The message names every
-            blocking competition and the shiaijo it still runs on, and nothing
-            is written; reassign those competitions' shiaijo in competition
-            settings first. Only competitions in progress block: `completed` and
+            re-POSTed against an existing record). `error` and `message` name
+            every blocking competition and the shiaijo it still runs on
+            (`message` is that alone, as a sentence the app shows as it is),
+            and nothing is written. A competition's `courts` change only until its draw is
+            made (the settings PUT refuses them after that), so a drawn one
+            frees its shiaijo when it finishes, and a bout moves to another
+            shiaijo with a court move. Only competitions in progress block: `completed` and
             `invalid` ones are history and are ignored, so a multi-day event
             that ran the morning on 4 shiaijo can still shrink to 2 for the
             afternoon. The refusal stops an orphan being CREATED; records

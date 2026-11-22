@@ -1090,11 +1090,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           {/* or a typed 0 or 1, both below this field's own min -- falls */}
           {/* back to the last-saved teamSize rather than landing on the */}
           {/* backend as a clobbering 0 or as a silent 5. */}
-          {/* draw-ready lock: teamSize is output-affecting. */}
+          {/* Locked from the draw on, started included (bc-rrsh r5). */}
           <NumberField label={LABEL_TEAM_SIZE} min={MIN_TEAM_SIZE} max={MAX_TEAM_SIZE}
             value={local.teamSize}
             onChange={(raw) => updateNumber("teamSize", raw, MIN_TEAM_SIZE)}
-            disabled={isDrawReady} hint={HINT_TEAM_SIZE} error={teamSizeErr} />
+            disabled={lockedAfterDraw} hint={`${HINT_TEAM_SIZE}${lockedNote}`} error={teamSizeErr} />
         </>
       )}
       {teamFieldsVisible(local.kind) && (
@@ -1135,7 +1135,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               field in on POST, so a competition authored outside the SPA
               reaches the Format editor with "" and a bare equality lit
               NEITHER pill while the draw ran minimum sizing. */}
-          {/* draw-ready lock: poolSizeMode, poolSize, poolWinners are output-affecting. */}
+          {/* Locked from the draw on, started included (bc-rrsh r5):
+              poolSizeMode, poolSize, poolWinners and the qualifiers shape
+              the draw, and the server refuses a change once started. */}
           {/* bc-qual LP-5a: leaving minimum-players-per-pool sizing
               hides the "Knockout qualifiers" radio below; reset its
               value to standard so it can't persist as a stale
@@ -1145,7 +1147,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <PillGroup label={LABEL_POOL_SIZE_MODE} options={POOL_SIZE_MODE_OPTIONS}
             isActive={(v) => resolvePoolSizeMode(local.poolSizeMode) === v}
             onChange={(v) => { update("poolSizeMode", v); if (v === POOL_SIZE_MODE_MAX) update("extraQualifiers", resetExtraQualifiersOnPoolModeChange(POOL_SIZE_MODE_MAX, local.extraQualifiers)); }}
-            disabled={isDrawReady} />
+            disabled={lockedAfterDraw} hint={lockedNote.trim()} />
           <div className="row">
             {/* Same NaN-as-"" + gated-save pattern as Team size above. */}
             {/* min=3 is a PRODUCT floor, not the backend's, which this */}
@@ -1156,15 +1158,20 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             {/* Shared with the create form via poolSettingsError. */}
             <NumberField label={LABEL_POOL_SIZE} min={MIN_POOL_SIZE} value={local.poolSize}
               onChange={(raw) => updateNumber("poolSize", raw, MIN_POOL_SIZE)}
-              disabled={isDrawReady} />
-            {/* bc-qual LP-5a: same coupling hint as the create form; */}
-            {/* draw-ready already has its own standing note on the */}
-            {/* Assigned shiaijo field below, so it isn't repeated per-field here. */}
+              disabled={lockedAfterDraw} />
+            {/* bc-qual LP-5a: same coupling hint as the create form. Once */}
+            {/* locked, the pair's one "Locked after draw." note sits under */}
+            {/* the row instead (bc-rrsh r7 C2). */}
             <NumberField label={LABEL_POOL_WINNERS} min={MIN_POOL_WINNERS} value={local.poolWinners}
               onChange={(raw) => updateNumber("poolWinners", raw, MIN_POOL_WINNERS)}
-              disabled={isDrawReady || winnersInputDisabled(local.extraQualifiers)}
-              hint={!isDrawReady && winnersInputDisabled(local.extraQualifiers) ? HINT_POOL_WINNERS_LOCKED : ""} />
+              disabled={lockedAfterDraw || winnersInputDisabled(local.extraQualifiers)}
+              hint={!lockedAfterDraw && winnersInputDisabled(local.extraQualifiers) ? HINT_POOL_WINNERS_LOCKED : ""} />
           </div>
+          {lockedAfterDraw && (
+            <div className="field">
+              <div className="field__hint" data-testid="pool-sizing-locked">{lockedNote.trim()}</div>
+            </div>
+          )}
           {/* Rendered for ANY invalid poolSize/poolWinners, staged or already
               saved, mirroring courtsErr's own rule (see the ShiaijoCountNotes
               comment on the Assigned shiaijo field below): the field must never
@@ -1217,7 +1224,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                   <PillButton
                     active={!local.extraQualifiers}
                     onClick={() => update("extraQualifiers", EXTRA_QUALIFIERS_STANDARD)}
-                    disabled={isDrawReady}
+                    disabled={lockedAfterDraw}
                   >{extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)}</PillButton>
                   <PillButton
                     active={local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS}
@@ -1225,7 +1232,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                       update("extraQualifiers", EXTRA_QUALIFIERS_LARGER_POOLS);
                       update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, local.poolWinners));
                     }}
-                    disabled={isDrawReady}
+                    disabled={lockedAfterDraw}
                   >{extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)}</PillButton>
                   <PillButton
                     active={local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET}
@@ -1233,11 +1240,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                       update("extraQualifiers", EXTRA_QUALIFIERS_FILL_BRACKET);
                       update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, local.poolWinners));
                     }}
-                    disabled={isDrawReady}
+                    disabled={lockedAfterDraw}
                   >{extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)}</PillButton>
                 </div>
                 <div className="field__hint">
-                  {extraQualifiersHint(local.extraQualifiers, local.poolSize)}
+                  {extraQualifiersHint(local.extraQualifiers, local.poolSize)}{lockedNote}
                 </div>
                 <div className="field__hint" data-testid="qualifier-preview-line">
                   {previewLine || "Preview appears once this competition has participants."}
@@ -1295,7 +1302,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         {/* draw-ready lock: courts is output-affecting. Discard the draw to reassign. */}
         {lockedAfterDraw && (
           <div className="field__hint field__hint--locked">
-            Set by the draw. Discard the draw to change shiaijo.
+            {isDrawReady
+              ? "Set by the draw. Discard the draw to change shiaijo."
+              : lockedNote.trim()}
           </div>
         )}
         <window.FieldError testId="orphan-shiaijo-hint">{orphanedCourtsErr}</window.FieldError>

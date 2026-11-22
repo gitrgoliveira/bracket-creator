@@ -121,7 +121,14 @@ Three rules govern when a setting stops being editable:
   Discard the draw to change them, then generate it again.
 - **Once the competition has started**, the format and the competition type are
   fixed for good. Both decide how matches are generated and scored, and results
-  already exist by then, so neither can be changed after the fact.
+  already exist by then, so neither can be changed after the fact. The settings
+  that shaped the draw stay locked too: **Who fights whom**, **Pool size is a**,
+  **Players per pool**, **Winners per pool**, **Knockout qualifiers**,
+  **Team size** and **Assigned shiaijo (courts)**. The pools being fought were
+  drawn with them, and changing **Winners per pool** mid-pools would change who
+  goes through. The competition's shiai-jo stay as drawn until it finishes; to
+  run a bout on another one, move the bout
+  ([Moving matches between shiai-jo](#moving-matches-between-shiai-jo)).
 - **Once participants are loaded**, the competition type locks separately and
   earlier than everything else. Individual and team rosters are not
   interchangeable. To switch, clear the paste box in the **Participant list**

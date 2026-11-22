@@ -258,13 +258,13 @@ func courtsRemovedBy(stored, incoming []string) []string {
 // competition can never be DRAWN onto a court the tournament lacks, including
 // for records orphaned before this guard existed.
 //
-// Returns (infraErr, validationErr), the same pair checkCourtRemoval hands its
+// Returns (validationErr, infraErr), the same pair checkCourtRemoval hands its
 // caller: reading a competition's matches can fail for reasons that are not the
 // operator's fault, and a store failure must 500 with a logged cause rather than
 // 400 with the raw error echoed back. Both nil when nothing blocks. The
 // validation message names every blocker so the operator can fix them in one
 // pass rather than one 400 at a time.
-func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts []string, matchesOf compMatchLoader) (error, error) {
+func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts []string, matchesOf compMatchLoader) (*courtsInUseError, error) {
 	removed := courtsRemovedBy(stored, courts)
 	if len(removed) == 0 {
 		return nil, nil
@@ -297,7 +297,7 @@ func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts
 		{
 			poolMatches, bracket, lerr := matchesOf(comp.ID)
 			if lerr != nil {
-				return lerr, nil
+				return nil, lerr
 			}
 			for _, cc := range engine.CourtsStillInUseAmong(removed, poolMatches, bracket) {
 				if !slices.Contains(missing, cc) {
@@ -317,10 +317,26 @@ func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts
 	if len(blockers) == 0 {
 		return nil, nil
 	}
-	return nil, fmt.Errorf(
-		"cannot set the tournament's shiaijo to %s: %s. Reassign those shiaijo in the competition's settings first, then change the tournament",
-		strings.Join(courts, ", "), strings.Join(blockers, "; "),
-	)
+	return &courtsInUseError{courts: courts, blockers: blockers}, nil
+}
+
+// courtsInUseError is the shrink guard's refusal. It names each competition
+// still running on a shiaijo the write removes, and nothing else (bc-rrsh r9).
+type courtsInUseError struct {
+	courts   []string
+	blockers []string
+}
+
+func (e *courtsInUseError) Error() string {
+	return fmt.Sprintf("cannot set the tournament's shiaijo to %s: %s",
+		strings.Join(e.courts, ", "), strings.Join(e.blockers, "; "))
+}
+
+// sentence is the refusal as the operator reads it: the app shows a body's
+// `message` as a whole sentence, so the queue's alert adds no "Re-enter it."
+// after it (bc-rrsh r9 L4).
+func (e *courtsInUseError) sentence() string {
+	return strings.Join(e.blockers, "; ") + "."
 }
 
 // guardCourtRemoval runs checkCourtRemoval and answers the request itself when
@@ -336,20 +352,20 @@ func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts
 // and the save) is covered by the engine's draw gate, which re-checks against
 // the tournament at the moment a draw is built.
 func guardCourtRemoval(c *gin.Context, store *state.Store, courts []string) bool {
-	infraErr, validationErr := checkCourtRemoval(store, courts)
+	validationErr, infraErr := checkCourtRemoval(store, courts)
 	if infraErr != nil {
 		internalError(c, infraErr)
 		return false
 	}
 	if validationErr != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error(), "message": validationErr.sentence()})
 		return false
 	}
 	return true
 }
 
 // checkCourtRemoval is the store-walking half of the shrink guard. It returns
-// (infraErr, validationErr) like CheckUniqueCompFields: infraErr means the
+// (validationErr, infraErr): infraErr means the
 // store could not be queried (caller should 500), validationErr means a live
 // competition still depends on a court this request REMOVES (caller should
 // 400).
@@ -357,10 +373,10 @@ func guardCourtRemoval(c *gin.Context, store *state.Store, courts []string) bool
 // The stored court list is loaded here, not passed in, because both call sites
 // (PUT and POST /tournament) run before the write transform and neither has it
 // to hand. A tournament that does not exist yet removes nothing.
-func checkCourtRemoval(store *state.Store, courts []string) (error, error) {
+func checkCourtRemoval(store *state.Store, courts []string) (*courtsInUseError, error) {
 	tourn, err := store.LoadTournament()
 	if err != nil {
-		return fmt.Errorf("load tournament: %w", err), nil
+		return nil, fmt.Errorf("load tournament: %w", err)
 	}
 	var stored []string
 	if tourn != nil {
@@ -379,13 +395,13 @@ func checkCourtRemoval(store *state.Store, courts []string) (error, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return fmt.Errorf("list competitions: %w", err), nil
+		return nil, fmt.Errorf("list competitions: %w", err)
 	}
 	comps := make([]*state.Competition, 0, len(ids))
 	for _, id := range ids {
 		comp, lerr := store.LoadCompetition(id)
 		if lerr != nil {
-			return fmt.Errorf("load competition %s: %w", id, lerr), nil
+			return nil, fmt.Errorf("load competition %s: %w", id, lerr)
 		}
 		comps = append(comps, comp)
 	}

@@ -354,3 +354,62 @@ describe('bc-rrsh: "Who fights whom" is one field over roundRobin', () => {
     expect('poolFormat' in payload, 'the removed field must not be sent').toBe(false);
   });
 });
+
+describe('bc-rrsh r5: the draw-shaping fields lock once the competition has started', () => {
+  // Every control of the field whose label reads exactly `label`.
+  const controls = (container, label) => {
+    const field = Array.from(container.querySelectorAll('.field'))
+      .find((f) => f.querySelector('.field__label')?.textContent.trim() === label);
+    return field ? Array.from(field.querySelectorAll('button, input')) : [];
+  };
+  const LABELS = ['Pool size is a', 'Players per pool', 'Winners per pool', 'Knockout qualifiers', 'Team size'];
+  const teamMixed = (status) => makeCompetition({
+    status, format: 'mixed', kind: 'team', teamSize: 5, poolSize: 4, poolWinners: 1, poolSizeMode: '',
+  });
+
+  it.each(['draw-ready', 'pools', 'knockout'])('disables each of them once the competition is %s', async (status) => {
+    const { container } = await mountSettings(teamMixed(status), noop);
+    for (const label of LABELS) {
+      const found = controls(container, label);
+      expect(found.length, `expected controls under "${label}"`).toBeGreaterThan(0);
+      expect(found.every((el) => el.disabled), `"${label}" shapes the draw, so it locks with it`).toBe(true);
+    }
+  });
+
+  it('leaves them editable in setup', async () => {
+    const { container } = await mountSettings(teamMixed('setup'), noop);
+    for (const label of LABELS) {
+      const found = controls(container, label);
+      expect(found.length, `expected controls under "${label}"`).toBeGreaterThan(0);
+      expect(found.some((el) => !el.disabled), `"${label}" is the operator's to set before the draw`).toBe(true);
+    }
+  });
+
+  // bc-rrsh r7 C2: each locked field says why, in the page's own words.
+  const fieldText = (container, label) => Array.from(container.querySelectorAll('.field'))
+    .find((f) => f.querySelector('.field__label')?.textContent.trim() === label)?.textContent || '';
+  const NOTED = ['Pool size is a', 'Knockout qualifiers', 'Team size'];
+
+  it.each(['draw-ready', 'pools', 'completed'])('says "Locked after draw." once the competition is %s', async (status) => {
+    const { container } = await mountSettings(teamMixed(status), noop);
+    for (const label of NOTED) {
+      expect(fieldText(container, label), label).toContain('Locked after draw.');
+    }
+    const pair = container.querySelector('[data-testid="pool-sizing-locked"]');
+    expect(pair?.textContent).toBe('Locked after draw.');
+  });
+
+  it('says nothing of a lock in setup', async () => {
+    const { container } = await mountSettings(teamMixed('setup'), noop);
+    expect(container.textContent).not.toContain('Locked after draw.');
+    expect(container.querySelector('[data-testid="pool-sizing-locked"]')).toBeNull();
+  });
+
+  // bc-rrsh r7 C1 and r8 L3: a started competition cannot discard its draw,
+  // so its shiaijo note is the plain lock note.
+  it('gives a started competition the lock note, not discard the draw', async () => {
+    const { container } = await mountSettings(teamMixed('pools'), noop);
+    expect(fieldText(container, 'Assigned shiaijo (courts)')).toContain('Locked after draw.');
+    expect(container.textContent).not.toContain('Discard the draw to change shiaijo.');
+  });
+});

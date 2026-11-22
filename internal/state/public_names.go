@@ -105,7 +105,9 @@ func CompetitionRevealKey(c *Competition) string {
 // hex HMAC-SHA256(secret, "competitor:" + participantID). It is "" (no
 // key) unless the competition gives per-person links, holds a well-formed
 // secret and participantID is not empty. Expiry is not judged here; ask
-// RevealOpen.
+// RevealOpen. The key follows the participant id, which a substitute taking
+// the place of a competitor keeps, so the earlier link then reveals the
+// substitute's name; the organiser guide says so.
 func CompetitorRevealKey(c *Competition, participantID string) string {
 	if c == nil || c.PublicNames != PublicNamesPerson || participantID == "" {
 		return ""

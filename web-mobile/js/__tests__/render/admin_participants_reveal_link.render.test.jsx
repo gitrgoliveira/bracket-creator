@@ -57,6 +57,27 @@ describe('Participants: Copy reveal link', () => {
     expect(showToast).toHaveBeenCalledWith('Reveal link for Alice copied');
   });
 
+  it('reads the keys again when a swapped row keeps the roster the same size', async () => {
+    const key = { 'p-1': 'key-alice', 'p-2': 'key-bob', 'p-3': 'key-cara' };
+    global.fetch = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ publicNames: 'person', open: true, competitors: Object.keys(key).map((id) => ({ id, key: key[id] })) }),
+    }));
+    const c = makeParticipantsCompetition({ publicNames: 'person' });
+    const { container, rerender } = await mountParticipants(c);
+    await act(async () => { await Promise.resolve(); });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    const swapped = { ...c, players: [c.players[0], { id: 'p-3', name: 'Cara', dojo: 'Dojo Cara' }] };
+    await act(async () => {
+      rerender(<window.AdminParticipants c={swapped} tournament={{ name: 'Spring Taikai', courts: ['A'] }} onUpdate={() => {}} password="" showToast={() => {}} onSection={() => {}} />);
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(revealButtons(container).map((b) => b.getAttribute('aria-label'))).toEqual(['Copy reveal link for Alice', 'Copy reveal link for Cara']);
+  });
+
   it('offers no button, and reads nothing, for any other choice', async () => {
     global.fetch = vi.fn();
     for (const publicNames of ['', 'competition', 'hidden']) {

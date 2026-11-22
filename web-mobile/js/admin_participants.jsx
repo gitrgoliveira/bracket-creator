@@ -483,7 +483,9 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   const players = useMemo(() => c.players || [], [c.players]);
   // bc-hnam: with a link per person, each competitor's own reveal key is read
   // (organiser only) so the row can copy their link. Read again when the roster
-  // or the expiry moves; a key that cannot be read simply leaves the button out.
+  // (by id, so a swapped row of the same count counts) or the expiry moves; a key
+  // that cannot be read simply leaves the button out.
+  const rosterIds = players.map((p) => p.id).join(",");
   const revealPerson = c.publicNames === "person" && publicNamesApplies(tournament);
   const [revealKeys, setRevealKeys] = useState(null);
   useEffect(() => {
@@ -494,7 +496,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
       .then((answer) => { if (live) setRevealKeys(new Map((answer.competitors || []).map((x) => [x.id, x.key]))); })
       .catch(() => { if (live) setRevealKeys(null); });
     return () => { live = false; };
-  }, [c.id, revealPerson, c.revealUntil, players.length, password]);
+  }, [c.id, revealPerson, c.revealUntil, rosterIds, password]);
   const copyRevealLink = (p) => {
     const key = revealKeys && revealKeys.get(p.id);
     if (!key) return;

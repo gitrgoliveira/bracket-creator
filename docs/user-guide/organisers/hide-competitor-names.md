@@ -33,6 +33,8 @@ Links appear once you have saved a choice that has them.
 - **A link per person.** Each competitor's link is the QR code on their printed tag (from **Export**). You can also open the **Participants** tab and press **Copy reveal link** next to a name.
 - **One competition link.** Open the competition's **Settings**. Under **Competition link**, press **Copy link**, or **Show QR code to print** to put the code on a sheet at the venue.
 
+A person's link belongs to their place in the competition, not to their name. If you replace a competitor with a substitute in the **Participants** tab, the substitute takes over the same link, so the link already given to the first competitor now shows the substitute's name. Hand the substitute their own copy and tell the first competitor their link has changed hands.
+
 Set a **Public URL** in the tournament details first. Without it, a copied link and a printed code point at the address of the device you are using, which other phones may not be able to open. The app warns you when you copy a link without one, and it does not offer the QR code.
 
 A competitor who opens their link sees the competition with their own name shown. The phone keeps the link, so the name stays shown on that phone. A link that has stopped working, or one for a competition whose links you switched off, says so and offers the competition by numbers.

@@ -1,10 +1,24 @@
 name: deploy documentation
 
+# The docs are versioned: each release from v2.5 has its own folder on
+# gh-pages, `latest` is the newest release and the site root's default, and
+# main is published as `dev`. docs/publish_docs.py decides which version a
+# ref publishes (an older patch, a prerelease or a release before 2.5
+# publishes nothing) and does the publishing with mike.
 on:
   push:
     branches:
       - main
-      - test-deploy-documentation/*
+    tags:
+      - "v*.*.*"
+  # Publish a release's docs by hand: a tag made before this workflow
+  # published versions (v2.5.0), or a re-publish. The tag's docs are built
+  # with the publish script and toolchain of the branch this is run from.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Release tag to publish (vX.Y.Z), or main"
+        required: true
 permissions:
   contents: write
 # Two quick pushes must not race for gh-pages: the second deploy waits for the
@@ -16,9 +30,23 @@ concurrency:
 jobs:
   docs:
     runs-on: ubuntu-latest
+    env:
+      REF: ${{ inputs.ref || github.ref_name }}
     steps:
-      - name: Checkout Source
+      # The publish script and the pinned toolchain it runs with.
+      - name: Checkout the publish tooling
         uses: actions/checkout@v7
+        with:
+          path: tools
+
+      # The docs to publish: the same commit on a push, the requested ref when
+      # run by hand. Its repository is where gh-pages is committed and pushed
+      # from, with the credentials this checkout sets up.
+      - name: Checkout the docs to publish
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          path: src
 
       # 3.11 is the lowest version Zensical allows, and the one the docs job
       # in validate.yaml builds with.
@@ -28,47 +56,23 @@ jobs:
           # pip's download cache, keyed on the pinned docs toolchain; the
           # Makefile still builds .venv-docs from scratch, only faster.
           cache: pip
-          cache-dependency-path: docs/requirements.txt
+          cache-dependency-path: |
+            tools/docs/requirements.txt
+            src/docs/requirements.txt
 
-      # The same gate as CI and the PR template: prose check, strict Zensical
-      # build into site/, link check over the built site.
-      - name: Build docs
-        run: make docs/build
+      # The same gate as CI and the PR template, on the docs being published:
+      # prose check, strict Zensical build, link check over the built site.
+      - name: Build and check the docs
+        run: make -C src docs/build
 
-      # Publish site/ as a new commit on top of gh-pages. Nothing is
-      # force-pushed, so every past publish stays in the branch's history, and
-      # an unchanged site makes no commit at all. The push is a plain one: if
-      # gh-pages moved meanwhile it is refused rather than overwritten.
-      - name: Publish site/ to gh-pages
+      # Builds the version with mike, commits it to gh-pages and pushes with a
+      # plain push: nothing is force-pushed, so every past publish stays in the
+      # branch's history, and if gh-pages moved meanwhile the push is refused
+      # rather than overwritten.
+      - name: Publish the version to gh-pages
         run: |
           set -euo pipefail
-          publish="$RUNNER_TEMP/gh-pages"
-
-          # The checkout holds only this branch, one commit deep.
-          git fetch --no-tags --depth=1 origin +refs/heads/gh-pages:refs/remotes/origin/gh-pages
-          git worktree add --detach "$publish" origin/gh-pages
-
-          # Zensical writes no .nojekyll (mkdocs gh-deploy did). Without it
-          # GitHub Pages runs Jekyll, which drops files and folders whose
-          # names start with an underscore.
-          touch site/.nojekyll
-
-          # Replace the published tree with site/, keeping the worktree's .git.
-          find "$publish" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -R site/. "$publish/"
-
-          git -C "$publish" add --all
-          if git -C "$publish" diff --cached --quiet; then
-            echo "site/ matches gh-pages: nothing to publish."
-            exit 0
-          fi
-
-          version="$(.venv-docs/bin/python -c 'import importlib.metadata as m; print(m.version("zensical"))')"
-          git -C "$publish" \
-            -c user.name="github-actions[bot]" \
-            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit --quiet -m "Deployed ${GITHUB_SHA::7} with Zensical version: $version"
-
-          # Pushed from the main checkout, which holds the credentials
-          # actions/checkout set up; the worktree shares its objects.
-          git push origin "$(git -C "$publish" rev-parse HEAD):refs/heads/gh-pages"
+          make -C tools docs/deps
+          git -C src config user.name "github-actions[bot]"
+          git -C src config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          tools/.venv-docs/bin/python tools/docs/publish_docs.py "$REF" --source src --push

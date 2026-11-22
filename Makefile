@@ -373,6 +373,7 @@ docs/build: $(DOCS_STAMP) docs/prose ## Build the docs with Zensical (strict) an
 docs/prose: ## Check the docs sources and theme templates against the public-prose rules (stdlib-only, no venv needed)
 	$(PYTHON) docs/test_check_prose.py
 	$(PYTHON) docs/test_check_links.py
+	$(PYTHON) docs/test_publish_docs.py
 	$(PYTHON) docs/check_prose.py docs overrides
 
 docs/clean: ## Remove the docs venv, the built site and Zensical's build cache
@@ -399,7 +400,7 @@ docs/clean: ## Remove the docs venv, the built site and Zensical's build cache
 # Checking it equals the version about to be tagged is a release step
 # (.github/agents/release.agent.md). This leaves bin/bracket-creator stamped
 # with it until the next plain `make go/build`.
-DOCS_CAPTURE_VERSION := v2.5.0
+DOCS_CAPTURE_VERSION := v2.6.0
 
 SHOTS_DIR := scripts/screenshots
 SHOTS_DEPS_STAMP := $(SHOTS_DIR)/node_modules/.package-lock.json

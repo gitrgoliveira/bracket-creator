@@ -114,6 +114,12 @@ You need `node` and `python3`; the first run installs the rest. A run writes to 
 
 The harness's own guide, [`scripts/screenshots/README.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/scripts/screenshots/README.md), covers the rest: how `SINCE=` decides what to capture, what a changed line tells you, what to do when a capture you did not touch appears in the list, how a capture must be seeded, and how to add one.
 
+## How the documentation is published
+
+The site keeps one version of the docs for each minor release, starting with 2.5, and a version picker in the header switches between them. A patch release replaces its minor release's version, so 2.5.1 updates `2.5`. Readers land on `latest`, the newest release, so what they read matches what they downloaded. Every merge to `main` updates the `dev` version, which describes the next release while it is being built, so a docs fix you merge shows in `dev` at once and in `latest` with the next release. A link from before the docs had versions still works: it opens the same page under `latest`.
+
+Publishing is automatic. A merge to `main` and a release tag each run `.github/workflows/doc.yaml`, which checks the docs with `make docs/build` and then publishes them with `docs/publish_docs.py`. That script's header lists which version each tag publishes.
+
 ## Create a commit
 
 We use Conventional Commits, so write commit messages in that format.

@@ -92,8 +92,13 @@ make docs/clean        # Remove .venv-docs and the built site/
 # targets above run through .venv-docs, which pins the whole toolchain from
 # docs/requirements.txt. Never call zensical (or a system mkdocs) directly for
 # verification; use make docs/build. The deploy (.github/workflows/doc.yaml)
-# runs the same target and adds site/ as a new commit on gh-pages, never a
-# force push, and only when the built site changed.
+# runs the same target, then docs/publish_docs.py publishes a VERSION with
+# mike (Zensical's fork): main as `dev`, a release tag from v2.5 that is the
+# newest of its line as its MAJOR.MINOR folder, the newest of all also as
+# `latest` (the site root's default). Prereleases publish nothing. Plain
+# pushes to gh-pages, never a force push. Never run publish_docs.py --push from
+# a checkout whose origin is GitHub: it publishes the live site (a rehearsal
+# did, 2026-11-22). Rehearse in a scratch clone whose origin is a local bare repo.
 
 make docs/screenshots  # Recapture the docs screenshots (NAME=, FAMILY=, SINCE=main to scope)
 make docs/videos       # Recapture the docs videos
@@ -347,7 +352,7 @@ bd close <id>         # Complete work if the PR is merged
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge. Do NOT use MEMORY.md files
 
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/architecture/dolt.md for how sync, remotes and backups work.
 
 ## Agent Context Profiles
 
@@ -414,7 +419,7 @@ The plugin is `hindsight-coding-agents` (upstream's replacement for the retired 
 - **Correct** a memory you verify is wrong with `hindsight_ingest_document`, titled `Correction: <topic>`: what memory claimed, what is true now, and the evidence.
 - **Where:** the server and a bank per repo come from `~/.hindsight/coding-agent.json`. Its `bankIdTemplate` is `{gitProject}`, so the bank is named for the main checkout and shared by every worktree. The bank was seeded from the old auto-memory notes (documents keyed `memory/<file>.md`) and the `bd remember` entries (`beads/<key>`), so `merge-concurrency-plan` and the other bd entries are read from there.
 
-The old `memory/` directory is kept untouched as a rollback copy: do not delete it, and do not read or review it as current. The post-merge cleanup skill reviews the Hindsight bank. AGENTS.md and GEMINI.md tell the other agents not to use `bd remember` either.
+The old `memory/` directory is kept untouched as a rollback copy: do not delete it, and do not read or review it as current. The post-merge cleanup skill reviews the Hindsight bank. AGENTS.md tells the other agents not to use `bd remember` either.
 
 ### Where the issues live
 

@@ -18,7 +18,7 @@ Open `http://localhost:8080` in a browser on the same computer. When the data fo
 
 ## 2. Create a competition
 
-From the dashboard, click **+ Add competition**. Choose Individual or Team, then pick a format: **Knockout only**, **Pools + Knockout**, **League**, or **Swiss**. Refer to [Formats](../organisers/formats.md) for a description of each format and when to use it.
+From the dashboard, click **+ Add competition**. Choose Individual or Team, then pick a format: **Knockout only**, **Pools + Knockout**, **League**, or **Swiss** (work in progress). Refer to [Formats](../organisers/formats.md) for a description of each format and when to use it.
 
 The number of shiai-jo you entered in [Install and start the server](#1-install-and-start-the-server) is your venue's total. It can be anything from 1 to 16. Each competition is then assigned some of them. A competition that ends in a knockout must be assigned 1, 2, 4, 8 or 16, because its bracket splits into one block per shiai-jo, and those blocks merge in pairs. So a hall with three shiai-jo runs each competition on 1 or 2, and can run two competitions at once to use all three. Refer to [Assigning shiai-jo](../organisers/run-tournament.md#assigning-shiai-jo).
 

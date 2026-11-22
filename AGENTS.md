@@ -81,7 +81,7 @@ bd close <id>         # Complete work if the PR is merged
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge: do NOT use MEMORY.md files
 
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/architecture/dolt.md for how sync, remotes and backups work.
 
 ## Session Completion
 

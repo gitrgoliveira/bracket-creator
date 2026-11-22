@@ -426,6 +426,98 @@ func TestPublicNames_ConfirmedSaveNeverAppliesAStoredHidingDefaultToASelfRunTour
 	assert.Empty(t, f.comp(t, "c1").PublicNames, "a self-run tournament's competition is not made to hide names")
 }
 
+// A first save, and a POST over the tournament that is there, move the default
+// like a PUT does: the competitions already on disk are set to it once the
+// organiser has seen the list.
+func TestPublicNames_TheDefaultOfAFirstSaveOrAPostAppliesAfterConfirmation(t *testing.T) {
+	cases := map[string]struct {
+		mode   string
+		method string
+		body   func(t *testing.T, f publicNamesFixture) map[string]any
+	}{
+		"POST creating the tournament": {"", http.MethodPost, func(t *testing.T, f publicNamesFixture) map[string]any {
+			return map[string]any{"name": "New", "date": "01-06-2026", "courts": []string{"A"}, "password": publicNamesPassword}
+		}},
+		"PUT creating the tournament": {"", http.MethodPut, func(t *testing.T, f publicNamesFixture) map[string]any {
+			return withStoredTournamentVersion(t, f.store, map[string]any{"name": "New", "date": "01-06-2026", "courts": []string{"A"}, "password": publicNamesPassword})
+		}},
+		"POST over the tournament": {state.TournamentModeOfficiated, http.MethodPost, func(t *testing.T, f publicNamesFixture) map[string]any {
+			return map[string]any{"name": "Officiated Test", "date": "01-06-2026", "courts": []string{"A"}, "password": publicNamesPassword}
+		}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newPublicNamesFixture(t, tc.mode)
+			f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout})
+			f.saveComp(t, &state.Competition{ID: "c2", Name: "Swiss", Kind: "individual", Format: state.CompFormatSwiss})
+			body := tc.body(t, f)
+			body["defaultPublicNames"] = "person"
+
+			w := f.send(tc.method, "/api/tournament", publicNamesPassword, body)
+			require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+			assert.Equal(t, codePublicNamesApplyConfirm, codeOf(t, w))
+			var refusal struct {
+				Competitions []publicNamesTarget `json:"competitions"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &refusal))
+			require.Len(t, refusal.Competitions, 1, "Swiss is left out")
+			assert.Equal(t, "c1", refusal.Competitions[0].ID)
+			assert.Empty(t, f.comp(t, "c1").PublicNames, "nothing changed before the confirmation")
+			stored, err := f.store.LoadTournament()
+			require.NoError(t, err)
+			if stored != nil {
+				assert.Empty(t, stored.DefaultPublicNames)
+			}
+
+			body["confirmPublicNames"] = true
+			w = f.send(tc.method, "/api/tournament", publicNamesPassword, body)
+			require.Less(t, w.Code, 300, w.Body.String())
+			stored, err = f.store.LoadTournament()
+			require.NoError(t, err)
+			require.NotNil(t, stored)
+			assert.Equal(t, state.PublicNamesPerson, stored.DefaultPublicNames)
+			assert.Equal(t, state.PublicNamesPerson, f.comp(t, "c1").PublicNames)
+			assert.Equal(t, state.PublicNamesShown, f.comp(t, "c2").PublicNames, "Swiss is left alone")
+		})
+	}
+}
+
+// A POST over a self-run tournament that already holds a hiding default
+// (hand-edited, or brought in by a restore) is not locked out: the refusal is
+// for a default the save introduces, as the PUT's is.
+func TestPublicNames_APostThatLeavesAStoredHidingDefaultAloneIsNotRefused(t *testing.T) {
+	f := newPublicNamesFixture(t, state.TournamentModeSelfRun)
+	stored, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	edited := *stored
+	edited.DefaultPublicNames = state.PublicNamesHidden
+	require.NoError(t, f.store.SaveTournament(&edited))
+	body := map[string]any{
+		"name": stored.Name, "date": stored.Date, "courts": stored.Courts, "password": publicNamesPassword,
+		"defaultPublicNames": state.PublicNamesHidden,
+	}
+
+	w := f.admin(http.MethodPost, "/api/tournament", body)
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+
+	body["defaultPublicNames"] = state.PublicNamesPerson
+	w = f.admin(http.MethodPost, "/api/tournament", body)
+	require.Equal(t, http.StatusConflict, w.Code, "a hiding default the POST introduces is still refused")
+	assert.Equal(t, codePublicNamesSelfRun, codeOf(t, w))
+}
+
+// A started competition cannot change its format, so switching it to Swiss is
+// told that, and not first that its hidden names do not suit Swiss.
+func TestPublicNames_AStartedHidingCompetitionSwitchedToSwissIsToldTheStartedRefusalFirst(t *testing.T) {
+	f := newPublicNamesFixture(t, state.TournamentModeOfficiated)
+	f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout, Status: state.CompStatusPools, PublicNames: state.PublicNamesHidden})
+	w := f.admin(http.MethodPut, "/api/competitions/c1", map[string]any{"name": "Kata", "kind": "individual", "format": state.CompFormatSwiss, "swissRounds": 3, "courts": []string{"A"}})
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.NotEqual(t, codePublicNamesSwiss, codeOf(t, w))
+	assert.Contains(t, w.Body.String(), "format and kind can only be changed before the competition starts")
+	assert.Equal(t, state.CompFormatKnockout, f.comp(t, "c1").Format)
+}
+
 func TestPublicNames_RevealLinks(t *testing.T) {
 	t.Run("per competition answers the one key", func(t *testing.T) {
 		f := newPublicNamesFixture(t, state.TournamentModeOfficiated)

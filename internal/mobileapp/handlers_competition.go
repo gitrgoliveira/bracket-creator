@@ -2184,10 +2184,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if req.RevealUntil != nil {
 					revealUntil = *req.RevealUntil
 				}
-				if status, code, msg := publicNamesRefusal(publicNames, comp.Format, publicNames != current.PublicNames, formatChanged, putTourn); status != 0 {
-					publicNamesStatus, publicNamesCode, publicNamesMsg = status, code, msg
-					return nil, nil
-				}
 				// Settings-only merge. Status, Players, and
 				// HasParticipantIDs are deliberately not copied from
 				// the body. Status is managed via dedicated endpoints
@@ -2255,6 +2251,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// the competition happens to be started.
 				if started && (formatChanged || kindChanged) {
 					formatOrKindStartedFlag = true
+					return nil, nil
+				}
+				// Judged after the started format and kind refusal above, so a
+				// save that breaks both is told the started one first and not
+				// one refusal after another.
+				if status, code, msg := publicNamesRefusal(publicNames, comp.Format, publicNames != current.PublicNames, formatChanged, putTourn); status != 0 {
+					publicNamesStatus, publicNamesCode, publicNamesMsg = status, code, msg
 					return nil, nil
 				}
 				// bc-symm: reject an illegal Kind ("banana"), but ONLY when

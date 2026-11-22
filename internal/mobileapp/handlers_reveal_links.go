@@ -149,6 +149,43 @@ func applyPublicNamesDefault(store *state.Store, targets []publicNamesTarget, v 
 	return anyChanged, failed
 }
 
+// publicNamesAnswer is the refusal or failure a judgement hands back: the
+// status and the body the handler writes. Judging never writes an answer
+// itself, so each judgement can be read and tested apart from gin.
+type publicNamesAnswer struct {
+	status int
+	body   gin.H
+}
+
+// answerPublicNames writes a judgement's refusal, or the 500 for its error,
+// and says whether it answered (the handler then returns).
+func answerPublicNames(c *gin.Context, refusal *publicNamesAnswer, err error) bool {
+	if err != nil {
+		internalError(c, err)
+		return true
+	}
+	if refusal != nil {
+		c.JSON(refusal.status, refusal.body)
+		return true
+	}
+	return false
+}
+
+// publicNamesSelfRunAnswer is the 409 for a hiding default in a self-run
+// tournament.
+func publicNamesSelfRunAnswer() *publicNamesAnswer {
+	return &publicNamesAnswer{http.StatusConflict, gin.H{"error": msgPublicNamesSelfRun, "code": codePublicNamesSelfRun}}
+}
+
+// publicNamesDefaultFailedAnswer is the 500 for a tournament save that landed
+// while some competitions could not be set to its default.
+func publicNamesDefaultFailedAnswer(failed []string) *publicNamesAnswer {
+	return &publicNamesAnswer{http.StatusInternalServerError, gin.H{
+		"error":        fmt.Sprintf("The tournament settings were saved, but these competitions could not be changed to the new default: %s. Save again to retry.", strings.Join(failed, ", ")),
+		"competitions": failed,
+	}}
+}
+
 // judgePublicNamesDefault judges a tournament save's default public-names
 // option (stored is the tournament as it stands, nil before the first save)
 // and answers the competitions the save is to set to it once it lands. A
@@ -157,54 +194,47 @@ func applyPublicNamesDefault(store *state.Store, targets []publicNamesTarget, v 
 // stored value the save leaves alone never locks the form, and is never
 // applied to the competitions either); a moved default
 // that would change competitions is 409 public_names_apply_confirm listing
-// them until confirmed. ok is false when the answer has been written.
-func judgePublicNamesDefault(c *gin.Context, store *state.Store, stored, t *state.Tournament, confirmed bool) ([]publicNamesTarget, bool) {
+// them until confirmed. A first save counts as moving the default from
+// showing names, and takes the mode it chooses, so it too sets the
+// competitions already in the data folder.
+func judgePublicNamesDefault(store *state.Store, stored, t *state.Tournament, confirmed bool) ([]publicNamesTarget, *publicNamesAnswer, error) {
 	if msg := validatePublicNamesValue("defaultPublicNames", t.DefaultPublicNames); msg != "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
-		return nil, false
+		return nil, &publicNamesAnswer{http.StatusBadRequest, gin.H{"error": msg}}, nil
 	}
-	if stored == nil {
-		// The first save (a PUT may create the tournament too): no
-		// competition has a tournament to follow yet, and the mode is the
-		// one this save chooses.
-		if state.PublicNamesHidesNames(t.DefaultPublicNames) && t.IsSelfRun() {
-			c.JSON(http.StatusConflict, gin.H{"error": msgPublicNamesSelfRun, "code": codePublicNamesSelfRun})
-			return nil, false
-		}
-		return nil, true
+	// The mode cannot change on a later save (errModeImmutable), so the
+	// stored one is the mode this default lands in.
+	storedDefault, selfRun := "", t.IsSelfRun()
+	if stored != nil {
+		storedDefault, selfRun = stored.DefaultPublicNames, stored.IsSelfRun()
 	}
-	moved := t.DefaultPublicNames != stored.DefaultPublicNames
-	// The mode cannot change on a save (errModeImmutable), so the stored
-	// one is the mode this default lands in.
-	if moved && state.PublicNamesHidesNames(t.DefaultPublicNames) && stored.IsSelfRun() {
-		c.JSON(http.StatusConflict, gin.H{"error": msgPublicNamesSelfRun, "code": codePublicNamesSelfRun})
-		return nil, false
+	hides := state.PublicNamesHidesNames(t.DefaultPublicNames)
+	moved := t.DefaultPublicNames != storedDefault
+	if moved && hides && selfRun {
+		return nil, publicNamesSelfRunAnswer(), nil
 	}
 	if !moved && !confirmed {
-		return nil, true
+		return nil, nil, nil
 	}
 	// A hiding default a self-run tournament already holds (hand-edited, or
 	// brought in by a restore) is left alone, as the refusal above leaves it
 	// on a save that does not move it, and so is never applied to the
 	// competitions: public names are for officiated tournaments only.
-	if stored.IsSelfRun() && state.PublicNamesHidesNames(t.DefaultPublicNames) {
-		return nil, true
+	if hides && selfRun {
+		return nil, nil, nil
 	}
 	comps, err := loadAllCompetitions(store)
 	if err != nil {
-		internalError(c, err)
-		return nil, false
+		return nil, nil, err
 	}
 	targets := publicNamesDefaultTargets(comps, t.DefaultPublicNames)
 	if len(targets) > 0 && !confirmed {
-		c.JSON(http.StatusConflict, gin.H{
+		return nil, &publicNamesAnswer{http.StatusConflict, gin.H{
 			"error":        msgPublicNamesApply,
 			"code":         codePublicNamesApplyConfirm,
 			"competitions": targets,
-		})
-		return nil, false
+		}}, nil
 	}
-	return targets, true
+	return targets, nil, nil
 }
 
 // publicNamesHidingTargets lists the competitions that hide names, Swiss
@@ -220,52 +250,62 @@ func publicNamesHidingTargets(comps []*state.Competition) []publicNamesTarget {
 	return targets
 }
 
-// showNamesForSelfRun is the self-run switch (public_names_self_run_switch).
+// judgeSelfRunSwitch judges the self-run switch (public_names_self_run_switch).
 // The mode is chosen once, when the tournament is created (errModeImmutable
 // after that), so the one save that turns a tournament self-run is the
 // first one (stored nil), and it can find competitions already in the data
 // folder that hide names. Such a save is answered 409 with the list until it
-// carries confirmShowNames; confirmed, those competitions are set to show
-// names BEFORE the tournament is written, so a failure part way leaves no
-// self-run tournament with a competition hiding names, and sending the save
-// again finishes the rest. Each competition keeps its reveal secret (E3).
-// ok is false when the answer has been written; the caller broadcasts
-// tournament_updated once the tournament lands.
-func showNamesForSelfRun(c *gin.Context, hub *Hub, store *state.Store, stored, t *state.Tournament, confirmed bool) bool {
+// carries confirmShowNames; confirmed, it answers the competitions
+// applySelfRunSwitch is to set to show names.
+func judgeSelfRunSwitch(store *state.Store, stored, t *state.Tournament, confirmed bool) ([]publicNamesTarget, *publicNamesAnswer, error) {
 	if stored != nil || !t.IsSelfRun() {
-		return true
+		return nil, nil, nil
 	}
 	comps, err := loadAllCompetitions(store)
 	if err != nil {
-		internalError(c, err)
-		return false
+		return nil, nil, err
 	}
 	targets := publicNamesHidingTargets(comps)
-	if len(targets) == 0 {
-		return true
-	}
-	if !confirmed {
-		c.JSON(http.StatusConflict, gin.H{
+	if len(targets) > 0 && !confirmed {
+		return nil, &publicNamesAnswer{http.StatusConflict, gin.H{
 			"error":        msgPublicNamesSwitch,
 			"code":         codePublicNamesSelfRunSwitch,
 			"competitions": targets,
-		})
-		return false
+		}}, nil
+	}
+	return targets, nil, nil
+}
+
+// applySelfRunSwitch sets the competitions judgeSelfRunSwitch listed to show
+// names, BEFORE the tournament is written, so a failure part way leaves no
+// self-run tournament with a competition hiding names, and sending the save
+// again finishes the rest. Each competition keeps its reveal secret (E3). It
+// answers the 500 naming the competitions it could not change, nil when all
+// changed; the caller broadcasts tournament_updated once the tournament lands.
+//
+// The listing was read before the tournament's own lock, which the lock
+// order (competitions, then the tournament) forbids holding here. A second
+// first save landing in between leaves these competitions showing names and
+// this save refused as stale, which is the safe direction: the retry finds
+// the tournament that was created and no competition is left hiding under a
+// self-run one.
+func applySelfRunSwitch(hub *Hub, store *state.Store, targets []publicNamesTarget) *publicNamesAnswer {
+	if len(targets) == 0 {
+		return nil
 	}
 	changed, failed := applyPublicNamesDefault(store, targets, state.PublicNamesShown)
-	if len(failed) > 0 {
-		// The competitions that did change are already showing names: tell
-		// open pages now, as the tournament save's own failure path does.
-		if changed {
-			hub.Broadcast(EventTournamentUpdated, nil)
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":        fmt.Sprintf("The tournament was not saved: these competitions could not be changed to show names: %s. Save again to retry.", strings.Join(failed, ", ")),
-			"competitions": failed,
-		})
-		return false
+	if len(failed) == 0 {
+		return nil
 	}
-	return true
+	// The competitions that did change are already showing names: tell
+	// open pages now, as the tournament save's own failure path does.
+	if changed {
+		hub.Broadcast(EventTournamentUpdated, nil)
+	}
+	return &publicNamesAnswer{http.StatusInternalServerError, gin.H{
+		"error":        fmt.Sprintf("The tournament was not saved: these competitions could not be changed to show names: %s. Save again to retry.", strings.Join(failed, ", ")),
+		"competitions": failed,
+	}}
 }
 
 // revealLinksResponse is GET /api/competitions/:id/reveal-links: what the

@@ -494,10 +494,18 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           description: |
-            Two cases, told apart by `code`. Nothing is written.
+            Three cases, told apart by `code`. Nothing is written.
 
+            * `public_names_apply_confirm`: the body's `defaultPublicNames`
+              differs from the stored one (from showing names, when the
+              tournament is being created) and that would change the
+              `publicNames` of competitions already on disk (Swiss ones are
+              left out). The body lists them in `competitions`. Send the
+              request again with `confirmPublicNames: true` to set them all to
+              the new default.
             * `public_names_self_run`: the body sets a hiding
-              `defaultPublicNames` on a self-run tournament.
+              `defaultPublicNames` on a self-run tournament, and is not the
+              default the stored tournament already holds.
             * `public_names_self_run_switch`: the tournament is created
               self-run while competitions already on disk hide their names.
               The body lists them in `competitions`. Send the request again
@@ -507,14 +515,21 @@ paths:
             application/json:
               schema:
                 oneOf:
+                  - $ref: '#/components/schemas/PublicNamesApplyConfirmError'
                   - $ref: '#/components/schemas/PublicNamesError'
                   - $ref: '#/components/schemas/PublicNamesSelfRunSwitchError'
         '500':
-          description: >
-            Created self-run with `confirmShowNames: true`, but some competitions
-            could not be changed to show names (`competitions` lists them). The
-            tournament was not saved: send the request again to retry. Any other
-            server error carries the usual `error` alone.
+          description: |
+            Some competitions could not be changed (`competitions` lists them),
+            told apart by whether the tournament was saved (the `error`
+            sentence says which). Any other server error carries the usual
+            `error` alone.
+
+            * With `confirmPublicNames: true`, the tournament WAS saved and the
+              competitions listed keep their old option. Send the same request
+              again with `confirmPublicNames: true` to retry the rest.
+            * Created self-run with `confirmShowNames: true`, the tournament was
+              NOT saved: send the request again to retry.
           content:
             application/json:
               schema:
@@ -609,7 +624,8 @@ paths:
             * `tournament_changed`: the body's `tournamentVersion` is not the
               stored settings' version.
             * `public_names_apply_confirm`: the save changes
-              `defaultPublicNames` and that would change the `publicNames` of
+              `defaultPublicNames` (from showing names, when it creates the
+              tournament) and that would change the `publicNames` of
               competitions already on disk (Swiss ones are left out). The body
               lists them in
               `competitions` (`id`, `name` and their current `publicNames`).
@@ -8418,7 +8434,7 @@ components:
         500 on `POST` or `PUT /api/tournament`: some competitions could not be
         changed. A failure on one competition does not stop the others, and
         `competitions` lists the ids of the ones that were not changed. On
-        `PUT`, the answer to a `confirmPublicNames` save, the tournament
+        the answer to a `confirmPublicNames` save, the tournament
         settings were saved (the default moved) and the others are changed:
         send the same save again with `confirmPublicNames: true` to retry the
         rest. On `POST` or `PUT` that creates the tournament self-run with
@@ -8440,7 +8456,7 @@ components:
       type: object
       required: [code, error, competitions]
       description: >
-        409 on `PUT /api/tournament`: the save changes `defaultPublicNames`
+        409 on `POST` or `PUT /api/tournament`: the save changes `defaultPublicNames`
         and that would change competitions already on disk. Nothing is written.
         Send the save again with `confirmPublicNames: true` to set them all to
         the new default.
@@ -9296,7 +9312,7 @@ components:
           type: boolean
           writeOnly: true
           description: |
-            Request only, on `PUT /api/tournament`. Send `true` to confirm a
+            Request only, on `POST` and `PUT /api/tournament`. Send `true` to confirm a
             changed `defaultPublicNames` being applied to the competitions the
             `public_names_apply_confirm` answer listed. Never stored and never
             answered.

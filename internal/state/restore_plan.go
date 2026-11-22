@@ -403,30 +403,6 @@ func checkRestoreTournamentSettings(
 	for _, id := range inPlace {
 		check(id, competitionName(live, id), live.comps[id])
 	}
-	if restored.IsSelfRun() {
-		warnHidden := func(id, name string, c *Competition) {
-			if c == nil || !c.HidesNames() {
-				return
-			}
-			w.plan.Warnings = append(w.plan.Warnings, RestoreWarning{
-				Code:          RestoreWarnPublicNamesSelfRun,
-				CompetitionID: id,
-				Message:       fmt.Sprintf("%s hides competitor names, but the restored tournament is self-run, and only an officiated tournament may hide names. Set its public names option back to showing names in its settings.", name),
-			})
-		}
-		for _, t := range w.targets {
-			warnHidden(t.dstID, ai.names[t.srcID], ai.comps[t.srcID])
-		}
-		for _, id := range inPlace {
-			warnHidden(id, competitionName(live, id), live.comps[id])
-		}
-		if PublicNamesHidesNames(restored.DefaultPublicNames) {
-			w.plan.Warnings = append(w.plan.Warnings, RestoreWarning{
-				Code:    RestoreWarnPublicNamesSelfRun,
-				Message: "The restored tournament is self-run but its default public names option hides competitor names, which only an officiated tournament may do. Set the default back to showing names in the tournament settings.",
-			})
-		}
-	}
 	if !req.LockedMode && (live.tourn == nil || live.tourn.Password == "") {
 		w.plan.Password = RestorePasswordNeedsOne
 	}
@@ -478,6 +454,49 @@ func checkRestorePrefixCollisions(
 				Message:       fmt.Sprintf("%s's number prefix is used by another competition, so it gets a new one; reprint this competition's tags.", e.Name),
 			})
 		}
+	}
+}
+
+// checkRestorePublicNames warns about a competition that hides competitor
+// names under a self-run tournament, which only an officiated one may do. The
+// tournament it judges is the one the restore leaves: the archive's when the
+// whole tournament is restored, the running one when only competitions are
+// (so a competition-scope restore, or one with --only, is warned too). The
+// restore still goes ahead and changes nothing.
+func checkRestorePublicNames(tournament bool, inPlace []string, ai *restoreArchiveInfo, live *restoreLiveState, w *restoreWork) {
+	tourn, who := live.tourn, "the tournament"
+	if tournament {
+		tourn, who = ai.tourn, "the restored tournament"
+	}
+	if tourn == nil {
+		return
+	}
+	resulting := *tourn
+	ApplyTournamentDefaults(&resulting)
+	if !resulting.IsSelfRun() {
+		return
+	}
+	warnHidden := func(id, name string, c *Competition) {
+		if c == nil || !c.HidesNames() {
+			return
+		}
+		w.plan.Warnings = append(w.plan.Warnings, RestoreWarning{
+			Code:          RestoreWarnPublicNamesSelfRun,
+			CompetitionID: id,
+			Message:       fmt.Sprintf("%s hides competitor names, but %s is self-run, and only an officiated tournament may hide names. Set its public names option back to showing names in its settings.", name, who),
+		})
+	}
+	for _, t := range w.targets {
+		warnHidden(t.dstID, ai.names[t.srcID], ai.comps[t.srcID])
+	}
+	for _, id := range inPlace {
+		warnHidden(id, competitionName(live, id), live.comps[id])
+	}
+	if tournament && PublicNamesHidesNames(resulting.DefaultPublicNames) {
+		w.plan.Warnings = append(w.plan.Warnings, RestoreWarning{
+			Code:    RestoreWarnPublicNamesSelfRun,
+			Message: "The restored tournament is self-run but its default public names option hides competitor names, which only an officiated tournament may do. Set the default back to showing names in the tournament settings.",
+		})
 	}
 }
 
@@ -555,6 +574,7 @@ func planRestore(req RestoreRequest, ai *restoreArchiveInfo, live *restoreLiveSt
 	if tournament {
 		checkRestoreTournamentSettings(req, inPlace, ai, live, w)
 	}
+	checkRestorePublicNames(tournament, inPlace, ai, live, w)
 
 	checkRestorePrefixCollisions(entries, inPlace, ai, live, w)
 

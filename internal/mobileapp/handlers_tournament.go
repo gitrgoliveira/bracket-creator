@@ -925,8 +925,8 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// alone changes no competition, so each competition's own choice
 		// stands. A confirmed save applies the default even when it did not
 		// move, so sending it again finishes one a failure cut short.
-		publicNamesTargets, ok := judgePublicNamesDefault(c, store, stored, &t, req.ConfirmPublicNames)
-		if !ok {
+		publicNamesTargets, refusal, err := judgePublicNamesDefault(store, stored, &t, req.ConfirmPublicNames)
+		if answerPublicNames(c, refusal, err) {
 			return
 		}
 		// Preserve the stored Password when the incoming body omits it
@@ -980,7 +980,8 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 				return
 			}
 		}
-		if !showNamesForSelfRun(c, hub, store, stored, &t, req.ConfirmShowNames) {
+		switchTargets, refusal, err := judgeSelfRunSwitch(store, stored, &t, req.ConfirmShowNames)
+		if answerPublicNames(c, refusal, err) || answerPublicNames(c, applySelfRunSwitch(hub, store, switchTargets), nil) {
 			return
 		}
 		// Track whether the persisted password actually changed so we
@@ -1159,10 +1160,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			}
 		}
 		if len(publicNamesFailed) > 0 {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":        fmt.Sprintf("The tournament settings were saved, but these competitions could not be changed to the new default: %s. Save again to retry.", strings.Join(publicNamesFailed, ", ")),
-				"competitions": publicNamesFailed,
-			})
+			answerPublicNames(c, publicNamesDefaultFailedAnswer(publicNamesFailed), nil)
 			return
 		}
 		// In locked mode the on-disk Password is irrelevant and must not
@@ -1338,29 +1336,27 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			t.Mode = existingMode
 		}
 
-		// The default public-names option, judged on the mode just settled.
-		// POST sets no competition to it: a first save has none to follow it,
-		// and changing the default for existing competitions is the PUT's,
-		// with its confirmation.
-		t.DefaultPublicNames = strings.TrimSpace(t.DefaultPublicNames)
-		if msg := validatePublicNamesValue("defaultPublicNames", t.DefaultPublicNames); msg != "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
-			return
-		}
-		if state.PublicNamesHidesNames(t.DefaultPublicNames) && t.IsSelfRun() {
-			c.JSON(http.StatusConflict, gin.H{"error": msgPublicNamesSelfRun, "code": codePublicNamesSelfRun})
-			return
-		}
-		// Created self-run, the competitions already on disk that hide
-		// names show them first, once the organiser has seen the list.
 		var confirm struct {
-			ConfirmShowNames bool `json:"confirmShowNames"`
+			ConfirmPublicNames bool `json:"confirmPublicNames"`
+			ConfirmShowNames   bool `json:"confirmShowNames"`
 		}
 		if err := c.ShouldBindBodyWith(&confirm, binding.JSON); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if !showNamesForSelfRun(c, hub, store, existingForPost, &t, confirm.ConfirmShowNames) {
+		// The default public-names option, judged on the mode just settled and
+		// against the tournament POST replaces, as the PUT judges it: a moved
+		// default sets the competitions already on disk once the organiser has
+		// seen the list.
+		t.DefaultPublicNames = strings.TrimSpace(t.DefaultPublicNames)
+		publicNamesTargets, refusal, err := judgePublicNamesDefault(store, existingForPost, &t, confirm.ConfirmPublicNames)
+		if answerPublicNames(c, refusal, err) {
+			return
+		}
+		// Created self-run, the competitions already on disk that hide
+		// names show them first, once the organiser has seen the list.
+		switchTargets, refusal, err := judgeSelfRunSwitch(store, existingForPost, &t, confirm.ConfirmShowNames)
+		if answerPublicNames(c, refusal, err) || answerPublicNames(c, applySelfRunSwitch(hub, store, switchTargets), nil) {
 			return
 		}
 
@@ -1369,6 +1365,11 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
+		// The default landed; now the competitions it was confirmed for.
+		var publicNamesFailed []string
+		if len(publicNamesTargets) > 0 {
+			_, publicNamesFailed = applyPublicNamesDefault(store, publicNamesTargets, t.DefaultPublicNames)
+		}
 		hub.Broadcast(EventTournamentUpdated, nil)
 		// In file mode, broadcast EventPasswordReset when an existing
 		// admin password is OVERWRITTEN (re-bootstrap with a new
@@ -1392,6 +1393,10 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			existingForPost != nil &&
 			t.Password != existingForPost.Password {
 			hub.Broadcast(EventPasswordReset, passwordResetEventData{})
+		}
+		if len(publicNamesFailed) > 0 {
+			answerPublicNames(c, publicNamesDefaultFailedAnswer(publicNamesFailed), nil)
+			return
 		}
 		// In locked mode the on-disk Password is not authoritative; strip it
 		// from the response so callers don't cache a stale file-mode credential

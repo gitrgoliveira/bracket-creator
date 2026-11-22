@@ -226,7 +226,13 @@ func TestMarshalledStructsStayFullyMarshalled(t *testing.T) {
 		allow map[string]string
 	}{
 		{reflect.TypeOf(SubMatchResult{}), "json", nil},
-		{reflect.TypeOf(BracketMatch{}), "json", nil},
+		{reflect.TypeOf(BracketMatch{}), "json", map[string]string{
+			"HeldTeamResult": "a served copy's held summary (BracketMatch.HoldTeamResult): " +
+				"the public name mask fixes it before rewriting the bout rows, on the " +
+				"copy a viewer read serves; every marshal of a stored match recomputes " +
+				"it from the stored rows, so a stored copy would only go stale.",
+			"TeamResultHeld": "says HeldTeamResult is set; served copies only, never stored.",
+		}},
 		{reflect.TypeOf(Bracket{}), "json", nil},
 		{reflect.TypeOf(Overrides{}), "json", nil},
 		{reflect.TypeOf(Tournament{}), "yaml", nil},

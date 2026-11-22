@@ -1795,6 +1795,13 @@ type MatchResult struct {
 	// incoming result only, read by the history writer and the handlers'
 	// heldGroups; never persisted.
 	Merge *MergeReport `json:"-" yaml:"-"`
+	// HeldTeamResult is the team-match summary the caller fixed before it
+	// rewrote the bout rows (TeamResultHeld says it is set): the public name
+	// mask rewrites fighter names, and a summary recomputed from the masked
+	// names would count differently from the organiser's. Set on the copy a
+	// viewer read serves only, through HoldTeamResult; never persisted.
+	HeldTeamResult TeamResultLine `json:"-" yaml:"-"`
+	TeamResultHeld bool           `json:"-" yaml:"-"`
 	// LineupWarning is what the write's door tells the operator when a
 	// kachinuki start kept the match's own lineup at the start and a later
 	// match's carried lineup could not follow it (engine.DerivedLineupError,
@@ -2247,6 +2254,11 @@ type BracketMatch struct {
 	HansokuB      int      `json:"hansokuB,omitempty"`
 	IsOverridden  bool     `json:"isOverridden"`
 	QueuePosition int      `json:"queuePosition,omitempty"`
+	// HeldTeamResult mirrors MatchResult.HeldTeamResult for a bracket match:
+	// set on the copy a viewer read serves only (HoldTeamResult), never
+	// persisted (json:"-" keeps it out of bracket.json).
+	HeldTeamResult TeamResultLine `json:"-" yaml:"-"`
+	TeamResultHeld bool           `json:"-" yaml:"-"`
 	// IneligibleSides mirrors MatchResult.IneligibleSides for a bracket
 	// match (bc-cse): a request-time-only annotation, stamped by
 	// mobileapp.annotateEligibility on the copy a viewer endpoint

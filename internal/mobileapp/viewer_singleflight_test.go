@@ -258,3 +258,28 @@ func TestViewerFlightKeySeparatesAudiences(t *testing.T) {
 		t.Fatal("one audience must keep one key")
 	}
 }
+
+// A read of one competition keys the audience as that competition's answer
+// sees it: a link or a per-person link to ANOTHER competition shares the
+// public's build, while this competition's own links and the organiser keep
+// keys of their own.
+func TestViewerFlightKeyFor_CountsOnlyTheCompetitionsOwnReveals(t *testing.T) {
+	const base = "competition:k@1"
+	public := viewerFlightKeyFor(base, "k", audience{})
+	elsewhere := audience{
+		competitions: map[string]bool{"other": true},
+		competitors:  map[string]map[string]bool{"other": {"p1": true}},
+	}
+	if viewerFlightKeyFor(base, "k", elsewhere) != public {
+		t.Fatal("a link to another competition must share the public's build")
+	}
+	link := viewerFlightKeyFor(base, "k", audience{competitions: map[string]bool{"k": true}})
+	person := viewerFlightKeyFor(base, "k", audience{competitors: map[string]map[string]bool{"k": {"p1": true}}})
+	other := viewerFlightKeyFor(base, "k", audience{competitors: map[string]map[string]bool{"k": {"p2": true}}})
+	both := viewerFlightKeyFor(base, "k", audience{competitors: map[string]map[string]bool{"k": {"p2": true, "p1": true}}})
+	organiser := viewerFlightKeyFor(base, "k", organiserAudience())
+	keys := map[string]bool{public: true, link: true, person: true, other: true, both: true, organiser: true}
+	if len(keys) != 6 {
+		t.Fatalf("audiences that read different bytes share a key: %v", keys)
+	}
+}

@@ -1248,7 +1248,7 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// found it, so a request that arrives after a write never joins a
 		// build begun before it, and the audience (viewerFlightKey), so a
 		// masked build is never shared with a caller who may read the names.
-		key := viewerFlightKey(fmt.Sprintf("competition:%s@%d", id, store.CompetitionWriteToken(id)), aud)
+		key := viewerFlightKeyFor(fmt.Sprintf("competition:%s@%d", id, store.CompetitionWriteToken(id)), id, aud)
 		data, err := sf.Do(key, func() ([]byte, error) {
 			return readCompetitionConsistently(store, id, build)
 		})

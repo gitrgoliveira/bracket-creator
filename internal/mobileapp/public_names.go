@@ -127,6 +127,29 @@ func (a audience) key() string {
 	return audienceReveal + "|" + strings.Join(parts, ",")
 }
 
+// keyFor names the audience as one competition's answer sees it: the organiser,
+// the holder of that competition's link, the holders of the same set of
+// competitors' own links in it, or the public (every link that opens another
+// competition counts for nothing here). It is the part a single-flight key adds
+// for a read of that one competition.
+func (a audience) keyFor(compID string) string {
+	if a.organiser {
+		return audienceOrganiser
+	}
+	if a.competitions[compID] {
+		return audienceReveal + "|c:" + compID
+	}
+	pids := make([]string, 0, len(a.competitors[compID]))
+	for pid := range a.competitors[compID] {
+		pids = append(pids, pid)
+	}
+	if len(pids) == 0 {
+		return audiencePublic
+	}
+	sort.Strings(pids)
+	return audienceReveal + "|p:" + compID + "=" + strings.Join(pids, "+")
+}
+
 func (a audience) competitionParts() []string {
 	parts := make([]string, 0, len(a.competitions))
 	for id, ok := range a.competitions {
@@ -477,11 +500,13 @@ func (v maskView) matches(ms []state.MatchResult) {
 }
 
 // match masks one pool or league match in place: sides and winner, the
-// representative-bout fighters and the bout rows.
+// representative-bout fighters and the bout rows. The team summary (IV/PW) is
+// fixed first, from the names as stored, so the public one is the organiser's.
 func (v maskView) match(m *state.MatchResult) {
 	if v.m == nil || m == nil {
 		return
 	}
+	m.HoldTeamResult()
 	teamA, teamB := m.SideA, m.SideB
 	m.SubResults = v.bouts(m.SubResults, m.SideAID, m.SideBID, teamA, teamB)
 	m.RepPlayerA = v.memberByName(m.SideAID, m.RepPlayerA)
@@ -514,6 +539,7 @@ func (v maskView) bracketMatch(m *state.BracketMatch) {
 	if v.m == nil || m == nil {
 		return
 	}
+	m.HoldTeamResult()
 	m.SubResults = v.bouts(m.SubResults, m.SideAID, m.SideBID, m.SideA, m.SideB)
 	m.SideA = v.side(m.SideA, m.SideAID)
 	m.SideB = v.side(m.SideB, m.SideBID)
@@ -832,7 +858,9 @@ func (c *nameMaskCache) token(compID string) nameMaskToken {
 // is sampled BEFORE the files are read, so a write landing during the build
 // leaves an entry whose token is already stale and is rebuilt next time. On a
 // read error the mask fails closed (failClosedMask, or what could be read)
-// and is not cached, so the next read tries again.
+// and is not cached, so the next read tries again. Every rebuild also drops
+// the entries of competitions that no longer exist (evictGone), so a deleted
+// or replaced competition's names do not stay in memory.
 func (c *nameMaskCache) get(compID string) (*nameMask, error) {
 	tok := c.token(compID)
 	c.mu.Lock()
@@ -842,13 +870,36 @@ func (c *nameMaskCache) get(compID string) (*nameMask, error) {
 		return e.mask, nil
 	}
 	m, err := c.build(compID)
+	c.mu.Lock()
 	if err != nil {
-		return m, err
+		delete(c.entries, compID)
+	} else {
+		c.entries[compID] = nameMaskEntry{token: tok, mask: m}
+	}
+	c.mu.Unlock()
+	c.evictGone()
+	return m, err
+}
+
+// evictGone drops the entry of every competition the store no longer lists. A
+// listing that fails drops nothing: the entries still match their tokens or are
+// rebuilt on their next read.
+func (c *nameMaskCache) evictGone() {
+	ids, err := c.store.ListCompetitions()
+	if err != nil {
+		return
+	}
+	live := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		live[id] = true
 	}
 	c.mu.Lock()
-	c.entries[compID] = nameMaskEntry{token: tok, mask: m}
-	c.mu.Unlock()
-	return m, nil
+	defer c.mu.Unlock()
+	for id := range c.entries {
+		if !live[id] {
+			delete(c.entries, id)
+		}
+	}
 }
 
 func (c *nameMaskCache) build(compID string) (*nameMask, error) {

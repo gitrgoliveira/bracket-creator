@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -423,6 +424,66 @@ func TestMaskView_TeamLinkRevealsItsMembers(t *testing.T) {
 	ps := []domain.Player{{ID: pnTeamA, Name: "Tigers", Metadata: []string{"Ken Kato"}}}
 	v.players(ps)
 	assert.Equal(t, []string{"Ken Kato"}, ps[0].Metadata)
+}
+
+// A masked team match keeps the organiser's IV and PW: the summary is fixed
+// before the bout rows are rewritten, so legacy rows that name no member (both
+// sides read "?" once masked) still count.
+func TestMaskView_TeamResultIsTheOrganisers(t *testing.T) {
+	v := maskView{m: teamMask()}
+	subs := []state.SubMatchResult{
+		{Position: 1, SideA: "Ken Kato", SideB: "Sho Ono", Winner: "Ken Kato", IpponsA: []string{"M", "K"}},
+		{Position: 2, SideA: "Ryo Mori", SideB: "Unknown Fighter", Winner: "Unknown Fighter", IpponsB: []string{"D"}},
+	}
+	m := state.MatchResult{ID: "Pool A-1", SideA: "Tigers", SideAID: pnTeamA, SideB: "Lions", SideBID: pnTeamB,
+		Status: "completed", SubResults: subs}
+	b := state.BracketMatch{ID: "r1-m1", SideA: "Tigers", SideAID: pnTeamA, SideB: "Lions", SideBID: pnTeamB,
+		Status: "completed", SubResults: subs}
+	wantMatch, wantBracket := m.TeamResult(), b.TeamResult()
+	require.NotNil(t, wantMatch)
+	assert.Equal(t, 1, wantMatch.AkaIV)
+	assert.Equal(t, 1, wantMatch.ShiroIV)
+
+	v.match(&m)
+	v.bracketMatch(&b)
+	assert.Equal(t, "?", m.SubResults[0].SideB, "the rows are masked")
+	assert.Equal(t, wantMatch, m.TeamResult(), "a pool match's summary is the organiser's")
+	assert.Equal(t, wantBracket, b.TeamResult(), "a knockout match's summary is the organiser's")
+	wire, err := json.Marshal(m)
+	require.NoError(t, err)
+	assert.Contains(t, string(wire), `"teamResult":{"shiroIV":1,"akaIV":1,"shiroPW":1,"akaPW":2}`)
+	assert.NotContains(t, string(wire), "HeldTeamResult")
+
+	single := state.MatchResult{ID: "Pool A-2", SideA: "Ken Kato", SideB: "Sho Ono"}
+	v.match(&single)
+	assert.Nil(t, single.TeamResult(), "an individual match holds no summary")
+}
+
+// The name mask of a deleted competition does not stay in the cache: the next
+// rebuild of any mask drops it.
+func TestNameMaskCache_DropsADeletedCompetition(t *testing.T) {
+	fx := newPNFixture(t, state.PublicNamesHidden)
+	second := &state.Competition{ID: "seniors", Name: "Seniors", Kind: "individual", Format: state.CompFormatMixed,
+		Status: state.CompStatusSetup, NumberPrefix: "S", PoolSize: 3, PoolWinners: 1, PublicNames: state.PublicNamesHidden}
+	require.NoError(t, fx.store.SaveCompetition(second))
+	cache := fx.pn.masks
+	_, err := cache.get("seniors")
+	require.NoError(t, err)
+	_, err = cache.get("juniors")
+	require.NoError(t, err)
+	assert.Len(t, cache.entries, 2)
+
+	require.NoError(t, fx.store.DeleteCompetition("seniors"))
+	cache.entries["juniors"] = nameMaskEntry{} // out of date: the next read rebuilds
+	_, err = cache.get("juniors")
+	require.NoError(t, err)
+	assert.Len(t, cache.entries, 1, "the deleted competition's mask is gone")
+	_, kept := cache.entries["juniors"]
+	assert.True(t, kept)
+
+	_, err = cache.get("seniors")
+	require.Error(t, err)
+	assert.NotContains(t, cache.entries, "seniors", "a failed build leaves no entry")
 }
 
 func TestFailClosedMask(t *testing.T) {

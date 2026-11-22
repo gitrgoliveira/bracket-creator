@@ -57,7 +57,7 @@ func validateRevealUntilValue(v string) string {
 	if state.ValidRevealUntil(v) {
 		return ""
 	}
-	return fmt.Sprintf("revealUntil must be a date and time like %s, or empty for the end of the tournament", "2026-05-12T18:00")
+	return "revealUntil must be a date and time like 2026-05-12T18:00, or empty for the end of the tournament"
 }
 
 // setPublicNames gives comp the public-names option v and mints its reveal

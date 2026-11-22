@@ -11,7 +11,7 @@ The following table summarises when each format fits best.
 | Knockout | Small fields or qualification rounds where a straight knockout is enough |
 | Mixed | Most events with a moderate-to-large field; pools thin the field before the knockout |
 | League | Small fields where every match matters and standings tell the full story |
-| Swiss | Large individual fields where you want many rounds but a full round-robin is impractical |
+| Swiss (work in progress) | Large individual fields where you want many rounds but a full round-robin is impractical |
 
 !!! note
     In the tournament app's competition setup, these formats are labelled **Knockout only**, **Pools + Knockout** (Mixed), **League**, and **Swiss**.
@@ -47,6 +47,9 @@ Use league for small fields (typically eight or fewer competitors) where you wan
 Of the podium places in a league, only 3rd can be shared: a tie for 1st or 2nd place is always settled by a tie-breaker with a winner. Refer to [Ties in a league](team-tournaments.md#ties-in-a-league) for 3rd place, lower places and lots.
 
 ## Swiss
+
+!!! warning "Work in progress"
+    Swiss is still being built. Expect rough edges and changes between releases, and do not rely on it for a live tournament yet.
 
 Swiss is a tournament system that runs over a fixed number of rounds. Competitors are not eliminated; instead, each round pairs competitors with similar win records, so results stay competitive throughout.
 

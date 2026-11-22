@@ -35,6 +35,7 @@
 // no regression.
 
 import { applyPatchToCompetitions as _applyPatchToCompetitions, matchInComp as _matchInComp } from './patch.jsx';
+import { competitionHidesNames } from './competition_shape.jsx';
 
 // freshnessMs: the amber->red dot threshold.
 // 20 s sits below the 35 s SSE silence watchdog and above the 15 s SSE
@@ -257,6 +258,99 @@ export function getLastBroadcastAt() {
 }
 
 // -----------------------------------------------------------------------
+// -----------------------------------------------------------------------
+// maskSnapshotForBridge: the competitions slice an operator tab hands to a
+// display tab, with every competitor of a competition whose public pages hide
+// names (competitionHidesNames) carried by number and id alone (bc-hnam).
+//
+// The operator tab holds the organiser's copy, names and all; the display tab
+// is a PUBLIC surface, so a same-origin snapshot must not carry what the
+// server's masked payload would not. A competitor record (an object carrying a
+// number, or an id the roster maps to one) gets its name, display name and
+// zekken name set to its number and is stamped `nameHidden`; a match side, a
+// winner or a representative named by a bare string is replaced by the number
+// of the competitor its id names (else of the one roster name that is unique),
+// never by a name. A name no roster entry can place is left alone: it is
+// placeholder text ("Winner of ..."), not a competitor. The competition is
+// stamped `namesHidden`, as a server payload built for a hidden reader is.
+// A competition that shows names passes through untouched. Match PATCHES need
+// no mask: boardOverlayResult names sides by id only.
+//
+// Pure and exported so vitest can pin it.
+// -----------------------------------------------------------------------
+const MASK_STRING_SIDES = [
+    ['sideA', ['sideAId', 'sideAID']],
+    ['sideB', ['sideBId', 'sideBID']],
+    ['winner', ['winnerId', 'winnerID']],
+    ['repPlayerA', []],
+    ['repPlayerB', []],
+];
+const MASK_NAME_FIELDS = ['displayName', 'zekkenName', 'zekken'];
+
+function hasCompetitorNumber(node) {
+    return node.number != null && String(node.number).trim() !== '';
+}
+
+function collectNumbers(node, byId, byName, clashing) {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+        node.forEach((n) => collectNumbers(n, byId, byName, clashing));
+        return;
+    }
+    if (typeof node.name === 'string' && hasCompetitorNumber(node)) {
+        const num = String(node.number).trim();
+        if (node.id != null && node.id !== '') byId.set(String(node.id), num);
+        if (byName.has(node.name) && byName.get(node.name) !== num) clashing.add(node.name);
+        byName.set(node.name, num);
+    }
+    for (const v of Object.values(node)) collectNumbers(v, byId, byName, clashing);
+}
+
+function maskNode(node, ctx) {
+    if (Array.isArray(node)) return node.map((n) => maskNode(n, ctx));
+    if (!node || typeof node !== 'object') return node;
+    const out = {};
+    for (const [k, v] of Object.entries(node)) out[k] = maskNode(v, ctx);
+    const own = hasCompetitorNumber(node) ? String(node.number).trim() : '';
+    const mapped = node.id != null && node.id !== '' ? ctx.byId.get(String(node.id)) : undefined;
+    const num = own || mapped || '';
+    if (num && typeof node.name === 'string') {
+        out.name = num;
+        out.nameHidden = true;
+        for (const f of MASK_NAME_FIELDS) {
+            if (typeof node[f] === 'string' && node[f]) out[f] = num;
+        }
+    }
+    for (const [f, idKeys] of MASK_STRING_SIDES) {
+        const name = node[f];
+        if (typeof name !== 'string' || !name) continue;
+        let found = '';
+        for (const ik of idKeys) {
+            if (node[ik] != null && node[ik] !== '' && ctx.byId.has(String(node[ik]))) {
+                found = ctx.byId.get(String(node[ik]));
+                break;
+            }
+        }
+        if (!found && ctx.byName.has(name)) {
+            found = ctx.clashing.has(name) ? '?' : ctx.byName.get(name);
+        }
+        if (found) out[f] = found;
+    }
+    return out;
+}
+
+export function maskSnapshotForBridge(comps) {
+    if (!Array.isArray(comps)) return comps;
+    // The slice itself comes back when no competition in it hides its names.
+    if (!comps.some((comp) => comp && typeof comp === 'object' && competitionHidesNames(null, comp))) return comps;
+    return comps.map((comp) => {
+        if (!comp || typeof comp !== 'object' || !competitionHidesNames(null, comp)) return comp;
+        const ctx = { byId: new Map(), byName: new Map(), clashing: new Set() };
+        collectNumbers(comp, ctx.byId, ctx.byName, ctx.clashing);
+        return { ...maskNode(comp, ctx), namesHidden: true };
+    });
+}
+
 // Module-level snapshot provider registry.
 //
 // The operator tab calls setSnapshotProvider(fn) after loading its
@@ -351,7 +445,7 @@ export function openBridge() {
                             origin: _tabId,
                             court,
                             compId: '',
-                            payload: slice,
+                            payload: maskSnapshotForBridge(slice),
                         });
                         _lastBroadcastAt = Date.now();
                     }

@@ -20,7 +20,7 @@
 import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, boutSideView, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution, defaultWinMaru } from './result_slot.jsx';
-import { sideLookupKey } from './competitor_identity.jsx';
+import { sideLookupKey, nameBesideBadge } from './competitor_identity.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 import { creditedBoutSide, subBoutHasResult } from './team_default_credit.jsx';
 import { barredNameMark } from './barred_chip.jsx';
@@ -564,6 +564,9 @@ export function numberedParts(side, withZekkenName) {
 export function withNumber(side, withZekkenName, color) {
   const { name, number } = numberedParts(side, withZekkenName);
   if (!number) return name;
+  // A competition that hides names sends the number where the name goes
+  // (bc-hnam): print it once, never "K12 K12" (nameBesideBadge owns the rule).
+  if (nameBesideBadge(name, number) === "") return number;
   // numberFollowsName, not a second `=== "aka"` here: the placement rule has
   // ONE owner (numbered_name.jsx) and this is its string form, so the two
   // cannot drift about which side the number trails on.

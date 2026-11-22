@@ -58,6 +58,10 @@ import { seededRanks } from './admin_helpers.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 import { andList } from './list_phrase.jsx';
+import {
+  PublicNamesFields, publicNamesApplies, publicNamesHasLinks,
+  fetchRevealLinks, revealLinkUrl, formatRevealExpiry, copyText, RevealQrSheet,
+} from './public_names_fields.jsx';
 import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor, TIME_WRITE_KINDS } from './queued_writes_wait.jsx';
 import {
   settingsPutBody,
@@ -105,6 +109,83 @@ function formatClearedValue(key, value) {
   }
   if (key === "extraQualifiers") return extraQualifiersLabel(value);
   return String(value);
+}
+
+// RevealLinksPanel: what the SAVED public-names option gives the organiser to
+// hand out. A per-person option points at the places each competitor's own link
+// is. A per-competition option shows the one link: copy it, or print its QR code
+// (only with a Public URL, as for the printed competitor tags, since a QR code
+// carrying this device's own address would be of no use to anyone else).
+// `unsaved` is true while the picker or the expiry holds a change the server
+// has not seen: the link then waits for the save.
+function RevealLinksPanel({ c, tournament, password, showToast, unsaved }) {
+  const saved = c.publicNames || "";
+  const [links, setLinks] = useState(null);
+  const [error, setError] = useState("");
+  const [sheetOpen, setSheetOpen] = useState(false);
+  useEffect(() => {
+    setLinks(null);
+    setError("");
+    if (saved !== "competition" || unsaved) return undefined;
+    let live = true;
+    fetchRevealLinks(c.id, password)
+      .then((answer) => { if (live) setLinks(answer); })
+      .catch((e) => { if (live) setError((e && e.message) || "Could not read the link."); });
+    return () => { live = false; };
+  }, [c.id, saved, c.revealUntil, password, unsaved]);
+
+  if (!publicNamesApplies(tournament) || !publicNamesHasLinks(saved)) return null;
+  if (unsaved) {
+    return <div className="field__hint" data-testid="reveal-links-unsaved">Save the changes to get the link.</div>;
+  }
+  if (saved === "person") {
+    return (
+      <div className="field__hint" data-testid="reveal-links-person">
+        {"Each competitor's link is the QR code on their printed tag (from Export) and the Copy reveal link button next to their name on the Participants tab."}
+      </div>
+    );
+  }
+  const publicBase = (tournament.publicURL || "").trim();
+  const key = links && links.competitionKey;
+  const shareBase = publicBase || (window.linkBase || (() => window.location.origin))(tournament);
+  const url = key ? revealLinkUrl(shareBase, c.id, key) : "";
+  const copy = () => {
+    copyText(url).then(
+      () => showToast && showToast("Competition link copied!"),
+      () => showToast && showToast("Copy failed. Open the QR code sheet and select the link there.", "error"),
+    );
+  };
+  return (
+    <div className="field public-names__links" data-testid="reveal-links-panel">
+      <label className="field__label">Competition link</label>
+      {error && <window.FieldError>{error}</window.FieldError>}
+      {!links && !error && <div className="field__hint">Loading the link…</div>}
+      {links && !links.open && (
+        <div className="field__hint field__hint--warn" data-testid="reveal-links-closed">
+          {links.expiresAt
+            ? `The link stopped working at ${formatRevealExpiry(links.expiresAt)}. Move that time later to make the same link work again.`
+            : "The link does not work yet because the tournament has no start date."}
+        </div>
+      )}
+      {links && links.open && links.expiresAt && (
+        <div className="field__hint">The link works until {formatRevealExpiry(links.expiresAt)}.</div>
+      )}
+      {key && (
+        <div className="public-names__buttons">
+          <button type="button" className="btn btn--sm" onClick={copy}>Copy link</button>
+          <button type="button" className="btn btn--sm" disabled={!publicBase} onClick={() => setSheetOpen(true)}>Show QR code to print</button>
+        </div>
+      )}
+      {key && !publicBase && (
+        <div className="field__hint field__hint--warn" data-testid="reveal-links-no-public-url">
+          {"Set a Public URL in the tournament details to get a QR code. Without it a printed code would point at this device's own address."}
+        </div>
+      )}
+      {sheetOpen && url && publicBase && (
+        <RevealQrSheet compName={c.name} url={url} expiresAt={links.expiresAt} onClose={() => setSheetOpen(false)} showToast={showToast} />
+      )}
+    </div>
+  );
 }
 
 function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, onStatusChange }) {
@@ -323,7 +404,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       }
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType, c.expectedParticipants]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType, c.expectedParticipants, c.publicNames, c.revealUntil]);
 
   // bc-obox T1: a save that moves a drawn competition (a new date or start
   // time, whose matches the server re-times in the same save) waits for the
@@ -361,6 +442,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       return;
     }
     const finalNext = res.body;
+    // bc-hnam: the public-names option and its expiry are not part of the
+    // shaped body (competition_put_body.jsx); they ride along only when edited.
+    // Left out, the server keeps what it holds.
+    if (Object.prototype.hasOwnProperty.call(edits, "publicNames")) finalNext.publicNames = edits.publicNames || "";
+    if (Object.prototype.hasOwnProperty.call(edits, "revealUntil")) finalNext.revealUntil = edits.revealUntil || "";
 
     // Cross-file guard symmetry with the tournament edit/create paths
     // (admin_setup.jsx AdminEditTournament:80, app.jsx CreateTournament:410)
@@ -1454,6 +1540,25 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         <CheckboxField label={LABEL_NAGINATA} checked={!!local.naginata} disabled={lockedAfterDraw} onChange={(on) => { update("naginata", on); update("twoThirdPlaces", twoThirdPlacesForNaginata(on)); }} hint={`${HINT_NAGINATA}${lockedNote}`} />
         {tournamentHasCheckIn(tournament) && <CheckboxField label={LABEL_CHECK_IN} checked={!!local.checkInEnabled} onChange={(on) => update("checkInEnabled", on)} hint={HINT_CHECK_IN} />}
       </div>
+      {/* bc-hnam: competitor names on the public pages. Editable at any status:
+          it changes only what the public pages show, never the draw. */}
+      <PublicNamesFields
+        tournament={tournament}
+        format={local.format}
+        kind={local.kind}
+        value={local.publicNames || ""}
+        onChange={(v) => update("publicNames", v)}
+        revealUntil={local.revealUntil || ""}
+        onRevealUntilChange={(v) => update("revealUntil", v)}
+      >
+        <RevealLinksPanel
+          c={c}
+          tournament={tournament}
+          password={password}
+          showToast={showToast}
+          unsaved={(local.publicNames || "") !== (c.publicNames || "") || (local.revealUntil || "") !== (c.revealUntil || "")}
+        />
+      </PublicNamesFields>
       {/* Repeat Save at the foot of the long settings form so the operator
           doesn't have to scroll back to the header after editing. Same
           onClick, the SAME `saveDisabled` value and the SAME `saveBlockMessage`

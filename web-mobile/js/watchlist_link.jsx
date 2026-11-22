@@ -61,7 +61,7 @@
 // not exist: the accessor was moved to the identity leaf precisely so that a
 // caller could read the FIELD without this module's typed-query rule, and
 // this line did not move with it. Do not "restore" it.
-import { numberOf } from './competitor_identity.jsx';
+import { numberOf, nameHidden } from './competitor_identity.jsx';
 
 export const WATCHLIST_PARAM = "w";
 const SEP = ",";
@@ -108,6 +108,10 @@ function safeDecodeToken(tok) {
 
 // watchlistTokens: the watchlist as tokens, applying the per-entry rule above.
 // `roster` is buildRoster output.
+//
+// A token is a number, an id or a dojo, never a competitor's name, so a link
+// built from a list that holds hidden-name entries (bc-hnam) carries no name
+// either.
 //
 // An entry the roster cannot resolve still yields a token, carrying its id.
 // That looks droppable and is not: the roster can legitimately be absent when
@@ -245,7 +249,12 @@ function resolveToken(tok, roster) {
   const list = roster || [];
   const hit = list.find((p) => p && p.id === tok.value)
     || list.find((p) => numberOf(p) === tok.value);
-  return hit ? { type: "player", id: hit.id, name: hit.name || "", dojo: hit.dojo || "" } : null;
+  if (!hit) return null;
+  // A competitor whose name is hidden from this reader (bc-hnam) is watched by
+  // id and number alone: a link carries only those (watchlistTokens), and the
+  // entry it makes keeps no name.
+  if (nameHidden(hit)) return { type: "player", id: hit.id, name: "", dojo: hit.dojo || "", number: numberOf(hit), nameHidden: true };
+  return { type: "player", id: hit.id, name: hit.name || "", dojo: hit.dojo || "" };
 }
 
 export function resolveWatchlistTokens(tokens, roster) {

@@ -17,6 +17,104 @@ import {
 // bc-evts S2: the build this page runs against the server's, and the reload rule.
 import { noteServerBuild } from './app_version.jsx';
 import { late } from './api_client_store.jsx';
+import { revealKeysHeader } from './reveal_key.jsx';
+
+// ---------------------------------------------------------------------------
+// Who this page reads as (bc-hnam)
+// ---------------------------------------------------------------------------
+// A competition can hide its competitors' names from the public pages; the
+// server judges every public read by the credential it carries (the
+// organiser's password, a phone's reveal keys, or nothing) and masks the
+// answer for whoever may not see names. Which credential a read carries is
+// decided HERE, by the route the page is on, never by the caller:
+//   - "admin", an organiser signed in on an admin route: the password, so the
+//     court console's feed, the team editor's detail and every other admin
+//     read gets the real names it saves from;
+//   - "viewer", the public pages: the reveal keys this phone holds
+//     (reveal_key.jsx), and never the password, so an organiser who opens the
+//     public page on the same laptop sees what the public sees;
+//   - "display", the court boards and the stream overlay: nothing at all,
+//     whatever the device holds, since a board is watched by the hall.
+// app.jsx sets it as the route changes (setReadAudience) and keys the
+// competitions it holds by readAudienceKey, so data read as one audience is
+// never shown to another. The event stream asks its ticket with the same
+// headers (api_client_events.jsx).
+const READ_KINDS = new Set(['admin', 'viewer', 'display']);
+const _audience = { kind: 'viewer', password: '' };
+let _audienceSignature = '';
+
+function _readKind(kind) {
+    return READ_KINDS.has(kind) ? kind : 'viewer';
+}
+
+// readAudienceKey: which audience a page on `kind` (with `password` when the
+// organiser is signed in) reads as, for keying fetched state: "organiser",
+// "display", "reveal:<the keys held>" or "public". The password itself is not
+// in the key: a changed password reads the same names.
+export function readAudienceKey(kind, password) {
+    const k = _readKind(kind);
+    if (k === 'admin') return password ? 'organiser' : 'public';
+    if (k === 'display') return 'display';
+    const keys = revealKeysHeader();
+    return keys ? `reveal:${keys}` : 'public';
+}
+
+// setReadAudience: the credential every read sends from now on. True when it
+// differs from the one set before (another route, password or set of reveal
+// keys): the caller then reopens the event stream, whose ticket was asked with
+// the old one.
+export function setReadAudience(kind, password) {
+    _audience.kind = _readKind(kind);
+    _audience.password = _audience.kind === 'admin' ? (password || '') : '';
+    const keys = _audience.kind === 'viewer' ? revealKeysHeader() : '';
+    const signature = `${_audience.kind}\n${_audience.password}\n${keys}`;
+    const changed = signature !== _audienceSignature;
+    _audienceSignature = signature;
+    return changed;
+}
+
+// currentReadAudienceKey: the audience the reads sent now go as
+// (readAudienceKey of the credential last set). A read whose answer lands
+// after it moved is dropped by its caller (app.jsx load).
+export function currentReadAudienceKey() {
+    return readAudienceKey(_audience.kind, _audience.password);
+}
+
+// readsAsOrganiser: whether this page's reads carry the organiser's password.
+export function readsAsOrganiser() {
+    return _audience.kind === 'admin' && !!_audience.password;
+}
+
+// readHeaders: the credential headers of a read from this page, {} for none.
+export function readHeaders() {
+    if (_audience.kind === 'admin') {
+        return _audience.password ? { 'X-Tournament-Password': _audience.password } : {};
+    }
+    if (_audience.kind === 'display') return {};
+    const keys = revealKeysHeader();
+    return keys ? { 'X-Reveal-Key': keys } : {};
+}
+
+// NAMES_HIDDEN_FOR_ORGANISER: what an organiser's read is refused with when
+// the answer came back masked anyway. The server never masks a valid
+// password's read (a wrong one is 401), so this is a guard, never a flow: an
+// admin surface must not hold numbers where names go, or a save would store a
+// number as a fighter's name.
+export const NAMES_HIDDEN_FOR_ORGANISER = 'This page was sent the public view, with competitor names hidden, so it is not shown here. Reload the page, or sign in again.';
+
+// refuseMaskedForOrganiser throws when a read made as the organiser came back
+// marked `namesHidden` (the whole payload, or any item of a list); otherwise
+// it returns the payload untouched.
+export function refuseMaskedForOrganiser(payload) {
+    if (!readsAsOrganiser() || !payload) return payload;
+    const items = Array.isArray(payload) ? payload : [payload];
+    if (items.some((p) => p && p.namesHidden)) {
+        const e = new Error(NAMES_HIDDEN_FOR_ORGANISER);
+        e.code = 'names_hidden';
+        throw e;
+    }
+    return payload;
+}
 
 // ---------------------------------------------------------------------------
 // F1: fetch with per-request timeout via AbortController
@@ -168,6 +266,11 @@ export function normalizeViewerCompItem(item) {
         // inside one of them. Hoisted like poolMatches so the console can
         // render the notice off the flattened competition it already has.
         dataIssues: item.dataIssues,
+        // bc-hnam: the server's mark that this item was built for a reader who
+        // may not see this competition's names, also a sibling of config.
+        // normalizeCompetitionDetail stamps every record's nameHidden from it,
+        // so dropped here the aggregate and court-feed reads stamp nothing.
+        namesHidden: item.namesHidden,
         // Whether this competition's participants.csv actually LOADED, also a
         // sibling of config for the same reason. Hoisted like dataIssues or it
         // is silently dropped. Absent (an older payload) is read as loaded by
@@ -498,10 +601,12 @@ export const LINEUP_NOT_REMOVED = 'The lineup was not removed';
 // _requestTimedOut's error, which lineupReadFailure words, instead of leaving an
 // editor on "Loading lineup…" until the browser gives up on the connection.
 // `saved: false` reads as null (lineupOrNull). Shared by fetchTeamLineup and
-// fetchLineupInForce.
+// fetchLineupInForce. It reads as the page does (readHeaders): an admin route's
+// editor gets the fighters' names, and a masked answer is refused there.
 export async function _readLineup(url) {
-    const { res, body } = await _fetchJson(url, {});
+    const { res, body } = await _fetchJson(url, { headers: readHeaders() });
     if (!res.ok) throw new Error(body.error || "Failed to load lineup");
+    refuseMaskedForOrganiser(body);
     // An answer whose body could not be read comes back from _fetchJson as an empty
     // object, which cannot be told from one the server sent. A body with no keys is
     // refused here rather than read as no lineup, since an editor would then show an

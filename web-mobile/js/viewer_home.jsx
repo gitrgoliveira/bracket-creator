@@ -129,9 +129,11 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // is "primary" (implicitly when there is one, or by an explicit pin when ≥2);
   // the primary gets the hero card and the loud on-deck chime. The legacy
   // single "followed player" is migrated into the list once (see useWatchlist).
-  const [watchlist, setWatchlist] = useWatchlist();
-  const [primaryKey, setPrimaryKey] = usePrimaryWatch();
   const roster = useMemo(() => buildRoster(t.competitions, t), [t]);
+  // The roster goes to the hook so a name it already stored for a competitor of
+  // a competition that hides names is dropped (bc-hnam).
+  const [watchlist, setWatchlist] = useWatchlist(roster);
+  const [primaryKey, setPrimaryKey] = usePrimaryWatch();
   // Derived beside the roster because it qualifies it: a non-empty roster does
   // not mean every competition's participants loaded, and only the panel's
   // "not in this tournament" claim depends on the difference.

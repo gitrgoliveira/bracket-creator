@@ -316,6 +316,9 @@ const LINEUP_NOT_READ_NOTICE = "The lineup has not been read, so this name was n
 // the pick was out (the feeding match corrected on another device): the name was typed
 // for the team that played the side then, and the members and lineup it would write are
 // theirs.
+// bc-hnam: what the team sheet shows in place of the match when its
+// competition came back with competitors' names hidden.
+const TEAM_SHEET_NAMES_HIDDEN = "This screen was sent the public view, with competitor names hidden, so this match cannot be scored here: a save would record numbers as fighters' names. Reload the page, or sign in again, then open the match again.";
 const SIDE_TEAM_CHANGED_NOTICE = "Nothing was saved because another team is now on this side. Type the name again.";
 
 // Whether a save of this match's lineup for the team is still waiting in the
@@ -667,6 +670,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // knockout-format precondition. Falls back to compKind/teamSize when
   // the fetch fails so the existing fixed-grid flow still works.
   const [compMeta, setCompMeta] = useState(null);
+  // bc-hnam: the competition came back with its competitors' names hidden
+  // (read as the public, or refused as such on an admin route). The sheet then
+  // shows nothing to score: its fighter names would be numbers, and a save
+  // would store a number as a fighter's name.
+  const [namesHiddenRead, setNamesHiddenRead] = useState(false);
+  const namesHiddenHere = namesHiddenRead || !!(compMeta && compMeta.namesHidden);
   // Kachinuki branch. Match-level teamMatchType (added by
   // viewer.compMatches in a sibling slice) is preferred; competition
   // fetch is the fallback. Default "fixed" preserves the legacy N×1
@@ -1335,6 +1344,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
         if (cancelled) return;
         setCompMeta(detail || null);
       } catch (e) {
+        if (cancelled) return;
+        // An admin route's read that came back masked is refused as such
+        // (api_client_requests.jsx refuseMaskedForOrganiser): the sheet
+        // refuses too.
+        if (e && e.code === "names_hidden") setNamesHiddenRead(true);
         // Soft-fail: kachinuki/daihyosen UI just won't render.
         console.warn("Competition fetch for team modal failed:", e);
       }
@@ -5673,14 +5687,34 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     </>
   );
 
+  // bc-hnam: a sheet whose competition hides names from this reader shows the
+  // refusal alone, with no control that writes.
+  const shown = namesHiddenHere ? (
+    <>
+      <div className="editor-modal__head">
+        <div style={{ flex: 1 }}>
+          <div className="editor-modal__title">
+            <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
+          </div>
+        </div>
+        {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} style={{ padding: "2px 8px" }}><Icon name="x" size={14} />Close</button>}
+      </div>
+      <div className="editor-modal__body">
+        <div className="alert alert--warn" role="alert" data-testid="team-editor-names-hidden">
+          {TEAM_SHEET_NAMES_HIDDEN}
+        </div>
+      </div>
+    </>
+  ) : inner;
+
   if (variant === "inline") {
-    return <div className={`scoring-panel scoring-panel--team${useCompact ? " editor-modal--compact" : ""}`} aria-label={dialogLabel}>{inner}</div>;
+    return <div className={`scoring-panel scoring-panel--team${useCompact ? " editor-modal--compact" : ""}`} aria-label={dialogLabel}>{shown}</div>;
   }
 
   return (
     <div className="modal-backdrop" data-testid="scoring-modal-root" ref={openedRef} onClickCapture={onClickCapture} onClick={handleDismiss}>
       <div className={`editor-modal editor-modal--team ${useCompact ? "editor-modal--compact" : ""}`} role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()}>
-        {inner}
+        {shown}
       </div>
     </div>
   );

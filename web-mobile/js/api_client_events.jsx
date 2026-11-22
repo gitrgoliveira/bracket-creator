@@ -15,6 +15,7 @@ import {
 import { noteServerBuild } from './app_version.jsx';
 import { _tellTurnedAway } from './api_client_taps.jsx';
 import { _forgetShownMatches, _forgetAllShownMatches } from './api_client_status.jsx';
+import { _fetchJson, readHeaders, setReadAudience } from './api_client_requests.jsx';
 
 // ---------------------------------------------------------------------------
 // Shared ref-counted SSE singleton
@@ -53,8 +54,38 @@ function _noteEventId(id, parsed) {
     }
     if (id) _lastEventId = id;
 }
-function _eventsUrl() {
-    return _lastEventId ? `/api/events?lastEventId=${encodeURIComponent(_lastEventId)}` : '/api/events';
+function _eventsUrl(ticket) {
+    const params = [];
+    if (ticket) params.push(`ticket=${encodeURIComponent(ticket)}`);
+    if (_lastEventId) params.push(`lastEventId=${encodeURIComponent(_lastEventId)}`);
+    return params.length ? `/api/events?${params.join('&')}` : '/api/events';
+}
+
+// bc-hnam: the stream is masked per subscriber, by the credential its
+// connection was opened with. An EventSource sends no headers, so a page that
+// holds a credential (the organiser's password on an admin route, reveal keys
+// on a public page; readHeaders decides) first asks POST /api/events/ticket
+// with it as headers and opens /api/events?ticket=..., the secret never in a
+// URL. A ticket is good for ONE connection within a minute, so EVERY connect
+// asks a new one: the first, each reconnect after an error, the silence
+// watchdog's, a resume's. A page with no credential opens the public stream
+// with no ticket. A ticket the server will not give is a failed connect,
+// retried with the backoff, and NEVER a fall back to the public stream: a
+// signed-in console must not land on a masked stream without a word. The one
+// exception is the server saying no ticket is needed (event_ticket_not_needed:
+// reveal keys none of which is well formed), where the public stream is what
+// the page is owed anyway; never for the password.
+//
+// _ticketGen tells a ticket's answer whether it is still wanted: a reconnect,
+// the last unsubscribe or a new credential bumps it, and an answer for an
+// older generation opens nothing.
+let _ticketGen = 0;
+let _ticketPending = false;
+const EVENT_TICKET_NOT_NEEDED = 'event_ticket_not_needed';
+
+function _cancelTicket() {
+    _ticketGen++;
+    _ticketPending = false;
 }
 
 // F2: timestamp of the last received SSE activity (open or message).
@@ -125,13 +156,55 @@ function _ensureConnected() {
         clearTimeout(_retryTimer);
         _retryTimer = null;
     }
-    // Guard against double-connect: only one shared source may exist at a time.
-    if (_sharedSource) return;
+    // Guard against double-connect: only one shared source may exist at a time,
+    // and a ticket already asked for is that source on its way.
+    if (_sharedSource || _ticketPending) return;
+    const headers = readHeaders();
+    if (Object.keys(headers).length === 0) {
+        _openSource(_eventsUrl());
+        return;
+    }
+    const gen = ++_ticketGen;
+    _ticketPending = true;
+    _fetchJson('/api/events/ticket', { method: 'POST', headers }).then(({ res, body }) => {
+        if (gen !== _ticketGen) return;
+        _ticketPending = false;
+        if (res.ok && body && typeof body.ticket === 'string' && body.ticket) {
+            _openSource(_eventsUrl(body.ticket));
+            return;
+        }
+        if (res.status === 400 && body && body.code === EVENT_TICKET_NOT_NEEDED && !headers['X-Tournament-Password']) {
+            _openSource(_eventsUrl());
+            return;
+        }
+        throw new Error(`no event-stream ticket (HTTP ${res.status})`);
+    }).catch((err) => {
+        if (gen !== _ticketGen) return;
+        _ticketPending = false;
+        console.warn('[sse] could not open the event stream:', err);
+        _connectFailed();
+    });
+}
+
+// _connectFailed: a connect that never got a source (its ticket was refused or
+// never answered). Told and retried exactly as a source that errored is.
+function _connectFailed() {
+    _disarmWatchdog();
+    _fanOutStatus('error');
+    if (_subscribers.size > 0) {
+        if (_retryTimer) clearTimeout(_retryTimer);
+        _retryTimer = setTimeout(_ensureConnected, _reconnectDelay());
+        _reconnectAttempt++;
+    }
+}
+
+// _openSource opens the shared EventSource on `url` and binds its handlers.
+function _openSource(url) {
     // Bind handlers to THIS instance via a local const. Each handler ignores
     // events from a superseded source (`source !== _sharedSource`) so a stale
     // instance: should one ever fire after being replaced: can't close the
     // live connection or fan out a false status/message to current subscribers.
-    const source = new EventSource(_eventsUrl());
+    const source = new EventSource(url);
     _sharedSource = source;
 
     // F2: arm the watchdog at connect time, not just in onopen: a CONNECTING
@@ -274,6 +347,8 @@ export function _subscribeToEvents(callback, onStatus) {
             // F2: disarm the watchdog when no subscribers remain: no point
             // in polling for silence when no one is listening.
             _disarmWatchdog();
+            // A ticket still being asked for opens nothing now.
+            _cancelTicket();
             if (_sharedSource) {
                 _sharedSource.close();
                 _sharedSource = null;
@@ -296,6 +371,9 @@ export function _reconnectEvents() {
         _sharedSource = null;
         _disarmWatchdog();
     }
+    // A ticket asked for with the old credential opens nothing: the connect
+    // below asks a new one (bc-hnam).
+    _cancelTicket();
     if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
     _reconnectAttempt = 0;
     _ensureConnected();
@@ -315,3 +393,15 @@ export const eventsApi = {
         _reconnectEvents();
     },
 };
+
+// bc-hnam: setAudienceAndReconnect (app.jsx, as the route, the sign-in or the
+// reveal keys held change): the credential this page reads with from now on
+// (api_client_requests.jsx setReadAudience), and, when it changed while the
+// stream is open or opening, a new connection with a ticket for it, so the
+// stream is never left masked, or unmasked, for the old audience. True when
+// the credential changed.
+export function setAudienceAndReconnect(kind, password) {
+    const changed = setReadAudience(kind, password);
+    if (changed && (_sharedSource || _ticketPending || _retryTimer)) _reconnectEvents();
+    return changed;
+}

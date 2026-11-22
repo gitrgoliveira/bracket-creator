@@ -1298,8 +1298,9 @@ describe('API Utils', () => {
         const r = await API.swissStandings('c1');
         expect(r).toEqual(sample);
         // No password header on the public endpoint; pin the call
-        // shape so a refactor doesn't accidentally make it admin-only.
-        expect(global.fetch).toHaveBeenCalledWith('/api/competitions/c1/swiss/standings');
+        // shape so a refactor doesn't accidentally make it admin-only. A
+        // public page holding no reveal key sends no credential (bc-hnam).
+        expect(global.fetch).toHaveBeenCalledWith('/api/competitions/c1/swiss/standings', { headers: {} });
       });
 
       it('throws with server message on error', async () => {
@@ -1323,8 +1324,9 @@ describe('API Utils', () => {
         const r = await API.leagueStandings('c1');
         expect(r).toEqual(sample);
         // No password header on the public endpoint; pin the call shape so a
-        // refactor doesn't accidentally make it admin-only.
-        expect(global.fetch).toHaveBeenCalledWith('/api/competitions/c1/league/standings');
+        // refactor doesn't accidentally make it admin-only. A public page
+        // holding no reveal key sends no credential (bc-hnam).
+        expect(global.fetch).toHaveBeenCalledWith('/api/competitions/c1/league/standings', { headers: {} });
       });
 
       it('throws with server message on error', async () => {

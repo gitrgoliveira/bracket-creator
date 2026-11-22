@@ -12,6 +12,7 @@ import { canShuffleUnseeded } from './competition_shape.jsx';
 import { downloadBlob } from './blob_download.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { PillButton } from './competition_fields.jsx';
+import { publicNamesApplies, fetchRevealLinks, revealLinkUrl, copyText } from './public_names_fields.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 
@@ -288,7 +289,7 @@ export const ROSTER_KEPT_CHANGING = "Not saved: the competitor list kept changin
 // are told (stage 6 review 12, C1).
 export const ROSTER_CHANGED_BEFORE_APPLY = "Not saved: the competitor list was changed on another device. The list now shown is the current one; your pasted list is still in the box, so tap Apply changes to replace it.";
 
-function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection, onRefreshCompetition }) {
+function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSection, onRefreshCompetition }) {
   // Zekken-column flag. Engi pairs store both member names combined in the
   // name field ("Name 1 - Name 2"), so engi does not alter the roster layout.
   const withZekken = !!c.withZekkenName;
@@ -480,6 +481,29 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     || (withZekken && replaceZekken !== (replaceTarget.displayName || "")));
   useUnsavedInput(rosterDirty || addTyped || editChanged);
   const players = useMemo(() => c.players || [], [c.players]);
+  // bc-hnam: with a link per person, each competitor's own reveal key is read
+  // (organiser only) so the row can copy their link. Read again when the roster
+  // or the expiry moves; a key that cannot be read simply leaves the button out.
+  const revealPerson = c.publicNames === "person" && publicNamesApplies(tournament);
+  const [revealKeys, setRevealKeys] = useState(null);
+  useEffect(() => {
+    setRevealKeys(null);
+    if (!revealPerson) return undefined;
+    let live = true;
+    fetchRevealLinks(c.id, password)
+      .then((answer) => { if (live) setRevealKeys(new Map((answer.competitors || []).map((x) => [x.id, x.key]))); })
+      .catch(() => { if (live) setRevealKeys(null); });
+    return () => { live = false; };
+  }, [c.id, revealPerson, c.revealUntil, players.length, password]);
+  const copyRevealLink = (p) => {
+    const key = revealKeys && revealKeys.get(p.id);
+    if (!key) return;
+    const base = (tournament && tournament.publicURL || "").trim() || (window.linkBase || (() => window.location.origin))(tournament);
+    copyText(revealLinkUrl(base, c.id, key)).then(
+      () => showToast(`Reveal link for ${p.name} copied`),
+      () => showToast("Copy failed", "error"),
+    );
+  };
   // First-run: with no participants yet there is nothing to seed or check in,
   // so the seeding panel is premature. Collapse it and let the roster-input
   // panel fill the width: adding names is the only task at this point.
@@ -1326,6 +1350,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                           draw (engine.ReplaceParticipantInDrawTx, mp-et2); it 409s
                           once the competition has started, so the pencil goes then.
                           Operator ruling bc-prow, reversing the 26dcd631 hide. */}
+                      {revealPerson && revealKeys && revealKeys.get(p.id) && (
+                        <button type="button" className="btn btn--sm seed-row__reveal" onClick={() => copyRevealLink(p)} aria-label={`Copy reveal link for ${p.name}`}>Copy reveal link</button>
+                      )}
                       {(isSetup || isDrawReady) && (
                         <button type="button" className="btn btn--sm btn--icon-sm" title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(withZekken ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}><Icon name="pencil" size={14} /></button>
                       )}

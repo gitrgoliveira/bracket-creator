@@ -17,8 +17,15 @@ import { pushToast } from './toast_queue.jsx';
 import { queueMoveCourts, sharesCourtDay, sharesDay } from './court_queue.jsx';
 import { useCourtPaceLookup, PACE_TICK_MS } from './court_pace.jsx';
 import { useLatestRef } from './latest_ref.jsx';
+// bc-hnam: which credential the page reads with, keyed by the route.
+import { readAudienceKey, currentReadAudienceKey } from './api_client_requests.jsx';
+import { setAudienceAndReconnect } from './api_client_events.jsx';
+import { onRevealKeysChange } from './reveal_key.jsx';
+import { RevealPage, takeRevealLink } from './viewer_reveal.jsx';
+import { publicNamesLabel } from './public_names_fields.jsx';
+import { andList } from './list_phrase.jsx';
 
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useLayoutEffect, useRef, useCallback } = React;
 
 // preact-router wrapper from router.jsx (T005). Used for URL → state
 // synchronisation. The render path itself still drives off
@@ -197,6 +204,12 @@ function parsePath(path) {
       const compId = path.split("/")[2] || "";
       if (compId) return { mode: "viewer", viewerScreen: "register", viewerCompId: compId };
     }
+    // bc-hnam: /reveal/<competition>, a reveal link (its key, in the
+    // fragment, is taken before the first render: viewer_reveal.jsx).
+    if (path.startsWith("/reveal/")) {
+      const compId = safeDecode(path.split("/")[2] || "");
+      if (compId) return { mode: "viewer", viewerScreen: "reveal", viewerCompId: compId };
+    }
     return { mode: "viewer", viewerScreen: "home" };
 }
 
@@ -223,6 +236,7 @@ function pathFromState(m, vs, vcid, av, vt) {
       return "/admin";
     }
     if (vs === "register" && vcid) return `/register/${vcid}`;
+    if (vs === "reveal" && vcid) return `/reveal/${encodeURIComponent(vcid)}`;
     if (vcid) {
       // Omit the tab segment for overview (default) so the canonical URL
       // stays clean and parsePath(pathFromState(…)) round-trips correctly.
@@ -517,6 +531,10 @@ function App() {
   // but its result is only meaningful once. If this ever becomes a
   // performance concern, convert to the lazy-initializer function form:
   // useState(() => parsePath(window.location.pathname))
+  //
+  // bc-hnam: a reveal link's key is taken first, before anything reads: the
+  // first reads then carry it, and the fragment leaves the address bar.
+  const [revealLanding] = useState(() => takeRevealLink());
   const initialRoute = (() => {
     try {
       return parsePath(window.location.pathname);
@@ -550,6 +568,29 @@ function App() {
   });
   // A deep link to /admin without a sign-in opens the AuthModal at once.
   const [authPrompt, setAuthPrompt] = useState(() => initialRoute.mode === "admin" && !authed);
+  // bc-hnam: who this page reads as. An admin route signed in reads with the
+  // password (every admin read gets the real names); the court boards and the
+  // overlay read with nothing, whatever this device holds; every other page
+  // reads with the reveal keys the phone holds (api_client_requests.jsx
+  // readHeaders). The keys held can change in another tab: revealVersion
+  // re-asks.
+  const [revealVersion, setRevealVersion] = useState(0);
+  useEffect(() => onRevealKeysChange(() => setRevealVersion((v) => v + 1)), []);
+  const readKind = mode === "display" ? "display" : (mode === "admin" && authed && password ? "admin" : "viewer");
+  const readCredential = readKind === "admin" ? password : "";
+  // The audience the page's data must have been read as (a public page's
+  // names the keys held, so a key taken in another tab is a new audience).
+  const audienceNow = readAudienceKey(readKind, readCredential);
+  // The audience the competitions held now were read as: the page shows them
+  // only while it is audienceNow (see the reload effect below), so names read
+  // on an admin route never show on the public page of the same laptop, nor
+  // numbers on the admin route the operator saves from.
+  const [dataAudience, setDataAudience] = useState(audienceNow);
+  // Set before any effect reads (a layout effect runs first), and the event
+  // stream reopened with a ticket for it when it changed.
+  useLayoutEffect(() => {
+    setAudienceAndReconnect(readKind, readCredential);
+  }, [readKind, readCredential, revealVersion]);
   const [reauthPrompt, setReauthPrompt] = useState(false);
   const [viewerCompId, setViewerCompId] = useState(initialRoute.viewerCompId || null);
   // mp-tidg: tab is lifted here (not inside ViewerCompetition) so that
@@ -804,8 +845,13 @@ function App() {
   const updateTournament = useCallback((next) => setTournament((prev) => keepNewerTournament(prev, next)), []);
 
   const load = async () => {
+    // bc-hnam: an answer read as another audience than the page reads as by
+    // the time it lands (the route changed meanwhile) is dropped: the change
+    // of audience reads again.
+    const readAs = currentReadAudienceKey();
     try {
       const t = await window.API.fetchTournament();
+      if (currentReadAudienceKey() !== readAs) return;
       if (!t || t.error) {
         // null = no tournament configured yet: fetchTournament returns null for
         // the bootstrap state (a 200 with a null body on newer servers, or a 404
@@ -813,6 +859,7 @@ function App() {
         setTournament(null);
       } else {
         const comps = await window.API.fetchCompetitions();
+        if (currentReadAudienceKey() !== readAs) return;
         t.competitions = comps;
         // A display takes the fetch whole: no score editor reads it, and a
         // reload must discard its optimistic broadcast overlay (see below).
@@ -1504,7 +1551,24 @@ function App() {
       setSelectedCompData(null);
       setLoading(false);
     }
-  }, [viewerCompId, viewerScreen, compPushes]);
+    // audienceNow: a read made as another audience is read again as this one
+    // (bc-hnam).
+  }, [viewerCompId, viewerScreen, compPushes, audienceNow]);
+
+  // bc-hnam: the competitions held were read as another audience (the page
+  // moved between an admin route and a public one, the organiser signed in
+  // or out, the phone took a reveal key). They are dropped, never shown, and
+  // read again; the page shows the spinner meanwhile (the gate below).
+  useEffect(() => {
+    if (dataAudience === audienceNow) return undefined;
+    let cancelled = false;
+    setTournament((prev) => (prev && Array.isArray(prev.competitions) ? { ...prev, competitions: [] } : prev));
+    setSelectedCompData(null);
+    Promise.resolve(loadRef.current()).finally(() => {
+      if (!cancelled) setDataAudience(audienceNow);
+    });
+    return () => { cancelled = true; };
+  }, [audienceNow, dataAudience, loadRef]);
 
   const requestAdmin = () => {
     if (authed) {
@@ -1578,6 +1642,9 @@ function App() {
   }, []);
 
   if (loading && !selectedCompData) return <window.LoadingSpinner text="Loading..." />;
+  // bc-hnam: data read as another audience is never shown; it is being read
+  // again as this one (the reload effect above).
+  if (dataAudience !== audienceNow) return <window.LoadingSpinner text="Loading..." />;
 
   // Gate ALL rendering on the initial data load. The spinner stays visible
   // until both fetchTournament and fetchAuthConfig have resolved (setting
@@ -1683,7 +1750,29 @@ function App() {
           onDismiss={handleDismissAnnouncement}
         />
       )}
-      {selectedCompData && viewerScreen !== "register" ? (
+      {viewerScreen === "reveal" && viewerCompId ? (
+        // bc-hnam: a reveal link. The key was taken before the first render
+        // (takeRevealLink); the page reads the competition with it, follows a
+        // per-person link's competitor, and opens the competition in place of
+        // the link (a replace, so Back does not land on the link again).
+        <RevealPage
+          compId={viewerCompId}
+          landing={revealLanding}
+          competition={selectedCompData}
+          onOpen={(compId) => {
+            replaceNextUrlSyncRef.current = true;
+            setViewerCompId(compId);
+            setViewerTab(null);
+            setViewerScreen("home");
+          }}
+          onHome={() => {
+            replaceNextUrlSyncRef.current = true;
+            setViewerCompId(null);
+            setViewerTab(null);
+            setViewerScreen("home");
+          }}
+        />
+      ) : selectedCompData && viewerScreen !== "register" ? (
         <window.ViewerCompetition
           // key on the competition id so switching comps remounts the
           // component and resets its internal per-comp UI state (open match
@@ -1932,6 +2021,18 @@ export function validateCreateTournament({ name, pass, date, courts, maxCourts }
   return "";
 }
 
+// bc-hnam: the question the first-run form asks when the server answers
+// public_names_self_run_switch: creating the tournament self-run shows the
+// names of the competitions listed, which hide them now.
+export const SELF_RUN_SWITCH_CANCELLED = "The tournament was not created. Those competitions still hide competitor names.";
+export function selfRunSwitchMessage(competitions) {
+  const list = Array.isArray(competitions) ? competitions : [];
+  const n = list.length;
+  const count = n === 1 ? "1 competition" : `${n} competitions`;
+  const names = andList(list.map((c) => `${(c && c.name) || (c && c.id) || "?"} (now: ${publicNamesLabel(c && c.publicNames)})`));
+  return `A self-run tournament always shows competitor names on the public pages. Creating it sets ${count} back to "${publicNamesLabel("")}": ${names}. Their names then show on every public page.`;
+}
+
 function CreateTournament({ onCreated, authConfig }) {
   // In locked mode the server requires X-Tournament-Password on the
   // bootstrap POST and discards the body's `password` field. The form's
@@ -2013,7 +2114,32 @@ function CreateTournament({ onCreated, authConfig }) {
       // X-Tournament-Password. In file mode authPassword is undefined
       // and the header is omitted (the bootstrap branch in middleware
       // lets it through unauthenticated).
-      const t = await window.API.createTournament(config, locked ? pass : undefined);
+      const send = (confirmShowNames) => window.API.createTournament(
+        confirmShowNames ? { ...config, confirmShowNames: true } : config,
+        locked ? pass : undefined,
+      );
+      let t;
+      try {
+        t = await send(false);
+      } catch (err) {
+        // bc-hnam: a self-run tournament always shows names on the public
+        // pages, so creating one over competitions that hide them (a restored
+        // data folder) asks first, naming them. Cancelling creates nothing.
+        if (!err || err.code !== "public_names_self_run_switch") throw err;
+        const ok = await window.confirmDialog({
+          title: "Show competitor names?",
+          message: selfRunSwitchMessage(err.competitions),
+          confirmLabel: "Show names and create",
+          danger: true,
+        });
+        if (!mountedRef.current) return;
+        if (!ok) {
+          setError(SELF_RUN_SWITCH_CANCELLED);
+          setSaving(false);
+          return;
+        }
+        t = await send(true);
+      }
       if (!mountedRef.current) return;
       onCreated(t, pass);
     } catch (err) {

@@ -7361,6 +7361,19 @@ details[open] > summary::before { transform: rotate(90deg); }
   flex: none;
   margin: 0;
 }
+/* A competition that hides names prints each competitor's number where the
+   name goes (bc-hnam), and the row then holds the number ONCE, as the chip:
+   the name text beside it is empty (nameBesideBadge). The empty text takes no
+   room, and the chip drops the margin it keeps for a name that is not there. */
+.numbered-name__text:empty { display: none; }
+.num-prefix:has(+ .numbered-name__text:empty) { margin-right: 0; }
+.numbered-name__text:empty + .num-prefix--after { margin-left: 0; }
+/* The line a public competition page shows while its names are hidden. */
+.names-hidden-note {
+  margin: 8px 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
 
 /* The two compact schedules' stacked side lines take their tint from
    .side-fill--* at the --mid pitch (SideCell density="mid"), so they read like
@@ -12733,3 +12746,17 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .backup-scope .input,
 .backup-copy-name,
 .backup-sync > summary { min-height: var(--tap-floor); }
+
+/* ---------- Competitor names on the public pages (bc-hnam) ----------
+   The option picker's notes sit close under the pills they explain; the buttons
+   (copy, print, clear, show names) keep a tap-sized target. */
+.public-names__note { margin-top: -6px; margin-bottom: 14px; }
+.public-names__until { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.public-names__until .input { max-width: 240px; }
+.public-names__buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.public-names__fix { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 8px; }
+.public-names__buttons .btn,
+.public-names__until .btn,
+.public-names__fix .btn,
+.seed-row__reveal { min-height: max(36px, var(--tap-floor)); }
+.seed-row__reveal { white-space: nowrap; }

@@ -22,7 +22,7 @@
 // unified `score` object the bracket card renderer can consume.
 
 import { realIppons, hanteiDecided, placeHtForWinner, stripHt } from './result_slot.jsx';
-import { sameCompetitor } from './competitor_identity.jsx';
+import { sameCompetitor, isMaskedName } from './competitor_identity.jsx';
 const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
 
 function toBackendStatus(s) { return STATUS_MAP[s] || s; }
@@ -275,7 +275,7 @@ function matchWire(m) {
 
 // Normalize a backend match (string sideA/sideB) into UI shape (object sideA/sideB).
 // Also normalizes score fields so bracket.js MatchCard can display them.
-function normalizeMatch(m, playerMap) {
+function normalizeMatch(m, playerMap, namesHidden) {
     if (!m) return m;
     const norm = { ...m };
     // Normalize sideA/sideB/winner from name-string to {id, name}.
@@ -304,7 +304,11 @@ function normalizeMatch(m, playerMap) {
         // an id-less participant -- so every downstream "does this side
         // carry an id" check reads it truthfully instead of matching itself
         // to any other side that happens to share the display name.
+        // A side the map does not hold, in a payload built for a reader who may
+        // not see names, is the fail-closed "?" the server prints for a name it
+        // could not place (bc-hnam): hidden, like every masked side.
         const base = p ? { ...p } : { id: flatId || "", name };
+        if (!p && isMaskedName(namesHidden, name, "")) base.nameHidden = true;
         if (flatId) base.id = flatId;
         return base;
     };
@@ -412,6 +416,10 @@ function buildPlayerMap(comp) {
             source: norm.source || "",
             danGrade: norm.danGrade || "",
         };
+        // bc-hnam: stamped (never defaulted to false) on a record whose name is
+        // only its number, so a surface asks nameHidden(x) and a side resolved
+        // from this map carries it like it carries the number.
+        if (norm.nameHidden || isMaskedName(comp?.namesHidden, norm.name, norm.number)) entry.nameHidden = true;
         map[norm.name] = entry;
         // ALSO key by participant id. The name key collapses same-name
         // participants (two "Tanaka Kenji" from different dojos) onto whichever
@@ -444,6 +452,14 @@ function buildPlayerMetadata(danGrade, existingMeta) {
     if (danGrade) return [danGrade, ...rest];
     if (rest.length > 0) return ["", ...rest];
     return undefined;
+}
+
+// stampNameHidden: the player with `nameHidden` set when the payload hides names
+// from this reader and this record's name is only its number (isMaskedName in
+// competitor_identity.jsx owns the rule). A visible record is returned as it is.
+function stampNameHidden(p, payloadHidden) {
+    if (!p || !isMaskedName(payloadHidden, p.name, p.number)) return p;
+    return { ...p, nameHidden: true };
 }
 
 // Normalize a Go helper.Player (uppercase fields) to frontend shape (lowercase)
@@ -482,6 +498,10 @@ function normalizeCompetitionDetail(data) {
     // null from empty courts, so this is behavior-preserving.
     result.courts = result.courts || [];
 
+    // bc-hnam: the server marks a payload built for a reader who may not see
+    // names with `namesHidden: true`. Every record below is stamped from it.
+    const hidden = !!result.namesHidden;
+
     // ExtraQualifiers (bc-qual LP-5a): `json:"extraQualifiers,omitempty"` on
     // the Go side drops the key entirely for the default/standard value
     // (""), so a competition without a non-standard selection arrives with
@@ -509,7 +529,7 @@ function normalizeCompetitionDetail(data) {
             config.players = config.players.map(p => {
                 const norm = normalizePlayer(p);
                 // Preserve id and seed null (normalizePlayer maps Seed:0 → seed:0, but JS uses null for "not seeded")
-                return { ...norm, id: p.id || norm.id, seed: p.Seed || p.seed || null };
+                return stampNameHidden({ ...norm, id: p.id || norm.id, seed: p.Seed || p.seed || null }, hidden);
             });
         }
         // bc-pnum ruling 1e follow-up: dataIssues is a SIBLING of config on
@@ -540,7 +560,7 @@ function normalizeCompetitionDetail(data) {
             const poolName = p.PoolName || p.poolName || "";
             return {
                 poolName,
-                players: (p.Players || p.players || []).map(normalizePlayer),
+                players: (p.Players || p.players || []).map((pl) => stampNameHidden(normalizePlayer(pl), hidden)),
                 matches: p.Matches || p.matches || [],
                 qualifiers: cuts[poolName],
             };
@@ -553,26 +573,32 @@ function normalizeCompetitionDetail(data) {
         for (const key of Object.keys(result.standings)) {
             standings[key] = result.standings[key].map(s => ({
                 ...s,
-                player: normalizePlayer(s.player),
+                player: stampNameHidden(normalizePlayer(s.player), hidden),
                 flags: s.flags || 0,
             }));
         }
         result.standings = standings;
     }
 
+    // The roster a viewer item carries beside its config (hoisted by
+    // normalizeViewerCompItem) is stamped like the config's own.
+    if (hidden && Array.isArray(result.players)) {
+        result.players = result.players.map((pl) => stampNameHidden(pl, hidden));
+    }
+
     const playerMap = buildPlayerMap(result);
 
     if (result.poolMatches) {
-        result.poolMatches = result.poolMatches.map(m => normalizeMatch(m, playerMap));
+        result.poolMatches = result.poolMatches.map(m => normalizeMatch(m, playerMap, hidden));
     }
     if (result.bracket && result.bracket.rounds) {
         result.bracket = { ...result.bracket, rounds: result.bracket.rounds.map(round =>
-            round.map(m => normalizeMatch(m, playerMap))
+            round.map(m => normalizeMatch(m, playerMap, hidden))
         )};
     }
     // Normalize bronze/3rd-place match when present (any competition requiring a single 3rd; bc-3rdp)
     if (result.bracket && result.bracket.thirdPlaceMatch) {
-        result.bracket = { ...result.bracket, thirdPlaceMatch: normalizeMatch(result.bracket.thirdPlaceMatch, playerMap) };
+        result.bracket = { ...result.bracket, thirdPlaceMatch: normalizeMatch(result.bracket.thirdPlaceMatch, playerMap, hidden) };
     }
     return result;
 }

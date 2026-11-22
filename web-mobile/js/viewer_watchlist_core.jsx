@@ -17,13 +17,13 @@
 // (panel UI) continues to read the re-exported watchlist helpers via window.*
 // lazy reads: those assignments still live in viewer.jsx.
 
-import { competitorKey } from './competitor_identity.jsx';
+import { competitorKey, nameHidden, numberOf, isMaskedName } from './competitor_identity.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
 import { parseWatchlistTokens, resolveFreshTokens, WATCHLIST_PARAM } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 import { checkInApplies } from './competition_shape.jsx';
 
-const { useState } = React;
+const { useState, useEffect } = React;
 
 // Case-insensitive, whitespace-trimmed name normaliser for every watch-list
 // key in this file: names here come from operator-typed rosters, so "Sato"
@@ -141,6 +141,10 @@ export const WATCHLIST_MAX = 50;
 // The watchlist absorbs the old single "followed player". Entries are now
 // polymorphic:
 //   - player: { type: "player", id, name, dojo }
+//     or, for a competitor of a competition that hides names (bc-hnam),
+//     { type: "player", id, name: "", dojo, number, nameHidden: true }: the id
+//     and the number are kept and the name is NOT, so nothing on the phone
+//     (nor in a shared link) holds a name the reader was never given.
 //   - dojo:   { type: "dojo", dojo }   (expands to all current roster members)
 //
 // A single entry is *implicitly* primary (gets the hero card + chime). With
@@ -217,7 +221,47 @@ export function normalizeWatchlistEntry(x) {
   // Explicit player OR legacy (no type): both keyed by id.
   const id = x.id != null ? String(x.id) : "";
   if (!id) return null;
+  // A hidden-name entry never keeps a name, whatever the stored value says.
+  if (x.nameHidden) return hiddenWatchEntry(id, x.dojo, x.number);
   return { type: "player", id, name: x.name != null ? String(x.name) : "", dojo: x.dojo != null ? String(x.dojo) : "" };
+}
+
+// hiddenWatchEntry: the entry for a competitor whose name is hidden from this
+// reader (bc-hnam): id, dojo and number, and no name.
+function hiddenWatchEntry(id, dojo, number) {
+  return {
+    type: "player", id: String(id), name: "",
+    dojo: dojo != null ? String(dojo) : "",
+    number: number != null ? String(number) : "",
+    nameHidden: true,
+  };
+}
+
+// scrubHiddenWatchNames: the watchlist with every name it still holds for a
+// competitor whose competition now hides names dropped (bc-hnam): an entry
+// stored before the organiser turned hiding on, or a shared link opened before,
+// keeps its id and gains the number, and loses its name. `roster` is
+// buildRoster output, whose records carry nameHidden. Returns `watchlist`
+// ITSELF when nothing changed, so useWatchlist's setter drops it without a
+// re-render or a storage write.
+export function scrubHiddenWatchNames(watchlist, roster) {
+  if (!Array.isArray(watchlist)) return watchlist;
+  const hiddenById = new Map();
+  (Array.isArray(roster) ? roster : []).forEach((p) => {
+    if (p && p.id && nameHidden(p)) hiddenById.set(String(p.id), p);
+  });
+  if (hiddenById.size === 0) return watchlist;
+  let changed = false;
+  const next = watchlist.map((e) => {
+    if (!e || e.type === "dojo") return e;
+    const rec = hiddenById.get(String(e.id));
+    if (!rec) return e;
+    const number = numberOf(rec);
+    if (e.nameHidden && !e.name && (e.number || "") === number) return e;
+    changed = true;
+    return hiddenWatchEntry(e.id, rec.dojo || e.dojo, number);
+  });
+  return changed ? next : watchlist;
 }
 
 // normalizeWatchlist: normalize every entry, drop the unusable ones, dedup by
@@ -416,6 +460,7 @@ export function migrateWatchlistOnLoad(rawWatchlist, legacyId, legacyName) {
 export function addPlayerToWatchlist(watchlist, p) {
   if (!p || !p.id) return watchlist;
   if (watchlist.some((e) => e.type === "player" && e.id === p.id)) return watchlist;
+  if (nameHidden(p)) return [...watchlist, hiddenWatchEntry(p.id, p.dojo, numberOf(p))];
   return [...watchlist, { type: "player", id: p.id, name: p.name || "", dojo: p.dojo || "" }];
 }
 
@@ -448,7 +493,9 @@ export function resolveWatchedPlayers(watchlist, roster) {
     if (!key || seen.has(key)) return;
     seen.add(key);
     const rec = rosterById.get(key);
-    out.push(rec ? { ...rec, id: key } : { id: key, name: (fallback && fallback.name) || "", dojo: (fallback && fallback.dojo) || "" });
+    if (rec) out.push({ ...rec, id: key });
+    else if (fallback && fallback.nameHidden) out.push({ id: key, name: fallback.number || "", dojo: fallback.dojo || "", number: fallback.number || "", nameHidden: true });
+    else out.push({ id: key, name: (fallback && fallback.name) || "", dojo: (fallback && fallback.dojo) || "" });
   };
   normalizeWatchlist(watchlist).forEach((entry) => {
     if (entry.type === "dojo") {
@@ -688,7 +735,12 @@ export function buildRoster(competitions, tournament) {
         // number rule's "prefix alone selects the draw" arm reads it through
         // prefixOf (competitor_identity.jsx), because "K021" alone cannot say
         // whether its prefix is K or K02.
-        map.set(p.id, { ...p, checkedIn, comps: [c.name || ""], numberPrefix: c.numberPrefix || "" });
+        // `nameHidden` is stamped (never defaulted) on a record whose name is
+        // only its number (bc-hnam): normalizeCompetitionDetail already did it,
+        // and a competition handed in without that pass (a fixture) is judged
+        // here from its own `namesHidden` marker by the same rule.
+        const masked = nameHidden(p) || isMaskedName(c.namesHidden, p.name, p.number);
+        map.set(p.id, { ...p, checkedIn, comps: [c.name || ""], numberPrefix: c.numberPrefix || "", ...(masked ? { nameHidden: true } : {}) });
       } else {
         // Reached only if the SAME participant id appears under two
         // competitions. Participant ids are minted per competition (a fresh
@@ -720,7 +772,12 @@ export function buildRoster(competitions, tournament) {
 // key shouldn't crash the viewer for everyone using that browser profile), and
 // folds the legacy single "followed player" keys into the list once on first
 // load (mp-xhaa migration).
-export function useWatchlist() {
+//
+// `roster` (optional, buildRoster output) lets the hook drop the names it holds
+// for a competitor whose competition hides names (bc-hnam,
+// scrubHiddenWatchNames): a caller that has the roster passes it, and the list
+// is cleaned as soon as the roster says so.
+export function useWatchlist(roster) {
   const [list, setList] = useState(() => {
     if (typeof window === "undefined") return [];
     let raw = null;
@@ -780,5 +837,11 @@ export function useWatchlist() {
       try { window.localStorage.setItem(LS_WATCHLIST, JSON.stringify(normalized)); } catch (_e) { /* ignore */ }
     }
   };
+  useEffect(() => {
+    // Asked of the list as rendered, and only a changing answer reaches the
+    // setter, so a list with nothing to drop never causes a render.
+    if (!roster || scrubHiddenWatchNames(list, roster) === list) return;
+    persist((prev) => scrubHiddenWatchNames(prev, roster));
+  }, [roster, list]);
   return [list, persist];
 }

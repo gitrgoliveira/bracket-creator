@@ -35,8 +35,11 @@ type configVersionPayload struct {
 	TwoThirdPlaces               *bool         `json:"twoThirdPlaces"`
 	ExpectedParticipants         int           `json:"expectedParticipants"`
 	CheckInEnabled               bool          `json:"checkInEnabled"`
-	PublicNames                  string        `json:"publicNames"`
-	RevealUntil                  string        `json:"revealUntil"`
+	// omitempty on the fields added since v2.5 keeps an untouched record's
+	// version as it was before the upgrade, so a save opened before it is
+	// not refused for a change nobody made.
+	PublicNames string `json:"publicNames,omitempty"`
+	RevealUntil string `json:"revealUntil,omitempty"`
 }
 
 // ConfigVersion computes a content-hash config version for a competition's

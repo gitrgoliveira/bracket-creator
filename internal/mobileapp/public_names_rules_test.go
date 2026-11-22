@@ -338,6 +338,41 @@ func TestPublicNames_TournamentDefaultAppliesAfterConfirmation(t *testing.T) {
 	assert.Equal(t, state.PublicNamesShown, f.comp(t, "c1").PublicNames)
 }
 
+// A Swiss competition left hiding names (a hand edit, a restore) is brought
+// back to showing them by a default that shows names, as any other is; only a
+// hiding default leaves Swiss out.
+func TestPublicNames_AShowingDefaultBringsBackAHidingSwissCompetition(t *testing.T) {
+	f := newPublicNamesFixture(t, state.TournamentModeOfficiated)
+	w := f.admin(http.MethodPut, "/api/tournament", tournamentPutBody(t, f, map[string]any{"defaultPublicNames": "person", "confirmPublicNames": true}))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	f.saveComp(t, &state.Competition{ID: "c1", Name: "Swiss", Kind: "individual", Format: state.CompFormatSwiss, PublicNames: state.PublicNamesHidden})
+
+	w = f.admin(http.MethodPut, "/api/tournament", tournamentPutBody(t, f, map[string]any{"defaultPublicNames": ""}))
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Equal(t, codePublicNamesApplyConfirm, codeOf(t, w))
+	var refusal struct {
+		Competitions []publicNamesTarget `json:"competitions"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &refusal))
+	require.Len(t, refusal.Competitions, 1, "the hiding Swiss competition is listed")
+	assert.Equal(t, "c1", refusal.Competitions[0].ID)
+
+	w = f.admin(http.MethodPut, "/api/tournament", tournamentPutBody(t, f, map[string]any{"defaultPublicNames": "", "confirmPublicNames": true}))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, state.PublicNamesShown, f.comp(t, "c1").PublicNames)
+}
+
+func TestPublicNamesDefaultChanges(t *testing.T) {
+	swissHiding := &state.Competition{Format: state.CompFormatSwiss, PublicNames: state.PublicNamesHidden}
+	knockout := &state.Competition{Format: state.CompFormatKnockout}
+	assert.True(t, publicNamesDefaultChanges(swissHiding, state.PublicNamesShown), "a showing default reaches a hiding Swiss competition")
+	assert.False(t, publicNamesDefaultChanges(swissHiding, state.PublicNamesPerson), "a hiding default never reaches Swiss")
+	assert.False(t, publicNamesDefaultChanges(&state.Competition{Format: state.CompFormatSwiss}, state.PublicNamesPerson))
+	assert.True(t, publicNamesDefaultChanges(knockout, state.PublicNamesPerson))
+	assert.False(t, publicNamesDefaultChanges(knockout, state.PublicNamesShown), "an option already taken is no change")
+	assert.False(t, publicNamesDefaultChanges(nil, state.PublicNamesShown))
+}
+
 func TestPublicNames_TournamentDefaultRefusals(t *testing.T) {
 	t.Run("a value that is not an option is 400", func(t *testing.T) {
 		f := newPublicNamesFixture(t, state.TournamentModeOfficiated)

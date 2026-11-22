@@ -52,6 +52,13 @@ describe('Settings: competitor names on public pages', () => {
     expect(warn.textContent).toContain('shown to everyone exactly as typed');
   });
 
+  it('tells a team competition with no kind but a team size that team names stay visible', async () => {
+    // A hand-edited competition: an empty kind with a team size is still a
+    // team competition (isTeamCompetition, Go's Competition.IsTeam).
+    const { container } = await mountSettings(makeSettingsCompetition({ kind: '', teamSize: 3, publicNames: 'hidden' }), vi.fn());
+    expect(container.textContent).toContain('Team names stay visible.');
+  });
+
   it('asks for the expiry only while the choice has links', async () => {
     const { container } = await mountSettings(makeSettingsCompetition(), vi.fn());
     expect(container.querySelector('input[type="datetime-local"]')).toBeNull();

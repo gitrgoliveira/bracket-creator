@@ -1547,6 +1547,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         tournament={tournament}
         format={local.format}
         kind={local.kind}
+        teamSize={local.teamSize}
         value={local.publicNames || ""}
         onChange={(v) => update("publicNames", v)}
         revealUntil={local.revealUntil || ""}

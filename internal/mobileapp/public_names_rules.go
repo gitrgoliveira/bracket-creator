@@ -109,13 +109,21 @@ type publicNamesTarget struct {
 	PublicNames string `json:"publicNames"`
 }
 
+// publicNamesDefaultChanges reports whether the tournament default v changes
+// comp: its option differs, and v is not a hiding option on a Swiss one (E2:
+// Swiss never hides names, but one left hiding by a hand edit or a restore is
+// brought back to showing them).
+func publicNamesDefaultChanges(comp *state.Competition, v string) bool {
+	return comp != nil && comp.PublicNames != v && (comp.Format != state.CompFormatSwiss || !state.PublicNamesHidesNames(v))
+}
+
 // publicNamesDefaultTargets lists the competitions that taking the
-// tournament default v would change: every one whose option differs, Swiss
-// left out (E2). Sorted as the store lists them.
+// tournament default v would change (publicNamesDefaultChanges). Sorted as
+// the store lists them.
 func publicNamesDefaultTargets(comps []*state.Competition, v string) []publicNamesTarget {
 	targets := []publicNamesTarget{}
 	for _, comp := range comps {
-		if comp == nil || comp.Format == state.CompFormatSwiss || comp.PublicNames == v {
+		if !publicNamesDefaultChanges(comp, v) {
 			continue
 		}
 		targets = append(targets, publicNamesTarget{ID: comp.ID, Name: comp.Name, PublicNames: comp.PublicNames})
@@ -135,7 +143,7 @@ func applyPublicNamesDefault(store *state.Store, targets []publicNamesTarget, v 
 	var failed []string
 	for _, target := range targets {
 		changed, err := store.UpdateCompetitionChanged(target.ID, func(current *state.Competition) (*state.Competition, error) {
-			if current == nil || current.PublicNames == v || (current.Format == state.CompFormatSwiss && state.PublicNamesHidesNames(v)) {
+			if !publicNamesDefaultChanges(current, v) {
 				return nil, nil
 			}
 			if err := setPublicNames(current, v); err != nil {

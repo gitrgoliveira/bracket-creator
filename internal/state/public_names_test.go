@@ -303,3 +303,15 @@ func TestConfigVersion_PublicNamesFields(t *testing.T) {
 	c.RevealSecret = testRevealSecret
 	assert.Equal(t, baseVer, ConfigVersion(c), "the secret is server-managed, not a setting")
 }
+
+// A record that never set the public-names fields hashes as it did before
+// they existed, so an upgrade made mid-event refuses no save opened before it.
+func TestVersions_UnsetPublicNamesFieldsAreNotHashed(t *testing.T) {
+	comp, err := json.Marshal(configVersionPayload{})
+	require.NoError(t, err)
+	assert.NotContains(t, string(comp), "publicNames")
+	assert.NotContains(t, string(comp), "revealUntil")
+	tourn, err := json.Marshal(tournamentVersionPayload{})
+	require.NoError(t, err)
+	assert.NotContains(t, string(tourn), "defaultPublicNames")
+}

@@ -34,7 +34,7 @@ type tournamentVersionPayload struct {
 	ClockToElapsedMultiplier float64                `json:"clockToElapsedMultiplier"`
 	SlowestCourtBufferPct    int                    `json:"slowestCourtBufferPct"`
 	Mode                     string                 `json:"mode"`
-	DefaultPublicNames       string                 `json:"defaultPublicNames"`
+	DefaultPublicNames       string                 `json:"defaultPublicNames,omitempty"` // omitempty: an untouched record keeps its pre-upgrade version
 	PublicURL                string                 `json:"publicURL"`
 	VenueAddress             string                 `json:"venueAddress"`
 	VenueMapURL              string                 `json:"venueMapURL"`

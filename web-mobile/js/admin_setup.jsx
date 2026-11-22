@@ -1587,6 +1587,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             tournament={tournament}
             format={format}
             kind={kind}
+            teamSize={effectiveTeamSize}
             value={publicNames}
             onChange={setPublicNames}
             revealUntil={revealUntil}

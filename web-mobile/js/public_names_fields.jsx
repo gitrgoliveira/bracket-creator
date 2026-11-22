@@ -7,7 +7,7 @@
 // ES-imported and never script-tagged, like competition_fields.jsx.
 //
 import { PillGroup } from './competition_fields.jsx';
-import { FORMAT_SWISS } from './competition_shape.jsx';
+import { FORMAT_SWISS, isTeamCompetition } from './competition_shape.jsx';
 import { useStableId } from './stable_id.jsx';
 import { andList } from './list_phrase.jsx';
 
@@ -198,9 +198,10 @@ export function RevealQrSheet({ compName, url, expiresAt, onClose, showToast }) 
 
 // PublicNamesFields: the option picker, the notes that go with it, and (when a
 // competition screen hands over the expiry) the time its links stop working.
-// `format`/`kind` are the competition's (absent for the tournament default).
+// `format`/`kind`/`teamSize` are the competition's (absent for the tournament
+// default).
 // `children` carries what only the saved competition can show (its link).
-export function PublicNamesFields({ tournament, format, kind, value, onChange, revealUntil, onRevealUntilChange, applyNote, children }) {
+export function PublicNamesFields({ tournament, format, kind, teamSize, value, onChange, revealUntil, onRevealUntilChange, applyNote, children }) {
   const untilId = useStableId("reveal-until");
   if (!publicNamesApplies(tournament)) {
     return (
@@ -224,7 +225,7 @@ export function PublicNamesFields({ tournament, format, kind, value, onChange, r
       </div>
     );
   }
-  const isTeam = kind === "team";
+  const isTeam = isTeamCompetition({ kind, teamSize });
   const hides = publicNamesHides(value);
   const hint = `${PUBLIC_NAMES_HINTS[value || ""] || ""}${hides ? ` ${HINT_PUBLIC_NAMES_DOJO}` : ""}${hides && isTeam ? ` ${HINT_PUBLIC_NAMES_TEAM}` : ""}`.trim();
   return (

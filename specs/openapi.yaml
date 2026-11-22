@@ -8001,6 +8001,14 @@ paths:
                           description: >
                             `true` when this competition's entry is masked for
                             the caller (it hides its names). Absent otherwise.
+                        revealedCompetitors:
+                          type: array
+                          items:
+                            type: string
+                          description: >
+                            On a masked entry, the ids of the participants the
+                            caller's own per-person reveal links reveal (a team's
+                            id for a team's link), sorted. Absent when none.
                         poolMatches:
                           type: array
                           items:
@@ -8252,6 +8260,14 @@ components:
             `true` when the answer is masked for this caller; absent otherwise
             (the organiser's answer, a revealed competition, a competition that
             shows its names).
+        revealedCompetitors:
+          type: array
+          items:
+            type: string
+          description: >
+            On a masked answer, the ids of the participants the caller's own
+            per-person reveal links reveal (a team's id for a team's link),
+            sorted, which the reveal page follows. Absent when none.
     RefusedWrite:
       type: object
       additionalProperties: false

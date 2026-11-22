@@ -35,7 +35,8 @@
 // no regression.
 
 import { applyPatchToCompetitions as _applyPatchToCompetitions, matchInComp as _matchInComp } from './patch.jsx';
-import { competitionHidesNames } from './competition_shape.jsx';
+import { competitionHidesNames, isTeamCompetition } from './competition_shape.jsx';
+import { squadMemberLabel } from './squad_member_label.jsx';
 
 // freshnessMs: the amber->red dot threshold.
 // 20 s sits below the 35 s SSE silence watchdog and above the 15 s SSE
@@ -272,8 +273,10 @@ export function getLastBroadcastAt() {
 // never by a name. A name no roster entry can place is left alone: it is
 // placeholder text ("Winner of ..."), not a competitor. The competition is
 // stamped `namesHidden`, as a server payload built for a hidden reader is.
-// A competition that shows names passes through untouched. Match PATCHES need
-// no mask: boardOverlayResult names sides by id only.
+// A team competition keeps its team names and carries its team members the
+// way the server does (see maskTeamNode). A competition that shows names, or
+// any competition of a self-run tournament, passes through untouched. Match
+// PATCHES need no mask: boardOverlayResult names sides by id only.
 //
 // Pure and exported so vitest can pin it.
 // -----------------------------------------------------------------------
@@ -338,15 +341,126 @@ function maskNode(node, ctx) {
     return out;
 }
 
-export function maskSnapshotForBridge(comps) {
+// A team competition keeps its team names (the teams are the competitors) and
+// hides its team MEMBERS, as the server's masked payload does (maskView.bouts,
+// memberByName, squads): a member reads as their label ("T10.1"), or "?" when
+// no label can be made. The members come from the competition's own
+// teamMembers/squads map (team id to its members); a bout row names its
+// fighters by member id, a representative bout by name.
+const MEMBER_MAPS = ['teamMembers', 'squads'];
+
+function isPlainObject(v) {
+    return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function collectMembers(node, ctx) {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+        node.forEach((n) => collectMembers(n, ctx));
+        return;
+    }
+    for (const [k, v] of Object.entries(node)) {
+        if (MEMBER_MAPS.includes(k) && isPlainObject(v)) {
+            for (const [teamId, members] of Object.entries(v)) {
+                if (!Array.isArray(members)) continue;
+                const names = ctx.namesByTeam.get(teamId) || new Map();
+                for (const m of members) {
+                    if (!m || m.id == null || m.id === '') continue;
+                    ctx.memberTeam.set(String(m.id), teamId);
+                    ctx.memberLabel.set(String(m.id), squadMemberLabel(ctx.byId.get(teamId), m.index) || '?');
+                    if (typeof m.name === 'string' && m.name) names.set(m.name, names.has(m.name) ? null : String(m.id));
+                }
+                ctx.namesByTeam.set(teamId, names);
+            }
+        } else {
+            collectMembers(v, ctx);
+        }
+    }
+}
+
+// maskMember: what a team member's name reads as. A team's own name stays
+// (a quick-score row names the two teams).
+function maskMember(ctx, memberId, name, teamName) {
+    if (!name) return name;
+    if (teamName && name === teamName) return name;
+    if (memberId == null || memberId === '') return '?';
+    return ctx.memberLabel.get(String(memberId)) || '?';
+}
+
+function sideIdentity(side, id) {
+    const name = typeof side === 'string' ? side : (side && side.name) || '';
+    const own = id != null && id !== '' ? id : (side && typeof side === 'object' ? side.id : '');
+    return { name, id: own == null ? '' : String(own) };
+}
+
+function maskTeamMatch(node, out, ctx) {
+    const A = sideIdentity(node.sideA, node.sideAId ?? node.sideAID);
+    const B = sideIdentity(node.sideB, node.sideBId ?? node.sideBID);
+    out.subResults = node.subResults.map((row) => {
+        if (!row || typeof row !== 'object') return row;
+        const masked = { ...row };
+        masked.sideA = maskMember(ctx, row.sideAMemberId, row.sideA, A.name);
+        masked.sideB = maskMember(ctx, row.sideBMemberId, row.sideB, B.name);
+        const w = row.winner;
+        if (w && w !== A.name && w !== B.name) {
+            if (row.winnerMemberId) masked.winner = maskMember(ctx, row.winnerMemberId, w, '');
+            else if (w === row.sideA) masked.winner = masked.sideA;
+            else if (w === row.sideB) masked.winner = masked.sideB;
+            else masked.winner = '?';
+        }
+        return masked;
+    });
+    // A representative bout's fighter is recorded by name alone: it reads as
+    // the one member of that team the name names, else "?".
+    const rep = (name, teamId) => {
+        if (typeof name !== 'string' || !name) return name;
+        const id = (ctx.namesByTeam.get(teamId) || new Map()).get(name);
+        return maskMember(ctx, id, name, '');
+    };
+    if (node.repPlayerA) out.repPlayerA = rep(node.repPlayerA, A.id);
+    if (node.repPlayerB) out.repPlayerB = rep(node.repPlayerB, B.id);
+}
+
+function maskTeamNode(node, ctx) {
+    if (Array.isArray(node)) return node.map((n) => maskTeamNode(n, ctx));
+    if (!node || typeof node !== 'object') return node;
+    const out = {};
+    for (const [k, v] of Object.entries(node)) {
+        if (MEMBER_MAPS.includes(k) && isPlainObject(v)) {
+            const masked = {};
+            for (const [teamId, members] of Object.entries(v)) {
+                masked[teamId] = Array.isArray(members)
+                    ? members.map((m) => (m && typeof m === 'object' ? { ...m, name: maskMember(ctx, m.id, m.name, '') } : m))
+                    : members;
+            }
+            out[k] = masked;
+        } else {
+            out[k] = maskTeamNode(v, ctx);
+        }
+    }
+    if (Array.isArray(node.subResults)) maskTeamMatch(node, out, ctx);
+    return out;
+}
+
+// `tournament` is the operator tab's tournament: a self-run one shows names
+// whatever a competition's setting says (competitionHidesNames), as the server
+// does. Without it the tournament is read as an officiated one.
+export function maskSnapshotForBridge(comps, tournament = null) {
     if (!Array.isArray(comps)) return comps;
-    const hides = (comp) => !!comp && typeof comp === 'object' && competitionHidesNames(null, comp);
+    const hides = (comp) => !!comp && typeof comp === 'object' && competitionHidesNames(tournament, comp);
     // The slice itself comes back when no competition in it hides its names.
     if (!comps.some(hides)) return comps;
     return comps.map((comp) => {
         if (!hides(comp)) return comp;
-        const ctx = { byId: new Map(), byName: new Map(), clashing: new Set() };
+        const ctx = {
+            byId: new Map(), byName: new Map(), clashing: new Set(),
+            memberTeam: new Map(), memberLabel: new Map(), namesByTeam: new Map(),
+        };
         collectNumbers(comp, ctx.byId, ctx.byName, ctx.clashing);
+        if (isTeamCompetition(comp)) {
+            collectMembers(comp, ctx);
+            return { ...maskTeamNode(comp, ctx), namesHidden: true };
+        }
         return { ...maskNode(comp, ctx), namesHidden: true };
     });
 }
@@ -361,11 +475,16 @@ export function maskSnapshotForBridge(comps) {
 //
 // fn signature: (court: string) => competitions[] | null
 //   Return null when the tab has no data for the requested court.
+// tournamentFn (optional): () => the operator tab's tournament, which the
+//   snapshot's name mask asks whether names are shown (a self-run tournament
+//   always shows them).
 // -----------------------------------------------------------------------
 let _snapshotProvider = null;
+let _snapshotTournament = null;
 
-export function setSnapshotProvider(fn) {
+export function setSnapshotProvider(fn, tournamentFn) {
     _snapshotProvider = typeof fn === 'function' ? fn : null;
+    _snapshotTournament = typeof tournamentFn === 'function' ? tournamentFn : null;
 }
 
 // Testing only: reset all module-level state so test suites that assert on
@@ -375,6 +494,7 @@ export function _resetModuleStateForTests() {
     _lastBroadcastAt = null;
     _displayCourt = null;
     _snapshotProvider = null;
+    _snapshotTournament = null;
 }
 
 // -----------------------------------------------------------------------
@@ -445,7 +565,7 @@ export function openBridge() {
                             origin: _tabId,
                             court,
                             compId: '',
-                            payload: maskSnapshotForBridge(slice),
+                            payload: maskSnapshotForBridge(slice, _snapshotTournament ? _snapshotTournament() : null),
                         });
                         _lastBroadcastAt = Date.now();
                     }

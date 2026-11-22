@@ -60,8 +60,75 @@ describe('maskSnapshotForBridge', () => {
         expect(JSON.stringify(out)).not.toContain('Tanaka');
     });
 
+    it('shows a self-run tournament as it is, whatever the competition says', () => {
+        const hiding = individual('hidden');
+        const [out] = maskSnapshotForBridge([hiding], { mode: 'self-run' });
+        expect(out).toBe(hiding);
+        const [masked] = maskSnapshotForBridge([hiding], { mode: 'officiated' });
+        expect(masked.namesHidden).toBe(true);
+    });
+
     it('passes a non-array through', () => {
         expect(maskSnapshotForBridge(null)).toBe(null);
+    });
+});
+
+function teamComp(publicNames) {
+    const t1 = { id: 't1', name: 'Dojo Alpha', number: 'T1', dojo: 'Alpha' };
+    const t2 = { id: 't2', name: 'Dojo Beta', number: 'T2', dojo: 'Beta' };
+    return {
+        id: 'ct',
+        name: 'Teams',
+        kind: 'team',
+        teamSize: 3,
+        publicNames,
+        config: { players: [t1, t2] },
+        teamMembers: {
+            t1: [{ id: 'm11', name: 'Tanaka Kenji', index: 1 }, { id: 'm12', name: 'Sato Ryo', index: 2 }],
+            t2: [{ id: 'm21', name: 'Suzuki Ayumi', index: 1 }],
+        },
+        poolMatches: [
+            {
+                id: 'Pool A-1', court: 'A',
+                sideA: { id: 't1', name: 'Dojo Alpha' }, sideB: { id: 't2', name: 'Dojo Beta' },
+                repPlayerA: 'Sato Ryo', repPlayerB: 'Nobody Known',
+                subResults: [
+                    { position: 1, sideA: 'Tanaka Kenji', sideAMemberId: 'm11', sideB: 'Suzuki Ayumi', sideBMemberId: 'm21', winner: 'Tanaka Kenji', winnerMemberId: 'm11' },
+                    { position: 2, sideA: 'Sato Ryo', sideAMemberId: 'm12', sideB: '', winner: 'Dojo Alpha' },
+                ],
+            },
+        ],
+    };
+}
+
+describe('maskSnapshotForBridge, team competitions', () => {
+    it('keeps the team names and carries every team member by label', () => {
+        const [out] = maskSnapshotForBridge([teamComp('person')]);
+        const text = JSON.stringify(out);
+        for (const real of ['Tanaka', 'Sato', 'Suzuki', 'Nobody']) expect(text).not.toContain(real);
+        expect(out.namesHidden).toBe(true);
+        expect(out.config.players.map((p) => p.name)).toEqual(['Dojo Alpha', 'Dojo Beta']);
+        const m = out.poolMatches[0];
+        expect(m.sideA.name).toBe('Dojo Alpha');
+        expect(out.teamMembers.t1.map((x) => x.name)).toEqual(['T1.1', 'T1.2']);
+        expect(out.teamMembers.t2[0].name).toBe('T2.1');
+        expect(m.subResults[0]).toMatchObject({ sideA: 'T1.1', sideB: 'T2.1', winner: 'T1.1', sideAMemberId: 'm11' });
+        // a team's own name in a row stays, an empty side stays empty
+        expect(m.subResults[1]).toMatchObject({ sideA: 'T1.2', sideB: '', winner: 'Dojo Alpha' });
+        expect(m.repPlayerA).toBe('T1.2');
+        expect(m.repPlayerB).toBe('?');
+    });
+
+    it('leaves a team competition that shows its names untouched', () => {
+        const shown = teamComp('');
+        expect(maskSnapshotForBridge([shown])[0]).toBe(shown);
+    });
+
+    it('does not change the organiser copy it was handed', () => {
+        const hiding = teamComp('hidden');
+        maskSnapshotForBridge([hiding]);
+        expect(hiding.teamMembers.t1[0].name).toBe('Tanaka Kenji');
+        expect(hiding.poolMatches[0].subResults[0].sideA).toBe('Tanaka Kenji');
     });
 });
 

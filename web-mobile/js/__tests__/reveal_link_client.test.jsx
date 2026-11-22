@@ -142,10 +142,11 @@ describe('viewer_reveal.jsx: the reveal link', () => {
     expect(reveal.takeRevealLink({ pathname: '/competition/juniors', hash: `#${KEY_A}` }, hist)).toBeNull();
   });
 
-  it('a per-person link follows the individual whose name the read shows', async () => {
+  it('a per-person link follows the individual the server says its key reveals', async () => {
     const { reveal } = await fresh();
     const detail = {
       namesHidden: true,
+      revealedCompetitors: ['p2'],
       config: {
         id: 'juniors',
         players: [
@@ -159,22 +160,28 @@ describe('viewer_reveal.jsx: the reveal link', () => {
     expect(reveal.revealVerdict('juniors', landing, detail).kind).toBe('follow');
   });
 
-  it('a team is followed when its members carry names, not labels', async () => {
+  it('a team is followed when the server says its key reveals it, named members or not', async () => {
     const { reveal } = await fresh();
     const detail = {
       namesHidden: true,
+      revealedCompetitors: ['t1', 't2'],
       config: {
         id: 't', kind: 'team', players: [
           { id: 't1', name: 'Kyoto', number: 'T1' },
           { id: 't2', name: 'Osaka', number: 'T2' },
+          { id: 't3', name: 'Nara', number: 'T3' },
         ],
       },
+      // t1 has no named member: its link reveals nothing to show, and it is
+      // followed all the same.
       teamMembers: {
-        t1: [{ id: 'm1', name: 'T1.1', index: 1 }, { id: 'm2', name: '?', index: 2 }],
-        t2: [{ id: 'm3', name: 'Ken Kato', index: 1 }, { id: 'm4', name: '', index: 2 }],
+        t1: [{ id: 'm1', name: '', index: 1 }],
+        t2: [{ id: 'm3', name: 'Ken Kato', index: 1 }],
       },
     };
-    expect(reveal.revealedRecords(detail).map((p) => p.id)).toEqual(['t2']);
+    expect(reveal.revealedRecords(detail).map((p) => p.id)).toEqual(['t1', 't2']);
+    expect(reveal.revealedRecords({ ...detail, revealedCompetitors: undefined })).toEqual([]);
+    expect(reveal.revealedRecords({ ...detail, namesHidden: false })).toEqual([]);
   });
 
   it('opens a competition that shows names, and says so when a link shows none', async () => {
@@ -281,8 +288,32 @@ describe('api_client_events.jsx: the stream ticket', () => {
     unsub();
   });
 
-  it('a refused ticket opens nothing, never the public stream, and is asked again', async () => {
+  it('a ticket the password was refused for tells the page and is not asked for again', async () => {
     ticketAnswers.push({ status: 401, body: { error: 'Invalid password' } });
+    const refused = vi.fn();
+    window.credentialRefused = refused;
+    mods.events.setAudienceAndReconnect('admin', 'stale');
+    const status = vi.fn();
+    const unsub = mods.API.subscribeToEvents(() => {}, status);
+    await flush();
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(status).toHaveBeenCalledWith('error');
+    expect(refused).toHaveBeenCalledTimes(1);
+    // A stale password cannot be mended by retrying: nothing asks again, and
+    // the page's change of audience is what reopens the stream.
+    await vi.advanceTimersByTimeAsync(30000);
+    await flush();
+    expect(tickets).toHaveLength(1);
+    expect(mods.events.setAudienceAndReconnect('viewer', '')).toBe(true);
+    await flush();
+    expect(FakeEventSource.instances[0].url).toBe('/api/events');
+    unsub();
+    delete window.credentialRefused;
+    console.warn.mockClear();
+  });
+
+  it('a refused ticket opens nothing, never the public stream, and is asked again', async () => {
+    ticketAnswers.push({ status: 503, body: { error: 'busy' } });
     mods.events.setAudienceAndReconnect('admin', 'stale');
     const status = vi.fn();
     const unsub = mods.API.subscribeToEvents(() => {}, status);

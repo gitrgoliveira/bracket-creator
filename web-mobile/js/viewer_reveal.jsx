@@ -11,22 +11,18 @@
 // phone holds) and:
 //   - names shown (a competition link, or a competition that does not hide
 //     names): opens the competition;
-//   - a per-person link: follows the competitor whose name it shows (for a
-//     team, the team whose members it names) and opens the competition;
+//   - a per-person link: follows the competitor the server says its key
+//     reveals (revealedCompetitors; for a team, the team whose members it
+//     names) and opens the competition;
 //   - nothing shown: says so (the link expired, or the organiser switched the
 //     links off) and offers the competition by numbers.
 // The server judges the key on every read; nothing here decides what a key
 // may reveal.
 
 import { rememberRevealKey, revealKeysFor } from './reveal_key.jsx';
-import { nameHidden, numberOf } from './competitor_identity.jsx';
-import { squadMemberLabel } from './squad_member_label.jsx';
 import { addPlayerToWatchlist, useWatchlist } from './viewer_watchlist_core.jsx';
 
 const { useEffect, useRef } = React;
-
-// What the server prints for a member it cannot place (public_names.go).
-const MASKED_UNKNOWN = "?";
 
 function safeDecode(s) {
   try {
@@ -57,32 +53,17 @@ export function takeRevealLink(loc, hist) {
   return { compId, stored };
 }
 
-// A team member's name the masked read did not replace: not empty, not the
-// member's label, not the "?" of a member the mask could not place.
-function memberNamed(members, teamNumber) {
-  return (Array.isArray(members) ? members : []).some((mb) => {
-    const name = String((mb && mb.name) || "").trim();
-    if (!name || name === MASKED_UNKNOWN) return false;
-    return name !== squadMemberLabel(teamNumber, mb.index);
-  });
-}
-
-// revealedRecords: the competitors a masked read showed by name anyway, which
-// are the ones this phone's per-person links reveal: an individual whose name
-// is not their number (nameHidden), a team whose members carry names (a
-// team's name always shows, so its members say whether it is revealed).
-// [] for a read that hides nothing.
+// revealedRecords: the competitors this phone's per-person links reveal, which
+// the server names in the masked read (revealedCompetitors: the participants
+// the keys sent with the read prove, a team's id for a team's link). Taken
+// from that list, never worked out from the names the read shows, so a team
+// with no named members is followed too. [] for a read that hides nothing.
 export function revealedRecords(detail) {
   if (!detail || !detail.namesHidden) return [];
   const cfg = detail.config || {};
   const players = (Array.isArray(detail.players) && detail.players.length ? detail.players : cfg.players) || [];
-  // state.Competition.IsTeam: a team competition is kind "team" or has a team size.
-  const team = cfg.kind === "team" || Number(cfg.teamSize) > 0;
-  const members = detail.teamMembers || {};
-  return players.filter((p) => {
-    if (!p || !p.id) return false;
-    return team ? memberNamed(members[p.id], numberOf(p)) : !nameHidden(p);
-  });
+  const ids = new Set(Array.isArray(detail.revealedCompetitors) ? detail.revealedCompetitors : []);
+  return players.filter((p) => p && p.id && ids.has(p.id));
 }
 
 // revealVerdict: what the page does with what it has. `detail` is App's read

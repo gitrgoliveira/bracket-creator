@@ -2,7 +2,7 @@
 //
 // /reveal/<competition>#<key>: the key is kept on the phone and leaves the
 // address bar before anything reads, the competition is read with it, a
-// per-person link follows the competitor whose name it shows, and the page
+// per-person link follows the competitor the server says its key reveals, and the page
 // opens the competition in place of the link.
 //
 // Mounts the real App with a stub API and a probe in place of the
@@ -20,6 +20,7 @@ function ProbeViewerCompetition(props) {
 
 const DETAIL = {
   namesHidden: true,
+  revealedCompetitors: ['p2'],
   config: {
     id: 'juniors',
     name: 'Juniors',
@@ -63,7 +64,7 @@ describe('opening a reveal link', () => {
     expect(window.location.href).not.toContain(KEY);
   });
 
-  it('follows the competitor the per-person link shows, and opens the competition in its place', () => {
+  it('follows the competitor the per-person link reveals, and opens the competition in its place', () => {
     expect(screen.getByTestId('viewer-competition').textContent).toBe('juniors');
     expect(window.location.pathname).toBe('/competition/juniors');
     const followed = JSON.parse(window.localStorage.getItem('bc_watchlist') || '[]');

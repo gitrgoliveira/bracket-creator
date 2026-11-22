@@ -15,7 +15,7 @@ import {
 import { noteServerBuild } from './app_version.jsx';
 import { _tellTurnedAway } from './api_client_taps.jsx';
 import { _forgetShownMatches, _forgetAllShownMatches } from './api_client_status.jsx';
-import { _fetchJson, readHeaders, setReadAudience } from './api_client_requests.jsx';
+import { _fetchJson, readHeaders, setReadAudience, noteRefusedCredential } from './api_client_requests.jsx';
 
 // ---------------------------------------------------------------------------
 // Shared ref-counted SSE singleton
@@ -81,6 +81,9 @@ function _eventsUrl(ticket) {
 // older generation opens nothing.
 let _ticketGen = 0;
 let _ticketPending = false;
+// A ticket was refused for the organiser's password: nothing is retried until
+// the audience changes (setAudienceAndReconnect).
+let _credentialRefused = false;
 const EVENT_TICKET_NOT_NEEDED = 'event_ticket_not_needed';
 
 function _cancelTicket() {
@@ -166,6 +169,7 @@ function _ensureConnected() {
     }
     const gen = ++_ticketGen;
     _ticketPending = true;
+    _credentialRefused = false;
     _fetchJson('/api/events/ticket', { method: 'POST', headers }).then(({ res, body }) => {
         if (gen !== _ticketGen) return;
         _ticketPending = false;
@@ -175,6 +179,15 @@ function _ensureConnected() {
         }
         if (res.status === 400 && body && body.code === EVENT_TICKET_NOT_NEEDED && !headers['X-Tournament-Password']) {
             _openSource(_eventsUrl());
+            return;
+        }
+        // A ticket refused for the organiser's password is a stale credential,
+        // which no retry can mend: the page is told (it drops the password and
+        // asks for it again) and the change of audience reopens the stream, so
+        // no ticket is asked for again with the same password.
+        if (noteRefusedCredential(res.status)) {
+            _credentialRefused = true;
+            _fanOutStatus('error');
             return;
         }
         throw new Error(`no event-stream ticket (HTTP ${res.status})`);
@@ -402,6 +415,6 @@ export const eventsApi = {
 // the credential changed.
 export function setAudienceAndReconnect(kind, password) {
     const changed = setReadAudience(kind, password);
-    if (changed && (_sharedSource || _ticketPending || _retryTimer)) _reconnectEvents();
+    if (changed && (_sharedSource || _ticketPending || _retryTimer || _credentialRefused)) _reconnectEvents();
     return changed;
 }

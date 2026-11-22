@@ -15,7 +15,7 @@
 import { NOT_SENT_NO_CONNECTION } from './write_result.jsx';
 import { TOURNAMENT_BASE, tournamentRefusal } from './document_versions.jsx';
 import {
-    _directFetch, _backupRequest, _backupFilename, _restoreForm, readHeaders, refuseMaskedForOrganiser,
+    _directFetch, _backupRequest, _backupFilename, _restoreForm, readHeaders, readFailure, refuseMaskedForOrganiser,
 } from './api_client_requests.jsx';
 import { _serverNowMs } from './api_client_clock.jsx';
 import { _dequeue, _entriesFor } from './api_client_queue.jsx';
@@ -67,7 +67,7 @@ export const tournamentApi = {
         }
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Failed to fetch tournament (Status ${res.status})`);
+            throw readFailure(res.status, err.error, 'tournament');
         }
         // A settings save this device still has queued shows (G4b).
         return overlayPendingTournament(refuseMaskedForOrganiser(await res.json()));

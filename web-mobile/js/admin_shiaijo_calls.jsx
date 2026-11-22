@@ -15,7 +15,7 @@ import { serverNowMs } from './server_clock.jsx';
 import { acceptTap } from './tap_guard.jsx';
 import { announcementExpiredToast } from './write_result.jsx';
 import { matchKey } from './admin_shiaijo_feed.jsx';
-import { competitionHidesNames } from './competition_shape.jsx';
+import { competitionCallsByNumber } from './competition_shape.jsx';
 import { numberOf } from './competitor_identity.jsx';
 
 const { useState, useEffect, useRef } = React;
@@ -116,7 +116,7 @@ export function useCourtCalls({
         // A competition whose public pages hide names is called by number (the
         // side colour when a side has none yet): the announcement reaches every
         // public screen as typed, so a name here would undo the setting.
-        const hides = competitionHidesNames(tournament, (courtCompetitions || []).find((c) => c.id === m.compId));
+        const hides = competitionCallsByNumber(tournament, (courtCompetitions || []).find((c) => c.id === m.compId));
         const callLabel = (side, colour) => (hides ? numberOf(side) : (side && side.name)) || colour;
         const a = callLabel(m.sideA, "Aka");
         const b = callLabel(m.sideB, "Shiro");

@@ -18,7 +18,7 @@ import { NOT_SENT_NO_CONNECTION } from './write_result.jsx';
 import { awardsBase } from './document_versions.jsx';
 import {
     normalizeViewerCompItem, parseSkippedCompetitionsHeader, _fetchJson, _directFetch,
-    readHeaders, refuseMaskedForOrganiser,
+    readHeaders, readFailure, refuseMaskedForOrganiser,
 } from './api_client_requests.jsx';
 import { _serverNowMs } from './api_client_clock.jsx';
 import { _poolRanksBase } from './api_client_queue.jsx';
@@ -57,7 +57,7 @@ export const competitionsApi = {
     async fetchCompetitions({ bounded = false } = {}) {
         if (bounded) {
             const { res, body } = await _fetchJson('/api/viewer/competitions', { headers: readHeaders() });
-            if (!res.ok) throw new Error(body.error || `Failed to fetch competitions (Status ${res.status})`);
+            if (!res.ok) throw readFailure(res.status, body.error, 'competitions');
             // _fetchJson reads an unreadable body as {}: never hand that on as
             // the competitions.
             if (!Array.isArray(body)) throw new Error('Failed to fetch competitions (unreadable answer)');
@@ -67,7 +67,7 @@ export const competitionsApi = {
         const res = await fetch('/api/viewer/competitions', { headers: readHeaders() });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Failed to fetch competitions (Status ${res.status})`);
+            throw readFailure(res.status, err.error, 'competitions');
         }
         const comps = await res.json();
         if (!Array.isArray(comps)) return comps;

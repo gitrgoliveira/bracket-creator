@@ -133,6 +133,22 @@ describe('AdminApp saves the tournament settings through the outbox', () => {
     expect(app.showToast).toHaveBeenCalledWith('Tournament updated');
   });
 
+  it('sends the public-names confirmation but never keeps it in the settings', async () => {
+    const settled = deferred();
+    window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
+    const app = await mount();
+    await act(async () => { await probe.props.onSave(patch({ defaultPublicNames: 'person', confirmPublicNames: true })); });
+    // The server is asked to apply the default, as confirmed.
+    expect(window.API.updateTournament.mock.calls[0][0].confirmPublicNames).toBe(true);
+    // Local state holds the settings, so a later save built from it does not
+    // confirm a change nobody was asked about.
+    const shown = app.onUpdate.mock.calls.at(-1)[0];
+    expect(shown.defaultPublicNames).toBe('person');
+    expect('confirmPublicNames' in shown).toBe(false);
+    await act(async () => { settled.resolve({ tournamentVersion: 'v2' }); await settled.promise; });
+    expect('confirmPublicNames' in app.onUpdate.mock.calls.at(-1)[0]).toBe(false);
+  });
+
   it('tells once when two saves queued behind each other share one answer', async () => {
     // A save that takes the place of a queued one shares its settled promise.
     const settled = deferred();

@@ -23,11 +23,13 @@ export function awardsBase(compID) {
 }
 
 // The fields of a queued document save that are the document, not the
-// outbox's tags, the version it was made against or the password. The sponsors
+// outbox's tags, the version it was made against, the password or the
+// request-only confirmation of a public-names change (it is never stored, so a
+// copy kept in local state would confirm every later save). The sponsors
 // are not the save's: the server carries the stored list over, so a list
 // riding the payload is only the form's older copy.
 function documentFields(payload) {
-    const { writeId: _w, session: _s, basis: _b, password: _p, tournamentVersion: _t, awardsVersion: _a, competitions: _c, sponsors: _sp, ...fields } = payload || {};
+    const { writeId: _w, session: _s, basis: _b, password: _p, confirmPublicNames: _cp, tournamentVersion: _t, awardsVersion: _a, competitions: _c, sponsors: _sp, ...fields } = payload || {};
     return fields;
 }
 

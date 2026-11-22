@@ -18,7 +18,7 @@ import { queueMoveCourts, sharesCourtDay, sharesDay } from './court_queue.jsx';
 import { useCourtPaceLookup, PACE_TICK_MS } from './court_pace.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 // bc-hnam: which credential the page reads with, keyed by the route.
-import { readAudienceKey, currentReadAudienceKey } from './api_client_requests.jsx';
+import { readAudienceKey, currentReadAudienceKey, CREDENTIAL_REFUSED } from './api_client_requests.jsx';
 import { setAudienceAndReconnect } from './api_client_events.jsx';
 import { onRevealKeysChange } from './reveal_key.jsx';
 import { RevealPage, takeRevealLink } from './viewer_reveal.jsx';
@@ -838,6 +838,40 @@ function App() {
     return () => { delete window.requestReauth; };
   }, []);
 
+  // dropStaleCredential: the organiser's saved password is no longer the
+  // server's (another admin reset it, or a read just answered 401 with it).
+  // The credential is cleared so the next request does not 401 again, the page
+  // leaves the admin audience, and the AuthModal opens so the operator notices
+  // at once. bc-qttl: the queued writes are scrubbed of it and PARKED, never
+  // destroyed: nobody here chose to discard anything, and the password was the
+  // secret, not the results; they resume when the operator signs in again.
+  // Asked by the password_reset push and, through window.credentialRefused, by
+  // a read or an event-stream ticket the server refused (api_client_requests.jsx
+  // noteRefusedCredential), so a stale password is never shown as "no tournament".
+  const dropStaleCredential = () => {
+    if (!authedRef.current) return;
+    setAuthed(false);
+    setPassword("");
+    if (window.API && window.API.parkQueueForReauth) window.API.parkQueueForReauth();
+    try {
+      localStorage.removeItem("bc_authed");
+      localStorage.removeItem("bc_password");
+    } catch {
+      // private-browsing modes can throw; the in-memory state above is the
+      // load-bearing fix anyway.
+    }
+    if (mode === "admin") {
+      setMode("viewer");
+      setAuthPrompt(true);
+      authPromptRef.current = true;
+    }
+  };
+  const dropStaleCredentialRef = useLatestRef(dropStaleCredential);
+  useEffect(() => {
+    window.credentialRefused = () => dropStaleCredentialRef.current();
+    return () => { delete window.credentialRefused; };
+  }, [dropStaleCredentialRef]);
+
   // A refreshed tournament never puts a live score back to an older state
   // under a score editor (keepNewerTournament, patch.jsx): the admin's
   // refreshes and this load both feed the Scores tab, and two of them can be
@@ -876,7 +910,10 @@ function App() {
       // undefined to null here, so the gate opens instead of spinning; only
       // the server's own "no tournament" answer (above) replaces a loaded one.
       console.error("Failed to load tournament", e);
-      setTournament((prev) => (prev === undefined ? null : prev));
+      // A refused password says nothing about whether a tournament exists
+      // either: dropStaleCredential has taken the page off the admin audience,
+      // and that change of audience reads again.
+      if (!(e && e.code === CREDENTIAL_REFUSED)) setTournament((prev) => (prev === undefined ? null : prev));
     } finally {
       setLoading(false);
     }
@@ -1009,6 +1046,8 @@ function App() {
   // Keep compsRef in sync with the latest competitions so the snapshot
   // provider (registered once below) always answers with current data.
   useEffect(() => { compsRef.current = (tournament && tournament.competitions) || null; }, [tournament]);
+  // The tournament the snapshot's name mask asks about self-run (court_bridge.jsx).
+  const tournamentRef = useLatestRef(tournament);
 
   // mp-9ukk Phase 2: operator-tab snapshot provider.
   //
@@ -1045,7 +1084,7 @@ function App() {
         return false;
       });
       return slice.length > 0 ? slice : null;
-    });
+    }, () => tournamentRef.current);
     return () => setSnapshotProvider(null);
   }, [mode]);
 
@@ -1329,30 +1368,7 @@ function App() {
             // where the user signs in without mode changing would
             // otherwise leave the handler holding `authed=false` and
             // miss the reset event entirely.
-            if (authedRef.current) {
-                setAuthed(false);
-                setPassword("");
-                // Security: the old plaintext password must not linger in
-                // localStorage past the reset. bc-qttl: scrub it from the queued
-                // writes and PARK them rather than destroying them. Nobody at this
-                // tablet chose to discard anything (another admin reset the
-                // password), and the operator's queued results were never the
-                // secret; the password was, and parking removes it. They resume
-                // automatically once this operator signs in again.
-                if (window.API && window.API.parkQueueForReauth) window.API.parkQueueForReauth();
-                try {
-                    localStorage.removeItem("bc_authed");
-                    localStorage.removeItem("bc_password");
-                } catch {
-                    // private-browsing modes can throw; the in-memory
-                    // state above is the load-bearing fix anyway.
-                }
-                if (mode === "admin") {
-                    setMode("viewer");
-                    setAuthPrompt(true);
-                    authPromptRef.current = true;
-                }
-            }
+            dropStaleCredentialRef.current();
         } else if (event.type === "competitor_status_updated") {
             // T099: viewer doesn't need to mutate selectedCompData itself: 
             // the eligibility change feeds back through the full

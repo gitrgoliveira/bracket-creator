@@ -718,6 +718,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // async handlers: an SSE update during the save would be clobbered by
       // pre-save state until the next refresh.
       const sendBody = mergeTournamentPatch(tRef.current, patch, password, locked);
+      // What local state keeps of the patch: confirmPublicNames is request-only
+      // (the server never stores it), and a copy kept here would ride every
+      // later save and confirm a public-names change nobody was asked about.
+      const { confirmPublicNames: _confirmed, ...stored } = patch;
       // sendBody carries the patch's tournamentVersion: the settings the Edit
       // Tournament form was filled from, not tRef.current's freshest copy. A
       // save made after another device's is then refused (tournament_changed)
@@ -740,7 +744,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // Re-read tRef.current AFTER the await: the patch just persisted is
         // applied on top of the freshest snapshot, with the version the save
         // answered, so the next save is made from the settings just stored.
-        onUpdateRef.current({ ...mergeTournamentPatch(tRef.current, patch, password, locked), tournamentVersion: saved.tournamentVersion });
+        onUpdateRef.current({ ...mergeTournamentPatch(tRef.current, stored, password, locked), tournamentVersion: saved.tournamentVersion });
         showToast("Tournament updated");
         return true;
       }
@@ -774,7 +778,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // The settings the operator just saved show at once (the freshest
       // snapshot with the patch on top, as before); the version they were
       // saved at comes with the server's answer.
-      onUpdateRef.current(mergeTournamentPatch(tRef.current, patch, password, locked));
+      onUpdateRef.current(mergeTournamentPatch(tRef.current, stored, password, locked));
       // Kept on this device and sent when the link allows: a save made with no
       // connection says so now, not when it lands (the same line the court-call
       // composer gives).

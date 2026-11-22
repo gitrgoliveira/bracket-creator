@@ -85,6 +85,30 @@ export function readsAsOrganiser() {
     return _audience.kind === 'admin' && !!_audience.password;
 }
 
+// CREDENTIAL_REFUSED: the `code` of the error a read throws when the server
+// refused the organiser's password (HTTP 401 on an admin read, which a stale
+// saved password draws now that every read is judged by its audience).
+export const CREDENTIAL_REFUSED = 'credential_refused';
+
+// noteRefusedCredential: a read answered `status`. When that is 401 on a page
+// that read with the organiser's password, the app is told (the page drops the
+// stale credential and asks for the password again, app.jsx
+// dropStaleCredential) and the answer is true; the caller then throws an error
+// carrying CREDENTIAL_REFUSED, so nothing reads it as "no tournament".
+export function noteRefusedCredential(status) {
+    if (status !== 401 || !readsAsOrganiser()) return false;
+    if (typeof window !== 'undefined' && typeof window.credentialRefused === 'function') window.credentialRefused();
+    return true;
+}
+
+// readFailure: the error a failed read throws. It carries CREDENTIAL_REFUSED
+// when the server refused the organiser's password (noteRefusedCredential).
+export function readFailure(status, serverMessage, what) {
+    const e = new Error(serverMessage || `Failed to fetch ${what} (Status ${status})`);
+    if (noteRefusedCredential(status)) e.code = CREDENTIAL_REFUSED;
+    return e;
+}
+
 // readHeaders: the credential headers of a read from this page, {} for none.
 export function readHeaders() {
     if (_audience.kind === 'admin') {

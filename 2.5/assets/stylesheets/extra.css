@@ -1,0 +1,286 @@
+/* bracket-creator docs theme: a bold, sporting design language layered onto
+ * Zensical's classic theme (the Material look). The brand navy (#1d3557, see
+ * DESIGN.md) is the single interactive colour. The theme owns the page
+ * chrome (header, tabs, sidebar, TOC, search); this file owns the design
+ * language: type rhythm, surfaces, figures, code/table/tab styling. The
+ * landing page at the site root is a standalone template
+ * (overrides/landing.html) with its own styles.
+ *
+ * Colour is scoped PER SCHEME. Material derives link/interactive colours from
+ * the --md-* tokens; an unscoped :root override forces one value into both
+ * light and dark (which made dark links invisible). The :root block below
+ * defines every brand anchor and derived tint as a named token; every
+ * colour at a use site references a token, nothing is improvised inline.
+ * ------------------------------------------------------------------------- */
+
+/* ===== Brand + surface tokens (scheme-independent) ===== */
+:root {
+	/* Brand anchors: exact hex, single-sourced with the product (DESIGN.md). */
+	--bc-navy:       #1d3557;
+	--bc-navy-deep:  #142840;
+	--bc-navy-700:   #2a4a72;
+
+	/* Neutrals + navy tints (used on dark surfaces). */
+	--bc-white:      #ffffff;
+	--bc-paper:      #fbfcfe;   /* reading surface, a whisper toward navy */
+	--bc-sky:        #93b3e0;   /* lightened navy: dark-scheme links */
+	--bc-ice:        #eef2fb;   /* near-white on navy: dark table head */
+
+	/* Derived surfaces (OKLCH). */
+	--bc-line:       oklch(0.925 0.006 260);
+	--bc-wash:       oklch(0.965 0.012 255);   /* faint navy wash: alternate table rows */
+
+	/* Motion. */
+	--bc-ease-out:   cubic-bezier(0.16, 1, 0.3, 1);
+	--bc-dur:        200ms;
+
+	/* Geometry. */
+	--bc-radius:     10px;
+	--bc-radius-sm:  6px;
+	--bc-rule:       3px;       /* the "court-line" tick weight */
+}
+
+/* No horizontal overflow at any width. Material manages its own layout; this is
+ * the belt-and-suspenders root rule. clip (not hidden) keeps the sticky header
+ * working, since clip does not create a scrolling container. */
+html, body { overflow-x: clip; }
+
+/* Zensical's classic theme reserves the scrollbar's gutter on every page
+ * (`scrollbar-gutter: stable`), which Material did not. With a classic
+ * (non-overlay) scrollbar that leaves a blank strip beside the header on a
+ * page too short to scroll, and narrows every page by the scrollbar's width.
+ * Back to the old behaviour: the scrollbar takes space only when it shows. */
+html { scrollbar-gutter: auto; }
+
+/* ===== Light scheme ===== */
+[data-md-color-scheme="default"] {
+	--md-primary-fg-color:        var(--bc-navy);
+	--md-primary-fg-color--light: var(--bc-navy-700);
+	--md-primary-fg-color--dark:  var(--bc-navy-deep);
+
+	/* Navy carries every interactive state + in-prose links (12.3:1 on white). */
+	--md-accent-fg-color:  var(--bc-navy);
+	--md-typeset-a-color:  var(--bc-navy);
+
+	/* Reading surface tinted a whisper toward navy so it reads as the
+	 * product's own paper rather than a default white. */
+	--md-default-bg-color: var(--bc-paper);
+
+	--bc-card-bg:    var(--bc-white);
+	--bc-code-bg:    oklch(0.975 0.008 255);
+	--bc-table-head: var(--bc-navy);
+	--bc-table-head-fg: var(--bc-white);
+	--bc-table-alt:  var(--bc-wash);
+	--bc-tick:       var(--bc-navy);
+}
+
+/* ===== Dark (slate) scheme ===== */
+[data-md-color-scheme="slate"] {
+	--md-primary-fg-color:        var(--bc-navy);
+	--md-primary-fg-color--light: var(--bc-navy-700);
+	--md-primary-fg-color--dark:  var(--bc-navy-deep);
+
+	/* Lightened navy (same hue) so links/accent clear 4.5:1 on slate.
+	 * --bc-sky on the slate surface measures ~6.1:1. */
+	--md-accent-fg-color:  var(--bc-sky);
+	--md-typeset-a-color:  var(--bc-sky);
+
+	--bc-card-bg:    oklch(0.27 0.02 262);
+	--bc-code-bg:    oklch(0.23 0.02 262);
+	--bc-table-head: oklch(0.32 0.04 258);
+	--bc-table-head-fg: var(--bc-ice);
+	--bc-table-alt:  oklch(0.30 0.018 262);
+	--bc-tick:       var(--bc-sky);
+	--bc-line:       oklch(0.40 0.02 262);
+	--bc-wash:       oklch(0.30 0.02 262);
+}
+
+/* ===== Typography: sporting display headings ===== */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+	/* 700, the heaviest weight of Atkinson Hyperlegible the theme loads. */
+	font-weight: 700;
+	letter-spacing: -0.018em;
+	line-height: 1.12;
+	overflow-wrap: anywhere;
+	text-wrap: balance;
+}
+
+/* Material greys the page title (--md-default-fg-color--light, 4.4:1 on the
+ * paper); the title takes the full text colour, as the headings under it do. */
+.md-typeset h1 {
+	font-size: 2.1rem;
+	min-width: 0;
+	color: var(--md-default-fg-color);
+}
+
+/* Fewer orphans in running prose (graceful no-op where unsupported). */
+.md-typeset p,
+.md-typeset li { text-wrap: pretty; }
+
+/* "Court-line" tick before every h2: a short bold navy bar, the spatial
+ * motif from the bracket courts, and the section's only mark: no rule above
+ * it as well. Section heads collapse cleanly on mobile. */
+.md-typeset h2 {
+	font-size: 1.5rem;
+	margin-top: 2.4em;
+}
+
+.md-typeset h2::before {
+	content: "";
+	display: block;
+	width: 2.2rem;
+	height: var(--bc-rule);
+	margin-bottom: 0.7rem;
+	background: var(--bc-tick);
+	border-radius: 2px;
+}
+
+.md-typeset h3 { font-size: 1.18rem; }
+
+/* ===== In-prose links: underline marks the link, navy hue is secondary ===== */
+.md-typeset a {
+	text-decoration: underline;
+	text-underline-offset: 0.15em;
+	text-decoration-thickness: 1px;
+	transition: text-decoration-thickness var(--bc-dur) var(--bc-ease-out);
+}
+.md-typeset a:hover { text-decoration-thickness: 2px; }
+
+/* Permalink anchors (¶) and image-only links are not prose links. */
+.md-typeset a.headerlink { text-decoration: none; }
+.md-typeset a:has(img) { text-decoration: none; }
+
+/* ===== Code blocks: navy-headed, crisp border ===== */
+.md-typeset pre > code {
+	border-radius: var(--bc-radius-sm);
+}
+.md-typeset .highlight {
+	border: 1px solid var(--bc-line);
+	border-radius: var(--bc-radius-sm);
+	overflow: hidden;
+}
+.md-typeset .highlight pre { margin: 0; }
+.md-typeset .highlight > pre > code { background: var(--bc-code-bg); }
+/* Inline code. */
+.md-typeset :not(pre) > code {
+	border-radius: 4px;
+}
+
+/* ===== Tables: bold navy header, subtle zebra ===== */
+.md-typeset table:not([class]) {
+	border: 1px solid var(--bc-line);
+	border-radius: var(--bc-radius-sm);
+	overflow: hidden;
+}
+.md-typeset table:not([class]) th {
+	background: var(--bc-table-head);
+	color: var(--bc-table-head-fg);
+	font-weight: 700;
+	letter-spacing: 0.01em;
+}
+.md-typeset table:not([class]) tr:nth-child(even) td {
+	background: var(--bc-table-alt);
+}
+
+/* Mobile table polish (preserved): keep command/flag tokens whole... */
+.md-typeset table:not([class]) td code,
+.md-typeset table:not([class]) th code {
+	white-space: nowrap;
+}
+/* ...and let the wrapper scroll horizontally past the content column. */
+.md-typeset__table {
+	display: block;
+	max-width: 100%;
+	overflow-x: auto;
+}
+
+/* ===== Phone screenshots: render at device scale, not column width ===== */
+/* Portrait phone captures are saved at 2x; unconstrained they fill the whole
+ * content column and read as a wall. Tag them `{ .bc-phone }` (attr_list) to
+ * cap them near a real phone's logical width, centred, with a hairline frame
+ * so light UI chrome doesn't dissolve into the page surface. */
+.md-typeset img.bc-phone,
+.md-typeset video.bc-phone {
+	display: block;
+	/* Material's root font-size is 125% (1rem = 20px), so 20rem = 400px:
+	 * a large phone's logical width. */
+	max-width: min(20rem, 100%);
+	height: auto;
+	margin: 1em auto;
+	border: 1px solid var(--bc-line);
+	border-radius: var(--bc-radius);
+}
+
+/* On slate the hairline is invisible against a light capture and the white
+ * screenshot glares on the near-black page; drop the dead border and take
+ * the capture down a notch instead. */
+[data-md-color-scheme="slate"] .md-typeset img.bc-phone,
+[data-md-color-scheme="slate"] .md-typeset video.bc-phone {
+	border-color: transparent;
+	filter: brightness(0.92);
+}
+
+/* Any embedded video stays inside the content column (Material has no
+ * default video sizing). */
+.md-typeset video {
+	max-width: 100%;
+	height: auto;
+}
+
+/* Figure + caption around framed captures: the caption names which app
+ * screen the reader is looking at, so stacked screenshots stay skimmable. */
+.md-typeset figure.bc-fig {
+	display: block;
+	margin: 1.2em auto;
+	text-align: center;
+}
+.md-typeset figure.bc-fig > figcaption {
+	margin: 0.55em auto 0;
+	max-width: 26rem;
+	font-size: 0.72rem;
+	color: var(--md-default-fg-color--light);
+	text-wrap: pretty;
+}
+
+/* ===== Tabbed content: heavier labels. Material already colours the active
+ * tab + its underline with --md-accent-fg-color (navy), so no active-state
+ * rule is needed here. ===== */
+.md-typeset .tabbed-labels > label {
+	font-weight: 700;
+}
+
+/* ===== Admonitions: one hairline all round, no thick edge ===== */
+.md-typeset .admonition,
+.md-typeset details {
+	border-width: 0.075rem;
+	border-radius: var(--bc-radius-sm);
+}
+
+/* ===== Material nav tabs: bold; the theme dims every tab but the active one ===== */
+.md-tabs__link { font-weight: 700; }
+
+/* ===== Primary sidebar: section titles read as headings ===== */
+/* Groups are collapsible rows (navigation.sections is off, see mkdocs.yaml).
+ * Bold the group labels so a section title is identifiable at a glance next
+ * to plain page links; Material adds the expander caret on top of this. */
+.md-nav--primary .md-nav__item--nested > .md-nav__link {
+	font-weight: 700;
+}
+
+/* ===== Footer: slim navy strip ===== */
+.md-footer-meta { background: var(--bc-navy-deep); }
+
+/* ===== Mobile (≤ 768px): verified 320 / 375 / 414 / 768 ===== */
+@media screen and (max-width: 768px) {
+	.md-typeset h1 { font-size: 1.85rem; }
+	.md-typeset h2 { font-size: 1.35rem; }
+}
+
+/* ===== Reduced motion ===== */
+@media (prefers-reduced-motion: reduce) {
+	.md-typeset a {
+		transition-duration: 0.01ms;
+	}
+}

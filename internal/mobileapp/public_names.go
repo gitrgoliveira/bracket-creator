@@ -110,20 +110,6 @@ func (a audience) revealedCompetitors(compID string) map[string]bool {
 	return a.competitors[compID]
 }
 
-// classKey names the audience CLASS a payload is built once for:
-// "organiser", "public", or "reveal|c:<compId>,..." for the competition
-// links held, sorted. Per-competitor links are left out: they are overlays
-// on the class's masked payload, applied per caller.
-func (a audience) classKey() string {
-	if a.organiser {
-		return audienceOrganiser
-	}
-	if len(a.competitions) == 0 {
-		return audiencePublic
-	}
-	return audienceReveal + "|" + strings.Join(a.competitionParts(), ",")
-}
-
 // key names the whole audience, per-competitor links included, sorted: two
 // callers with the same key are answered the same bytes, so it is the part a
 // single-flight key adds.

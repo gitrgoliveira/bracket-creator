@@ -29,7 +29,7 @@ info:
     - **`GET /api/competitions/{id}/teams/{tid}/lineup-in-force/{matchId}`**: public read; the lineup a team fields at a match.
     - **`GET /api/competitions/{id}/matches/{mid}/kachinuki-roster`**: public read, in self-run mode too; a kachinuki encounter's fighters each side has left.
     - **`POST /api/competitions/{id}/teams/{tid}/fielded-lineup/{matchId}`**: public read, in self-run mode too, that writes nothing; who a kachinuki team fields by member number in the empty places of a lineup form.
-    - **`GET /api/competitions/{id}/swiss/standings`**: public read; always public.
+    - **`GET /api/competitions/{id}/swiss/standings`**: public read; judges its caller like the other name-bearing reads (see below).
     - **`GET /api/tournament/announcement`**: public read; returns the currently active admin broadcast announcement (204 when none/expired).
 
     **Names a competition hides.** A competition whose `publicNames` is not `""`
@@ -5312,6 +5312,12 @@ paths:
                 type: object
                 required: [sideA, sideB, nextPairing]
                 properties:
+                  namesHidden:
+                    type: boolean
+                    description: >
+                      `true` when the fighters read as team member labels
+                      because the competition hides its names from this
+                      caller. Absent otherwise.
                   sideA:
                     $ref: '#/components/schemas/KachinukiRosterSide'
                   sideB:
@@ -7245,11 +7251,25 @@ paths:
       summary: Get Swiss-format cumulative standings
       description: >
         Returns the cumulative standings for a Swiss-format competition,
-        ranked by wins then points. Always public (no auth required); read-only
-        viewer data, same policy as pool standings.
+        ranked by wins then points. A public read (no auth required), judged
+        for its caller like the other reads that carry competitor names: a
+        password sent but wrong is `401`, and the answer is sent
+        `Cache-Control: no-store`. A Swiss competition cannot hide its names,
+        so the answer carries them as stored; the route answers for any
+        competition id, and one of another format that hides its names gives
+        the public each competitor's number where the name is. The answer is a
+        bare array, so it carries no `namesHidden` marker.
       security: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
       responses:
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
         '200':
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           description: Ranked standings list.
           content:
             application/json:
@@ -7296,6 +7316,12 @@ paths:
                 type: object
                 required: [candidates]
                 properties:
+                  namesHidden:
+                    type: boolean
+                    description: >
+                      `true` when the answer is masked for this caller because
+                      the competition hides its names (a team's own name
+                      stays). Absent otherwise.
                   candidates:
                     type: array
                     items:

@@ -154,12 +154,13 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 					zek := comp.EffectiveWithZekkenName()
 					v := viewerMaskView(names, comp, aud)
 					// bc-brid: BracketMatch carries a per-side id when its own
-					// row is stamped; buildSideByIDOrName prefers it and falls
-					// back to the pre-bc-brid name match for a bye, an
-					// unresolved feeder, or an unrepaired legacy row.
+					// row is stamped; bracketCurrentSide prefers it and, for an
+					// audience that sees names, falls back to the pre-bc-brid
+					// name match for a bye, an unresolved feeder, or an
+					// unrepaired legacy row.
 					c.JSON(http.StatusOK, maskCurrentMatchPayload(v, currentMatchPayload(court, comp,
-						buildSideByIDOrName(bm.SideA, bm.SideAID, players, zek),
-						buildSideByIDOrName(bm.SideB, bm.SideBID, players, zek),
+						bracketCurrentSide(v, bm.SideA, bm.SideAID, players, zek),
+						bracketCurrentSide(v, bm.SideB, bm.SideBID, players, zek),
 						bm.IpponsA, bm.IpponsB, bm.HansokuA, bm.HansokuB,
 						phaseFromMatchID(bm.ID), "", "")))
 					return
@@ -185,11 +186,11 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 				// (matches the "3rd Place Match" label kachinuki_export.go
 				// uses for the same match).
 				// ThirdPlaceMatch is a BracketMatch too, so the same
-				// id-preferring, name-falling-back resolution applies
-				// (buildSideByIDOrName, matching the round branch above).
+				// id-preferring resolution applies (bracketCurrentSide,
+				// matching the round branch above).
 				c.JSON(http.StatusOK, maskCurrentMatchPayload(v, currentMatchPayload(court, comp,
-					buildSideByIDOrName(bm.SideA, bm.SideAID, players, zek),
-					buildSideByIDOrName(bm.SideB, bm.SideBID, players, zek),
+					bracketCurrentSide(v, bm.SideA, bm.SideAID, players, zek),
+					bracketCurrentSide(v, bm.SideB, bm.SideBID, players, zek),
 					ipponsA, ipponsB, hansokuA, hansokuB,
 					"3rd Place Match", "", "")))
 				return
@@ -546,6 +547,20 @@ func buildSideByIDOrName(name, id string, players []domain.Player, withZekkenNam
 		p = findPlayerByName(players, name)
 	}
 	return sidePayload(name, p, withZekkenName)
+}
+
+// bracketCurrentSide is a running knockout match's side as the court overlay
+// shows it. An audience that sees names gets buildSideByIDOrName's tolerant
+// resolution. A caller the masking hides names from gets buildSideByID's
+// id-only one, so the side is masked by the id the row stores, as every other
+// bracket surface does (maskView.bracketMatch): an id-less legacy row reads
+// "?" rather than whatever competitor the name happens to match, which across
+// dojos could be a namesake, or one whose reveal link the caller holds.
+func bracketCurrentSide(v maskView, name, id string, players []domain.Player, withZekkenName bool) gin.H {
+	if v.namesHidden() {
+		return buildSideByID(name, id, players, withZekkenName)
+	}
+	return buildSideByIDOrName(name, id, players, withZekkenName)
 }
 
 // phaseFromMatchID derives a human-readable phase label from a match ID.

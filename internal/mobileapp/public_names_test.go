@@ -86,22 +86,18 @@ func judgeRequest(t *testing.T, pn *publicNames, headers map[string]string) (aud
 
 func TestAudienceKeys(t *testing.T) {
 	assert.Equal(t, "public", audience{}.key())
-	assert.Equal(t, "public", audience{}.classKey())
 	assert.Equal(t, "organiser", organiserAudience().key())
-	assert.Equal(t, "organiser", organiserAudience().classKey())
 
 	a := audience{
 		competitions: map[string]bool{"z-comp": true, "a-comp": true},
 		competitors:  map[string]map[string]bool{"m-comp": {pnBob: true, pnAlice: true}},
 	}
 	assert.Equal(t, "reveal|c:a-comp,c:z-comp,p:m-comp="+pnAlice+"+"+pnBob, a.key())
-	assert.Equal(t, "reveal|c:a-comp,c:z-comp", a.classKey(), "per-competitor links are overlays, not a class")
 	assert.True(t, a.revealsAll("a-comp"))
 	assert.False(t, a.revealsAll("m-comp"))
 	assert.True(t, a.revealedCompetitors("m-comp")[pnAlice])
 
 	onlyPersons := audience{competitors: map[string]map[string]bool{"m": {pnAlice: true}}}
-	assert.Equal(t, "public", onlyPersons.classKey())
 	assert.Equal(t, "reveal|p:m="+pnAlice, onlyPersons.key())
 }
 
@@ -165,7 +161,6 @@ func TestJudge_CompetitionKey(t *testing.T) {
 	aud, ok, _ := judgeRequest(t, f.pn, hdr)
 	require.True(t, ok)
 	assert.True(t, aud.revealsAll("juniors"))
-	assert.Equal(t, "reveal|c:juniors", aud.classKey())
 
 	// A wrong key, or a key for another competition id, reveals nothing.
 	aud, _, _ = judgeRequest(t, f.pn, map[string]string{revealKeyHeader: "juniors:" + strings.Repeat("0", 64)})
@@ -203,7 +198,6 @@ func TestJudge_CompetitorKey(t *testing.T) {
 	require.True(t, ok)
 	assert.False(t, aud.revealsAll("juniors"))
 	assert.Equal(t, map[string]bool{pnBob: true}, aud.revealedCompetitors("juniors"))
-	assert.Equal(t, "public", aud.classKey())
 
 	// The competition key is refused under per-person links.
 	f.comp.PublicNames = state.PublicNamesCompetition

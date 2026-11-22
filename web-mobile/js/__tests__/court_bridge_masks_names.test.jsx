@@ -144,6 +144,15 @@ describe('maskSnapshotForBridge, team competitions', () => {
         expect(hiding.teamMembers.t1[0].name).toBe('Tanaka Kenji');
         expect(hiding.poolMatches[0].subResults[0].sideA).toBe('Tanaka Kenji');
     });
+
+    it('drops a team record\'s metadata, where a legacy roster held its members\' names', () => {
+        const hiding = teamComp('hidden');
+        hiding.config.players[0] = { ...hiding.config.players[0], metadata: ['Tanaka Kenji', 'Sato Ryo'], danGrade: 'Tanaka Kenji' };
+        const [out] = maskSnapshotForBridge([hiding]);
+        expect(JSON.stringify(out)).not.toContain('Tanaka');
+        expect(out.config.players[0]).toMatchObject({ name: 'Dojo Alpha', metadata: [], danGrade: '' });
+        expect(hiding.config.players[0].metadata).toEqual(['Tanaka Kenji', 'Sato Ryo']);
+    });
 });
 
 describe('boardOverlayResult', () => {
@@ -168,6 +177,15 @@ describe('maskSnapshotForBridge, a competitor the draw has not numbered', () => 
         expect(out.poolMatches[0].sideB).toMatchObject({ id: 'p2', name: '?' });
         // the numbered competitor still reads by number
         expect(out.config.players[0].name).toBe('K1');
+    });
+
+    it('reads "?" for a legacy row with no id and no number, never its name', () => {
+        const c = individual('hidden');
+        delete c.config.players[1].id;
+        delete c.config.players[1].number;
+        const [out] = maskSnapshotForBridge([c]);
+        expect(out.config.players[1]).toMatchObject({ name: '?', displayName: '?', nameHidden: true });
+        expect(JSON.stringify(out.config.players)).not.toContain('Suzuki');
     });
 });
 

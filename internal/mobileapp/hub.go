@@ -473,6 +473,7 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 	}
 	if eventType == EventPasswordReset {
 		h.endOrganiserStreamsLocked()
+		h.tickets.passwordChanged()
 	}
 }
 

@@ -49,6 +49,11 @@ const eventTicketBytes = 32
 type eventTickets struct {
 	mu sync.Mutex
 	m  map[string]eventTicket
+	// passwordEpoch counts the admin password changes. An organiser's
+	// ticket carries the count read before its password was judged and is
+	// redeemed only while that is still the count, so a ticket judged
+	// against a password that has since changed never opens a stream.
+	passwordEpoch uint64
 	// now is the clock tickets are timed by; nil is time.Now.
 	now func() time.Time
 }
@@ -59,6 +64,30 @@ type eventTicket struct {
 	// idle: the subscriber is no organiser and holds no key that reveals
 	// anything now (counted against maxIdleEventTickets).
 	idle bool
+	// epoch is the passwordEpoch read before the caller was judged.
+	epoch uint64
+}
+
+// epochNow is the current passwordEpoch, read before a caller is judged.
+func (t *eventTickets) epochNow() uint64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.passwordEpoch
+}
+
+// passwordChanged counts a change of the admin password and drops the
+// organiser tickets still waiting: each was judged against the old password.
+// Called from Broadcast's EventPasswordReset, beside ending the organiser
+// streams already open.
+func (t *eventTickets) passwordChanged() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.passwordEpoch++
+	for k, e := range t.m {
+		if e.sub.aud.isOrganiser() {
+			delete(t.m, k)
+		}
+	}
 }
 
 // idleTickets counts the waiting tickets that reveal nothing. Call it with
@@ -84,7 +113,8 @@ func (t *eventTickets) clock() time.Time {
 var errTooManyEventTickets = errors.New("too many event-stream tickets waiting")
 
 // issueTicket hands out a single-use ticket for sub, valid eventTicketTTL.
-func (h *Hub) issueTicket(sub sseSubscriber) (string, time.Time, error) {
+// judgedAt is the passwordEpoch read before sub's credentials were judged.
+func (h *Hub) issueTicket(judgedAt uint64, sub sseSubscriber) (string, time.Time, error) {
 	var b [eventTicketBytes]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", time.Time{}, fmt.Errorf("event ticket: %w", err)
@@ -116,12 +146,13 @@ func (h *Hub) issueTicket(sub sseSubscriber) (string, time.Time, error) {
 			return "", time.Time{}, errTooManyEventTickets
 		}
 	}
-	t.m[ticket] = eventTicket{sub: sub, expires: expires, idle: idle}
+	t.m[ticket] = eventTicket{sub: sub, expires: expires, idle: idle, epoch: judgedAt}
 	return ticket, expires, nil
 }
 
 // redeemTicket spends ticket: the subscriber it was handed out for, and
-// whether it was waiting and unexpired. A ticket is gone once asked for,
+// whether it was waiting and unexpired, and, for an organiser's, judged
+// against the admin password in force now. A ticket is gone once asked for,
 // whatever the answer.
 func (h *Hub) redeemTicket(ticket string) (sseSubscriber, bool) {
 	t := &h.tickets
@@ -133,6 +164,9 @@ func (h *Hub) redeemTicket(ticket string) (sseSubscriber, bool) {
 	}
 	delete(t.m, ticket)
 	if !t.clock().Before(e.expires) {
+		return sseSubscriber{}, false
+	}
+	if e.sub.aud.isOrganiser() && e.epoch != t.passwordEpoch {
 		return sseSubscriber{}, false
 	}
 	return e.sub, true
@@ -152,6 +186,9 @@ func (h *Hub) HandleEventTicket() gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "event-stream tickets are not available"})
 			return
 		}
+		// Read before the password is judged: a change landing between the
+		// two leaves this ticket with the old count, and it is refused.
+		judgedAt := h.tickets.epochNow()
 		aud, ok := names.judge(c)
 		if !ok {
 			return
@@ -173,7 +210,7 @@ func (h *Hub) HandleEventTicket() gin.HandlerFunc {
 				return
 			}
 		}
-		ticket, expires, err := h.issueTicket(sub)
+		ticket, expires, err := h.issueTicket(judgedAt, sub)
 		if errors.Is(err, errTooManyEventTickets) {
 			c.Header("Retry-After", "5")
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Too many event-stream tickets are waiting; retry shortly"})

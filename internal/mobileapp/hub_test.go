@@ -1085,7 +1085,7 @@ func TestEventTicket_JudgedOnceAndSpent(t *testing.T) {
 	// Expired before it is used.
 	now := time.Now()
 	h.tickets.now = func() time.Time { return now }
-	tk, _, err := h.issueTicket(sseSubscriber{})
+	tk, _, err := h.issueTicket(0, sseSubscriber{})
 	require.NoError(t, err)
 	h.tickets.now = func() time.Time { return now.Add(eventTicketTTL) }
 	_, ok = h.redeemTicket(tk)
@@ -1111,10 +1111,10 @@ func TestEventTicket_BoundedAndBareHub(t *testing.T) {
 	for i := range maxEventTickets {
 		h.tickets.m[fmt.Sprint(i)] = eventTicket{expires: now.Add(time.Second)}
 	}
-	_, _, err := h.issueTicket(sseSubscriber{})
+	_, _, err := h.issueTicket(0, sseSubscriber{})
 	assert.ErrorIs(t, err, errTooManyEventTickets, "no new ticket while every one waiting is live")
 	h.tickets.now = func() time.Time { return now.Add(2 * time.Second) }
-	_, _, err = h.issueTicket(sseSubscriber{})
+	_, _, err = h.issueTicket(0, sseSubscriber{})
 	assert.NoError(t, err, "expired tickets make room")
 	assert.Len(t, h.tickets.m, 1)
 
@@ -1129,7 +1129,7 @@ func TestEventTicket_BoundedAndBareHub(t *testing.T) {
 func TestHandleEvents_RefusesAnUnusableTicket(t *testing.T) {
 	f := newPNFixture(t, state.PublicNamesHidden)
 	r, h := ticketRouter(f)
-	tk, _, err := h.issueTicket(sseSubscriber{aud: organiserAudience()})
+	tk, _, err := h.issueTicket(0, sseSubscriber{aud: organiserAudience()})
 	require.NoError(t, err)
 	_, ok := h.redeemTicket(tk)
 	require.True(t, ok)
@@ -1163,7 +1163,7 @@ func TestHandleEvents_StreamIsProjectedForItsTicket(t *testing.T) {
 		}()
 		return w, cancel, done
 	}
-	tk, _, err := h.issueTicket(sseSubscriber{aud: organiserAudience()})
+	tk, _, err := h.issueTicket(0, sseSubscriber{aud: organiserAudience()})
 	require.NoError(t, err)
 	orgW, orgCancel, orgDone := open("?lastEventId=0&ticket=" + tk)
 	pubW, pubCancel, pubDone := open("")
@@ -1280,9 +1280,9 @@ func TestEventTicket_KeepsRoomForTheOrganiser(t *testing.T) {
 	for i := range maxEventTickets - organiserTicketReserve {
 		h.tickets.m[fmt.Sprint(i)] = eventTicket{expires: now.Add(time.Second)}
 	}
-	_, _, err := h.issueTicket(sseSubscriber{reveal: "juniors:" + strings.Repeat("0", 64)})
+	_, _, err := h.issueTicket(0, sseSubscriber{reveal: "juniors:" + strings.Repeat("0", 64)})
 	assert.ErrorIs(t, err, errTooManyEventTickets, "a reveal-key caller leaves the reserve alone")
-	_, _, err = h.issueTicket(sseSubscriber{aud: organiserAudience()})
+	_, _, err = h.issueTicket(0, sseSubscriber{aud: organiserAudience()})
 	assert.NoError(t, err, "the organiser still gets a ticket")
 }
 
@@ -1294,25 +1294,25 @@ func TestEventTicket_InventedKeysCannotCrowdOutRealOnes(t *testing.T) {
 	h := hubWithNames(f)
 	invented := sseSubscriber{reveal: "juniors:" + strings.Repeat("0", 64)}
 	for range maxIdleEventTickets {
-		_, _, err := h.issueTicket(invented)
+		_, _, err := h.issueTicket(0, invented)
 		require.NoError(t, err)
 	}
-	_, _, err := h.issueTicket(invented)
+	_, _, err := h.issueTicket(0, invented)
 	assert.ErrorIs(t, err, errTooManyEventTickets, "invented keys stop at their own limit")
 
 	real := sseSubscriber{
 		reveal: invented.reveal,
 		aud:    audience{competitions: map[string]bool{"juniors": true}},
 	}
-	_, _, err = h.issueTicket(real)
+	_, _, err = h.issueTicket(0, real)
 	assert.NoError(t, err, "a key that reveals names still gets a ticket")
-	_, _, err = h.issueTicket(sseSubscriber{aud: organiserAudience()})
+	_, _, err = h.issueTicket(0, sseSubscriber{aud: organiserAudience()})
 	assert.NoError(t, err, "the organiser still gets a ticket")
 
 	// Spent or expired tickets free their room.
 	now := time.Now()
 	h.tickets.now = func() time.Time { return now.Add(eventTicketTTL) }
-	_, _, err = h.issueTicket(invented)
+	_, _, err = h.issueTicket(0, invented)
 	assert.NoError(t, err, "expired tickets make room")
 }
 
@@ -1339,6 +1339,42 @@ func TestBroadcast_PasswordResetEndsOrganiserStreams(t *testing.T) {
 	h.mu.RUnlock()
 	assert.True(t, publicOpen, "a public stream is never ended for a password change")
 	h.Close()
+}
+
+// An organiser's ticket is judged against the password in force when it was
+// asked for, so a password change refuses every organiser ticket judged
+// before it: one still waiting, and one judged before the change but stored
+// after it. A reveal key's ticket does not hang on the password.
+func TestBroadcast_PasswordResetRefusesOrganiserTickets(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	h := hubWithNames(f)
+	defer h.Close()
+
+	judgedAt := h.tickets.epochNow()
+	waiting, _, err := h.issueTicket(judgedAt, sseSubscriber{aud: organiserAudience()})
+	require.NoError(t, err)
+	keyed, _, err := h.issueTicket(judgedAt, sseSubscriber{
+		reveal: "juniors:" + strings.Repeat("0", 64),
+		aud:    audience{competitions: map[string]bool{"juniors": true}},
+	})
+	require.NoError(t, err)
+
+	h.Broadcast(EventPasswordReset, passwordResetEventData{})
+
+	late, _, err := h.issueTicket(judgedAt, sseSubscriber{aud: organiserAudience()})
+	require.NoError(t, err)
+	_, ok := h.redeemTicket(waiting)
+	assert.False(t, ok, "an organiser ticket waiting through a password change opens no stream")
+	_, ok = h.redeemTicket(late)
+	assert.False(t, ok, "a ticket judged before the change is refused though stored after it")
+	_, ok = h.redeemTicket(keyed)
+	assert.True(t, ok, "a reveal key's ticket is not about the password")
+
+	fresh, _, err := h.issueTicket(h.tickets.epochNow(), sseSubscriber{aud: organiserAudience()})
+	require.NoError(t, err)
+	sub, ok := h.redeemTicket(fresh)
+	assert.True(t, ok, "a ticket judged after the change opens the stream")
+	assert.True(t, sub.aud.isOrganiser())
 }
 
 // A masked copy built before the competition was written is built again after

@@ -266,7 +266,7 @@ export function getLastBroadcastAt() {
 // The operator tab holds the organiser's copy, names and all; the display tab
 // is a PUBLIC surface, so a same-origin snapshot must not carry what the
 // server's masked payload would not. A competitor record (an object carrying a
-// number, or an id the roster maps to one) gets its name, display name and
+// number, an id the roster maps to one, or a name and a dojo) gets its name, display name and
 // zekken name set to its number and is stamped `nameHidden`; a match side, a
 // winner or a representative named by a bare string is replaced by the number
 // of the competitor its id names (else of the one roster name that is unique),
@@ -328,7 +328,11 @@ function maskNode(node, ctx) {
     for (const [k, v] of Object.entries(node)) out[k] = maskNode(v, ctx);
     const own = hasCompetitorNumber(node) ? String(node.number).trim() : '';
     const mapped = node.id != null && node.id !== '' ? ctx.byId.get(String(node.id)) : undefined;
-    const num = own || mapped || '';
+    // A competitor record (a name and a dojo) the roster cannot place, a
+    // legacy row with no id and no number among them, reads "?", as
+    // collectNumbers reads it: never its name.
+    const record = typeof node.name === 'string' && 'dojo' in node;
+    const num = own || mapped || (record ? '?' : '');
     if (num && typeof node.name === 'string') {
         out.name = num;
         out.nameHidden = true;
@@ -358,7 +362,9 @@ function maskNode(node, ctx) {
 // A team competition keeps its team names (the teams are the competitors) and
 // hides its team MEMBERS, as the server's masked payload does (maskView.bouts,
 // memberByName, squads): a member reads as their label ("T10.1"), or "?" when
-// no label can be made. The members come from the competition's own
+// no label can be made. A team record loses its metadata, and the dan grade
+// read from it, as maskView.player clears Metadata: a legacy roster held the
+// members' names there. The members come from the competition's own
 // teamMembers/squads map (team id to its members); a bout row names its
 // fighters by member id, a representative bout by name.
 const MEMBER_MAPS = ['teamMembers', 'squads'];
@@ -453,6 +459,10 @@ function maskTeamNode(node, ctx) {
         } else {
             out[k] = maskTeamNode(v, ctx);
         }
+    }
+    if (typeof node.name === 'string') {
+        if ('metadata' in node) out.metadata = [];
+        if ('danGrade' in node) out.danGrade = '';
     }
     if (Array.isArray(node.subResults)) maskTeamMatch(node, out, ctx);
     return out;

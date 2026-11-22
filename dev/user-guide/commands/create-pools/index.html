@@ -2374,7 +2374,7 @@
 
 
 <h1 id="create-pools">create-pools</h1>
-<p>Generates a <strong>Pools &amp; Knockout</strong> bracket: round-robin pools followed by a knockout elimination tree. It is meant for scripts and automation; to prepare a tournament, use the <a href="../../start-here/first-tournament/">tournament app</a>.</p>
+<p>Generates a <strong>Pools &amp; Knockout</strong> bracket: pools, drawn as a ring unless you pass <code>--round-robin</code>, followed by a knockout elimination tree. It is meant for scripts and automation; to prepare a tournament, use the <a href="../../start-here/first-tournament/">tournament app</a>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>bracket-creator create-pools [flags]
 </code></pre></div>
 <h2 id="flags">Flags</h2>
@@ -2434,7 +2434,7 @@
 <td><code>--round-robin</code></td>
 <td><code>-r</code></td>
 <td><code>false</code></td>
-<td>Force full round-robin in every pool</td>
+<td>Everyone fights everyone in every pool. Without it, each competitor fights the two beside them in a ring (in a pool of 2 or 3, that is everyone)</td>
 </tr>
 <tr>
 <td><code>--team-matches</code></td>

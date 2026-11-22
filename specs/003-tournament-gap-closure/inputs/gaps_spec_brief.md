@@ -45,7 +45,7 @@ This brief asks SpecKit to plan the work needed to close all those gaps so the a
 - **Kachinuki**: Winner-stays-on team format; the winning fighter remains to face the next opponent.
 - **Senpo / Jiho / Chuken / Fukusho / Taisho**: Standard 5-person team positions (1st through 5th/captain).
 - **IV / PW**: Individual Victories / Points Won; team match totals.
-- **Pool**: Round-robin group (full or partial). Winners advance to playoffs in mixed format.
+- **Pool**: Round-robin group. Winners advance to playoffs in mixed format.
 - **Playoff / Bracket**: Single-elimination tree.
 - **Zekken**: Cloth name-tag worn during match; the `withZekkenName` competition option uses this as the display name.
 
@@ -208,11 +208,6 @@ Today `MatchResult.Decision` is a draw flag only. A fought 2–0, a kiken 2–0,
 
 ### 6. Tournament Formats (Low priority, but spec-required)
 
-#### 6a. Partial round-robin pools (Gap 8)
-
-- Competition-level setting: `full` (default) or `partial` (adjacent-neighbour pairings: 1v2, 2v3, …).
-- Reduces match count for large pools (8+). Same pool ranking criteria apply; no engine changes for ranking.
-
 #### 6b. League format (Gap 12)
 
 - Explicit "League" label in competition setup (today this emerges as a side effect of not creating playoffs after pools complete).
@@ -302,7 +297,6 @@ These reshape the codebase so the features above land safely. They do not delive
   - §1 (Role-Based Access; high impact)
   - §7a (Per-phase durations; small, isolated)
   - §3c (Queue position; small, isolated)
-  - §6a (Partial round-robin)
   - §6b (League labeling)
   - Encho-only metadata from §4a
 - **Display family** (§2): Build §2a first; §2b and §2c share components and routing with §2a. §2c benefits from §9.5 (router).

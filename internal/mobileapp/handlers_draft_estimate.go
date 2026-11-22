@@ -143,8 +143,6 @@ func RegisterDraftEstimateHandlers(r gin.IRoutes, store TournamentLoader, eng Dr
 			comp.PoolWinners = v
 		}
 
-		comp.PoolFormat = strings.TrimSpace(c.Query("poolFormat"))
-
 		if b, ok := parseDraftQueryBool(c, "roundRobin"); !ok {
 			return
 		} else if b != nil {

@@ -390,7 +390,6 @@ type Competition struct {
 	Name         string `yaml:"name" json:"name"`
 	Kind         string `yaml:"kind" json:"kind"`
 	Format       string `yaml:"format" json:"format"`
-	PoolFormat   string `yaml:"pool_format,omitempty" json:"poolFormat,omitempty"` // "full" (default) | "partial"
 	TeamSize     int    `yaml:"team_size" json:"teamSize"`
 	PoolSize     int    `yaml:"pool_size" json:"poolSize"`
 	PoolSizeMode string `yaml:"pool_size_mode" json:"poolSizeMode"`
@@ -1272,9 +1271,6 @@ const (
 	CompFormatMixed    = "mixed"  // FR-050
 	CompFormatLeague   = "league" // FR-050
 	CompFormatSwiss    = "swiss"  // FR-050, FR-050a (US13)
-
-	PoolFormatFull    = "full"
-	PoolFormatPartial = "partial"
 )
 
 // TeamMatchType selects the team-match format. FR-044.

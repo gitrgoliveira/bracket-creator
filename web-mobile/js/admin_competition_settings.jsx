@@ -31,9 +31,8 @@ import {
 // block a kind change.
 import {
   LABEL_KIND, KIND_OPTIONS, LABEL_FORMAT, FORMAT_OPTIONS, formatHint,
-  LABEL_POOL_FORMAT, POOL_FORMAT_OPTIONS, poolFormatVisible,
+  poolShapeVisible,
   LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS, swissRoundsVisible,
-  LABEL_ROUND_ROBIN, roundRobinVisible,
   LABEL_KNOCKOUT_DURATION, HINT_KNOCKOUT_DURATION,
   poolDurationLabel, poolDurationHint, poolDurationVisible, knockoutDurationVisible,
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES,
@@ -42,9 +41,9 @@ import {
   LABEL_ZEKKEN, LABEL_ENGI,
   teamFieldsVisible, zekkenApplies, engiApplies, teamSizeError,
   resolveTeamSize, kindChangeBlockedReason,
-  FORMAT_LEAGUE, FORMAT_MIXED, POOL_FORMAT_PARTIAL,
+  FORMAT_LEAGUE, FORMAT_MIXED,
   MIN_TEAM_SIZE, poolSettingsError, pendingConfigClears, swissSettingsError,
-  CLEARED_FIELD_LABELS, optionLabel, poolFormatHint, resolvePoolFormat,
+  CLEARED_FIELD_LABELS, optionLabel,
   resolvePoolSizeMode, POOL_SIZE_MODE_MAX,
   LABEL_POOL_SIZE_MODE, POOL_SIZE_MODE_OPTIONS,
   twoThirdPlacesVisible, teamMatchTypeActive, twoThirdPlacesForNaginata, effectiveTwoThirdPlaces,
@@ -54,7 +53,7 @@ import {
   LABEL_CHECK_IN, HINT_CHECK_IN, tournamentHasCheckIn, checkInApplies,
   LABEL_NUMBER_PREFIX, cutNumberPrefix, numberPrefixHint, LABEL_COURTS,
 } from './competition_shape.jsx';
-import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
+import { PillGroup, PillButton, CheckboxField, NumberField, TextField, PoolShapeField } from './competition_fields.jsx';
 import { seededRanks } from './admin_helpers.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
@@ -189,7 +188,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // when the operator changes pauses, clockToElapsedMultiplier, or
   // slowestCourtBufferPct on the tournament settings screen and then returns here:
   // otherwise the display would be stale until a competition field changed.
-  }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts, c.teamSize, c.teamMatchType, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled,
+  }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts, c.teamSize, c.teamMatchType, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.swissRounds, c.checkInEnabled,
     c.extraQualifiers, c.twoThirdPlaces, c.naginata, c.expectedParticipants, c.status, c.date, c.startTime, password,
     pausesKey,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
@@ -324,7 +323,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       }
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType, c.expectedParticipants]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType, c.expectedParticipants]);
 
   // bc-obox T1: a save that moves a drawn competition (a new date or start
   // time, whose matches the server re-times in the same save) waits for the
@@ -668,7 +667,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // when they were added -- the ninth is the one that says something
   // slightly different.
   const lockedAfterDraw = isDrawReady || isStarted;
-  const lockedNote = lockedAfterDraw ? " Locked after draw." : "";
+  // lockedHint is the note on its own; lockedNote follows another hint.
+  const lockedHint = lockedAfterDraw ? "Locked after draw." : "";
+  const lockedNote = lockedHint && ` ${lockedHint}`;
 
   // Kind lock: a ROSTER lock, not the isDrawReady/isStarted pair above.
   // Individual and team rosters don't translate (competition_shape.jsx's
@@ -1091,11 +1092,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           {/* or a typed 0 or 1, both below this field's own min -- falls */}
           {/* back to the last-saved teamSize rather than landing on the */}
           {/* backend as a clobbering 0 or as a silent 5. */}
-          {/* draw-ready lock: teamSize is output-affecting. */}
+          {/* Locked from the draw on, started included (bc-rrsh r5). */}
           <NumberField label={LABEL_TEAM_SIZE} min={MIN_TEAM_SIZE} max={MAX_TEAM_SIZE}
             value={local.teamSize}
             onChange={(raw) => updateNumber("teamSize", raw, MIN_TEAM_SIZE)}
-            disabled={isDrawReady} hint={HINT_TEAM_SIZE} error={teamSizeErr} />
+            disabled={lockedAfterDraw} hint={`${HINT_TEAM_SIZE}${lockedNote}`} error={teamSizeErr} />
         </>
       )}
       {teamFieldsVisible(local.kind) && (
@@ -1118,34 +1119,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             hint={`${teamMatchTypeHint(local.teamMatchType === "kachinuki")}${lockedNote}`} />
         </>
       )}
-      {poolFormatVisible(local.format) && (
-        <>
-          {/* Same output-affecting lock as Format above: this is
-              the shape of the round-robin the draw itself builds. */}
-          {/* Stored/legacy "" resolves to "full" for display: the server's
-              own unset default is "full" (see poolFormatVisible's comment
-              in competition_shape.jsx), and this file already reads an
-              empty poolFormat as non-partial at the courts-suggestion hint
-              below (was: `local.poolFormat === "partial"`). */}
-          <PillGroup label={LABEL_POOL_FORMAT} options={POOL_FORMAT_OPTIONS}
-            isActive={(v) => resolvePoolFormat(local.poolFormat) === v}
-            onChange={(v) => update("poolFormat", v)} disabled={lockedAfterDraw}
-            hint={`${poolFormatHint(local.poolFormat)}${lockedNote}`} />
-        </>
-      )}
-      {/* bc-symm Gap 2: gated on roundRobinVisible (competition_shape.jsx)
-          -- true only for "mixed" with poolFormat !== "partial", the one
-          combination internal/engine/pools.go actually reads
-          comp.RoundRobin for. Rendering it unconditionally (as this used
-          to) showed a live-looking control that a league or a
-          partial-pool mixed competition silently ignored.
-          The guard wraps the .field, not just the checkbox inside it: an
-          empty .field still carries the class's own margin, and the sibling
-          poolFormatVisible / swissRoundsVisible blocks on this screen all
-          gate the wrapper too.
-          draw-ready lock: roundRobin is output-affecting. */}
-      {roundRobinVisible(local.format, local.poolFormat) && (
-        <CheckboxField label={LABEL_ROUND_ROBIN} checked={local.roundRobin} onChange={(on) => update("roundRobin", on)} disabled={isDrawReady} />
+      {/* Same output-affecting lock as Format above: who fights whom is
+          what the draw itself builds (bc-rrsh). The roundRobin checkbox it
+          replaced locked only while draw-ready; it shapes the draw, so it
+          now locks from the draw on. */}
+      {poolShapeVisible(local.format) && (
+        <PoolShapeField roundRobin={local.roundRobin}
+          onChange={(on) => update("roundRobin", on)}
+          disabled={lockedAfterDraw} hintSuffix={lockedNote} />
       )}
       {local.format === FORMAT_MIXED && (
         <>
@@ -1155,10 +1136,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               competition_shape.jsx. Nothing on the server fills this
               field in on POST, so a competition authored outside the SPA
               reaches the Format editor with "" and a bare equality lit
-              NEITHER pill while the draw ran minimum sizing. Same fix, and
-              the same reason, as resolvePoolFormat on the sibling field
-              above. */}
-          {/* draw-ready lock: poolSizeMode, poolSize, poolWinners are output-affecting. */}
+              NEITHER pill while the draw ran minimum sizing. */}
+          {/* Locked from the draw on, started included (bc-rrsh r5):
+              poolSizeMode, poolSize, poolWinners and the qualifiers shape
+              the draw, and the server refuses a change once started. */}
           {/* bc-qual LP-5a: leaving minimum-players-per-pool sizing
               hides the "Knockout qualifiers" radio below; reset its
               value to standard so it can't persist as a stale
@@ -1168,7 +1149,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <PillGroup label={LABEL_POOL_SIZE_MODE} options={POOL_SIZE_MODE_OPTIONS}
             isActive={(v) => resolvePoolSizeMode(local.poolSizeMode) === v}
             onChange={(v) => { update("poolSizeMode", v); if (v === POOL_SIZE_MODE_MAX) update("extraQualifiers", resetExtraQualifiersOnPoolModeChange(POOL_SIZE_MODE_MAX, local.extraQualifiers)); }}
-            disabled={isDrawReady} />
+            disabled={lockedAfterDraw} hint={lockedHint} />
           <div className="row">
             {/* Same NaN-as-"" + gated-save pattern as Team size above. */}
             {/* min=3 is a PRODUCT floor, not the backend's, which this */}
@@ -1179,15 +1160,20 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             {/* Shared with the create form via poolSettingsError. */}
             <NumberField label={LABEL_POOL_SIZE} min={MIN_POOL_SIZE} value={local.poolSize}
               onChange={(raw) => updateNumber("poolSize", raw, MIN_POOL_SIZE)}
-              disabled={isDrawReady} />
-            {/* bc-qual LP-5a: same coupling hint as the create form; */}
-            {/* draw-ready already has its own standing note on the */}
-            {/* Assigned shiaijo field below, so it isn't repeated per-field here. */}
+              disabled={lockedAfterDraw} />
+            {/* bc-qual LP-5a: same coupling hint as the create form. Once */}
+            {/* locked, the pair's one "Locked after draw." note sits under */}
+            {/* the row instead (bc-rrsh r7 C2). */}
             <NumberField label={LABEL_POOL_WINNERS} min={MIN_POOL_WINNERS} value={local.poolWinners}
               onChange={(raw) => updateNumber("poolWinners", raw, MIN_POOL_WINNERS)}
-              disabled={isDrawReady || winnersInputDisabled(local.extraQualifiers)}
-              hint={!isDrawReady && winnersInputDisabled(local.extraQualifiers) ? HINT_POOL_WINNERS_LOCKED : ""} />
+              disabled={lockedAfterDraw || winnersInputDisabled(local.extraQualifiers)}
+              hint={!lockedAfterDraw && winnersInputDisabled(local.extraQualifiers) ? HINT_POOL_WINNERS_LOCKED : ""} />
           </div>
+          {lockedAfterDraw && (
+            <div className="field">
+              <div className="field__hint" data-testid="pool-sizing-locked">{lockedHint}</div>
+            </div>
+          )}
           {/* Rendered for ANY invalid poolSize/poolWinners, staged or already
               saved, mirroring courtsErr's own rule (see the ShiaijoCountNotes
               comment on the Assigned shiaijo field below): the field must never
@@ -1240,7 +1226,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                   <PillButton
                     active={!local.extraQualifiers}
                     onClick={() => update("extraQualifiers", EXTRA_QUALIFIERS_STANDARD)}
-                    disabled={isDrawReady}
+                    disabled={lockedAfterDraw}
                   >{extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)}</PillButton>
                   <PillButton
                     active={local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS}
@@ -1248,7 +1234,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                       update("extraQualifiers", EXTRA_QUALIFIERS_LARGER_POOLS);
                       update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, local.poolWinners));
                     }}
-                    disabled={isDrawReady}
+                    disabled={lockedAfterDraw}
                   >{extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)}</PillButton>
                   <PillButton
                     active={local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET}
@@ -1256,11 +1242,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                       update("extraQualifiers", EXTRA_QUALIFIERS_FILL_BRACKET);
                       update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, local.poolWinners));
                     }}
-                    disabled={isDrawReady}
+                    disabled={lockedAfterDraw}
                   >{extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)}</PillButton>
                 </div>
                 <div className="field__hint">
-                  {extraQualifiersHint(local.extraQualifiers, local.poolSize)}
+                  {extraQualifiersHint(local.extraQualifiers, local.poolSize)}{lockedNote}
                 </div>
                 <div className="field__hint" data-testid="qualifier-preview-line">
                   {previewLine || "Preview appears once this competition has participants."}
@@ -1318,7 +1304,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         {/* draw-ready lock: courts is output-affecting. Discard the draw to reassign. */}
         {lockedAfterDraw && (
           <div className="field__hint field__hint--locked">
-            Set by the draw. Discard the draw to change shiaijo.
+            {isDrawReady
+              ? "Set by the draw. Discard the draw to change shiaijo."
+              : lockedHint}
           </div>
         )}
         <window.FieldError testId="orphan-shiaijo-hint">{orphanedCourtsErr}</window.FieldError>
@@ -1334,7 +1322,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             drop it. Same component as the create form, which has to render
             both notes identically. */}
         <window.ShiaijoCountNotes error={courtsErr} hint={courtsHint} />
-        {(local.format === FORMAT_LEAGUE || local.poolFormat === POOL_FORMAT_PARTIAL) ? (() => {
+        {local.format === FORMAT_LEAGUE ? (() => {
           const playerCount = (c.players || []).length;
           const ct = (n) => n === 1 ? "1 court" : `${n} courts`;
           const pt = (n) => n === 1 ? "1 player" : `${n} players`;
@@ -1342,7 +1330,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           // `local.courts` is seeded from the competition record, which Go
           // ships as `courts: null` when it was stored without a courts key.
           // Every other read on this screen already defaults it; this one did
-          // not, so the league/partial-pool branch alone crashed the settings
+          // not, so the league branch alone crashed the settings
           // tab - the very screen an operator opens to assign the shiaijo.
           const numCourts = (local.courts || []).length;
           const hardCap = Math.max(1, Math.floor(playerCount / 2));

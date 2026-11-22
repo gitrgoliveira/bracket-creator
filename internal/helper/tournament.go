@@ -1224,7 +1224,7 @@ func playerIndex(players []Player, p *Player) int {
 	return -1
 }
 
-// buildRoundLookup converts a CircleMethodRounds (or PathGraphRounds) result
+// buildRoundLookup converts a CircleMethodRounds result
 // into a map from normalised IntPair (A < B) to round index.
 func buildRoundLookup(rounds [][]IntPair) map[IntPair]int {
 	lookup := make(map[IntPair]int)

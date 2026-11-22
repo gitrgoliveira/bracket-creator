@@ -154,7 +154,6 @@ func (gc goldenCase) build() (*state.Competition, *state.Tournament) {
 		Name:                         gc.Name,
 		Kind:                         kind,
 		Format:                       gc.Format,
-		PoolFormat:                   "full",
 		TeamSize:                     gc.TeamSize,
 		PoolSize:                     3,
 		PoolSizeMode:                 "min",

@@ -612,7 +612,6 @@ func estimateForPlayerCount(t *testing.T, comp *state.Competition, tourn *state.
 		PoolSizeMode:     comp.PoolSizeMode,
 		PoolWinners:      comp.EffectivePoolWinners(),
 		RoundRobin:       comp.RoundRobin,
-		PoolFormat:       comp.PoolFormat,
 		SwissRounds:      comp.SwissRounds,
 		ExtraQualifiers:  comp.ExtraQualifiers,
 		SingleThirdPlace: comp.RequiresSingleThirdPlace(),

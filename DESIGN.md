@@ -281,7 +281,7 @@ Quick lookup: scan, then `Ctrl+F` the class name to jump to its subsection.
 | `.btn--sm` / `.btn--lg` | Compact rows / hero CTAs |
 | `.btn--full` | Full-width (forms, modal footers) |
 
-States: `:hover` brightens border to `--ink-4`; `:disabled` drops to 0.5 opacity. No loading state: show a `.spinner` next to or inside the button instead.
+States: `:hover` brightens border to `--ink-4`; `:disabled` drops to 0.6 opacity. No loading state: show a `.spinner` next to or inside the button instead.
 
 ### Cards: `.card`
 
@@ -291,7 +291,7 @@ States: `:hover` brightens border to `--ink-4`; `:disabled` drops to 0.5 opacity
 
 ### Form fields
 
-`.field > .field__label + .input + .field__hint`. Inputs share padding (`9px 12px`), radius (`8px`), border (`--line`), focus ring (`3px --accent-soft`). For dense controls (in modals/tables), use `.input--sm`. `.lined-textarea` adds a line-number gutter: see the participant paste box in admin.
+`.field > .field__label + .input + .field__hint`. Inputs share padding (`9px 12px`), radius (`8px`), border (`--line`), focus ring (`3px --accent-soft`). A disabled `.input`, `.textarea`, `.select`, `.field__input`, `.radio-pill` or `.checkbox` takes the muted surface (`--surface-2`), `--ink-3` ink and the not-allowed cursor; a disabled pill that is the active choice keeps its navy fill at 0.6 opacity, as a disabled `.btn` fades, so a locked row still shows what was chosen. For dense controls (in modals/tables), use `.input--sm`. `.lined-textarea` adds a line-number gutter: see the participant paste box in admin.
 
 ### Tables: `.table`, `.pool__table`
 

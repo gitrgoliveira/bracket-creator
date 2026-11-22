@@ -29,7 +29,6 @@ describe('settingsPutBody', () => {
     withZekkenName: true,
     teamSize: 0,
     numberPrefix: 'M',
-    poolFormat: '',
     poolMatchDurationSeconds: 180,
     knockoutMatchDurationSeconds: 240,
     swissRounds: 0,
@@ -130,6 +129,11 @@ describe('describeSettingsEdits', () => {
 
   it('formats single field', () => {
     expect(describeSettingsEdits({ startTime: '15:00' })).toBe('Start time to 15:00.');
+  });
+
+  it('tells a roundRobin edit as the "Who fights whom" shape (bc-rrsh)', () => {
+    expect(describeSettingsEdits({ roundRobin: false })).toBe('Who fights whom to Each fights two.');
+    expect(describeSettingsEdits({ roundRobin: true })).toBe('Who fights whom to Everyone fights everyone.');
   });
 
   it('formats several fields', () => {
@@ -258,7 +262,6 @@ describe('mergeSavedCompetition', () => {
     withZekkenName: true,
     teamSize: 0,
     numberPrefix: 'M',
-    poolFormat: '',
     poolMatchDurationSeconds: 180,
     knockoutMatchDurationSeconds: 240,
     swissRounds: 0,

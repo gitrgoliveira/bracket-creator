@@ -823,42 +823,29 @@ shape whatever the shiaijo count" invariant holds and where it does not. The oth
 seven are rules, not open questions. Where a default goes beyond what the EKC sheets
 show it is labelled an extrapolation and listed again at the end of this document.
 
-### D1. R6 criterion 2 under `poolFormat: "partial"`
+### D1. R6 criterion 2: the pool load metric
 
 **Rule.** A pool is **oversized** when its qualifier plays MORE pool matches than the
-qualifier of the competition's lightest pool. The load metric is defined per pool
-format:
-
-- **`poolFormat: "full"`** (round robin, the default, and the `roundRobin` legacy
-  path): the pool's **participant count**. In a round robin of n every competitor
-  fights n-1 matches, so participant count and per-competitor load induce the same
-  ordering.
-- **`poolFormat: "partial"`**: the **number of matches generated for that pool**, read
-  from the drawn pool (`len(pool.Matches)`), not recomputed from its size.
+qualifier of the competition's lightest pool. The load metric is the **number of
+matches generated for that pool**, read from the drawn pool (`len(pool.Matches)`),
+falling back to its **participant count** when the pool has no matches yet.
 
 Criterion 2 ranks by that metric **descending**, ties by pool order. Only pools whose
 metric strictly exceeds the competition minimum qualify; when every pool has the same
 metric, criterion 2 contributes nothing and precedence falls through to R6-3.
 
-**Verified against the code.** `CreatePartialPoolMatches`
-(`internal/helper/pool_partial.go:17`) emits an **adjacent-neighbour path graph**:
-for a pool of N players it appends exactly **N-1** matches, `(0,1), (1,2), ...,
-(N-2,N-1)`, skipping pools with fewer than 2 players. So under `partial` the generated
-match count is `len(Players) - 1` and the generated-count ordering is **identical** to
-the participant-count ordering. The two branches of this rule can never disagree about
-which pools are oversized.
+**Verified against the code.** A pool is drawn one of two ways, chosen by `roundRobin`
+(`createPoolMatches`, `internal/engine/pools.go`): everyone fights everyone
+(n(n-1)/2 matches) or the ring, each fighting the two beside them (n matches from a
+pool of 3 up, 1 for a pool of 2). Both counts strictly increase with n, so the
+generated-count ordering is **identical** to the participant-count ordering
+(`poolLoad`, `internal/helper/draw.go`). There is no third shape: every competitor in a
+pool fights the same number of times (operator ruling 2026-11-22).
 
 **Why still read the generated count rather than derive it.** The count is the thing
-the rule is actually about. Reading `len(pool.Matches)` stays correct if the partial
-pairing shape ever changes (a different graph, a round cap, an operator-tuned format),
-whereas a size-derived shortcut would silently keep ranking by a proxy that no longer
-tracks match load.
-
-**Honest limitation to record.** Under `partial` each competitor fights 1 match (the
-two endpoints of the path) or 2 (everyone else) regardless of pool size, so the
-fatigue rationale that justifies criterion 2 is weaker there than under a round robin.
-The criterion remains deterministic and total, and matches the operator's pinned
-definition; it simply compensates less because there is less to compensate for.
+the rule is actually about. Reading `len(pool.Matches)` stays correct if a pairing
+shape ever changes, whereas a size-derived shortcut would silently keep ranking by a
+proxy that no longer tracks match load.
 
 ### D2. Region depth
 
@@ -1287,8 +1274,7 @@ to its expected content.
 | Carries | Location |
 |---|---|
 | Pool sizing; max mode gives the extra player to the FIRST `rem` pools | `internal/helper/tournament.go:241` `CreatePools`, balancing at `:264-273` |
-| Partial-format match generation (N-1 path graph) | `internal/helper/pool_partial.go:17` `CreatePartialPoolMatches`; called from `internal/engine/pools.go:74` and `cmd/create-pools.go:236` |
-| `poolFormat` values | `internal/state/models.go:308` (field), `:634-635` (`PoolFormatFull` / `PoolFormatPartial`) |
+| Pool match generation (everyone or the ring, by `roundRobin`) | `internal/engine/pools.go` `createPoolMatches`; `cmd/create-pools.go` |
 | Qualifiers per pool | `internal/state/models.go:601` `EffectivePoolWinners` (defaults to 2) |
 
 ### Characterization (Phase 1)

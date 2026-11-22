@@ -2,12 +2,12 @@ import { describe, it, expect } from 'vitest';
 import {
   KIND_INDIVIDUAL, KIND_TEAM,
   FORMAT_KNOCKOUT, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS,
-  POOL_FORMAT_FULL, POOL_FORMAT_PARTIAL,
   LABEL_KIND, KIND_OPTIONS,
   LABEL_FORMAT, FORMAT_OPTIONS, formatHint,
-  LABEL_POOL_FORMAT, POOL_FORMAT_OPTIONS, poolFormatVisible,
+  LABEL_POOL_SHAPE, poolShapeVisible,
+  POOL_SHAPE_ALL, POOL_SHAPE_RING, POOL_SHAPE_OPTIONS,
+  poolShapeOf, roundRobinOf, poolShapeHint,
   LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS, swissRoundsVisible,
-  LABEL_ROUND_ROBIN, roundRobinVisible,
   LABEL_POOL_DURATION, HINT_POOL_DURATION, poolDurationLabel, poolDurationHint,
   LABEL_KNOCKOUT_DURATION, HINT_KNOCKOUT_DURATION,
   poolDurationVisible, knockoutDurationVisible,
@@ -34,15 +34,13 @@ const ALL_FORMATS = [FORMAT_KNOCKOUT, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS,
 const ALL_KINDS = [KIND_INDIVIDUAL, KIND_TEAM, '', undefined];
 
 describe('wire-value constants', () => {
-  it('mirror state.Competition Kind/Format/PoolFormat values byte-for-byte', () => {
+  it('mirror state.Competition Kind/Format values byte-for-byte', () => {
     expect(KIND_INDIVIDUAL).toBe('individual');
     expect(KIND_TEAM).toBe('team');
     expect(FORMAT_KNOCKOUT).toBe('knockout');
     expect(FORMAT_MIXED).toBe('mixed');
     expect(FORMAT_LEAGUE).toBe('league');
     expect(FORMAT_SWISS).toBe('swiss');
-    expect(POOL_FORMAT_FULL).toBe('full');
-    expect(POOL_FORMAT_PARTIAL).toBe('partial');
   });
 });
 
@@ -77,33 +75,19 @@ describe('FORMAT_OPTIONS / formatHint', () => {
   });
 });
 
-describe('POOL_FORMAT_OPTIONS / poolFormatVisible', () => {
-  it('has exactly full and partial, verbatim create-form copy', () => {
-    expect(LABEL_POOL_FORMAT).toBe('Round-robin shape');
-    expect(POOL_FORMAT_OPTIONS).toEqual([
-      { value: POOL_FORMAT_FULL, label: 'Full round-robin', hint: 'Every participant plays every other participant in their pool.' },
-      { value: POOL_FORMAT_PARTIAL, label: 'Partial / neighbour-only', hint: 'Each participant plays a neighbourhood subset: useful when a full round-robin would not fit in the day\'s schedule.' },
-    ]);
-  });
-
-  // bc-symm Gap 1: visible for every format that builds a pool phase --
-  // "mixed" AND "league", per internal/engine/pools.go:149's
-  // `switch comp.PoolFormat`, which dispatches for both (see
-  // poolFormatVisible's own comment for the pools.go/competition.go
-  // evidence). Before the fix this returned false for "mixed", so a mixed
-  // competition's pool shape could only ever be set to "partial" by
-  // hand-editing config.md; the FORMAT_MIXED row below is the one that
-  // pins the fix.
+describe('poolShapeVisible', () => {
+  // Only a pools-then-knockout competition has a choice: a league is always
+  // everyone fights everyone (competition.go forces RoundRobin on for it).
   const table = [
     [FORMAT_KNOCKOUT, false],
     [FORMAT_MIXED, true],
-    [FORMAT_LEAGUE, true],
+    [FORMAT_LEAGUE, false],
     [FORMAT_SWISS, false],
     ['', false],
     [undefined, false],
   ];
-  it.each(table)('poolFormatVisible(%j) -> %j', (format, expected) => {
-    expect(poolFormatVisible(format)).toBe(expected);
+  it.each(table)('poolShapeVisible(%j) -> %j', (format, expected) => {
+    expect(poolShapeVisible(format)).toBe(expected);
   });
 });
 
@@ -128,51 +112,35 @@ describe('Swiss rounds label/hint/visibility', () => {
   });
 });
 
-describe('LABEL_ROUND_ROBIN / roundRobinVisible', () => {
-  it('is the settings-only checkbox copy verbatim', () => {
-    expect(LABEL_ROUND_ROBIN).toBe('Round-robin in pools');
+describe('Who fights whom: one control over roundRobin (bc-rrsh)', () => {
+  // Every competitor in a pool fights the same number of times (operator
+  // ruling 2026-11-22): the engine draws everyone for roundRobin true and the
+  // ring for false (internal/engine/pools.go createPoolMatches).
+  it.each([
+    [true, POOL_SHAPE_ALL],
+    [false, POOL_SHAPE_RING],
+    [undefined, POOL_SHAPE_ALL],
+  ])('poolShapeOf(%j) -> %j', (roundRobin, expected) => {
+    expect(poolShapeOf(roundRobin)).toBe(expected);
   });
 
-  // bc-symm Gap 2: visible ONLY for "mixed" with poolFormat !== "partial" --
-  // the one combination internal/engine/pools.go:157 actually reads
-  // comp.RoundRobin for (see roundRobinVisible's own comment). Full sweep,
-  // every format x every poolFormat value, not just the interesting cells:
-  // before the fix this control had no visibility predicate at all (both
-  // surfaces rendered it unconditionally), so every row where `expected`
-  // is false below is a row the OLD behaviour got wrong.
-  const ALL_POOL_FORMATS = [POOL_FORMAT_FULL, POOL_FORMAT_PARTIAL, '', undefined];
-  const table = [];
-  for (const format of ALL_FORMATS) {
-    for (const poolFormat of ALL_POOL_FORMATS) {
-      const expected = format === FORMAT_MIXED && poolFormat !== POOL_FORMAT_PARTIAL;
-      table.push([format, poolFormat, expected]);
-    }
-  }
-  it.each(table)('roundRobinVisible(%j, %j) -> %j', (format, poolFormat, expected) => {
-    expect(roundRobinVisible(format, poolFormat)).toBe(expected);
+  it('each shape writes the roundRobin the engine reads back as that shape', () => {
+    expect(roundRobinOf(POOL_SHAPE_ALL)).toBe(true);
+    expect(roundRobinOf(POOL_SHAPE_RING)).toBe(false);
+    for (const o of POOL_SHAPE_OPTIONS) expect(poolShapeOf(roundRobinOf(o.value))).toBe(o.value);
   });
 
-  // Named regression cases, restated outside the sweep so the two rules
-  // (format gate, poolFormat gate) each fail on their own if either one
-  // is dropped later.
-  it('is visible for mixed with an unset/full poolFormat', () => {
-    expect(roundRobinVisible(FORMAT_MIXED, POOL_FORMAT_FULL)).toBe(true);
-    expect(roundRobinVisible(FORMAT_MIXED, '')).toBe(true);
-    expect(roundRobinVisible(FORMAT_MIXED, undefined)).toBe(true);
-  });
-
-  it('disappears the moment a mixed competition switches to partial pools', () => {
-    expect(roundRobinVisible(FORMAT_MIXED, POOL_FORMAT_PARTIAL)).toBe(false);
-  });
-
-  it('is never visible for league, even though RoundRobin is stored there too: competition.go:896 forces it true regardless', () => {
-    expect(roundRobinVisible(FORMAT_LEAGUE, POOL_FORMAT_FULL)).toBe(false);
-    expect(roundRobinVisible(FORMAT_LEAGUE, POOL_FORMAT_PARTIAL)).toBe(false);
-  });
-
-  it('is never visible for knockout or swiss: neither runs the PoolFormat switch\'s default branch', () => {
-    expect(roundRobinVisible(FORMAT_KNOCKOUT, POOL_FORMAT_FULL)).toBe(false);
-    expect(roundRobinVisible(FORMAT_SWISS, POOL_FORMAT_FULL)).toBe(false);
+  it('names the control and both shapes, and a hint per shape', () => {
+    expect(LABEL_POOL_SHAPE).toBe('Who fights whom');
+    expect(POOL_SHAPE_OPTIONS.map((o) => o.label)).toEqual(['Everyone fights everyone', 'Each fights two']);
+    for (const o of POOL_SHAPE_OPTIONS) expect(poolShapeHint(o.value)).toBe(o.hint);
+    // The ring is one fight in a pool of 2 and all three pairs in a pool of 3
+    // (helper.CreatePoolMatches), so its hint must say so, or the default
+    // pool size shows two pills that draw the same thing with nothing to
+    // explain it. It must not claim everyone fights twice: a pool of 2 is
+    // one fight each.
+    expect(poolShapeHint(POOL_SHAPE_RING)).toContain('A pool of 2 or 3 is the same as everyone fights everyone.');
+    expect(poolShapeHint(POOL_SHAPE_RING)).not.toContain('everyone fights twice');
   });
 });
 

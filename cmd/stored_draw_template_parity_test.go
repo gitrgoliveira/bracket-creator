@@ -30,8 +30,8 @@ import (
 // must carry what /create's does: the same sheets (the stored one adds the
 // Tags sheet a knockout-only /create leaves out), the same number of formulas
 // and values on each (pool counting formulas, the kachinuki bout rows, the
-// 3rd-place block, a league with one pool and no knockout, the partial pool
-// format, zekken names, engi, the number prefix, seeds), none of them
+// 3rd-place block, a league with one pool and no knockout, pools that
+// are not round robin, zekken names, engi, the number prefix, seeds), none of them
 // collapsed to "=0", and the same Time Estimator inputs. Which competitor
 // sits where may differ: that is the draw.
 func TestStoredDrawTemplateMatchesCreate(t *testing.T) {
@@ -44,7 +44,7 @@ func TestStoredDrawTemplateMatchesCreate(t *testing.T) {
 		{"league", state.Competition{Kind: "individual", Format: state.CompFormatLeague, PoolSize: 6, PoolWinners: 2, RoundRobin: true}, 6, 0},
 		{"pools", state.Competition{Kind: "individual", Format: state.CompFormatMixed, PoolSize: 3, PoolWinners: 2, RoundRobin: true}, 9, 0},
 		{"pools seeded", state.Competition{Kind: "individual", Format: state.CompFormatMixed, PoolSize: 3, PoolWinners: 2, RoundRobin: true}, 9, 3},
-		{"partial pools", state.Competition{Kind: "individual", Format: state.CompFormatMixed, PoolSize: 4, PoolWinners: 2, PoolFormat: "partial"}, 8, 0},
+		{"ring pools", state.Competition{Kind: "individual", Format: state.CompFormatMixed, PoolSize: 4, PoolWinners: 2}, 8, 0},
 		{"team pools", state.Competition{Kind: "team", TeamSize: 3, Format: state.CompFormatMixed, PoolSize: 3, PoolWinners: 2, RoundRobin: true}, 6, 0},
 		{"team league", state.Competition{Kind: "team", TeamSize: 3, Format: state.CompFormatLeague, PoolSize: 4, PoolWinners: 2, RoundRobin: true}, 4, 0},
 		{"kachinuki pools", state.Competition{Kind: "team", TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki, Format: state.CompFormatMixed, PoolSize: 3, PoolWinners: 2, RoundRobin: true}, 6, 0},
@@ -163,9 +163,6 @@ func createFormFor(t *testing.T, comp *state.Competition, n int, lines []string,
 	}
 	if comp.Format == state.CompFormatLeague {
 		form.Set("format", state.CompFormatLeague)
-	}
-	if comp.PoolFormat == "partial" {
-		form.Set("poolFormat", "partial")
 	}
 	if comp.WithZekkenName {
 		form.Set("withZekkenName", "on")

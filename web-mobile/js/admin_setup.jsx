@@ -161,9 +161,8 @@ import {
 import {
   COMPETITION_DEFAULTS,
   LABEL_KIND, KIND_OPTIONS, LABEL_FORMAT, FORMAT_OPTIONS, formatHint,
-  LABEL_POOL_FORMAT, POOL_FORMAT_OPTIONS, poolFormatVisible,
+  poolShapeVisible,
   LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS, swissRoundsVisible,
-  LABEL_ROUND_ROBIN, roundRobinVisible,
   LABEL_KNOCKOUT_DURATION, HINT_KNOCKOUT_DURATION,
   poolDurationLabel, poolDurationHint, poolDurationVisible, knockoutDurationVisible,
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES, twoThirdPlacesVisible,
@@ -175,13 +174,12 @@ import {
   MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
   FORMAT_MIXED, POOL_SIZE_MODE_MAX,
   LABEL_POOL_SIZE_MODE, POOL_SIZE_MODE_OPTIONS,
-  poolFormatHint, resolvePoolFormat,
   HINT_ZEKKEN, HINT_ENGI, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
   LABEL_CHECK_IN, HINT_CHECK_IN, tournamentHasCheckIn, SELF_RUN_NO_CHECK_IN,
   LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, cutNumberPrefix, LABEL_COURTS,
 } from './competition_shape.jsx';
-import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
+import { PillGroup, PillButton, CheckboxField, NumberField, TextField, PoolShapeField } from './competition_fields.jsx';
 import { DurationInput } from './duration.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
@@ -791,20 +789,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   useUnsavedInput(name.trim() !== "");
   const [kind, setKind] = useState(COMPETITION_DEFAULTS.kind);
   const [format, setFormat] = useState(COMPETITION_DEFAULTS.format);
-  // FR-050 / T044: per-phase round-robin shape selector. Only meaningful
-  // when the format runs pool play ("mixed", "league"); default
-  // "full" (every-vs-every) matches the historical behaviour. "partial"
-  // (neighbour-only) is the new option for league-sized fields where a
-  // full round-robin would not fit in the day's schedule.
-  const [poolFormat, setPoolFormat] = useState(COMPETITION_DEFAULTS.poolFormat);
-  // bc-symm: settings-only until now (admin_competition_settings.jsx
-  // renders this checkbox, gated on roundRobinVisible -- see that
-  // predicate's comment in competition_shape.jsx for why "mixed" +
-  // non-partial is the only combination where it does anything). The
-  // create form has no draw yet, so there is no isDrawReady-style lock to
-  // add here; default true matches the value data.jsx hardcoded before
-  // this control existed, so a create that never touches the checkbox
-  // produces the same competition it always did.
+  // Written by the one "Who fights whom" control (PoolShapeField, bc-rrsh):
+  // Everyone is true, the ring false. Default true is Everyone, the value
+  // data.jsx hardcoded before any control wrote it.
   const [roundRobin, setRoundRobin] = useState(COMPETITION_DEFAULTS.roundRobin);
   // Seeded to "max" and only ever written by the two pills below, so unlike
   // the settings screen's stored value this never needs resolvePoolSizeMode
@@ -989,7 +976,6 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     poolSizeMode: poolMode,
     poolWinners: winners,
     poolSize,
-    poolFormat,
     roundRobin,
     swissRounds,
     courts: selectedCourts.length > 0 ? selectedCourts.length : undefined,
@@ -1161,31 +1147,17 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       // silently stops following when the rule moves.
       withZekkenName: zekkenApplies(kind) ? withZekken : false,
       checkInEnabled: checkInEnabled,
-      // bc-symm: sent unconditionally, unlike poolFormat/extraQualifiers/etc
-      // below which are attached post-construction only for the formats
-      // where they matter. roundRobinVisible (competition_shape.jsx) now
-      // hides the CHECKBOX outside "mixed" + non-partial, but the stored
-      // state var still holds its default (true) on every other format,
-      // and sending it is harmless there: pools.go only reads RoundRobin
-      // inside PoolFormatFull's default branch, so an operator who never
-      // saw the control can't have set it to anything but that default.
-      // buildEmptyCompetition (data.jsx) defaults this to true when
-      // omitted anyway, matching every other caller that hasn't been
-      // taught about the field.
+      // Sent unconditionally, unlike extraQualifiers/etc below: pools.go
+      // reads RoundRobin only for a mixed draw, which is where the "Who
+      // fights whom" ring writes it false (bc-rrsh); on every other format
+      // it is still the default and harmless. buildEmptyCompetition
+      // (data.jsx) defaults it to true when omitted anyway.
       roundRobin,
     });
-    // FR-050 / T044: persist poolFormat alongside the rest of the
-    // create payload. buildCompetition (data.jsx) takes no poolFormat
-    // argument; setting it after construction leaves the helper's
-    // signature unchanged and lets the backend's JSON binding pick up
-    // the camelCase key directly. Only emit for formats that run pool
-    // play: knockout-only competitions have no pool phase.
-    if (poolFormatVisible(format)) {
-      c.poolFormat = poolFormat;
-    }
-    // Knockout qualifiers (bc-qual LP-5a). Same post-construction pattern as
-    // poolFormat above. Only meaningful for "mixed" (pools + knockout); the
-    // radio itself only renders under poolMode === "min", and
+    // Knockout qualifiers (bc-qual LP-5a). Set after construction:
+    // buildCompetition (data.jsx) takes no such argument. Only meaningful
+    // for "mixed" (pools + knockout); the radio itself only renders under
+    // poolMode === "min", and
     // resetExtraQualifiersOnPoolModeChange keeps the stored value at
     // standard ("") whenever poolMode isn't "min", so this is never a
     // non-standard value outside the shape ValidateExtraQualifiers accepts.
@@ -1210,7 +1182,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // leagueTwoThirdPlaces predecessor.
     c.twoThirdPlaces = twoThirdPlaces;
     // T190 (FR-050a): persist swissRounds when format=swiss. Same
-    // post-construction pattern as poolFormat above: buildCompetition
+    // post-construction pattern as extraQualifiers above: buildCompetition
     // doesn't know about this field; setting it on the result object
     // lets the backend's JSON binding pick up the camelCase key. The
     // backend uses `omitempty` so the field is invisible on non-Swiss
@@ -1219,7 +1191,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       c.swissRounds = swissRounds;
     }
     // bc-symm: per-phase match durations, settings-only until now. Same
-    // post-construction pattern as poolFormat above, and gated the same
+    // post-construction pattern as extraQualifiers above, and gated the same
     // way as the fields controlling it: each duration only emitted when
     // its own field is actually shown (poolDurationVisible /
     // knockoutDurationVisible), so a duration typed while e.g. "mixed" was
@@ -1376,21 +1348,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               hint={teamMatchTypeHint(teamMatchType === "kachinuki")} />
           )}
 
-          {poolFormatVisible(format) && (
-            <PillGroup label={LABEL_POOL_FORMAT} options={POOL_FORMAT_OPTIONS}
-              isActive={(v) => resolvePoolFormat(poolFormat) === v}
-              onChange={setPoolFormat} hint={poolFormatHint(poolFormat)} />
-          )}
-
-          {/* bc-symm Gap 2: gated on roundRobinVisible (competition_shape.jsx),
-              which is true only for "mixed" with poolFormat !== "partial" --
-              the one combination where internal/engine/pools.go actually
-              reads comp.RoundRobin. Elsewhere (league, knockout, swiss,
-              partial-pool mixed) the field is stored but never consulted, so
-              showing the checkbox there would let the operator toggle
-              something with no effect. */}
-          {roundRobinVisible(format, poolFormat) && (
-            <CheckboxField label={LABEL_ROUND_ROBIN} checked={roundRobin} onChange={setRoundRobin} />
+          {poolShapeVisible(format) && (
+            <PoolShapeField roundRobin={roundRobin}
+              onChange={setRoundRobin} />
           )}
 
           {format === FORMAT_MIXED && (

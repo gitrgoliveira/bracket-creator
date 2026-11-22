@@ -520,8 +520,6 @@ The **Shinpan-cho** (chief referee coordinator) allocates referee groups to cour
 
 The most common format for larger competitions. Competitors are divided into pools of 3–5 players (sometimes with 8 players each) and play round-robin within their pool. After all pool matches complete, the top-ranked from each pool advance to a single-elimination knockout bracket. Pool matches typically use shorter match times (e.g. 3–4 minutes) while knockout matches use longer times (e.g. 4–5 minutes).
 
-In tournaments with large pools, a **partial round-robin** may be used instead of a full one, each competitor or team only fights their adjacent neighbours in the pool list (e.g. position 1 vs 2, 2 vs 3, 3 vs 4, etc.) rather than every possible pairing. This significantly reduces the number of matches while still producing enough data for ranking. The same pool ranking criteria apply.
-
 ### Knockout Only (Direct Elimination)
 
 A single-elimination bracket from the start, with no pool stage. Often used when time is limited or the number of entries is small. Seeding may be applied to separate strong competitors in the draw. Every match has a decisive result, draws go to encho/hantei.

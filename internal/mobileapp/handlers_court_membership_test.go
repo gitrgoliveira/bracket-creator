@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -69,7 +70,14 @@ func TestPutTournamentRefusesToOrphanACompetitionsShiaijo(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
 	assert.Contains(t, w.Body.String(), "cannot set the tournament's shiaijo to A, B, C")
 	assert.Contains(t, w.Body.String(), "Mudansha")
-	assert.Contains(t, w.Body.String(), "still runs on shiaijo D")
+	assert.Contains(t, w.Body.String(), "uses shiaijo D")
+	// bc-rrsh r9: the refusal names the competition and nothing else, as a
+	// whole sentence the app shows without "Re-enter it." after it.
+	var refusal struct {
+		Message string `json:"message"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &refusal))
+	assert.Equal(t, `"Mudansha" uses shiaijo D.`, refusal.Message)
 
 	// Nothing changed on disk: the operator's venue keeps its 4 shiaijo, and
 	// the competition keeps the allocation it is running on.
@@ -186,7 +194,7 @@ func TestPutTournamentStillRefusesARemovalAlongsideAPreExistingOrphan(t *testing
 
 	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
 	body := w.Body.String()
-	assert.Contains(t, body, "still runs on shiaijo C")
+	assert.Contains(t, body, "uses shiaijo C")
 	assert.NotContains(t, body, "shiaijo C, D",
 		"D was already outside the venue, so it is not a reason for this refusal")
 }
@@ -230,7 +238,7 @@ func TestPostTournamentRefusesToOrphanACompetitionsShiaijo(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "still runs on shiaijo")
+	assert.Contains(t, w.Body.String(), "uses shiaijo")
 }
 
 // competitionsBlockingCourtRemoval is the pure half; table-drive it so the
@@ -267,13 +275,13 @@ func TestCompetitionsBlockingCourtRemoval(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
-			infraErr, err := competitionsBlockingCourtRemoval(tc.comps, tc.stored, tc.courts, noCompMatches)
+			err, infraErr := competitionsBlockingCourtRemoval(tc.comps, tc.stored, tc.courts, noCompMatches)
 			require.NoError(t, infraErr)
 			if tc.blocked {
-				require.Error(t, err)
+				require.NotNil(t, err)
 				return
 			}
-			require.NoError(t, err)
+			require.Nil(t, err)
 		})
 	}
 }
@@ -283,7 +291,7 @@ func TestCompetitionsBlockingCourtRemoval(t *testing.T) {
 // listed as a reason for a refusal it did not cause, or the operator is sent
 // to fix the wrong shiaijo.
 func TestCompetitionsBlockingCourtRemovalNamesOnlyTheRemovedShiaijo(t *testing.T) {
-	infraErr, err := competitionsBlockingCourtRemoval(
+	err, infraErr := competitionsBlockingCourtRemoval(
 		[]*state.Competition{{ID: "mudansha", Name: "Mudansha", Courts: []string{"A", "C", "Z"}, Status: state.CompStatusSetup}},
 		[]string{"A", "B", "C"},
 		[]string{"A", "B"},
@@ -291,7 +299,7 @@ func TestCompetitionsBlockingCourtRemovalNamesOnlyTheRemovedShiaijo(t *testing.T
 	)
 	require.NoError(t, infraErr)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "still runs on shiaijo C")
+	assert.Contains(t, err.Error(), "uses shiaijo C")
 	assert.NotContains(t, err.Error(), "Z",
 		"Z was never a venue shiaijo, so this request did not orphan it")
 }
@@ -299,7 +307,7 @@ func TestCompetitionsBlockingCourtRemovalNamesOnlyTheRemovedShiaijo(t *testing.T
 func TestCompetitionsBlockingCourtRemovalFallsBackToTheID(t *testing.T) {
 	// A record with no display name still has to be identifiable in the
 	// message, otherwise the operator is told to fix "".
-	infraErr, err := competitionsBlockingCourtRemoval(
+	err, infraErr := competitionsBlockingCourtRemoval(
 		[]*state.Competition{{ID: "mudansha", Courts: []string{"D"}, Status: state.CompStatusSetup}},
 		[]string{"A", "D"},
 		[]string{"A"},
@@ -401,7 +409,7 @@ func TestPutTournamentRefusesToOrphanAMatchMovedOffTheAllocation(t *testing.T) {
 
 	require.Equalf(t, http.StatusBadRequest, w.Code,
 		"removing E must be refused while a live bout sits on it: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "still runs on shiaijo E")
+	assert.Contains(t, w.Body.String(), "uses shiaijo E")
 }
 
 // A FINISHED bout on a removed shiaijo is history and must not wedge the venue
@@ -425,41 +433,38 @@ func TestPutTournamentAllowsRemovingAShiaijoWhoseMatchesAreDone(t *testing.T) {
 	require.Equalf(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 }
 
-// The competition-level twin narrows the same way. Unnarrowed it asked "is any
-// live bout on a shiaijo outside the NEW list", which reported a bout the
-// operator had moved onto a shiaijo this competition never held, as the reason
-// for refusing the removal of an unrelated one.
-func TestSettingsPutNamesOnlyTheShiaijoItRemoves(t *testing.T) {
+// The tournament guard's narrowing. Unnarrowed it asked "is any live bout on a
+// shiaijo outside the NEW list", which reported a bout the operator had moved
+// onto a shiaijo the competition never held, as the reason for refusing the
+// removal of an unrelated one.
+func TestCourtsStillInUseAmongNamesOnlyTheShiaijoAskedAbout(t *testing.T) {
 	poolMatches := []state.MatchResult{
 		{ID: "Pool A-1", Court: "B", Status: state.MatchStatusScheduled},
 		{ID: "Pool A-2", Court: "E", Status: state.MatchStatusScheduled},
 	}
 
-	// Removing B, while a bout also sits on E (never in the allocation).
-	err := validateRemovedCourtsNotInUse([]string{"B"}, poolMatches, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "shiaijo B")
-	assert.NotContains(t, err.Error(), "E",
+	// Asking about B, while a bout also sits on E (never in the allocation).
+	assert.Equal(t, []string{"B"}, engine.CourtsStillInUseAmong([]string{"B"}, poolMatches, nil),
 		"E is a pre-existing orphan this request never removed")
 
-	// Removing nothing cannot refuse anything, however the bouts are placed.
-	require.NoError(t, validateRemovedCourtsNotInUse(nil, poolMatches, nil))
+	// Asking about nothing finds nothing, however the bouts are placed.
+	assert.Empty(t, engine.CourtsStillInUseAmong(nil, poolMatches, nil))
 
-	// And a removal whose bouts are all finished still passes.
+	// And a shiaijo whose bouts are all finished is free.
 	done := []state.MatchResult{{ID: "Pool A-1", Court: "B", Status: state.MatchStatusCompleted, Winner: "X"}}
-	require.NoError(t, validateRemovedCourtsNotInUse([]string{"B"}, done, nil))
+	assert.Empty(t, engine.CourtsStillInUseAmong([]string{"B"}, done, nil))
 }
 
 // A store failure while reading a competition's matches is NOT the operator's
 // fault. It used to travel back through the guard's validation slot, so an
 // unreadable bracket.json answered a venue edit with 400 plus the raw internal
 // error (paths included) and nothing in the server log. checkCourtRemoval's
-// contract is (infraErr, validationErr) and this half has to honour it.
+// contract is (validationErr, infraErr) and this half has to honour it.
 func TestCourtRemovalGuardReportsAStoreFailureAsInfrastructure(t *testing.T) {
 	boom := errors.New("bracket.json: unexpected end of JSON input")
 	failing := func(string) ([]state.MatchResult, *state.Bracket, error) { return nil, nil, boom }
 
-	infraErr, validationErr := competitionsBlockingCourtRemoval(
+	validationErr, infraErr := competitionsBlockingCourtRemoval(
 		[]*state.Competition{{ID: "mudansha", Name: "Mudansha", Courts: []string{"A", "B"}, Status: state.CompStatusPools}},
 		[]string{"A", "B", "C"},
 		[]string{"A", "B"},
@@ -468,6 +473,6 @@ func TestCourtRemovalGuardReportsAStoreFailureAsInfrastructure(t *testing.T) {
 
 	require.Error(t, infraErr, "a read failure must come back as infrastructure, so the handler 500s and logs it")
 	assert.ErrorIs(t, infraErr, boom)
-	assert.NoError(t, validationErr,
+	assert.Nil(t, validationErr,
 		"and must NOT be reported as a validation failure, which would 400 and echo the raw error to the client")
 }

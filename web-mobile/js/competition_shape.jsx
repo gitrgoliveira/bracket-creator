@@ -35,7 +35,7 @@
 // to read one hint string; it is not re-exported or duplicated here.
 //
 // Wire values below mirror internal/state/models.go's Competition fields
-// byte-for-byte (Kind, Format, PoolFormat's JSON/YAML values); the Go side
+// byte-for-byte (Kind, Format JSON/YAML values); the Go side
 // has no named constants for these, only string-literal comparisons, so
 // there is nothing further to mirror than the literals themselves.
 
@@ -46,9 +46,6 @@ export const FORMAT_KNOCKOUT = "knockout";
 export const FORMAT_MIXED = "mixed";
 export const FORMAT_LEAGUE = "league";
 export const FORMAT_SWISS = "swiss";
-
-export const POOL_FORMAT_FULL = "full";
-export const POOL_FORMAT_PARTIAL = "partial";
 
 // --- Option lists -----------------------------------------------------
 //
@@ -105,49 +102,48 @@ export function formatHint(format) {
   return optionLabel(FORMAT_OPTIONS, format, "hint");
 }
 
-// POOL_FORMAT_OPTIONS / LABEL_POOL_FORMAT: verbatim from admin_setup.jsx's
-// "Round-robin shape" pills (full round-robin vs partial/neighbour-only).
-export const LABEL_POOL_FORMAT = "Round-robin shape";
-export const POOL_FORMAT_OPTIONS = [
-  { value: POOL_FORMAT_FULL, label: "Full round-robin", hint: "Every participant plays every other participant in their pool." },
-  { value: POOL_FORMAT_PARTIAL, label: "Partial / neighbour-only", hint: "Each participant plays a neighbourhood subset: useful when a full round-robin would not fit in the day's schedule." },
+// --- Who fights whom in a pool (bc-rrsh) --------------------------------
+//
+// Every competitor in a pool fights the same number of times (operator
+// ruling 2026-11-22), so a pool is drawn one of two ways, chosen by the
+// stored roundRobin alone (internal/engine/pools.go createPoolMatches):
+// true is EVERYONE (helper.CreatePoolRoundRobinMatches), false the RING
+// (helper.CreatePoolMatches: each fights the two beside them; a pool of 2 is
+// one fight and a pool of 3 all three pairs, so the ring only differs from
+// pools of 4 up). The two
+// screens used to show this as two controls, which read as one choice; it
+// is one control now, mapped onto roundRobin here and nowhere else. A
+// competition saved with the old box unticked shows the ring.
+export const LABEL_POOL_SHAPE = "Who fights whom";
+export const POOL_SHAPE_ALL = "all";
+export const POOL_SHAPE_RING = "ring";
+export const POOL_SHAPE_OPTIONS = [
+  { value: POOL_SHAPE_ALL, label: "Everyone fights everyone", hint: "Every competitor fights every other competitor: a pool of 4 has 6 fights." },
+  { value: POOL_SHAPE_RING, label: "Each fights two", hint: "Competitors sit in a ring and each fights the two beside them: a pool of 4 has 4 fights, two each. A pool of 2 or 3 is the same as everyone fights everyone." },
 ];
 
-// resolvePoolFormat: a stored/legacy "" means "full" -- the engine's own
-// unset default (internal/engine/pools.go's `switch comp.PoolFormat`
-// falls through to the full round-robin arm). Both screens need this to
-// pick the active pill AND the hint, and before this existed they
-// disagreed: settings resolved `local.poolFormat || POOL_FORMAT_FULL`
-// while create used the bare value, so an empty poolFormat lit no pill
-// and showed no hint on the create form.
-export function resolvePoolFormat(poolFormat) {
-  return poolFormat || POOL_FORMAT_FULL;
+// poolShapeOf: the shape roundRobin draws. It counts as false only when it
+// is exactly false, so a payload that never carried it reads as the
+// default, Everyone.
+export function poolShapeOf(roundRobin) {
+  return roundRobin === false ? POOL_SHAPE_RING : POOL_SHAPE_ALL;
 }
 
-// poolFormatHint: the hint under the "Round-robin shape" pills, the twin
-// of formatHint above. Resolves the legacy-empty value first so the hint
-// matches whichever pill is lit.
-export function poolFormatHint(poolFormat) {
-  return optionLabel(POOL_FORMAT_OPTIONS, resolvePoolFormat(poolFormat), "hint");
+// roundRobinOf: the roundRobin a shape stores (poolShapeOf's inverse).
+export function roundRobinOf(shape) {
+  return shape !== POOL_SHAPE_RING;
 }
 
-// poolFormatVisible: true wherever a competition builds a pool phase at all
-// (bc-symm Gap 1). internal/engine/pools.go:149's `switch comp.PoolFormat`
-// dispatches on this field for ANY pool-bearing competition -- the switch
-// sits before and independent of any format check, and generatePools is
-// called for both state.CompFormatMixed and state.CompFormatLeague
-// (internal/engine/competition.go:904-907) -- so "mixed" and "league" are
-// exactly the two formats where PoolFormat is meaningful. Previously this
-// returned true for "league" only, mirroring the create form's historical
-// gate rather than where the engine actually reads the field: create()
-// already attached `c.poolFormat` to the payload for "mixed" too
-// (admin_setup.jsx), and the import manifest has no poolFormat field at
-// all, so a MIXED competition's pool shape could only ever be set to
-// "partial" by hand-editing config.md. Fixed by widening this predicate;
-// see also roundRobinVisible below, whose own gate depends on this one
-// having gone live for mixed first.
-export function poolFormatVisible(format) {
-  return format === FORMAT_MIXED || format === FORMAT_LEAGUE;
+// poolShapeHint: the hint under the pills for the shape that is lit.
+export function poolShapeHint(shape) {
+  return optionLabel(POOL_SHAPE_OPTIONS, shape, "hint");
+}
+
+// poolShapeVisible: only a pools-then-knockout competition has a choice. A
+// league is everyone-fights-everyone always (competition.go forces
+// RoundRobin on for it before the draw), and the other formats have no pools.
+export function poolShapeVisible(format) {
+  return format === FORMAT_MIXED;
 }
 
 // --- Swiss rounds -------------------------------------------------------
@@ -201,59 +197,6 @@ export function swissSettingsError(format, swissRounds) {
     return `${LABEL_SWISS_ROUNDS} must be a whole number ≥ ${MIN_SWISS_ROUNDS}.`;
   }
   return null;
-}
-
-// --- Round-robin-in-pools checkbox --------------------------------------
-//
-// Present on both surfaces (admin_setup.jsx, admin_competition_
-// settings.jsx). Both used to render this checkbox unconditionally, but
-// only ONE read of the flag decides anything the operator can see, and it
-// is internal/engine/pools.go:157: `comp.RoundRobin` is checked solely
-// inside the PoolFormat switch's `default` branch (PoolFormatFull, or an
-// unset/unrecognized value) -- the PoolFormatPartial case at
-// pools.go:150-152 calls helper.CreatePartialPoolMatches(pools) and never
-// looks at RoundRobin at all, so unchecking the box does nothing once
-// poolFormat is "partial".
-// And internal/engine/competition.go:896 unconditionally overwrites
-// `comp.RoundRobin = true` for CompFormatLeague before generatePools runs,
-// regardless of what the operator stored, so the checkbox is equally inert
-// for a league. That leaves exactly one format where toggling it changes
-// anything: "mixed" with poolFormat !== "partial" (see roundRobinVisible).
-// Elsewhere the control was a lie -- unchecking it left the UI showing
-// "off" while the draw still built a full round-robin (league) or ran
-// CreatePartialPoolMatches regardless (partial).
-//
-// The flag IS read in three other places, none of which widens that rule
-// -- they are listed here because "only read in one place" was this
-// comment's original wording and it was simply false, which is a bad
-// footing for the sole justification given for removing a control
-// operators used to have:
-//
-//   internal/engine/estimate_schedule.go:47 copies it into
-//     helper.EstimateMatchCountsInput, where poolMatchesPerPool
-//     (helper/estimate.go:189) branches on it -- but only down the
-//     estimator's `case "mixed"` path. `case "league"`
-//     (helper/estimate.go:87-89) computes N*(N-1)/2 directly and never
-//     consults the flag, matching competition.go:896's forced true. So the
-//     estimator agrees with the draw on every format, and agrees with this
-//     rule about which format the operator can move.
-//   internal/engine/competition.go:1022 compares it against the value
-//     loaded at the top of StartCompetition, to abort a draw whose config
-//     changed underneath it. A drift check, not a behaviour switch.
-//   internal/mobileapp/handlers_competition.go:1344 puts it in the
-//     output-affecting set that forces a redraw while draw-ready -- which
-//     is why the checkbox carries the same isDrawReady lock as poolSize.
-export const LABEL_ROUND_ROBIN = "Round-robin in pools";
-
-// roundRobinVisible: gates the checkbox on the one combination where it is
-// live -- see the field comment above for the pools.go/competition.go
-// evidence. `poolFormat` is read loosely (only an exact "partial" hides
-// the control), matching POOL_FORMAT_OPTIONS' own comment that a stored/
-// legacy "" or any other value resolves to "full" for display purposes:
-// the engine's switch reaches the same `default` branch for "", "full", or
-// an unrecognized value, so the checkbox should be visible for all three.
-export function roundRobinVisible(format, poolFormat) {
-  return format === FORMAT_MIXED && poolFormat !== POOL_FORMAT_PARTIAL;
 }
 
 // --- Per-phase match duration ------------------------------------------
@@ -386,7 +329,7 @@ export function teamMatchTypeActive(option, stored) {
 // resolveKind: what a stored `kind` MEANS, as opposed to what it says.
 //
 // Every other loose field in this module has one of these
-// (resolvePoolFormat, resolvePoolSizeMode, resolveTeamSize) and kind needs
+// (resolvePoolSizeMode, resolveTeamSize) and kind needs
 // it for the same reason: "" is a first-class member of the set, not a
 // straggler. state.ValidateCompetitionKind accepts `""`, `"individual"`
 // and `"team"`, and its doc comment spells out that "" MEANS individual --
@@ -618,9 +561,7 @@ export const LABEL_EXTRA_QUALIFIERS = "Knockout qualifiers";
 // only for "mixed" and a knockout-only competition could not be switched
 // to "mixed" from that screen. Now it can, and a bare `=== "max"` /
 // `=== "min"` equality lights NEITHER pill for a stored "" while the draw
-// quietly runs minimum sizing -- the identical failure resolvePoolFormat
-// (above) exists to fix on the sibling field, where an empty poolFormat lit
-// no pill and showed no hint.
+// quietly runs minimum sizing.
 //
 // Also passed to extraQualifiersRadioVisible (qualifier_preview.jsx), whose
 // gate is a strict `poolMode === "min"`: unresolved, it hides the
@@ -764,21 +705,6 @@ export function poolSettingsError(format, poolSize, winners) {
 // - league / knockout / swiss: ExtraQualifiers is forced to the standard
 //   sentinel ("") -- the "Knockout qualifiers" radio only ever means
 //   something on a pools-then-knockout ("mixed") competition.
-//
-// PoolFormat is DELIBERATELY not in that list, and the omission has been
-// re-raised in review, so here is why it stays out. This function is a
-// mirror of the server's normalizePoolConfig, and the server does not
-// touch PoolFormat for any format -- so clearing it here would make the
-// client destroy a field the server preserves, which is a new divergence
-// rather than a closed one. It would also be the very failure the
-// paragraph above documents for poolSize: PoolFormat is meaningful for
-// BOTH "mixed" and "league" (poolFormatVisible), so a league operator who
-// taps "Knockout only" and taps straight back would lose the
-// neighbour-only shape they chose, with the round trip cancelling out on
-// `format` and silently not on this field. Carrying it across a format
-// the field has no meaning for is what PRESERVING it looks like; a value
-// that reappears when the control that owns it comes back on screen is
-// the control working.
 export function normalizeConfigForFormat(cfg) {
   const next = { ...cfg };
   if (next.format === FORMAT_LEAGUE || next.format === FORMAT_KNOCKOUT) {
@@ -1174,7 +1100,6 @@ export const CLEARED_FIELD_LABELS = {
 export const COMPETITION_DEFAULTS = {
   kind: KIND_INDIVIDUAL,
   format: FORMAT_KNOCKOUT,
-  poolFormat: POOL_FORMAT_FULL,
   roundRobin: true,
   poolSizeMode: POOL_SIZE_MODE_MAX,
   poolSize: 3,

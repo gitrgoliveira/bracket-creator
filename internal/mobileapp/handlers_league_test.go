@@ -27,7 +27,7 @@ func TestLeagueStandings_Drawn(t *testing.T) {
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: "league-comp", Name: "League", Kind: "individual",
-		Format: state.CompFormatLeague, PoolFormat: "full", PoolSize: 4,
+		Format: state.CompFormatLeague, PoolSize: 4,
 		Courts: []string{"A"}, StartTime: "09:00", PoolMatchDurationSeconds: 180,
 		Status: state.CompStatusSetup,
 	}))

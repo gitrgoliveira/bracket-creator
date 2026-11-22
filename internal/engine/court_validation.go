@@ -282,16 +282,15 @@ func CourtsStillInUse(proposed []string, poolMatches []state.MatchResult, bracke
 }
 
 // CourtsStillInUseAmong answers "which of these shiaijo still carry a live
-// bout" -- the question BOTH court-removal guards ask, once each had to narrow
-// CourtsStillInUse's broader answer to the shiaijo its own write takes away.
+// bout" -- the question the tournament's court-removal guard asks, narrowing
+// CourtsStillInUse's broader answer to the shiaijo its write takes away.
 //
-// The narrowing is the rule, not a detail of either caller: a bout may sit on a
+// The narrowing is the rule, not a detail of the caller: a bout may sit on a
 // shiaijo its competition never held, because the move-court picker offers the
 // TOURNAMENT's shiaijo rather than the competition's. Reporting such a bout as
 // the reason for refusing an unrelated removal names a shiaijo the operator did
 // not touch, and a pre-existing orphan is not a write's to refuse -- the draw
-// gate still refuses to USE one. Both guards spelled that filter out
-// separately; this is where it lives.
+// gate still refuses to USE one.
 //
 // Completed bouts never count: CourtsStillInUse ignores them, so finished work
 // can always be tidied away.
@@ -314,21 +313,4 @@ func CourtsStillInUseAmong(courts []string, poolMatches []state.MatchResult, bra
 		}
 	}
 	return busy
-}
-
-// CourtsInUseError is the operator-facing refusal for a set of shiaijo that
-// still carry live bouts, or nil for an empty set. Split out so a caller that
-// NARROWS the set first (the settings PUT, which reports only the shiaijo its
-// own edit removes) words the refusal identically to one that does not.
-func CourtsInUseError(busy []string) error {
-	if len(busy) == 0 {
-		return nil
-	}
-	verb, pronoun := "has", "it"
-	if len(busy) > 1 {
-		verb, pronoun = "have", "them"
-	}
-	return fmt.Errorf(
-		"shiaijo %s still %s matches scheduled on %s; move them to a shiaijo this competition keeps, then remove %s",
-		strings.Join(busy, ", "), verb, pronoun, pronoun)
 }

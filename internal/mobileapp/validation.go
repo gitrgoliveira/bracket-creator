@@ -24,7 +24,6 @@ import (
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -1457,11 +1456,4 @@ func sameHanteiVerdict(stored, in *state.SubMatchResult) bool {
 	return in.Winner == stored.Winner && in.SideA == stored.SideA && in.SideB == stored.SideB &&
 		domain.ContainsHantei(in.IpponsA) == domain.ContainsHantei(stored.IpponsA) &&
 		domain.ContainsHantei(in.IpponsB) == domain.ContainsHantei(stored.IpponsB)
-}
-
-// validateRemovedCourtsNotInUse refuses a competition court change that would
-// strand a live bout on a shiaijo the change TAKES AWAY.
-// engine.CourtsStillInUseAmong owns the narrowing and says why.
-func validateRemovedCourtsNotInUse(removed []string, poolMatches []state.MatchResult, bracket *state.Bracket) error {
-	return engine.CourtsInUseError(engine.CourtsStillInUseAmong(removed, poolMatches, bracket))
 }

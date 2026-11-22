@@ -286,11 +286,10 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 	// Cross-file guard symmetry with POST /competitions and PUT
 	// /competitions/:id (handlers_competition.go): reject unknown formats
 	// (400) so a manifest cannot persist a Competition whose format would
-	// be rejected via the REST API. PoolFormat is not in
-	// ImportManifestComp (always ""), so only comp.Format needs checking
-	// here. FR-050a: swiss is accepted but additionally requires
-	// swissRounds >= 1, validateSwissConfig enforces that below.
-	if _, err := validateCompetitionFormat(comp.Format, ""); err != nil {
+	// be rejected via the REST API. FR-050a: swiss is accepted but
+	// additionally requires swissRounds >= 1, validateSwissConfig enforces
+	// that below.
+	if _, err := validateCompetitionFormat(comp.Format); err != nil {
 		res.Error = "format: " + err.Error()
 		return res
 	}

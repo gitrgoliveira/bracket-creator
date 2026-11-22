@@ -81,7 +81,7 @@ function shapeImportNames(src) {
 
 // "Control-bearing": an option list (*_OPTIONS) or a field label (LABEL_*) --
 // the things a screen actually RENDERS as a control. Deliberately narrower
-// than the full import list: coupling functions like poolFormatVisible or
+// than the full import list: coupling functions like poolShapeVisible or
 // teamFieldsVisible express a RULE ("does this field apply"), and the two
 // screens are free to consume the same rule through different call sites
 // (see zekkenApplies/engiApplies's own doc comment on that split) without
@@ -211,7 +211,7 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
   // list of names:
   //
   //   - the LABEL_/HINT_ prefix picks out operator-facing copy. Wire-value
-  //     constants (FORMAT_LEAGUE, KIND_TEAM, POOL_FORMAT_FULL, ...) are
+  //     constants (FORMAT_LEAGUE, KIND_TEAM, FORMAT_MIXED, ...) are
   //     deliberately not copy: both screens are EXPECTED to contain them
   //     literally in their own comparison logic (`local.format === "league"`
   //     and the like), so asserting on them would be noise.
@@ -257,8 +257,8 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
   // a reason other than "convenient to skip":
   //
   //   LABEL_FORMAT ("Format") is a short, common substring of unrelated
-  //   identifiers BOTH screens already contain for other reasons --
-  //   poolFormat (both), normalizeConfigForFormat/validateCompetitionFormat
+  //   identifiers the screens already contain for other reasons --
+  //   normalizeConfigForFormat/validateCompetitionFormat
   //   (settings only) -- and admin_setup.jsx's CSV batch-import preview
   //   table has its own unrelated `<th>Format</th>` column heading, a
   //   different table naming the same general concept, not a restated
@@ -335,7 +335,13 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
   //   hiding them would leave an operator unable to see why a setting they
   //   remember is gone). See zekkenApplies' own comment for that split.
   //   It is copy with ONE home by design, not drift.
+  //
+  //   LABEL_POOL_SHAPE is rendered by the shared PoolShapeField
+  //   (competition_fields.jsx), which both screens draw (bc-rrsh), so
+  //   neither screen names it; the order markers below pin that both draw
+  //   the field.
   const RENDER_EXEMPT = {
+    LABEL_POOL_SHAPE: new Set(['setup', 'settings']),
     LABEL_POOL_DURATION: new Set(['setup', 'settings']),
     HINT_POOL_DURATION: new Set(['setup', 'settings']),
     HINT_NUMBER_PREFIX: new Set(['settings']),
@@ -419,8 +425,9 @@ describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)
     // moved onto the shared field components.
     { key: 'Team size', pattern: 'label={LABEL_TEAM_SIZE}' },
     { key: 'Team match type', pattern: '{LABEL_TEAM_MATCH_TYPE}' },
-    { key: 'Pool format (round-robin shape)', pattern: '{LABEL_POOL_FORMAT}' },
-    { key: 'Round-robin (round-robin in pools)', pattern: '{LABEL_ROUND_ROBIN}' },
+    // "Who fights whom" (bc-rrsh): one field over roundRobin,
+    // its label owned by PoolShapeField (competition_fields.jsx).
+    { key: 'Who fights whom (pool shape)', pattern: '<PoolShapeField' },
     { key: 'Pool size mode ("Pool size is a")', pattern: '{LABEL_POOL_SIZE_MODE}' },
     { key: 'Pool size', pattern: '{LABEL_POOL_SIZE}' },
     { key: 'Pool winners', pattern: '{LABEL_POOL_WINNERS}' },

@@ -9,55 +9,41 @@ import (
 )
 
 // TestEstimateMatchCounts_PoolMatchCountPerPoolSize pins the match count
-// produced by each pool-format variant for various pool sizes.
+// produced by each pool shape for various pool sizes.
 //
 // This test documents the exact semantics of each sub-path so that a
-// future change to CreatePoolMatches / CreatePoolRoundRobinMatches /
-// CreatePartialPoolMatches is caught here before it silently drifts from
-// the estimator.
+// future change to CreatePoolMatches / CreatePoolRoundRobinMatches is caught
+// here before it silently drifts from the estimator.
 func TestEstimateMatchCounts_PoolMatchCountPerPoolSize(t *testing.T) {
 	tests := []struct {
 		name        string
 		poolSize    int
 		roundRobin  bool
-		poolFormat  string // "" | "full" | "partial"
 		wantPerPool int
 	}{
-		// -- Full round-robin (poolFormat="" or "full", roundRobin=true) --
+		// -- Full round-robin (roundRobin=true) --
 		// C(n,2) = n*(n-1)/2
-		{"rr size 2", 2, true, "", 1},
-		{"rr size 3", 3, true, "", 3},
-		{"rr size 4", 4, true, "", 6},
-		{"rr size 5", 5, true, "", 10},
-		{"rr size 6", 6, true, "", 15},
-		// full format explicit
-		{"rr full size 4", 4, true, "full", 6},
+		{"rr size 2", 2, true, 1},
+		{"rr size 3", 3, true, 3},
+		{"rr size 4", 4, true, 6},
+		{"rr size 5", 5, true, 10},
+		{"rr size 6", 6, true, 15},
 
-		// -- Non-RR (poolFormat="" or "full", roundRobin=false) --
+		// -- Non-RR (roundRobin=false) --
 		// CreatePoolMatches: size 2→1, 3→3, 4→4, N≥5→N
-		{"non-rr size 2", 2, false, "", 1},
-		{"non-rr size 3", 3, false, "", 3},
-		{"non-rr size 4", 4, false, "", 4},
-		{"non-rr size 5", 5, false, "", 5},
-		{"non-rr size 6", 6, false, "", 6},
-		{"non-rr size 7", 7, false, "", 7},
-
-		// -- Partial round-robin (poolFormat="partial") --
-		// Adjacent-pair: N-1 matches per pool
-		{"partial size 2", 2, false, "partial", 1},
-		{"partial size 3", 3, false, "partial", 2},
-		{"partial size 4", 4, false, "partial", 3},
-		{"partial size 5", 5, false, "partial", 4},
-		{"partial size 6", 6, false, "partial", 5},
-		// roundRobin flag ignored when poolFormat is partial
-		{"partial size 4 rr-ignored", 4, true, "partial", 3},
+		{"non-rr size 2", 2, false, 1},
+		{"non-rr size 3", 3, false, 3},
+		{"non-rr size 4", 4, false, 4},
+		{"non-rr size 5", 5, false, 5},
+		{"non-rr size 6", 6, false, 6},
+		{"non-rr size 7", 7, false, 7},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := poolMatchesPerPool(tc.poolSize, tc.roundRobin, tc.poolFormat)
+			got := poolMatchesPerPool(tc.poolSize, tc.roundRobin)
 			assert.Equal(t, tc.wantPerPool, got,
-				"poolMatchesPerPool(%d, rr=%v, fmt=%q)", tc.poolSize, tc.roundRobin, tc.poolFormat)
+				"poolMatchesPerPool(%d, rr=%v)", tc.poolSize, tc.roundRobin)
 		})
 	}
 }
@@ -170,7 +156,6 @@ func TestEstimateMatchCounts_Mixed_IndividualFullRR(t *testing.T) {
 				PoolSizeMode: tc.poolSizeMode,
 				PoolWinners:  tc.poolWinners,
 				RoundRobin:   tc.roundRobin,
-				PoolFormat:   "",
 			}
 			poolCount, knockoutCount, err := EstimateMatchCounts(in)
 			require.NoError(t, err)
@@ -217,51 +202,6 @@ func TestEstimateMatchCounts_Mixed_NonRR(t *testing.T) {
 				PoolSizeMode: tc.poolSizeMd,
 				PoolWinners:  tc.poolWinners,
 				RoundRobin:   false,
-				PoolFormat:   "",
-			}
-			poolCount, knockoutCount, err := EstimateMatchCounts(in)
-			require.NoError(t, err)
-			assert.Equal(t, tc.wantPool, poolCount, "pool matches")
-			assert.Equal(t, tc.wantKnockout, knockoutCount, "knockout matches")
-		})
-	}
-}
-
-// TestEstimateMatchCounts_Mixed_PartialRR covers the partial pool format.
-func TestEstimateMatchCounts_Mixed_PartialRR(t *testing.T) {
-	tests := []struct {
-		name         string
-		playerCount  int
-		poolSize     int
-		poolSizeMd   string
-		poolWinners  int
-		wantPool     int
-		wantKnockout int
-	}{
-		{
-			// 12p size4 min → 3 pools of 4 → N-1=3 matches each → 9
-			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
-			name:        "12p size4 partial",
-			playerCount: 12, poolSize: 4, poolSizeMd: "min", poolWinners: 2,
-			wantPool: 9, wantKnockout: 5,
-		},
-		{
-			// 9p size3 min → 3 pools of 3 → N-1=2 matches each → 6
-			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
-			name:        "9p size3 partial",
-			playerCount: 9, poolSize: 3, poolSizeMd: "min", poolWinners: 2,
-			wantPool: 6, wantKnockout: 5,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			in := EstimateMatchCountsInput{
-				Format:       "mixed",
-				PlayerCount:  tc.playerCount,
-				PoolSize:     tc.poolSize,
-				PoolSizeMode: tc.poolSizeMd,
-				PoolWinners:  tc.poolWinners,
-				PoolFormat:   "partial",
 			}
 			poolCount, knockoutCount, err := EstimateMatchCounts(in)
 			require.NoError(t, err)
@@ -518,7 +458,6 @@ func TestEstimateMatchCounts_CrossCheck_MatchesCreatePools(t *testing.T) {
 				PoolSizeMode: tc.poolSizeMode,
 				PoolWinners:  tc.poolWinners,
 				RoundRobin:   tc.roundRobin,
-				PoolFormat:   "",
 			}
 			estPool, _, err2 := EstimateMatchCounts(in)
 			require.NoError(t, err2)
@@ -624,7 +563,7 @@ func TestEstimateMatchCounts_ParityWithRealBuilders(t *testing.T) {
 
 									realPoolMatches := 0
 									for _, p := range realPools {
-										realPoolMatches += poolMatchesPerPool(len(p.Players), true, "")
+										realPoolMatches += poolMatchesPerPool(len(p.Players), true)
 									}
 
 									realKnockoutMatches := bracketMatchCount(numFinalists)
@@ -723,7 +662,7 @@ func TestEstimateMatchCounts_CourtCountDoesNotChangeCounts(t *testing.T) {
 
 				realPoolMatches := 0
 				for _, p := range realPools {
-					realPoolMatches += poolMatchesPerPool(len(p.Players), true, "")
+					realPoolMatches += poolMatchesPerPool(len(p.Players), true)
 				}
 				realKnockoutMatches := bracketMatchCount(numFinalists)
 				if tc.single3rd {

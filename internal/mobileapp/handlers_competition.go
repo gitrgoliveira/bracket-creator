@@ -214,13 +214,6 @@ func validateCompetitionDateInTournament(comp *state.Competition, tourn *state.T
 	return fmt.Errorf("date must be one of the tournament days (%s to %s)", days[0], days[len(days)-1])
 }
 
-// validateCompetitionFormat returns an HTTP status code + error
-// message for invalid Format / PoolFormat values. Empty values are
-// accepted (defaults applied on load). Unknown values return 400.
-//
-// FR-050a: swiss is now accepted; the caller must ALSO run
-// validateSwissConfig when format == swiss to enforce swissRounds >= 1.
-
 // validateCompetitionDurations enforces the band on the per-phase clock
 // durations of an INBOUND request body. Zero means "unset, use the scheduler
 // default" and is allowed. Out of band is rejected, never clamped: silently
@@ -244,21 +237,20 @@ func validateCompetitionDurations(comp *state.Competition) error {
 	return nil
 }
 
-func validateCompetitionFormat(format, poolFormat string) (int, error) {
+// validateCompetitionFormat returns an HTTP status code + error
+// message for an invalid Format value. An empty value is accepted
+// (defaults applied on load). An unknown value returns 400.
+//
+// FR-050a: swiss is now accepted; the caller must ALSO run
+// validateSwissConfig when format == swiss to enforce swissRounds >= 1.
+func validateCompetitionFormat(format string) (int, error) {
 	switch format {
 	case "", state.CompFormatKnockout,
 		state.CompFormatMixed, state.CompFormatLeague, state.CompFormatSwiss:
-		// ok
+		return 0, nil
 	default:
 		return http.StatusBadRequest, fmt.Errorf("unknown format %q", format)
 	}
-	switch poolFormat {
-	case "", state.PoolFormatFull, state.PoolFormatPartial:
-		// ok
-	default:
-		return http.StatusBadRequest, fmt.Errorf("unknown poolFormat %q", poolFormat)
-	}
-	return 0, nil
 }
 
 // validateCompetitionShape groups the four shape checks that both the POST
@@ -268,7 +260,7 @@ func validateCompetitionShape(comp *state.Competition) error {
 	if err := validateCompetitionDurations(comp); err != nil {
 		return err
 	}
-	if _, err := validateCompetitionFormat(comp.Format, comp.PoolFormat); err != nil {
+	if _, err := validateCompetitionFormat(comp.Format); err != nil {
 		return err
 	}
 	normalizePoolConfig(comp)
@@ -959,7 +951,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// through to "unknown kind" semantics.
 		comp.Kind = strings.TrimSpace(comp.Kind)
 		comp.Format = strings.TrimSpace(comp.Format)
-		comp.PoolFormat = strings.TrimSpace(comp.PoolFormat)
 		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
 		// bc-qual LP-5a: same defense-in-depth trim as the other enum-style
 		// fields above/below. The admin UI (admin_setup.jsx) only ever sends
@@ -1384,7 +1375,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// hand-crafted PUT requests.
 		comp.Kind = strings.TrimSpace(comp.Kind)
 		comp.Format = strings.TrimSpace(comp.Format)
-		comp.PoolFormat = strings.TrimSpace(comp.PoolFormat)
 		comp.PoolSizeMode = strings.TrimSpace(comp.PoolSizeMode)
 		// bc-qual LP-5a: same defense-in-depth trim as the other enum-style
 		// fields above/below. The admin UI (admin_setup.jsx) only ever sends
@@ -1504,39 +1494,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// below copies comp.Courts onto current for settings-only PUTs.
 			comp.Courts = resolveCompetitionCourts(comp.Courts, putTourn)
 
-			// Refuse to drop a shiaijo this competition's own live matches are
-			// still on. Sibling of the tournament-level orphan guard, and for
-			// the same reason: a match left on a shiaijo the competition no
-			// longer uses has no operator view to be run from. Completed
-			// matches do not count, so a court frees up as its bouts finish.
-			//
-			// Runs BEFORE the update transform, never inside it: that primitive
-			// holds the per-competition lock and LoadPoolMatches / LoadBracket
-			// take it too, so checking inside would deadlock on a non-reentrant
-			// mutex -- the same constraint checkCourtRemoval documents on the
-			// tournament side. The resulting TOCTOU window is covered by the
-			// engine's own gates at scoring and draw time.
-			// Only a REMOVAL can orphan a match, so adding or reordering shiaijo
-			// never pays for the match loads below. courtsRemovedBy is the same
-			// predicate the tournament twin gates on, and its answer is what the
-			// refusal is narrowed to, so it is computed once.
-			var removed []string
-			if stored, loadErr := store.LoadCompetition(id); loadErr == nil && stored != nil &&
-				stored.Status != state.CompStatusSetup && stored.Status != "" {
-				removed = courtsRemovedBy(resolveCompetitionCourts(stored.Courts, putTourn), comp.Courts)
-			}
-			if len(removed) > 0 {
-				poolMatches, bracket, loadErr := loadCompMatches(store, id)
-				if loadErr != nil {
-					internalError(c, loadErr)
-					return
-				}
-				if err := validateRemovedCourtsNotInUse(removed, poolMatches, bracket); err != nil {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
-					return
-				}
-			}
-
 			// Reject invalid competition shape (durations, format, swiss config)
 			// and normalize pool config for formats with no pool phase.
 			if err := validateCompetitionShape(&comp); err != nil {
@@ -1626,6 +1583,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// draw-ready output-affecting set, so a started-state conflict on
 		// them is that same refusal, not a validation error.
 		var formatOrKindStartedFlag bool
+		// drawShapeStartedFlag: a started competition asked to change the
+		// shape its draw was made with (see drawShapeChanged below) or its
+		// shiaijo.
+		var drawShapeStartedFlag bool
 		var changed bool
 		// numberPrefixMoved records whether THIS PUT actually changed the
 		// stored NumberPrefix (computed inside the transform below, comparing
@@ -1885,6 +1846,26 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// reassigning shiaijo?" -- so it is asked once. Two independent
 				// spellings of it is how one of them ends up answering differently.
 				courtsChanged := strings.Join(comp.Courts, ",") != strings.Join(currentCourts, ",")
+				// The shape a draw is made with: who fights whom, pool sizing,
+				// winners and qualifiers, and team size. Asked once
+				// here for the draw-ready gate and the started gate below. A
+				// league or knockout draw stores the pool size it drew with,
+				// while normalizePoolConfig has already zeroed the request's, so
+				// the stored pair is read the way the request is: otherwise any
+				// save of a drawn league was refused as a pool-size change.
+				storedPools := *current
+				normalizePoolConfig(&storedPools)
+				drawShapeChanged := comp.PoolSize != storedPools.PoolSize ||
+					comp.PoolWinners != storedPools.PoolWinners ||
+					comp.PoolSizeMode != current.PoolSizeMode ||
+					// bc-qual LP-5a: ExtraQualifiers selects which draw builder
+					// runs (standard/larger-pools/fill-bracket) and, for
+					// fill-bracket, changes how many pools are even CUT
+					// (helper.FillBracketPoolCount vs helper.PoolCount), the same
+					// "changes what the draw builds" reasoning as the pool fields.
+					comp.ExtraQualifiers != current.ExtraQualifiers ||
+					comp.RoundRobin != current.RoundRobin ||
+					comp.TeamSize != current.TeamSize
 				// Draw-ready gate: the draw artifacts (pools.csv /
 				// bracket.json) were generated from the current config.
 				// Mutating output-affecting fields while draw-ready would
@@ -1907,7 +1888,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// directly, no zero/empty sentinels. The settings merge
 					// below is a full replace, so a caller that sets an
 					// output-affecting field TO its zero/empty value (e.g.
-					// format:"" or poolFormat:"", both accepted by
+					// format:"", accepted by
 					// validateCompetitionFormat) would otherwise slip past a
 					// sentinel guard and corrupt the draw. The real client
 					// (admin_competition_settings.jsx finalNext) always PUTs
@@ -1921,31 +1902,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// ExpectedParticipants is absent for the same reason: only
 					// the estimate reads it, so it is editable in every status
 					// and a draw-ready save of it alone is a 200.
-					// A league or knockout draw stores the pool size it drew with,
-					// while normalizePoolConfig has already zeroed the request's, so
-					// the stored pair is read the way the request is: otherwise any
-					// save of a drawn league was refused as a pool-size change.
-					storedPools := *current
-					normalizePoolConfig(&storedPools)
 					outputAffectingChanged :=
-						comp.PoolSize != storedPools.PoolSize ||
-							comp.PoolWinners != storedPools.PoolWinners ||
-							comp.PoolSizeMode != current.PoolSizeMode ||
-							// bc-qual LP-5a: ExtraQualifiers selects which
-							// draw builder runs (standard/larger-pools/
-							// fill-bracket) and, for fill-bracket, changes
-							// how many pools are even CUT (helper.
-							// FillBracketPoolCount vs helper.PoolCount) --
-							// exactly the same "changes what the draw
-							// builds" reasoning as PoolSize/PoolWinners/
-							// PoolSizeMode immediately above, so it belongs
-							// in the same output-affecting set.
-							comp.ExtraQualifiers != current.ExtraQualifiers ||
+						drawShapeChanged ||
 							courtsChanged ||
 							formatChanged ||
-							comp.PoolFormat != current.PoolFormat ||
-							comp.RoundRobin != current.RoundRobin ||
-							comp.TeamSize != current.TeamSize ||
 							kindChanged ||
 							// TeamMatchType selects fixed vs kachinuki bout sequencing; changing
 							// it after draw-ready desyncs the match structure from config.
@@ -1963,6 +1923,26 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 						drawReadyFlag = true
 						return nil, nil
 					}
+				}
+				// started: the competition has left setup (a legacy record with no
+				// status counts as setup). Asked once, before the settings merge
+				// below changes current, and reused by every started guard.
+				started := current.Status != state.CompStatusSetup && current.Status != ""
+				// Once started, the draw's shape stays locked as it does while
+				// draw-ready (operator decision bc-rrsh r5, 2026-11-22): the
+				// pools and bracket being fought were drawn from it, and winners
+				// per pool is read live while the pools run, so a change would
+				// alter who qualifies. Format, kind, team match type, naginata,
+				// engi and joint 3rd places keep their own started guards below;
+				// the zekken name option and match durations stay editable. The
+				// shiaijo stay as drawn too (bc-rrsh r7): a bout changes court by
+				// a court move, never by this list. A format or kind change is
+				// left to its own started guard below: changing either
+				// renormalises the pool pair and team size, so this one would
+				// fire too and name fields the caller never touched.
+				if started && (drawShapeChanged || courtsChanged) && !formatChanged && !kindChanged {
+					drawShapeStartedFlag = true
+					return nil, nil
 				}
 				// Existence first, uniqueness second. Pre-fix order ran
 				// CheckUniqueCompFields BEFORE the transform, so a PUT to
@@ -2124,9 +2104,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.Name = comp.Name
 				current.Date = comp.Date
 				current.StartTime = comp.StartTime
-				// A drawn competition keeps the pool size and winners it drew
-				// with: the guard above has already refused any change to them.
-				if current.Status != state.CompStatusDrawReady {
+				// A drawn or started competition keeps the pool size and winners
+				// it drew with: the guards above have already refused any change
+				// to them, and a league's request was zeroed by
+				// normalizePoolConfig, which must not overwrite the stored pair.
+				if !started {
 					current.PoolSize = comp.PoolSize
 					current.PoolWinners = comp.PoolWinners
 				}
@@ -2150,15 +2132,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// between there and here touches either side of that
 				// comparison, so recomputing it would only restate it.
 				current.NumberPrefix = comp.NumberPrefix
-				// started is computed here, ahead of the Format/Kind gate that
-				// needs it, rather than down by the Naginata/Engi guards below
-				// (its original position): those guards run AFTER their own
-				// field's merge and compare against the FRESH current value, but
-				// Format/Kind are merged right here, so the comparison has to
-				// happen before these two assignments or it would compare a
-				// value against itself. Reused unchanged by every started-guard
-				// below.
-				started := current.Status != state.CompStatusSetup && current.Status != ""
+				// started (above) was taken before this merge, ahead of the
+				// Format/Kind gate that needs it: the Naginata/Engi guards below
+				// run AFTER their own field's merge and compare against the
+				// FRESH current value, but Format/Kind are merged right here, so
+				// the comparison has to happen before these two assignments or
+				// it would compare a value against itself.
 				// Format and Kind repoint pool-vs-bracket generation and
 				// team-vs-individual scoring while results already exist (see
 				// comp.Format read live in engine/scoring_tx.go's mixed-pool
@@ -2214,7 +2193,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					}
 				}
 				current.Format = comp.Format
-				current.PoolFormat = comp.PoolFormat
 				current.Kind = comp.Kind
 				// Seconds are the only duration representation that crosses the
 				// wire. The retired whole-minute fields are not merged: `current`
@@ -2358,11 +2336,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if drawReadyFlag {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format, courts, pool size/winners/mode, extra qualifiers, pool format, round-robin, team size, kind, team match type, zekken display) while a draw is pending; discard the draw first"})
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format, courts, pool size/winners/mode, extra qualifiers, round-robin, team size, kind, team match type, zekken display) while a draw is pending; discard the draw first"})
 			return
 		}
 		if teamMatchTypeStartedFlag {
 			c.JSON(http.StatusConflict, gin.H{"error": "teamMatchType can only be changed before the competition starts"})
+			return
+		}
+		if drawShapeStartedFlag {
+			c.JSON(http.StatusConflict, gin.H{"error": "who fights whom, pool size and type, winners per pool, knockout qualifiers, team size and shiaijo can only be changed before the competition starts"})
 			return
 		}
 		if formatOrKindStartedFlag {

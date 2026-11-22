@@ -334,7 +334,6 @@ func TestConfigVersion_FieldCoverage(t *testing.T) {
 		{"teamSize", func(c *state.Competition) { c.Kind = "team"; c.TeamSize = 3 }, map[string]any{"teamSize": 5}},
 		{"numberPrefix", nil, map[string]any{"numberPrefix": "CV"}},
 		{"format", nil, map[string]any{"format": state.CompFormatKnockout}},
-		{"poolFormat", nil, map[string]any{"poolFormat": state.PoolFormatPartial}},
 		{"kind", nil, map[string]any{"kind": "team", "teamSize": 3}},
 		{"poolMatchDurationSeconds", nil, map[string]any{"poolMatchDurationSeconds": 300}},
 		{"knockoutMatchDurationSeconds", nil, map[string]any{"knockoutMatchDurationSeconds": 360}},

@@ -166,22 +166,6 @@ The following tournament operations described in the spec are physical/logistica
 
 ---
 
-## Gap 8: Partial Round-Robin for Large Pools
-
-**Priority**: Low–Medium
-
-**Tournament need**: In tournaments with large pools (8+ players), a partial round-robin may be used; each competitor fights only their adjacent neighbours in the pool list (e.g., position 1 vs 2, 2 vs 3, 3 vs 4) rather than every possible pairing. This significantly reduces the number of matches while still producing enough data for ranking.
-
-**Current state**: Pool generation in `helper/tournament.go` produces full round-robin pairings only. There is no option for partial round-robin.
-
-**What's missing**:
-
-- A competition-level setting for round-robin mode: `full` (default) or `partial` (adjacent-neighbour pairings).
-- Match generation logic that produces only adjacent-pair matches when partial is selected.
-- The same pool ranking criteria apply; no changes needed to the ranking engine.
-
----
-
 ## Gap 9: Kachinuki (Winner-Stays-On) Format
 
 **Priority**: Low
@@ -338,7 +322,6 @@ The following tournament operations described in the spec are physical/logistica
 | 5. Video streaming overlay | Low–Medium | Medium | Benefits from Gap 3 (shared display components) |
 | 6. Phase-specific duration | Low | Low | None; isolated change |
 | 7. Match queue position | Low | Low | None; isolated computation |
-| 8. Partial round-robin | Low–Medium | Medium | None; extends pool generation |
 | 9. Kachinuki format | Low | High | New match type with dynamic bout progression |
 | 10. Fusensho handling | Low | Low | None; UI addition to team scoring modal |
 | 11. Swiss system | Low | High | New competition format and pairing engine |

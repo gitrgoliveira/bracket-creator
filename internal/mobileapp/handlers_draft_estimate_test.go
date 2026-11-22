@@ -192,7 +192,6 @@ func TestDraftEstimate_ShapeRefusals(t *testing.T) {
 	r := setupDraftEstimateRouter(t)
 	cases := []struct{ name, query, want string }{
 		{"unknown format", "participants=8&format=bogus", `unknown format "bogus"`},
-		{"unknown pool format", "participants=8&format=mixed&poolFormat=bogus", `unknown poolFormat "bogus"`},
 		{"swiss with no rounds", "participants=8&format=swiss", "swiss format requires swissRounds >= 1"},
 		{"swiss rounds past the cap", fmt.Sprintf("participants=8&format=swiss&swissRounds=%d", engine.MaxSwissRounds+1),
 			fmt.Sprintf("swissRounds must be at most %d", engine.MaxSwissRounds)},

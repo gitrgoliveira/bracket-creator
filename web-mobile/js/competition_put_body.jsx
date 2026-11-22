@@ -13,14 +13,14 @@ import {
   optionLabel,
   KIND_OPTIONS,
   FORMAT_OPTIONS,
-  POOL_FORMAT_OPTIONS,
+  POOL_SHAPE_OPTIONS,
+  poolShapeOf,
   POOL_SIZE_MODE_OPTIONS,
   TEAM_MATCH_TYPE_OPTIONS,
   LABEL_KIND,
   LABEL_FORMAT,
-  LABEL_POOL_FORMAT,
+  LABEL_POOL_SHAPE,
   LABEL_SWISS_ROUNDS,
-  LABEL_ROUND_ROBIN,
   LABEL_KNOCKOUT_DURATION,
   LABEL_POOL_DURATION,
   LABEL_TWO_THIRD_PLACES,
@@ -105,11 +105,10 @@ const SETTINGS_FIELD_LABELS = {
   courts: LABEL_COURTS,
   kind: LABEL_KIND,
   format: LABEL_FORMAT,
-  poolFormat: LABEL_POOL_FORMAT,
   poolSize: LABEL_POOL_SIZE,
   poolWinners: LABEL_POOL_WINNERS,
   poolSizeMode: LABEL_POOL_SIZE_MODE,
-  roundRobin: LABEL_ROUND_ROBIN,
+  roundRobin: LABEL_POOL_SHAPE,
   swissRounds: LABEL_SWISS_ROUNDS,
   teamSize: LABEL_TEAM_SIZE,
   teamMatchType: LABEL_TEAM_MATCH_TYPE,
@@ -126,6 +125,9 @@ const SETTINGS_FIELD_LABELS = {
 };
 
 function formatEditValue(k, v) {
+  if (k === "roundRobin") {
+    return optionLabel(POOL_SHAPE_OPTIONS, poolShapeOf(v));
+  }
   if (k === "poolMatchDurationSeconds" || k === "knockoutMatchDurationSeconds") {
     if (v === "" || v === null || v === undefined || (typeof v === "number" && Number.isNaN(v))) {
       return "blank";
@@ -138,9 +140,6 @@ function formatEditValue(k, v) {
   }
   if (k === "format") {
     return optionLabel(FORMAT_OPTIONS, v) || (v === "" ? "blank" : String(v));
-  }
-  if (k === "poolFormat") {
-    return optionLabel(POOL_FORMAT_OPTIONS, v) || (v === "" ? "blank" : String(v));
   }
   if (k === "poolSizeMode") {
     return optionLabel(POOL_SIZE_MODE_OPTIONS, v) || (v === "" ? "blank" : String(v));
@@ -375,10 +374,6 @@ export function settingsPutBody(base, edits, configVersion) {
     numberPrefix: trimmedPrefix,
     format: effective.format,
     kind: effective.kind,
-    // FR-050 / T044: round-robin shape selector. Only meaningful when
-    // the format runs pool play; the backend's validateCompetitionFormat
-    // accepts the empty value, so a non-pool format can safely PUT "".
-    poolFormat: effective.poolFormat || "",
     // FR-052..FR-054 / T047: per-phase durations, in SECONDS. The retired
     // whole-minute fields are no longer sent; seconds are the only duration
     // representation the API carries. safeNonNegInt still guards the

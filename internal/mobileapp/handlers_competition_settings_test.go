@@ -156,15 +156,7 @@ func TestValidateCompetitionDurations(t *testing.T) {
 // TestValidateCompetitionFormat_UnknownFormat verifies that unknown format
 // strings are rejected.
 func TestValidateCompetitionFormat_UnknownFormat(t *testing.T) {
-	code, err := validateCompetitionFormat("garbage", "")
-	assert.Error(t, err)
-	assert.Equal(t, http.StatusBadRequest, code)
-}
-
-// TestValidateCompetitionFormat_UnknownPoolFormat verifies that unknown pool
-// format strings are rejected.
-func TestValidateCompetitionFormat_UnknownPoolFormat(t *testing.T) {
-	code, err := validateCompetitionFormat("", "garbage")
+	code, err := validateCompetitionFormat("garbage")
 	assert.Error(t, err)
 	assert.Equal(t, http.StatusBadRequest, code)
 }
@@ -718,7 +710,7 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 		// All output-affecting fields match the stored comp; only Name differs.
 		// The gate compares effective values directly (no sentinels): the real
 		// client always PUTs the full config, and the omitted fields here
-		// (poolSizeMode/poolFormat/teamSize) match the stored zero values, so no
+		// (poolSizeMode/teamSize) match the stored zero values, so no
 		// output-affecting change is detected and the rename is allowed.
 		body, _ := json.Marshal(map[string]any{
 			"id":          cid,
@@ -944,11 +936,10 @@ func TestCompetitionAPI_RejectsOutOfBandNeverClamps(t *testing.T) {
 	})
 }
 
-// TestUpdateCompetition_CourtStillRunningMatches pins the competition-level twin
-// of the tournament's orphaned-shiaijo guard: a competition cannot drop a
-// shiaijo its own live matches are still assigned to, because such a match has
-// no operator view left to be run from.
-func TestUpdateCompetition_CourtStillRunningMatches(t *testing.T) {
+// TestUpdateCompetition_CourtsLockedWhenStarted pins operator decision bc-rrsh
+// r7: once a competition has started its shiaijo stay as drawn, whether or not
+// the bouts on a shiaijo are fought. A bout changes court by a court move.
+func TestUpdateCompetition_CourtsLockedWhenStarted(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 
 	require.NoError(t, store.SaveTournament(&state.Tournament{
@@ -974,38 +965,44 @@ func TestUpdateCompetition_CourtStillRunningMatches(t *testing.T) {
 		return w
 	}
 
-	t.Run("REJECT dropping a shiaijo a scheduled match is on", func(t *testing.T) {
-		save(state.CompStatusPools)
-		require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
-			{ID: "Pool A-1", Court: "A", Status: state.MatchStatusCompleted},
-			{ID: "Pool B-1", Court: "B", Status: state.MatchStatusScheduled},
+	for _, tc := range []struct {
+		name   string
+		status state.CompetitionStatus
+		courtB state.MatchStatus
+	}{
+		{"REJECT dropping a shiaijo a scheduled match is on", state.CompStatusPools, state.MatchStatusScheduled},
+		{"REJECT dropping a shiaijo whose bouts are all fought", state.CompStatusPools, state.MatchStatusCompleted},
+		{"REJECT dropping a shiaijo once the competition has finished", state.CompStatusComplete, state.MatchStatusCompleted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			save(tc.status)
+			require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+				{ID: "Pool A-1", Court: "A", Status: state.MatchStatusScheduled},
+				{ID: "Pool B-1", Court: "B", Status: tc.courtB},
+			}))
+
+			w := put([]string{"A"})
+			assert.Equal(t, http.StatusConflict, w.Code, "body: %s", w.Body.String())
+			assert.Contains(t, w.Body.String(), "shiaijo can only be changed before the competition starts")
+
+			stored, err := store.LoadCompetition(cid)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"A", "B"}, stored.Courts, "the allocation must not change after the refusal")
+		})
+	}
+
+	t.Run("REJECT adding a shiaijo once started", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name: "Court Drop", Date: "20-08-2026", Courts: []string{"A", "B", "C", "D"}, Password: "pw",
 		}))
-
-		w := put([]string{"A"})
-		assert.Equal(t, http.StatusBadRequest, w.Code,
-			"dropping shiaijo B while a bout is scheduled on it must be refused: %s", w.Body.String())
-		assert.Contains(t, w.Body.String(), "shiaijo B",
-			"the refusal must name the shiaijo the operator has to clear")
-
-		stored, err := store.LoadCompetition(cid)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"A", "B"}, stored.Courts, "the allocation must not change after the refusal")
-	})
-
-	t.Run("ALLOW dropping a shiaijo whose bouts are all fought", func(t *testing.T) {
+		t.Cleanup(func() {
+			require.NoError(t, store.SaveTournament(&state.Tournament{
+				Name: "Court Drop", Date: "20-08-2026", Courts: []string{"A", "B"}, Password: "pw",
+			}))
+		})
 		save(state.CompStatusPools)
-		require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
-			{ID: "Pool A-1", Court: "A", Status: state.MatchStatusScheduled},
-			{ID: "Pool B-1", Court: "B", Status: state.MatchStatusCompleted},
-		}))
-
-		w := put([]string{"A"})
-		assert.Equal(t, http.StatusOK, w.Code,
-			"a shiaijo whose bouts are all fought must be free to drop: %s", w.Body.String())
-
-		stored, err := store.LoadCompetition(cid)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"A"}, stored.Courts)
+		w := put([]string{"A", "B", "C", "D"})
+		assert.Equal(t, http.StatusConflict, w.Code, "body: %s", w.Body.String())
 	})
 
 	t.Run("ALLOW the same edit before the competition starts", func(t *testing.T) {
@@ -1017,6 +1014,132 @@ func TestUpdateCompetition_CourtStillRunningMatches(t *testing.T) {
 		w := put([]string{"A"})
 		assert.Equal(t, http.StatusOK, w.Code,
 			"nothing is live before the draw, so the allocation is still the operator's to set: %s", w.Body.String())
+	})
+}
+
+// TestUpdateCompetition_DrawShapeLockedWhenStarted pins operator decision
+// bc-rrsh r5: once a competition has started, the settings PUT refuses a
+// change to the shape its draw was made with (who fights whom, pool sizing,
+// winners, team size), as the Settings page locks them. A save that changes
+// none of them, the name or the zekken option included, still goes through.
+func TestUpdateCompetition_DrawShapeLockedWhenStarted(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	put := func(id string, payload map[string]any) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+id, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	const mixed = "shape-started-mixed"
+	saveMixed := func() {
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: mixed, Name: "Shape Started", Format: state.CompFormatMixed, Kind: "team",
+			Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, RoundRobin: true, TeamSize: 5,
+			Status: state.CompStatusPools,
+		}))
+	}
+	mixedPayload := func(overrides map[string]any) map[string]any {
+		p := map[string]any{
+			"id": mixed, "name": "Shape Started", "format": state.CompFormatMixed, "kind": "team",
+			"courts": []string{"A"}, "poolSize": 4, "poolWinners": 2, "roundRobin": true, "teamSize": 5,
+		}
+		for k, v := range overrides {
+			p[k] = v
+		}
+		return p
+	}
+
+	for _, tc := range []struct {
+		name     string
+		override map[string]any
+	}{
+		{"who fights whom", map[string]any{"roundRobin": false}},
+		{"players per pool", map[string]any{"poolSize": 5}},
+		{"winners per pool", map[string]any{"poolWinners": 1}},
+		{"pool size type", map[string]any{"poolSizeMode": "max"}},
+		{"team size", map[string]any{"teamSize": 3}},
+	} {
+		t.Run("REJECT "+tc.name+" on a started competition", func(t *testing.T) {
+			saveMixed()
+			w := put(mixed, mixedPayload(tc.override))
+			assert.Equal(t, http.StatusConflict, w.Code, "%s", w.Body.String())
+			assert.Contains(t, w.Body.String(), "can only be changed before the competition starts")
+
+			stored, err := store.LoadCompetition(mixed)
+			require.NoError(t, err)
+			assert.True(t, stored.RoundRobin)
+			assert.Equal(t, 4, stored.PoolSize)
+			assert.Equal(t, 2, stored.PoolWinners)
+			assert.Equal(t, "", stored.PoolSizeMode)
+			assert.Equal(t, 5, stored.TeamSize)
+		})
+	}
+
+	// Changing format or kind also renormalises the pool pair and team size,
+	// so the refusal must be the format/kind one, not a list of fields the
+	// caller never touched.
+	for _, tc := range []struct {
+		name     string
+		override map[string]any
+	}{
+		{"format to league", map[string]any{"format": state.CompFormatLeague}},
+		{"kind to individual", map[string]any{"kind": "individual", "teamSize": 0}},
+	} {
+		t.Run("REJECT "+tc.name+" with the format and kind sentence", func(t *testing.T) {
+			saveMixed()
+			w := put(mixed, mixedPayload(tc.override))
+			assert.Equal(t, http.StatusConflict, w.Code, "%s", w.Body.String())
+			assert.Contains(t, w.Body.String(), "format and kind can only be changed before the competition starts")
+		})
+	}
+
+	t.Run("ALLOW a save that leaves the shape alone", func(t *testing.T) {
+		saveMixed()
+		w := put(mixed, mixedPayload(map[string]any{"name": "Shape Started Renamed", "withZekkenName": true}))
+		require.Equal(t, http.StatusOK, w.Code, "%s", w.Body.String())
+		stored, err := store.LoadCompetition(mixed)
+		require.NoError(t, err)
+		assert.Equal(t, "Shape Started Renamed", stored.Name)
+		assert.True(t, stored.WithZekkenName)
+	})
+
+	t.Run("ALLOW the same change before the draw", func(t *testing.T) {
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: mixed, Name: "Shape Started", Format: state.CompFormatMixed, Kind: "team",
+			Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, RoundRobin: true, TeamSize: 5,
+			Status: state.CompStatusSetup,
+		}))
+		w := put(mixed, mixedPayload(map[string]any{"roundRobin": false, "poolSize": 5}))
+		require.Equal(t, http.StatusOK, w.Code, "%s", w.Body.String())
+		stored, err := store.LoadCompetition(mixed)
+		require.NoError(t, err)
+		assert.False(t, stored.RoundRobin)
+		assert.Equal(t, 5, stored.PoolSize)
+	})
+
+	// A league's request has its pool pair zeroed (normalizePoolConfig) while
+	// the stored one is the pair it drew with: a plain save of a started
+	// league is not a shape change, and keeps the stored pair.
+	t.Run("ALLOW a plain save of a started league and keep its pool pair", func(t *testing.T) {
+		const league = "shape-started-league"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: league, Name: "League Started", Format: state.CompFormatLeague,
+			Courts: []string{"A"}, PoolSize: 6, PoolWinners: 3, RoundRobin: true,
+			Status: state.CompStatusPools,
+		}))
+		w := put(league, map[string]any{
+			"id": league, "name": "League Started", "format": state.CompFormatLeague,
+			"courts": []string{"A"}, "poolSize": 6, "poolWinners": 3, "roundRobin": true,
+		})
+		require.Equal(t, http.StatusOK, w.Code, "%s", w.Body.String())
+		stored, err := store.LoadCompetition(league)
+		require.NoError(t, err)
+		assert.Equal(t, 6, stored.PoolSize)
+		assert.Equal(t, 3, stored.PoolWinners)
 	})
 }
 

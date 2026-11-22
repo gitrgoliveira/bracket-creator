@@ -248,10 +248,6 @@ paths:
                   description: >-
                     Adds a 3rd-place match after the semifinals. The legacy
                     field name naginata=on is accepted as an alias.
-                poolFormat:
-                  type: string
-                  enum: [full, partial]
-                  description: partial draws the path-graph match set; otherwise roundRobin decides.
                 extraQualifiers:
                   type: string
                   enum: ["", larger-pools, fill-bracket]
@@ -264,6 +260,10 @@ paths:
                 roundRobin:
                   type: string
                   enum: ["on", "off"]
+                  description: >-
+                    `on` draws everyone against everyone in every pool. Any
+                    other value draws a ring: each competitor fights the two
+                    beside them (in a pool of 2 or 3, that is everyone).
                 poolSizeMode:
                   type: string
                   enum: [min, max]
@@ -1879,7 +1879,7 @@ paths:
         **Settings-update (body OMITS `players`):**
         The server applies these fields from the body onto the
         on-disk record: `name`, `date`, `startTime`, `poolSize`,
-        `poolWinners`, `poolSizeMode`, `poolFormat`, `extraQualifiers`,
+        `poolWinners`, `poolSizeMode`, `extraQualifiers`,
         `courts`, `roundRobin`, `withZekkenName`, `teamSize`,
         `numberPrefix`, `format`, `kind`,
         `poolMatchDurationSeconds`, `knockoutMatchDurationSeconds`,
@@ -1902,12 +1902,13 @@ paths:
         (including `poolMatchDurationSeconds` / `knockoutMatchDurationSeconds`,
         `checkInEnabled`, `swissRounds` and `numberPrefix`) is editable
         regardless of status through this endpoint; `poolSize`, `poolWinners`,
-        `poolSizeMode`, `poolFormat`, `extraQualifiers`, `courts`,
+        `poolSizeMode`, `extraQualifiers`, `courts`,
         `roundRobin`, `teamSize` and `withZekkenName`
         are additionally subject to the draw-ready
         output-affecting 409 (see below) while status is exactly
-        `draw-ready`, but are not blocked once the competition has moved
-        past it.
+        `draw-ready`. Once the competition has started, every one of them
+        except `withZekkenName` is refused with 409 (see below);
+        `withZekkenName` stays editable.
 
         `numberPrefix` is deliberately outside the output-affecting set: it
         only labels competitors, not what the draw generated, so changing it
@@ -2134,7 +2135,7 @@ paths:
               the roster as it stands and its version.
 
             * Output-affecting settings (format, courts, pool
-              size/winners/mode, extra qualifiers, pool format, round-robin,
+              size/winners/mode, extra qualifiers, round-robin,
               team size, kind, team match type, zekken
               display) were changed while the competition is in `draw-ready`
               state; discard the draw first. `numberPrefix` is NOT one of
@@ -2145,6 +2146,12 @@ paths:
               (status past `setup`). Both repoint generation and scoring while
               results already exist, so neither can change after the fact.
             * `teamMatchType` was changed after the competition started.
+            * The shape the draw was made with (`roundRobin`, `poolSize`,
+              `poolWinners`, `poolSizeMode`, `extraQualifiers`, `teamSize`) or
+              its `courts` were changed after the competition started. The
+              pools and bracket being fought were drawn from them, and
+              `poolWinners` is read while the pools run. A bout changes
+              shiaijo by a court move, never through these settings.
 
             A settings save that merely echoes an unchanged `format`, `kind` or
             `teamMatchType` back is never refused: every one of these gates
@@ -7231,16 +7238,14 @@ paths:
             On a mixed competition, at most `poolSize`, or `poolSize` + 1 when
             `poolSizeMode` is not `max`; 0 or absent means the default.
         - in: query
-          name: poolFormat
-          required: false
-          schema:
-            type: string
-            enum: [full, partial]
-        - in: query
           name: roundRobin
           required: false
           schema:
             type: boolean
+          description: >
+            On a mixed competition, true counts everyone against everyone in
+            every pool and false counts a ring, where each competitor fights the
+            two beside them. A league always counts everyone against everyone.
         - in: query
           name: extraQualifiers
           required: false
@@ -8885,15 +8890,19 @@ components:
             `Competition.courts` is per competition, never per venue, so a
             3-, 5- or 7-shiaijo tournament is legal and is expected.
 
-            **Removing a shiaijo a competition still in progress still holds
-            is refused with 400** (on POST as well as PUT, since POST is
-            re-POSTed against an existing record). The message names every
-            blocking competition and the shiaijo it still runs on, and nothing
-            is written; reassign those competitions' shiaijo in competition
-            settings first. Only competitions in progress block: `completed` and
-            `invalid` ones are history and are ignored, so a multi-day event
-            that ran the morning on 4 shiaijo can still shrink to 2 for the
-            afternoon. The refusal stops an orphan being CREATED; records
+            **Removing a shiaijo that a competition not yet completed still
+            holds is refused with 400** (on POST as well as PUT, since POST is
+            re-POSTed against an existing record). That covers a competition
+            in `setup` and `draw-ready` as well as one under way. `error` and
+            `message` name every blocking competition and the shiaijo it uses
+            (`message` is that alone, as a sentence the app shows as
+            it is), and nothing is written. A competition's `courts` change
+            only until its draw is made (the settings PUT refuses them after
+            that), so a drawn one frees its shiaijo when it finishes, and a
+            bout moves to another shiaijo with a court move. `completed` and
+            `invalid` competitions are history and never block, so a
+            multi-day event that ran the morning on 4 shiaijo can still shrink
+            to 2 for the afternoon. The refusal stops an orphan being CREATED; records
             orphaned before it existed, or by a hand-edited config.md or an
             imported manifest, are caught instead by the draw gate, which is
             what makes "a competition is never drawn onto a shiaijo the
@@ -9121,6 +9130,11 @@ components:
             0 or absent means the default.
         roundRobin:
           type: boolean
+          description: >
+            How each pool of a mixed competition is drawn: true is everyone
+            against everyone, false is a ring where each competitor fights the
+            two beside them (in a pool of 2 or 3, that is everyone). A league
+            is always drawn everyone against everyone, whatever this holds.
         courts:
           type: array
           items:

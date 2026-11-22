@@ -351,9 +351,6 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
     'format', 'kind',
     // status: JSX-read (delete-warning prompt)
     'status',
-    // FR-050 / T044: poolFormat round-trips through saveNow's PUT body,
-    // so it needs a dep to absorb SSE-pushed concurrent admin changes.
-    'poolFormat',
     // FR-052..FR-054 / T047: per-phase duration inputs are rendered in
     // the settings form AND round-tripped via finalNext. Sync deps
     // required so an SSE-driven update lands in local state while the
@@ -427,8 +424,6 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     'courts', 'roundRobin', 'withZekkenName',
     'teamSize', 'numberPrefix',
     'format', 'kind',
-    // FR-050 / T044: round-robin shape selector.
-    'poolFormat',
     // FR-052..FR-054 / T047: per-phase durations, in SECONDS. Zero means
     // "unset, use the scheduler default". mp-m5kf retired the whole-minute
     // poolMatchDuration / knockoutMatchDuration / matchDuration fields: they are

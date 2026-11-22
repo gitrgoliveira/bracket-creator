@@ -11,7 +11,6 @@ describe('a read refused for the organiser\'s password', () => {
     beforeEach(() => { origFetch = global.fetch; });
     afterEach(() => {
         global.fetch = origFetch;
-        delete window.credentialRefused;
         vi.resetModules();
     });
 
@@ -28,8 +27,8 @@ describe('a read refused for the organiser\'s password', () => {
 
     it('tells the page and throws the refusal, for the tournament and the competitions', async () => {
         const refused = vi.fn();
-        window.credentialRefused = refused;
         const { requests, API } = await load('admin', 'stale', 401);
+        requests.onCredentialRefused(refused);
         await expect(API.fetchTournament()).rejects.toMatchObject({ code: requests.CREDENTIAL_REFUSED, message: 'Invalid password' });
         await expect(API.fetchCompetitions()).rejects.toMatchObject({ code: requests.CREDENTIAL_REFUSED });
         await expect(API.fetchCompetitions({ bounded: true })).rejects.toMatchObject({ code: requests.CREDENTIAL_REFUSED });
@@ -38,8 +37,8 @@ describe('a read refused for the organiser\'s password', () => {
 
     it('is an ordinary failure on a public page, which sends no password', async () => {
         const refused = vi.fn();
-        window.credentialRefused = refused;
         const { requests, API } = await load('viewer', '', 401);
+        requests.onCredentialRefused(refused);
         await expect(API.fetchTournament()).rejects.toThrow('Invalid password');
         await expect(API.fetchTournament()).rejects.not.toMatchObject({ code: requests.CREDENTIAL_REFUSED });
         expect(refused).not.toHaveBeenCalled();
@@ -47,8 +46,8 @@ describe('a read refused for the organiser\'s password', () => {
 
     it('is an ordinary failure for a server error', async () => {
         const refused = vi.fn();
-        window.credentialRefused = refused;
-        const { API } = await load('admin', 'pw', 500);
+        const { requests, API } = await load('admin', 'pw', 500);
+        requests.onCredentialRefused(refused);
         await expect(API.fetchTournament()).rejects.toThrow();
         expect(refused).not.toHaveBeenCalled();
     });

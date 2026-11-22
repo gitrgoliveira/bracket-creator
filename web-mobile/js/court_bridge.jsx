@@ -458,6 +458,28 @@ function maskTeamNode(node, ctx) {
     return out;
 }
 
+// maskAwards: a fighting spirit award names its recipient by name and dojo, and
+// the server reads it as the number or team member label of the competitor it
+// finds (maskView.awardRecipient), "?" when none. The bridge reads the one
+// competitor or member holding that name, "?" when none or several do.
+function maskAwards(comp, ctx, team) {
+    if (!Array.isArray(comp.fightingSpiritAwards)) return comp;
+    const reading = (name) => {
+        if (!name) return name;
+        if (!team) return ctx.byName.has(name) && !ctx.clashing.has(name) ? ctx.byName.get(name) : '?';
+        const ids = [];
+        for (const names of ctx.namesByTeam.values()) if (names.has(name)) ids.push(names.get(name));
+        return ids.length === 1 && ids[0] ? ctx.memberLabel.get(String(ids[0])) || '?' : '?';
+    };
+    return {
+        ...comp,
+        fightingSpiritAwards: comp.fightingSpiritAwards.map((a) => (
+            a && typeof a === 'object' && typeof a.recipientName === 'string'
+                ? { ...a, recipientName: reading(a.recipientName) }
+                : a)),
+    };
+}
+
 // `tournament` is the operator tab's tournament: a self-run one shows names
 // whatever a competition's setting says (competitionHidesNames), as the server
 // does. Without it the tournament is read as an officiated one.
@@ -469,8 +491,9 @@ export function maskSnapshotForBridge(comps, tournament = null) {
     return comps.map((comp) => {
         if (!hides(comp)) return comp;
         const ctx = maskContext(comp);
-        const masked = isTeamCompetition(comp) ? maskTeamNode(comp, ctx) : maskNode(comp, ctx);
-        return { ...masked, namesHidden: true };
+        const team = isTeamCompetition(comp);
+        const masked = team ? maskTeamNode(comp, ctx) : maskNode(comp, ctx);
+        return { ...maskAwards(masked, ctx, team), namesHidden: true };
     });
 }
 

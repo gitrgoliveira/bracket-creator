@@ -18,7 +18,7 @@ import { queueMoveCourts, sharesCourtDay, sharesDay } from './court_queue.jsx';
 import { useCourtPaceLookup, PACE_TICK_MS } from './court_pace.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 // bc-hnam: which credential the page reads with, keyed by the route.
-import { readAudienceKey, currentReadAudienceKey, CREDENTIAL_REFUSED } from './api_client_requests.jsx';
+import { readAudienceKey, currentReadAudienceKey, CREDENTIAL_REFUSED, onCredentialRefused } from './api_client_requests.jsx';
 import { setAudienceAndReconnect } from './api_client_events.jsx';
 import { onRevealKeysChange } from './reveal_key.jsx';
 import { RevealPage, takeRevealLink } from './viewer_reveal.jsx';
@@ -845,7 +845,7 @@ function App() {
   // at once. bc-qttl: the queued writes are scrubbed of it and PARKED, never
   // destroyed: nobody here chose to discard anything, and the password was the
   // secret, not the results; they resume when the operator signs in again.
-  // Asked by the password_reset push and, through window.credentialRefused, by
+  // Asked by the password_reset push and, through onCredentialRefused, by
   // a read or an event-stream ticket the server refused (api_client_requests.jsx
   // noteRefusedCredential), so a stale password is never shown as "no tournament".
   const dropStaleCredential = () => {
@@ -867,10 +867,7 @@ function App() {
     }
   };
   const dropStaleCredentialRef = useLatestRef(dropStaleCredential);
-  useEffect(() => {
-    window.credentialRefused = () => dropStaleCredentialRef.current();
-    return () => { delete window.credentialRefused; };
-  }, [dropStaleCredentialRef]);
+  useEffect(() => onCredentialRefused(() => dropStaleCredentialRef.current()), [dropStaleCredentialRef]);
 
   // A refreshed tournament never puts a live score back to an older state
   // under a score editor (keepNewerTournament, patch.jsx): the admin's

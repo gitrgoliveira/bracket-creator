@@ -76,8 +76,9 @@ func newPublicNames(store *state.Store, verifier PasswordVerifier) *publicNames 
 // tournament always shows names, whatever a competition's setting says (a
 // restore can leave one that hides them), because its competitors score their
 // own matches and need them; the competition keeps its setting, so it hides
-// names again if the tournament is switched back to officiated. A tournament
-// that cannot be read counts as officiated, so the names stay hidden.
+// names again if it is restored into an officiated tournament (the mode of a
+// tournament cannot change once it is made). A tournament that cannot be read
+// counts as officiated, so the names stay hidden.
 func (p *publicNames) hides(comp *state.Competition) bool {
 	if comp == nil || !comp.HidesNames() {
 		return false

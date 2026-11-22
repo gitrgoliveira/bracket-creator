@@ -51,6 +51,20 @@ describe('maskSnapshotForBridge', () => {
         expect(hiding.config.players[0].name).toBe('Tanaka Kenji');
     });
 
+    it('reads a fighting spirit award recipient as their number, "?" when no one or several hold the name', () => {
+        const c = individual('hidden');
+        c.config.players.push(player('p3', 'Ito Mari', 'K3'), player('p4', 'Ito Mari', 'K4'));
+        c.fightingSpiritAwards = [
+            { title: 'Spirit', recipientName: 'Tanaka Kenji', recipientDojo: 'Dojo' },
+            { title: 'Spirit', recipientName: 'Ito Mari', recipientDojo: 'Dojo' },
+            { title: 'Spirit', recipientName: 'Not On The Roster', recipientDojo: 'Dojo' },
+        ];
+        const [out] = maskSnapshotForBridge([c]);
+        expect(out.fightingSpiritAwards.map((a) => a.recipientName)).toEqual(['K1', '?', '?']);
+        expect(JSON.stringify(out)).not.toContain('Not On The Roster');
+        expect(c.fightingSpiritAwards[0].recipientName).toBe('Tanaka Kenji');
+    });
+
     it('names two competitors sharing a name by id, not by the shared name', () => {
         const c = individual('hidden');
         c.config.players.push(player('p3', 'Tanaka Kenji', 'K3'));

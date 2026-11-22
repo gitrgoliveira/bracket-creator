@@ -9,7 +9,6 @@ describe('reads made as the page reads', () => {
     beforeEach(() => { origFetch = global.fetch; });
     afterEach(() => {
         global.fetch = origFetch;
-        delete window.credentialRefused;
         vi.resetModules();
     });
 
@@ -60,8 +59,8 @@ describe('reads made as the page reads', () => {
         };
         for (const [name, read] of Object.entries(reads)) {
             const credentialRefused = vi.fn();
-            window.credentialRefused = credentialRefused;
             const { requests, API } = await load('admin', 'stale', refused);
+            requests.onCredentialRefused(credentialRefused);
             await expect(read(API), name).rejects.toMatchObject({ code: requests.CREDENTIAL_REFUSED });
             expect(credentialRefused, name).toHaveBeenCalledTimes(1);
         }

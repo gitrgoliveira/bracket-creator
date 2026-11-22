@@ -90,6 +90,17 @@ export function readsAsOrganiser() {
 // saved password draws now that every read is judged by its audience).
 export const CREDENTIAL_REFUSED = 'credential_refused';
 
+// onCredentialRefused: the app's one listener for a refused organiser password
+// (app.jsx registers dropStaleCredential). Returns the function that takes it
+// off again, which only removes this listener, never a later one.
+let _credentialRefusedListener = null;
+export function onCredentialRefused(listener) {
+    _credentialRefusedListener = listener;
+    return () => {
+        if (_credentialRefusedListener === listener) _credentialRefusedListener = null;
+    };
+}
+
 // noteRefusedCredential: a read answered `status`. When that is 401 on a page
 // that read with the organiser's password, the app is told (the page drops the
 // stale credential and asks for the password again, app.jsx
@@ -97,7 +108,7 @@ export const CREDENTIAL_REFUSED = 'credential_refused';
 // carrying CREDENTIAL_REFUSED, so nothing reads it as "no tournament".
 export function noteRefusedCredential(status) {
     if (status !== 401 || !readsAsOrganiser()) return false;
-    if (typeof window !== 'undefined' && typeof window.credentialRefused === 'function') window.credentialRefused();
+    if (_credentialRefusedListener) _credentialRefusedListener();
     return true;
 }
 

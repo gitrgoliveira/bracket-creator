@@ -254,7 +254,8 @@ describe('api_client_events.jsx: the stream ticket', () => {
     const api = await import('../api_client.jsx');
     const events = await import('../api_client_events.jsx');
     const keys = await import('../reveal_key.jsx');
-    mods = { API: api.API, events, keys };
+    const requests = await import('../api_client_requests.jsx');
+    mods = { API: api.API, events, keys, requests };
   });
 
   afterEach(() => {
@@ -291,7 +292,7 @@ describe('api_client_events.jsx: the stream ticket', () => {
   it('a ticket the password was refused for tells the page and is not asked for again', async () => {
     ticketAnswers.push({ status: 401, body: { error: 'Invalid password' } });
     const refused = vi.fn();
-    window.credentialRefused = refused;
+    mods.requests.onCredentialRefused(refused);
     mods.events.setAudienceAndReconnect('admin', 'stale');
     const status = vi.fn();
     const unsub = mods.API.subscribeToEvents(() => {}, status);
@@ -308,7 +309,6 @@ describe('api_client_events.jsx: the stream ticket', () => {
     await flush();
     expect(FakeEventSource.instances[0].url).toBe('/api/events');
     unsub();
-    delete window.credentialRefused;
     console.warn.mockClear();
   });
 

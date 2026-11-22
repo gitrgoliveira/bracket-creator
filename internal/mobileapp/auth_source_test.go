@@ -224,6 +224,66 @@ func TestCachedVerifier_ConcurrentSharesOneCheck(t *testing.T) {
 	}
 }
 
+// panickingVerifier panics on its first Verify, after being released.
+type panickingVerifier struct {
+	PasswordVerifier
+	calls   atomic.Int32
+	release chan struct{}
+}
+
+func (v *panickingVerifier) Verify(p string) (bool, error) {
+	if v.calls.Add(1) == 1 {
+		<-v.release
+		panic("verifier blew up")
+	}
+	return p == "right", nil
+}
+
+func TestCachedVerifier_APanicReleasesWaitersAndLaterChecks(t *testing.T) {
+	inner := &panickingVerifier{release: make(chan struct{})}
+	v := newCachedVerifier(inner, time.Now)
+
+	panicked := make(chan any, 1)
+	go func() {
+		defer func() { panicked <- recover() }()
+		_, _ = v.Verify("right")
+	}()
+	require.Eventually(t, func() bool { return inner.calls.Load() == 1 }, time.Second, time.Millisecond)
+
+	waiterErr := make(chan error, 1)
+	go func() {
+		_, err := v.Verify("right")
+		waiterErr <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(inner.release)
+
+	select {
+	case p := <-panicked:
+		assert.Equal(t, "verifier blew up", p, "the panic still reaches the caller that ran the check")
+	case <-time.After(2 * time.Second):
+		t.Fatal("the panicking check never returned")
+	}
+	select {
+	case err := <-waiterErr:
+		assert.ErrorIs(t, err, errVerifierPanicked, "a waiter is released with an error")
+	case <-time.After(2 * time.Second):
+		t.Fatal("a caller waiting on the panicked check is stuck")
+	}
+
+	later := make(chan bool, 1)
+	go func() {
+		ok, _ := v.Verify("right")
+		later <- ok
+	}()
+	select {
+	case ok := <-later:
+		assert.True(t, ok, "a later check of the same password runs again")
+	case <-time.After(2 * time.Second):
+		t.Fatal("a later check of the same password is stuck behind the panicked one")
+	}
+}
+
 func TestCachedVerifier_WrongCacheBounded(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	v := newCachedVerifier(&countingVerifier{right: "right"}, func() time.Time { return now })

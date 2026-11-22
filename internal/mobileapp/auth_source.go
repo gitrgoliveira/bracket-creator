@@ -246,6 +246,10 @@ type cachedVerifier struct {
 	inflight map[[sha256.Size]byte]*verifyCall
 }
 
+// errVerifierPanicked is what a caller that waited on a check sees when the
+// check it waited on panicked.
+var errVerifierPanicked = errors.New("password check did not finish")
+
 type verifyCall struct {
 	done  chan struct{}
 	valid bool
@@ -306,7 +310,22 @@ func (v *cachedVerifier) Verify(presented string) (bool, error) {
 	v.inflight[d] = call
 	v.mu.Unlock()
 
+	// A panic in the wrapped verifier must still release the callers waiting
+	// on this password, or every later check of it would block forever. They
+	// get an error (never a remembered answer) and the panic carries on.
+	finished := false
+	defer func() {
+		if finished {
+			return
+		}
+		call.err = errVerifierPanicked
+		v.mu.Lock()
+		delete(v.inflight, d)
+		v.mu.Unlock()
+		close(call.done)
+	}()
 	call.valid, call.err = v.PasswordVerifier.Verify(presented)
+	finished = true
 
 	v.mu.Lock()
 	delete(v.inflight, d)

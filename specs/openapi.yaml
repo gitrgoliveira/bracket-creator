@@ -492,6 +492,23 @@ paths:
                 $ref: '#/components/schemas/TournamentWithCompetitions'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          description: |
+            Two cases, told apart by `code`. Nothing is written.
+
+            * `public_names_self_run`: the body sets a hiding
+              `defaultPublicNames` on a self-run tournament.
+            * `public_names_self_run_switch`: the tournament is created
+              self-run while competitions already on disk hide their names.
+              The body lists them in `competitions`. Send the request again
+              with `confirmShowNames: true` to set them back to `""` (their
+              names then show on every public page) and create the tournament.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PublicNamesError'
+                  - $ref: '#/components/schemas/PublicNamesSelfRunSwitchError'
     put:
       tags: [tournament]
       summary: Update tournament configuration
@@ -577,23 +594,35 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           description: |
-            Two cases, told apart by `code`.
+            Four cases, told apart by `code`. Nothing is written in any of them.
 
             * `tournament_changed`: the body's `tournamentVersion` is not the
-              stored settings' version. Nothing is written.
-            * `public_names_self_run_switch`: the save switches the tournament
-              from officiated to self-run while competitions hide their names
-              (`publicNames` other than `""`). Nothing is written; the body
-              lists them in `competitions` (`id` and `name`). Send the save
-              again with `confirmShowNames: true` to go ahead: the same
-              transaction then sets every listed competition's `publicNames`
-              back to `""` (their names show on every public page, in every
-              stream) and a `tournament_updated` event is broadcast.
+              stored settings' version.
+            * `public_names_apply_confirm`: the save changes
+              `defaultPublicNames` and that would change the `publicNames` of
+              competitions already on disk (Swiss ones are left out). The body
+              lists them in
+              `competitions` (`id`, `name` and their current `publicNames`).
+              Send the save again with `confirmPublicNames: true` to go ahead:
+              every listed competition is then set to the new default.
+            * `public_names_self_run`: the save sets a hiding
+              `defaultPublicNames` on a self-run tournament.
+            * `public_names_self_run_switch`: the save creates the tournament
+              self-run (the mode cannot change afterwards) while competitions
+              already on disk hide their names (`publicNames` other than
+              `""`). The body lists them in `competitions` (`id`, `name` and
+              `publicNames`). Send the save again with
+              `confirmShowNames: true` to go ahead: the competitions are then
+              set back to `""` (their names show on every public page, in every
+              stream) before the tournament is written, and a
+              `tournament_updated` event is broadcast.
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: '#/components/schemas/TournamentChangedError'
+                  - $ref: '#/components/schemas/PublicNamesApplyConfirmError'
+                  - $ref: '#/components/schemas/PublicNamesError'
                   - $ref: '#/components/schemas/PublicNamesSelfRunSwitchError'
 
   /api/tournament/reset:
@@ -8339,9 +8368,10 @@ components:
       type: object
       required: [code, error, competitions]
       description: >
-        409 on `PUT /api/tournament`: the save switches the tournament to
-        self-run while competitions hide their names. Nothing is written. Send
-        the save again with `confirmShowNames: true` to show those names.
+        409 on `POST` or `PUT /api/tournament`: the save creates the tournament
+        self-run (the mode cannot change afterwards) while competitions already
+        on disk hide their names. Nothing is written. Send the save again with
+        `confirmShowNames: true` to show those names.
       properties:
         code:
           type: string
@@ -8352,17 +8382,45 @@ components:
           type: array
           description: The competitions that hide names, which the confirm would show.
           items:
-            type: object
-            required: [id, name]
-            properties:
-              id:
-                type: string
-              name:
-                type: string
+            $ref: '#/components/schemas/PublicNamesTarget'
+
+    PublicNamesApplyConfirmError:
+      type: object
+      required: [code, error, competitions]
+      description: >
+        409 on `PUT /api/tournament`: the save changes `defaultPublicNames`
+        and that would change competitions already on disk. Nothing is written.
+        Send the save again with `confirmPublicNames: true` to set them all to
+        the new default.
+      properties:
+        code:
+          type: string
+          enum: [public_names_apply_confirm]
+        error:
+          type: string
+        competitions:
+          type: array
+          description: The competitions the confirm would change, Swiss ones left out.
+          items:
+            $ref: '#/components/schemas/PublicNamesTarget'
+
+    PublicNamesTarget:
+      type: object
+      required: [id, name, publicNames]
+      description: A competition a public-names confirmation would change.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        publicNames:
+          type: string
+          enum: ["", person, competition, hidden]
+          description: The option the competition holds now.
 
     RevealLinks:
       type: object
-      required: [publicNames, expiresAt]
+      required: [publicNames, revealUntil, expiresAt, open, competitionKey, competitors]
       description: >
         The secret-bearing keys behind a competition's reveal links. The page
         builds `/reveal/<competitionId>#<key>` from them; the key is never put
@@ -8373,25 +8431,46 @@ components:
           type: string
           enum: ["", person, competition, hidden]
           description: The option in force, which decides which keys are present.
+        revealUntil:
+          type: string
+          description: >
+            The stored expiry, `YYYY-MM-DDTHH:MM`, or empty for the end of the
+            tournament.
         expiresAt:
           type: string
           description: >
             The date and time the links stop working, as the server reads it
             (`revealUntil`, or the end of the tournament plus one hour when that
-            is empty), `YYYY-MM-DDTHH:MM`.
+            is empty), `YYYY-MM-DDTHH:MM`. Empty when none can be worked out
+            (the tournament has no date); the links then reveal nothing.
         open:
           type: boolean
-          description: False once `expiresAt` has passed; the keys then reveal nothing.
+          description: >
+            Whether the links reveal names right now. False when the option
+            gives no links, once `expiresAt` has passed, or when the
+            competition holds no usable reveal secret.
         competitionKey:
           type: string
-          description: Present only when `publicNames` is `competition`.
-        competitorKeys:
-          type: object
+          description: The key of the one competition link; empty unless `publicNames` is `competition`.
+        competitors:
+          type: array
           description: >
-            Participant id to that participant's key. Present only when
-            `publicNames` is `person`; a team's key also reveals its members.
-          additionalProperties:
-            type: string
+            Each competitor's own key; empty unless `publicNames` is `person`.
+            A competitor with no participant id has no key and is left out. A
+            team's key also reveals its members.
+          items:
+            type: object
+            required: [id, name, dojo, key]
+            properties:
+              id:
+                type: string
+                description: The participant id.
+              name:
+                type: string
+              dojo:
+                type: string
+              key:
+                type: string
 
     CheckInStamp:
       type: object
@@ -9156,10 +9235,19 @@ components:
           type: boolean
           writeOnly: true
           description: |
-            Request only, on `PUT /api/tournament`. Send `true` to confirm
-            a switch to self-run that shows the names of competitions hiding
-            them; see the `public_names_self_run_switch` answer. Never stored
-            and never answered.
+            Request only, on `POST` and `PUT /api/tournament`. Send `true` to
+            confirm creating the tournament self-run, which shows the names of
+            competitions already on disk that hide them; see the
+            `public_names_self_run_switch` answer. Never stored and never
+            answered.
+        confirmPublicNames:
+          type: boolean
+          writeOnly: true
+          description: |
+            Request only, on `PUT /api/tournament`. Send `true` to confirm a
+            changed `defaultPublicNames` being applied to the competitions the
+            `public_names_apply_confirm` answer listed. Never stored and never
+            answered.
         theme:
           type: object
           description: >

@@ -166,12 +166,14 @@ func RevealExpiry(c *Competition, t *Tournament, loc *time.Location) (time.Time,
 
 // RevealOpen reports whether the competition's reveal links reveal names
 // at now: the competition gives links (PublicNamesHasLinks) and now is
-// before RevealExpiry, read in now's time zone. Judged on every read, so
+// before RevealExpiry, read in now's time zone, and the competition holds a
+// well-formed reveal secret (without one no key can be derived, so nothing
+// could reveal a name). Judged on every read, so
 // switching links off, or an expiry passing, stops every link at once, and
 // switching back or moving the expiry later makes the same links work
 // again.
 func RevealOpen(c *Competition, t *Tournament, now time.Time) bool {
-	if c == nil || !PublicNamesHasLinks(c.PublicNames) {
+	if c == nil || !PublicNamesHasLinks(c.PublicNames) || revealKey(c.RevealSecret, revealLabelCompetition) == "" {
 		return false
 	}
 	expiry, ok := RevealExpiry(c, t, now.Location())

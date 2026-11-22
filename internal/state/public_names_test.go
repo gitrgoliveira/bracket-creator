@@ -193,6 +193,15 @@ func TestRevealOpen_OnlyForAKindWithLinks(t *testing.T) {
 	}
 }
 
+func TestRevealOpen_NeedsAWellFormedSecret(t *testing.T) {
+	tourn := &Tournament{Date: "21-11-2026", DurationDays: 1, ClosingTime: "18:00"}
+	now := time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)
+	for _, secret := range []string{"", "not-hex", "abcd"} {
+		c := &Competition{PublicNames: PublicNamesCompetition, RevealSecret: secret}
+		assert.False(t, RevealOpen(c, tourn, now), "secret %q derives no key, so nothing is open", secret)
+	}
+}
+
 func TestRevealOpen_ReadsTheExpiryInNowsTimeZone(t *testing.T) {
 	c := &Competition{PublicNames: PublicNamesCompetition, RevealUntil: "2026-11-21T12:00", RevealSecret: testRevealSecret}
 	east := time.FixedZone("east", 3*60*60)

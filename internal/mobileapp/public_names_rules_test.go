@@ -218,6 +218,13 @@ func TestPublicNames_SettingsPutKeepsTheSecretForTheCompetitionsLife(t *testing.
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, "2026-06-01T20:30", f.comp(t, "c1").RevealUntil)
 
+	w = put(nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "2026-06-01T20:30", f.comp(t, "c1").RevealUntil, "an omitted expiry keeps the stored one")
+	w = put(map[string]any{"revealUntil": " "})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Empty(t, f.comp(t, "c1").RevealUntil, "an empty expiry clears it, so the links last to the end of the tournament")
+
 	w = put(map[string]any{"publicNames": "both"})
 	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 }

@@ -270,8 +270,9 @@ export function getLastBroadcastAt() {
 // zekken name set to its number and is stamped `nameHidden`; a match side, a
 // winner or a representative named by a bare string is replaced by the number
 // of the competitor its id names (else of the one roster name that is unique),
-// never by a name. A name no roster entry can place is left alone: it is
-// placeholder text ("Winner of ..."), not a competitor. The competition is
+// never by a name. A name no roster entry can place reads "?", as the server's
+// maskView.sideReading reads it; only an empty side and the draw's placeholders
+// ("Winner of ...", "Pool A-1st") stay as they are. The competition is
 // stamped `namesHidden`, as a server payload built for a hidden reader is.
 // A team competition keeps its team names and carries its team members the
 // way the server does (see maskTeamNode). A competition that shows names, or
@@ -288,6 +289,10 @@ const MASK_STRING_SIDES = [
     ['repPlayerB', []],
 ];
 const MASK_NAME_FIELDS = ['displayName', 'zekkenName', 'zekken'];
+// The draw's two placeholder shapes, which are not competitors (helper.
+// IsWinnerOfPlaceholder and IsPoolFinalistPlaceholder). The shared table
+// public_names_side_cases.json pins this reading to the server's.
+const DRAW_PLACEHOLDER_RE = /^(Winner of r\d+-m\d+|Pool .+-\d+(st|nd|rd|th))$/;
 
 function hasCompetitorNumber(node) {
     return node.number != null && String(node.number).trim() !== '';
@@ -345,6 +350,7 @@ function maskNode(node, ctx) {
             found = ctx.clashing.has(name) ? '?' : ctx.byName.get(name);
         }
         if (found) out[f] = found;
+        else if (!DRAW_PLACEHOLDER_RE.test(name)) out[f] = '?';
     }
     return out;
 }
@@ -483,9 +489,7 @@ function maskContext(comp) {
 // about competition `comp`, with its competitors carried as maskSnapshotForBridge
 // carries them: a winner or a representative named by a bare string, and a team
 // bout's fighters, read as the number or label the roster gives them, "?" when
-// no roster entry can place them. A patch holds a match, never a placeholder,
-// so a winner no roster entry places reads "?" rather than staying as it is.
-// A competition that shows its names, or one of a self-run tournament, passes
+// no roster entry can place them. A competition that shows its names, or one of a self-run tournament, passes
 // through by reference. Pure and exported so vitest can pin it.
 export function maskPatchForBridge(payload, comp, tournament = null) {
     if (!payload || !comp || !competitionHidesNames(tournament, comp)) return payload;
@@ -499,9 +503,7 @@ export function maskPatchForBridge(payload, comp, tournament = null) {
             if (!hasRows) delete out.subResults;
             return out;
         }
-        const out = maskNode(r, ctx);
-        if (typeof r.winner === 'string' && r.winner && out.winner === r.winner) out.winner = '?';
-        return out;
+        return maskNode(r, ctx);
     };
     const out = { ...payload };
     if (payload.result) out.result = maskResult(payload.result);

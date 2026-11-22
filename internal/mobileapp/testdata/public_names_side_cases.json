@@ -1,0 +1,18 @@
+{
+  "_about": "What a match side reads as when its competition hides names. Read by maskView.sideReading (public_names_side_cases_test.go) and by the court bridge's mask (web-mobile/js/__tests__/court_bridge_side_cases.test.jsx): the operator tab's copy of the mask and the server's judge the same cases. A competitor reads as its number, \"?\" when it has none or when the side names someone the roster does not hold; only an empty side and the draw's placeholders stay as written. A side carrying a name and no id is not in this table: the server resolves it from the draw before it reaches the mask, while the browser may still find it by its unique roster name.",
+  "roster": [
+    { "id": "p1", "name": "Tanaka Kenji", "number": "K1" },
+    { "id": "p2", "name": "Suzuki Ayumi", "number": "" }
+  ],
+  "cases": [
+    { "name": "a numbered competitor reads as the number", "side": "Tanaka Kenji", "id": "p1", "reading": "K1" },
+    { "name": "a competitor the draw has not numbered reads ?", "side": "Suzuki Ayumi", "id": "p2", "reading": "?" },
+    { "name": "an id the roster does not hold reads ?", "side": "Ghost Player", "id": "p9", "reading": "?" },
+    { "name": "a name no roster entry holds, with no id, reads ?", "side": "Ghost Player", "id": "", "reading": "?" },
+    { "name": "an empty side (a bye) stays empty", "side": "", "id": "", "reading": "" },
+    { "name": "a winner-of feeder stays as written", "side": "Winner of r1-m3", "id": "", "reading": "Winner of r1-m3" },
+    { "name": "a pool finalist placeholder stays as written", "side": "Pool A-1st", "id": "", "reading": "Pool A-1st" },
+    { "name": "a doubled-letter pool placeholder stays as written", "side": "Pool AA-2nd", "id": "", "reading": "Pool AA-2nd" },
+    { "name": "a name that only starts like a placeholder reads ?", "side": "Winner of the day", "id": "", "reading": "?" }
+  ]
+}

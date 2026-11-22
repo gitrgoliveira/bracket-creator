@@ -15,7 +15,7 @@ function individual(publicNames) {
         poolMatches: [
             { id: 'Pool A-1', court: 'A', sideA: { id: 'p1', name: 'Tanaka Kenji' }, sideB: { id: 'p2', name: 'Suzuki Ayumi' }, winner: { id: 'p1', name: 'Tanaka Kenji' } },
         ],
-        bracket: { rounds: [[{ id: 'M1', court: 'A', sideA: 'Tanaka Kenji', sideAId: 'p1', sideB: 'Winner of Pool A-2', winner: 'Tanaka Kenji', winnerId: 'p1' }]] },
+        bracket: { rounds: [[{ id: 'M1', court: 'A', sideA: 'Tanaka Kenji', sideAId: 'p1', sideB: 'Winner of r1-m2', winner: 'Tanaka Kenji', winnerId: 'p1' }]] },
     };
 }
 
@@ -36,7 +36,7 @@ describe('maskSnapshotForBridge', () => {
         expect(m.sideA).toBe('K1');
         expect(m.winner).toBe('K1');
         // a placeholder no roster entry can place stays as it is
-        expect(m.sideB).toBe('Winner of Pool A-2');
+        expect(m.sideB).toBe('Winner of r1-m2');
     });
 
     it('leaves a competition that shows its names untouched, by reference', () => {

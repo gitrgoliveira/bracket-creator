@@ -3,6 +3,7 @@
 
 import { findRunningOnCourt, sideLabel, sideLabelParts, TermD, StreamingQR } from './display_helpers.jsx';
 import { NumberedName } from './numbered_name.jsx';
+import { nameBesideBadge } from './competitor_identity.jsx';
 import { useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 import { pickFromLineup, pickMemberIdFromLineup, boutSideView, boutPositionName, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
 import { isPoolDaihyosenBout, teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
@@ -316,7 +317,7 @@ function StreamingOverlay({ court, position, competitions }) {
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw', marginTop: '0.4vh', opacity: 0.85 }}>
                             <span style={{ fontSize: '1.9vh', color: 'var(--accent-fg)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {boutShiroLabel && <span style={{ opacity: 0.75, fontWeight: 600, marginRight: '0.35em' }} data-testid="overlay-shiro-member-label">{boutShiroLabel}</span>}
-                                {boutShiroName}
+                                {nameBesideBadge(boutShiroName, boutShiroLabel)}
                             </span>
                             <span data-testid="overlay-shiro-bout" style={{ flexShrink: 0, fontSize: '2vh', color: 'var(--accent-fg)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{boutIpponsB}</span>
                         </div>
@@ -338,8 +339,9 @@ function StreamingOverlay({ court, position, competitions }) {
                             <span style={{ fontSize: '1.9vh', color: 'var(--rose-300)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {/* Aka's member label sits AFTER the name, on the outer
                                     side, like its competitor number (operator ruling
-                                    2026-09-14, bc-dnst); Shiro's sits before. */}
-                                {boutAkaName}
+                                    2026-09-14, bc-dnst); Shiro's sits before. A name that
+                                    IS its label (a hidden team member) prints once. */}
+                                {nameBesideBadge(boutAkaName, boutAkaLabel)}
                                 {boutAkaLabel && <span style={{ opacity: 0.75, fontWeight: 600, marginLeft: '0.35em' }} data-testid="overlay-aka-member-label">{boutAkaLabel}</span>}
                             </span>
                         </div>

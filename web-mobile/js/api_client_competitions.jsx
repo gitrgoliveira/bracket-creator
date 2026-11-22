@@ -88,7 +88,7 @@ export const competitionsApi = {
         const res = await fetch(`/api/viewer/court/${encodeURIComponent(court)}/matches`, { headers: readHeaders() });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Failed to fetch court matches (Status ${res.status})`);
+            throw readFailure(res.status, err.error || `Failed to fetch court matches (Status ${res.status})`);
         }
         const data = await res.json();
         const comps = Array.isArray(data.competitions) ? data.competitions : [];
@@ -99,7 +99,7 @@ export const competitionsApi = {
         const res = await fetch(`/api/viewer/competitions/${id}`, { headers: readHeaders() });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            const e = new Error(err.error || `Failed to fetch competition details (Status ${res.status})`);
+            const e = readFailure(res.status, err.error, 'competition details');
             // The server answered: a caller can tell that from a request
             // that never reached it (the data-issue banner's Reload).
             e.status = res.status;
@@ -549,7 +549,7 @@ export const competitionsApi = {
         const res = await fetch(`/api/competitions/${compID}/swiss/standings`, { headers: readHeaders() });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to load Swiss standings");
+            throw readFailure(res.status, err.error || "Failed to load Swiss standings");
         }
         return res.json();
     },
@@ -557,9 +557,10 @@ export const competitionsApi = {
         const res = await fetch(`/api/competitions/${compID}/league/standings`, { headers: readHeaders() });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to load league standings");
+            throw readFailure(res.status, err.error || "Failed to load league standings");
         }
-        return refuseMaskedForOrganiser(await res.json());
+        // A bare array with no namesHidden marker: nothing for refuseMaskedForOrganiser to read.
+        return res.json();
     },
     // bc-obox C1/C2: a check-in tap (checkedIn true) or its undo (false), an
     // outbox entry under the competition's base `checkin:<comp>`, answered at
@@ -642,7 +643,7 @@ export const competitionsApi = {
     // the other /api/competitions/:id/* GETs surfaced to the viewer.
     async fetchCompetitorStatuses(compID) {
         const res = await fetch(`/api/competitions/${compID}/competitor-status`, { headers: readHeaders() });
-        if (!res.ok) throw new Error("Failed to load competitor statuses");
+        if (!res.ok) throw readFailure(res.status, "", "competitor statuses");
         const data = refuseMaskedForOrganiser(await res.json());
         return data.statuses || [];
     },
@@ -708,7 +709,7 @@ export const competitionsApi = {
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak/candidates`, { headers: readHeaders() });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Failed to load league tie-breaker candidates (${res.status})`);
+            throw readFailure(res.status, err.error || `Failed to load league tie-breaker candidates (${res.status})`);
         }
         return refuseMaskedForOrganiser(await res.json());
     },

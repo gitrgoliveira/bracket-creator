@@ -454,6 +454,8 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     lineupMemberId: lineupHidden ? "" : pickMemberIdFromLineup(lineupA, index, teamSize),
     squad: squadA, name: akaName, teamNumber: numberA,
   });
+  // A hidden team member's name IS its label (the server masks it to the label):
+  // the name text goes and the label prints once (nameBesideBadge).
   // TV sizing comes from the parent `.msb--tv .msb-row` selector, so no
   // per-row --tv modifier is needed here.
   const cls = "msb-row"
@@ -464,7 +466,7 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     <div className={cls} data-testid={isDH ? "sub-row-dh" : `sub-row-${index}`}>
       <span className="msb-name msb-name--labelled">
         {shiroLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid="sub-member-label-b">{shiroLabel}</span>}
-        <span className="msb-name__text" data-testid="sub-shiro-name">{shiroDisplayName}</span>
+        <span className="msb-name__text" data-testid="sub-shiro-name">{nameBesideBadge(shiroDisplayName, shiroLabel)}</span>
       </span>
       {centreMarks(sub, matchSideA, matchSideB)}
       {/* The member label sits on the OUTER side of the name like the
@@ -476,7 +478,7 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
           cell's text run, which on Aka is the LABEL, so a long name used to
           eat Aka's label while Shiro's (leading) survived (bc-rvfx). */}
       <span className="msb-name msb-name--aka msb-name--labelled">
-        <span className="msb-name__text" data-testid="sub-aka-name">{akaDisplayName}</span>
+        <span className="msb-name__text" data-testid="sub-aka-name">{nameBesideBadge(akaDisplayName, akaLabel)}</span>
         {akaLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE_AFTER} data-testid="sub-member-label-a">{akaLabel}</span>}
       </span>
     </div>

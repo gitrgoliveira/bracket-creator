@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { maskSnapshotForBridge, boardOverlayResult } from '../court_bridge.jsx';
+import { describe, it, expect, afterEach } from 'vitest';
+import { maskSnapshotForBridge, maskPatchForBridge, boardOverlayResult, openBridge, setSnapshotProvider, _resetModuleStateForTests } from '../court_bridge.jsx';
 
 const player = (id, name, number) => ({ id, name, number, displayName: name.toUpperCase(), dojo: 'Dojo' });
 
@@ -139,5 +139,127 @@ describe('boardOverlayResult', () => {
         expect(r.sideBId).toBe('p2');
         expect(JSON.stringify(r)).not.toContain('Tanaka');
         expect(JSON.stringify(r)).not.toContain('Suzuki');
+    });
+});
+
+describe('maskSnapshotForBridge, a competitor the draw has not numbered', () => {
+    it('reads "?" rather than carrying the name, in the roster and in every match naming it', () => {
+        const c = individual('hidden');
+        delete c.config.players[1].number;
+        const [out] = maskSnapshotForBridge([c]);
+        const text = JSON.stringify(out);
+        expect(text).not.toContain('Suzuki');
+        expect(text).not.toContain('SUZUKI');
+        expect(out.config.players[1]).toMatchObject({ id: 'p2', name: '?', nameHidden: true });
+        expect(out.poolMatches[0].sideB).toMatchObject({ id: 'p2', name: '?' });
+        // the numbered competitor still reads by number
+        expect(out.config.players[0].name).toBe('K1');
+    });
+});
+
+describe('maskPatchForBridge', () => {
+    const patch = (result) => ({ result });
+
+    it('names an individual winner by number, by id or by name alone', () => {
+        const c = individual('competition');
+        const byId = maskPatchForBridge(patch({ id: 'M1', winner: 'Tanaka Kenji', winnerId: 'p1', sideAId: 'p1', sideBId: 'p2' }), c);
+        expect(byId.result.winner).toBe('K1');
+        const byName = maskPatchForBridge(patch({ id: 'M1', winner: 'Suzuki Ayumi' }), c);
+        expect(byName.result.winner).toBe('K2');
+        expect(JSON.stringify([byId, byName])).not.toMatch(/Tanaka|Suzuki/);
+    });
+
+    it('reads "?" for a winner no roster entry places, never the name', () => {
+        const out = maskPatchForBridge(patch({ id: 'M1', winner: 'Nobody Known' }), individual('hidden'));
+        expect(out.result.winner).toBe('?');
+    });
+
+    it('carries a team bout fighter and a representative by label, keeping the team names', () => {
+        const c = teamComp('person');
+        const out = maskPatchForBridge(patch({
+            id: 'Pool A-1', sideAId: 't1', sideBId: 't2', winner: 'Dojo Alpha',
+            repPlayerA: 'Sato Ryo', repPlayerB: 'Nobody Known',
+            subResults: [
+                { position: 1, sideA: 'Tanaka Kenji', sideAMemberId: 'm11', sideB: 'Suzuki Ayumi', sideBMemberId: 'm21', winner: 'Tanaka Kenji', winnerMemberId: 'm11' },
+                { position: 2, sideA: 'Sato Ryo', sideAMemberId: 'm12', sideB: '', winner: 'Dojo Alpha' },
+            ],
+        }), c);
+        const text = JSON.stringify(out);
+        for (const real of ['Tanaka', 'Sato', 'Suzuki', 'Nobody']) expect(text).not.toContain(real);
+        expect(out.result.winner).toBe('Dojo Alpha');
+        expect(out.result.repPlayerA).toBe('T1.2');
+        expect(out.result.repPlayerB).toBe('?');
+        expect(out.result.subResults[0]).toMatchObject({ sideA: 'T1.1', sideB: 'T2.1', winner: 'T1.1' });
+        // a team's own name as a bout winner stays, as the roster names it
+        expect(out.result.subResults[1]).toMatchObject({ sideA: 'T1.2', winner: 'Dojo Alpha' });
+    });
+
+    it('masks a team patch that carries a representative but no bout rows, and adds no rows', () => {
+        const out = maskPatchForBridge(patch({ id: 'Pool A-1', sideAId: 't1', repPlayerA: 'Sato Ryo' }), teamComp('hidden'));
+        expect(out.result.repPlayerA).toBe('T1.2');
+        expect('subResults' in out.result).toBe(false);
+    });
+
+    it('masks every entry of a results list', () => {
+        const out = maskPatchForBridge({ results: [{ id: 'M1', winner: 'Tanaka Kenji', winnerId: 'p1' }, null] }, individual('hidden'));
+        expect(out.results[0].winner).toBe('K1');
+        expect(out.results[1]).toBe(null);
+    });
+
+    it('passes a competition that shows its names, or a self-run tournament, through by reference', () => {
+        const p = patch({ id: 'M1', winner: 'Tanaka Kenji' });
+        expect(maskPatchForBridge(p, individual(''))).toBe(p);
+        expect(maskPatchForBridge(p, individual('hidden'), { mode: 'self-run' })).toBe(p);
+    });
+
+    it('does not change the patch it was handed', () => {
+        const p = patch({ id: 'M1', winner: 'Tanaka Kenji', winnerId: 'p1' });
+        maskPatchForBridge(p, individual('hidden'));
+        expect(p.result.winner).toBe('Tanaka Kenji');
+    });
+});
+
+describe('a patch published on the court channel', () => {
+    class Channel {
+        static last = null;
+        postMessage(data) { Channel.last = data; }
+        close() {}
+    }
+    const orig = global.BroadcastChannel;
+    afterEach(() => {
+        global.BroadcastChannel = orig;
+        Channel.last = null;
+        _resetModuleStateForTests();
+    });
+
+    function publishWith(comps, compId, payload) {
+        global.BroadcastChannel = Channel;
+        _resetModuleStateForTests();
+        const b = openBridge();
+        setSnapshotProvider(() => comps, () => ({ mode: 'officiated' }));
+        b.publish('patch', 'A', compId, payload);
+        return Channel.last;
+    }
+
+    it('leaves the tab masked for a competition that hides its names', () => {
+        const sent = publishWith([individual('competition')], 'c1', { result: { id: 'M1', winner: 'Tanaka Kenji' } });
+        expect(sent.payload.result.winner).toBe('K1');
+    });
+
+    it('is sent as it is by a competition that shows its names', () => {
+        const sent = publishWith([individual('')], 'c1', { result: { id: 'M1', winner: 'Tanaka Kenji' } });
+        expect(sent.payload.result.winner).toBe('Tanaka Kenji');
+    });
+
+    it('is not sent for a competition the tab cannot place', () => {
+        const sent = publishWith([individual('hidden')], 'other', { result: { id: 'M1', winner: 'Tanaka Kenji' } });
+        expect(sent).toBe(null);
+    });
+
+    it('is sent as it is by a tab holding no tournament', () => {
+        global.BroadcastChannel = Channel;
+        _resetModuleStateForTests();
+        openBridge().publish('patch', 'A', 'c1', { result: { id: 'M1', winner: 'Tanaka Kenji' } });
+        expect(Channel.last.payload.result.winner).toBe('Tanaka Kenji');
     });
 });

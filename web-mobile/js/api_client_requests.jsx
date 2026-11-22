@@ -629,7 +629,7 @@ export const LINEUP_NOT_REMOVED = 'The lineup was not removed';
 // editor gets the fighters' names, and a masked answer is refused there.
 export async function _readLineup(url) {
     const { res, body } = await _fetchJson(url, { headers: readHeaders() });
-    if (!res.ok) throw new Error(body.error || "Failed to load lineup");
+    if (!res.ok) throw readFailure(res.status, body.error || "Failed to load lineup");
     refuseMaskedForOrganiser(body);
     // An answer whose body could not be read comes back from _fetchJson as an empty
     // object, which cannot be told from one the server sent. A body with no keys is

@@ -11,7 +11,7 @@
 // called directly, never through `API`. Never import api_client.jsx from here
 // (it would run the outbox twice).
 
-import { _fetchJson, _readLineup, _refusalError } from './api_client_requests.jsx';
+import { _fetchJson, _readLineup, _refusalError, readHeaders } from './api_client_requests.jsx';
 import { _outboxWrite, _queuedLineupSave } from './api_client_enqueue.jsx';
 import {
     _withListedMembersForgotten, _memberWrite, _newClientId, _shownMember,
@@ -149,14 +149,16 @@ export const teamsApi = {
     // the position key to member id map (`{}` when nothing is filled); null on any
     // failure, a timeout or a non-OK answer, since a default is a convenience and
     // never a reason to show an error (the panel shows no default and asks again).
-    // Public, bounded like every read (_fetchJson), never queued.
+    // Bounded like every read (_fetchJson), never queued; it reads as the page
+    // does (readHeaders), since the server masks the names of a hidden-names
+    // competition for a caller with no credential.
     async fetchFieldedLineup(compID, teamId, matchId, form = {}) {
         try {
             const { res, body } = await _fetchJson(
                 `/api/competitions/${encodeURIComponent(compID)}/teams/${encodeURIComponent(teamId)}/fielded-lineup/${encodeURIComponent(matchId)}`,
                 {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...readHeaders() },
                     body: JSON.stringify({ positions: form.positions || {}, memberIds: form.memberIds || {} }),
                 });
             const places = body && body.fieldedMemberIds;
@@ -176,7 +178,7 @@ export const teamsApi = {
     async fetchKachinukiRoster(compID, matchID) {
         try {
             const { res, body } = await _fetchJson(
-                `/api/competitions/${encodeURIComponent(compID)}/matches/${encodeURIComponent(matchID)}/kachinuki-roster`, {});
+                `/api/competitions/${encodeURIComponent(compID)}/matches/${encodeURIComponent(matchID)}/kachinuki-roster`, { headers: readHeaders() });
             if (!res.ok || !body || !body.sideA || !body.sideB) return null;
             return body;
         } catch (_e) {

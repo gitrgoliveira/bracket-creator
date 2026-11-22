@@ -537,7 +537,7 @@ describe('AdminEditTournament server-error surfacing (bc-draw R9 gap 3)', () => 
   };
 
   it('shows the orphaned-shiaijo refusal in the form banner', async () => {
-    const msg = '"Mudansha" still runs on shiaijo D.';
+    const msg = '"Mudansha" uses shiaijo D.';
     const onSave = vi.fn().mockRejectedValue(new Error(msg));
     const { container } = await mountEditor(onSave);
 
@@ -548,7 +548,7 @@ describe('AdminEditTournament server-error surfacing (bc-draw R9 gap 3)', () => 
       expect(el).not.toBeNull();
       return el;
     });
-    expect(banner.textContent).toContain('"Mudansha" still runs on shiaijo D.');
+    expect(banner.textContent).toContain('"Mudansha" uses shiaijo D.');
   });
 
   it('surfaces ANY tournament-save rejection, not just the court rule', async () => {

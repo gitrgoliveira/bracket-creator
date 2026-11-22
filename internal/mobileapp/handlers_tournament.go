@@ -312,7 +312,7 @@ func competitionsBlockingCourtRemoval(comps []*state.Competition, stored, courts
 		if name == "" {
 			name = comp.ID
 		}
-		blockers = append(blockers, fmt.Sprintf("%q still runs on shiaijo %s", name, strings.Join(missing, ", ")))
+		blockers = append(blockers, fmt.Sprintf("%q uses shiaijo %s", name, strings.Join(missing, ", ")))
 	}
 	if len(blockers) == 0 {
 		return nil, nil

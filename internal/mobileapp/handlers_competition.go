@@ -1936,8 +1936,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// engi and joint 3rd places keep their own started guards below;
 				// the zekken name option and match durations stay editable. The
 				// shiaijo stay as drawn too (bc-rrsh r7): a bout changes court by
-				// a court move, never by this list.
-				if started && (drawShapeChanged || courtsChanged) {
+				// a court move, never by this list. A format or kind change is
+				// left to its own started guard below: changing either
+				// renormalises the pool pair and team size, so this one would
+				// fire too and name fields the caller never touched.
+				if started && (drawShapeChanged || courtsChanged) && !formatChanged && !kindChanged {
 					drawShapeStartedFlag = true
 					return nil, nil
 				}

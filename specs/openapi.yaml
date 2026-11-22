@@ -1906,8 +1906,9 @@ paths:
         `roundRobin`, `teamSize` and `withZekkenName`
         are additionally subject to the draw-ready
         output-affecting 409 (see below) while status is exactly
-        `draw-ready`, but are not blocked once the competition has moved
-        past it.
+        `draw-ready`. Once the competition has started, every one of them
+        except `withZekkenName` is refused with 409 (see below);
+        `withZekkenName` stays editable.
 
         `numberPrefix` is deliberately outside the output-affecting set: it
         only labels competitors, not what the draw generated, so changing it

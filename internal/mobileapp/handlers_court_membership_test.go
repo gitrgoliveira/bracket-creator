@@ -70,14 +70,14 @@ func TestPutTournamentRefusesToOrphanACompetitionsShiaijo(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
 	assert.Contains(t, w.Body.String(), "cannot set the tournament's shiaijo to A, B, C")
 	assert.Contains(t, w.Body.String(), "Mudansha")
-	assert.Contains(t, w.Body.String(), "still runs on shiaijo D")
+	assert.Contains(t, w.Body.String(), "uses shiaijo D")
 	// bc-rrsh r9: the refusal names the competition and nothing else, as a
 	// whole sentence the app shows without "Re-enter it." after it.
 	var refusal struct {
 		Message string `json:"message"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &refusal))
-	assert.Equal(t, `"Mudansha" still runs on shiaijo D.`, refusal.Message)
+	assert.Equal(t, `"Mudansha" uses shiaijo D.`, refusal.Message)
 
 	// Nothing changed on disk: the operator's venue keeps its 4 shiaijo, and
 	// the competition keeps the allocation it is running on.
@@ -194,7 +194,7 @@ func TestPutTournamentStillRefusesARemovalAlongsideAPreExistingOrphan(t *testing
 
 	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
 	body := w.Body.String()
-	assert.Contains(t, body, "still runs on shiaijo C")
+	assert.Contains(t, body, "uses shiaijo C")
 	assert.NotContains(t, body, "shiaijo C, D",
 		"D was already outside the venue, so it is not a reason for this refusal")
 }
@@ -238,7 +238,7 @@ func TestPostTournamentRefusesToOrphanACompetitionsShiaijo(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "still runs on shiaijo")
+	assert.Contains(t, w.Body.String(), "uses shiaijo")
 }
 
 // competitionsBlockingCourtRemoval is the pure half; table-drive it so the
@@ -299,7 +299,7 @@ func TestCompetitionsBlockingCourtRemovalNamesOnlyTheRemovedShiaijo(t *testing.T
 	)
 	require.NoError(t, infraErr)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "still runs on shiaijo C")
+	assert.Contains(t, err.Error(), "uses shiaijo C")
 	assert.NotContains(t, err.Error(), "Z",
 		"Z was never a venue shiaijo, so this request did not orphan it")
 }
@@ -409,7 +409,7 @@ func TestPutTournamentRefusesToOrphanAMatchMovedOffTheAllocation(t *testing.T) {
 
 	require.Equalf(t, http.StatusBadRequest, w.Code,
 		"removing E must be refused while a live bout sits on it: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "still runs on shiaijo E")
+	assert.Contains(t, w.Body.String(), "uses shiaijo E")
 }
 
 // A FINISHED bout on a removed shiaijo is history and must not wedge the venue

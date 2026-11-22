@@ -1079,6 +1079,24 @@ func TestUpdateCompetition_DrawShapeLockedWhenStarted(t *testing.T) {
 		})
 	}
 
+	// Changing format or kind also renormalises the pool pair and team size,
+	// so the refusal must be the format/kind one, not a list of fields the
+	// caller never touched.
+	for _, tc := range []struct {
+		name     string
+		override map[string]any
+	}{
+		{"format to league", map[string]any{"format": state.CompFormatLeague}},
+		{"kind to individual", map[string]any{"kind": "individual", "teamSize": 0}},
+	} {
+		t.Run("REJECT "+tc.name+" with the format and kind sentence", func(t *testing.T) {
+			saveMixed()
+			w := put(mixed, mixedPayload(tc.override))
+			assert.Equal(t, http.StatusConflict, w.Code, "%s", w.Body.String())
+			assert.Contains(t, w.Body.String(), "format and kind can only be changed before the competition starts")
+		})
+	}
+
 	t.Run("ALLOW a save that leaves the shape alone", func(t *testing.T) {
 		saveMixed()
 		w := put(mixed, mixedPayload(map[string]any{"name": "Shape Started Renamed", "withZekkenName": true}))

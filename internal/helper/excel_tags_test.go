@@ -306,3 +306,61 @@ func TestCreateTagsSheet_NumberNotCarryingPrefixStaysSingleLine(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "XYZ", got, "a number not carrying the sheet's prefix must never be split")
 }
+
+func TestRevealTagURL(t *testing.T) {
+	key := "ab12"
+	assert.Equal(t, "https://example.com/reveal/junior#ab12", revealTagURL("https://example.com", "junior", key))
+	// A path on the public URL is kept; its query and fragment are not.
+	assert.Equal(t, "https://host/base/reveal/junior#ab12", revealTagURL("https://host/base/?x=1#y", "junior", key))
+	for _, bad := range []string{"", "ftp://example.com", "https://u:p@example.com", "not a url"} {
+		assert.Emptyf(t, revealTagURL(bad, "junior", key), "public URL %q", bad)
+	}
+}
+
+func TestRevealTagQRPNG_EmptyInputsPrintNothing(t *testing.T) {
+	for _, in := range [][3]string{{"", "junior", "k"}, {"https://example.com", "", "k"}, {"https://example.com", "junior", ""}} {
+		png, err := revealTagQRPNG(in[0], in[1], in[2])
+		require.NoError(t, err)
+		assert.Nil(t, png)
+	}
+	_, err := revealTagQRPNG("ftp://example.com", "junior", "k")
+	require.Error(t, err)
+}
+
+// A competitor with a key gets a QR on both copies of the tag; one with no
+// key (or a sheet with no reveal) keeps the watchlist QR, and the key
+// function is asked only for competitors that have a participant id.
+func TestCreateTagsSheetWithReveal(t *testing.T) {
+	pools := []Pool{{PoolName: "Pool A", Players: []Player{
+		{ID: "p1", Name: "Alice", Number: "K1", Dojo: "D"},
+		{Name: "Bob", Number: "K2", Dojo: "D"},
+	}}}
+	var asked []string
+	reveal := &TagReveal{CompetitionID: "junior", KeyFor: func(id string) string {
+		asked = append(asked, id)
+		return "0123abcd"
+	}}
+	f := excelize.NewFile()
+	require.NoError(t, CreateTagsSheetWithReveal(f, pools, "https://example.com", "K", reveal))
+	assert.Equal(t, []string{"p1"}, asked)
+	for _, cell := range []string{"A1", "A2", "A3", "A4"} {
+		pics, err := f.GetPictures(SheetTags, cell)
+		require.NoError(t, err)
+		require.NotEmptyf(t, pics, "QR in %s", cell)
+	}
+	a1, err := f.GetPictures(SheetTags, "A1")
+	require.NoError(t, err)
+	a3, err := f.GetPictures(SheetTags, "A3")
+	require.NoError(t, err)
+	assert.NotEqual(t, a1[0].File, a3[0].File, "Alice's reveal QR differs from Bob's watchlist QR")
+}
+
+func TestCreateTagsSheetWithReveal_NoPublicURLPrintsNoQR(t *testing.T) {
+	pools := []Pool{{Players: []Player{{ID: "p1", Name: "Alice", Number: "K1", Dojo: "D"}}}}
+	reveal := &TagReveal{CompetitionID: "junior", KeyFor: func(string) string { return "0123abcd" }}
+	f := excelize.NewFile()
+	require.NoError(t, CreateTagsSheetWithReveal(f, pools, "", "K", reveal))
+	pics, err := f.GetPictures(SheetTags, "A1")
+	require.NoError(t, err)
+	assert.Empty(t, pics)
+}

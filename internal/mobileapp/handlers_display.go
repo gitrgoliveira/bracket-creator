@@ -35,7 +35,20 @@ import (
 // parameter -- so this file needs no engine reference of its own), the SAME
 // derivation the stored-draw export uses, so this surface's numbers
 // cannot silently disagree with either of those.
+//
+// This form judges its callers with a judge of its own over the file-mode
+// password (tests mount the display reads alone this way); NewRouterWithHub
+// calls registerDisplayHandlers with the router's shared judge.
 func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
+	registerDisplayHandlers(r, store, newPublicNames(store, nil))
+}
+
+// registerDisplayHandlers wires the court-scoped reads. Each judges its caller
+// first (names.judge; a password sent but wrong is 401) and answers for that
+// audience: a court board or overlay, which never sends the password, shows
+// the numbers of a competition that hides names (bc-hnam), and the court
+// console, which sends it, the real names.
+func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publicNames) {
 	// P2 (mp-9afd style): singleflight group for the court-scoped match feed,
 	// mirroring the sf in RegisterViewerHandlers for GET /competitions.
 	// Unlike the constant "competitions" key, the key here includes the
@@ -47,6 +60,10 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 		// Streaming clients poll this on a 1-2s cadence; resolveCourt pins the
 		// no-store + CORS headers so the polled-surface guarantee survives
 		// router refactors, normalises the: court param, and writes the 503/404.
+		aud, ok := names.judge(c)
+		if !ok {
+			return
+		}
 		court, ok := resolveCourt(c, store)
 		if !ok {
 			return
@@ -95,6 +112,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				// falls back to its own pools.csv read for a pooled competition.
 				players := currentMatchPlayers(store, comp, nil)
 				zek := comp.EffectiveWithZekkenName()
+				v := viewerMaskView(names, comp, aud)
 				// Pool daihyosen/tiebreaker rep bouts carry team names in
 				// sideA/sideB; the representative fighter for each side lives in
 				// RepPlayerA/B. Empty for every regular match (mp-62vr).
@@ -104,11 +122,12 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				// class: buildSideByID, never buildSideByIDOrName -- a name
 				// fallback here could silently resolve to the wrong same-name
 				// competitor across dojos.
-				c.JSON(http.StatusOK, currentMatchPayload(court, comp,
+				c.JSON(http.StatusOK, maskCurrentMatchPayload(v, currentMatchPayload(court, comp,
 					buildSideByID(m.SideA, m.SideAID, players, zek),
 					buildSideByID(m.SideB, m.SideBID, players, zek),
 					m.IpponsA, m.IpponsB, m.HansokuA, m.HansokuB,
-					phaseFromMatchID(m.ID), m.RepPlayerA, m.RepPlayerB))
+					phaseFromMatchID(m.ID),
+					v.memberByName(m.SideAID, m.RepPlayerA), v.memberByName(m.SideBID, m.RepPlayerB))))
 				return
 			}
 
@@ -133,15 +152,16 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 					// read bracket.json a second time.
 					players := currentMatchPlayers(store, comp, bracket)
 					zek := comp.EffectiveWithZekkenName()
+					v := viewerMaskView(names, comp, aud)
 					// bc-brid: BracketMatch carries a per-side id when its own
 					// row is stamped; buildSideByIDOrName prefers it and falls
 					// back to the pre-bc-brid name match for a bye, an
 					// unresolved feeder, or an unrepaired legacy row.
-					c.JSON(http.StatusOK, currentMatchPayload(court, comp,
+					c.JSON(http.StatusOK, maskCurrentMatchPayload(v, currentMatchPayload(court, comp,
 						buildSideByIDOrName(bm.SideA, bm.SideAID, players, zek),
 						buildSideByIDOrName(bm.SideB, bm.SideBID, players, zek),
 						bm.IpponsA, bm.IpponsB, bm.HansokuA, bm.HansokuB,
-						phaseFromMatchID(bm.ID), "", ""))
+						phaseFromMatchID(bm.ID), "", "")))
 					return
 				}
 			}
@@ -155,6 +175,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				// from it), so pass it through rather than a second read.
 				players := currentMatchPlayers(store, comp, bracket)
 				zek := comp.EffectiveWithZekkenName()
+				v := viewerMaskView(names, comp, aud)
 				ipponsA, hansokuA := bm.IpponsA, bm.HansokuA
 				ipponsB, hansokuB := bm.IpponsB, bm.HansokuB
 				// phaseFromMatchID(bm.ID) would return "m" for the bronze
@@ -166,11 +187,11 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				// ThirdPlaceMatch is a BracketMatch too, so the same
 				// id-preferring, name-falling-back resolution applies
 				// (buildSideByIDOrName, matching the round branch above).
-				c.JSON(http.StatusOK, currentMatchPayload(court, comp,
+				c.JSON(http.StatusOK, maskCurrentMatchPayload(v, currentMatchPayload(court, comp,
 					buildSideByIDOrName(bm.SideA, bm.SideAID, players, zek),
 					buildSideByIDOrName(bm.SideB, bm.SideBID, players, zek),
 					ipponsA, ipponsB, hansokuA, hansokuB,
-					"3rd Place Match", "", ""))
+					"3rd Place Match", "", "")))
 				return
 			}
 		}
@@ -199,16 +220,21 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 		// resolveCourt is a per-request concern (validates + normalizes the
 		// :court param against the current tournament) and must run outside
 		// sf.Do, only the expensive payload build is collapsed.
+		aud, ok := names.judge(c)
+		if !ok {
+			return
+		}
 		court, ok := resolveCourt(c, store)
 		if !ok {
 			return
 		}
 
-		// P2 (mp-9afd style): collapse concurrent builds for the SAME court to
-		// O(1) per in-flight window (court-scoped key: see the sf declaration
-		// comment). On panic inside the elected build, sf.Do returns an error
-		// and all waiters receive it; mapped to 500.
-		data, err := sf.Do("court-matches:"+court, func() ([]byte, error) {
+		// P2 (mp-9afd style): collapse concurrent builds for the SAME court
+		// and the same audience to O(1) per in-flight window (court-scoped
+		// key: see the sf declaration comment; the audience through
+		// viewerFlightKey). On panic inside the elected build, sf.Do returns
+		// an error and all waiters receive it; mapped to 500.
+		data, err := sf.Do(viewerFlightKey("court-matches:"+court, aud), func() ([]byte, error) {
 			// Propagate a failing competition list so serveSingleFlightJSON
 			// maps it to a 500 (matching GET /competitions): swallowing it
 			// here would serve an empty-but-200 board to every collapsed
@@ -220,7 +246,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 			// comps is non-nil even when empty, so zero competitions
 			// marshals as [] not null (the wire shape the SPA and the
 			// regression test pin).
-			comps, err := buildViewerCompetitionPayloads(store, court)
+			comps, err := buildViewerCompetitionPayloadsFor(store, court, names, aud)
 			if err != nil {
 				return nil, err
 			}
@@ -382,6 +408,33 @@ func currentMatchPayload(court string, comp *state.Competition, sideA, sideB gin
 		"repPlayerA": repA,
 		"repPlayerB": repB,
 	}
+}
+
+// maskCurrentMatchPayload masks, in place, the two sides of a court's
+// current-match payload built through v, and marks it namesHidden: each
+// side's name and zekken name read as the competitor's number (a team's name
+// stays, a revealed competitor's name stays), resolved by the side's
+// playerId, so a side the roster could not resolve reads "?". The
+// representative-bout fighters are masked by the caller (maskView.memberByName),
+// which knows each one's team. The zero view changes nothing.
+func maskCurrentMatchPayload(v maskView, payload gin.H) gin.H {
+	if !v.namesHidden() {
+		return payload
+	}
+	for _, key := range []string{"sideA", "sideB"} {
+		side, _ := payload[key].(gin.H)
+		if side == nil {
+			continue
+		}
+		name, _ := side["name"].(string)
+		id, _ := side["playerId"].(string)
+		if masked := v.side(name, id); masked != name {
+			side["name"] = masked
+			side["displayName"] = masked
+		}
+	}
+	stampNamesHidden(payload, v)
+	return payload
 }
 
 // emptyIfNil returns a non-nil slice so JSON encodes [] rather than null.

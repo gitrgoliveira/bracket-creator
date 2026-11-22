@@ -15,6 +15,14 @@ import (
 // endpoints on the given router group (mp-e5j). These routes are only functional
 // in self-run tournaments; they return 404 for officiated tournaments (defense-in-depth).
 //
+// Nothing here is judged for hidden names (bc-hnam, operator decision E5: sign-up
+// is unchanged: sign-up is self-run only, and the organiser always sees every
+// name). Only an officiated tournament may hide names: publicNamesRefusal
+// refuses the option in a self-run one and the switch to self-run shows names
+// again first, so a competition hiding names reaches these routes only through
+// a restore, whose plan warns the organiser to set it back
+// (public_names_self_run).
+//
 // Routes:
 //
 //	GET  /api/register/competitions/:id, competition metadata for the registration form

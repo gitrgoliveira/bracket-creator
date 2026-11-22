@@ -228,10 +228,30 @@ func validLineupRequest(c *gin.Context, req LineupRequest) bool {
 // So is POST .../fielded-lineup/:matchId, a read that carries the lineup
 // panel's form and answers a fieldedLineupRead, writing nothing.
 //
+// This form mounts the reads with no judge, every caller reading the names as
+// stored (tests mount the lineup reads alone this way); NewRouterWithHub calls
+// registerPublicLineupHandlers with the router's shared judge.
+//
 // Slice 7.B / T127.
 func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, eng LineupEngine) {
+	registerPublicLineupHandlers(r, store, comps, eng, nil)
+}
+
+// registerPublicLineupHandlers wires the public lineup reads. The three lineup
+// GETs and the kachinuki roster judge their caller first (publicReadView: a
+// password sent but wrong is 401, every answer no-store) and answer for that
+// audience, so in a competition that hides names (bc-hnam) the public reads
+// each team member's label ("T10.1") where the member's name is, and the holder
+// of a team's own link reads that team's names (E7). Team names and member ids
+// stay. The fielded-lineup read answers member ids alone, but it is judged too
+// (judgePublicRead), like every public read of a competition's data.
+func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, eng LineupEngine, names *publicNames) {
 	r.GET("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)
+		if !ok {
+			return
+		}
+		v, ok := publicReadView(c, names, compID)
 		if !ok {
 			return
 		}
@@ -247,7 +267,8 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !found {
 			lineup = domain.TeamLineup{TeamID: teamID, CompetitionID: compID, Round: round, Positions: map[domain.Position]string{}}
 		}
-		c.JSON(http.StatusOK, teamLineupRead{TeamLineup: lineup, Saved: found})
+		v.lineup(&lineup)
+		c.JSON(http.StatusOK, teamLineupRead{TeamLineup: lineup, Saved: found, namesHiddenMark: v.mark()})
 	})
 
 	// Match-scoped read (mp-825): exactly the lineup saved for this match,
@@ -255,6 +276,10 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 	// match is read from the lineup-in-force route below.
 	r.GET("/competitions/:id/teams/:tid/match-lineups/:matchId", func(c *gin.Context) {
 		compID, teamID, matchID, ok := parseMatchLineupParams(c)
+		if !ok {
+			return
+		}
+		v, ok := publicReadView(c, names, compID)
 		if !ok {
 			return
 		}
@@ -270,7 +295,8 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !found {
 			lineup = domain.TeamLineup{TeamID: teamID, CompetitionID: compID, MatchID: matchID, Positions: map[domain.Position]string{}}
 		}
-		c.JSON(http.StatusOK, teamLineupRead{TeamLineup: lineup, Saved: found})
+		v.lineup(&lineup)
+		c.JSON(http.StatusOK, teamLineupRead{TeamLineup: lineup, Saved: found, namesHiddenMark: v.mark()})
 	})
 
 	// The lineup in force (operator ruling 2026-10-05): the match's own lineup,
@@ -283,6 +309,10 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !ok {
 			return
 		}
+		v, ok := publicReadView(c, names, compID)
+		if !ok {
+			return
+		}
 		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
@@ -291,7 +321,10 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, newLineupInForceRead(compID, teamID, matchID, in))
+		read := newLineupInForceRead(compID, teamID, matchID, in)
+		v.lineup(&read.TeamLineup)
+		read.namesHiddenMark = v.mark()
+		c.JSON(http.StatusOK, read)
 	})
 
 	// Who the server fields in the empty places of a kachinuki lineup form
@@ -302,6 +335,9 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 	r.POST("/competitions/:id/teams/:tid/fielded-lineup/:matchId", MaxBodyBytes(FieldedLineupMaxBodyBytes), func(c *gin.Context) {
 		compID, teamID, matchID, ok := parseMatchLineupParams(c)
 		if !ok {
+			return
+		}
+		if !judgePublicRead(c, names) {
 			return
 		}
 		if !requireExistingCompetition(c, comps, compID) {
@@ -353,6 +389,10 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 			c.JSON(http.StatusBadRequest, gin.H{"error": "match ID is required"})
 			return
 		}
+		v, ok := publicReadView(c, names, compID)
+		if !ok {
+			return
+		}
 		// The engine reads config.md once and answers an unknown competition or
 		// match with a NotFoundError naming which, so the handler reads nothing
 		// of its own and answers with that error's own words.
@@ -366,9 +406,108 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		case err != nil:
 			internalError(c, err)
 		default:
-			c.JSON(http.StatusOK, roster)
+			c.JSON(http.StatusOK, kachinukiRosterRead{
+				KachinukiRoster: maskKachinukiRoster(v, names, compID, matchID, roster),
+				namesHiddenMark: v.mark(),
+			})
 		}
 	})
+}
+
+// judgePublicRead judges a public read whose answer carries no competitor's
+// name (names.judge: a password sent but wrong is 401, the answer is
+// no-store), so it answers every audience alike. false when the answer has
+// been written. With no judge (names nil: a test mounting the reads alone)
+// every caller is answered.
+func judgePublicRead(c *gin.Context, names *publicNames) bool {
+	if names == nil {
+		return true
+	}
+	_, ok := names.judge(c)
+	return ok
+}
+
+// publicReadView judges a public read's caller and gives the mask view of
+// competition compID for them (bc-hnam): names.judge first (a password sent
+// but wrong is 401, the answer is no-store), then the competition's view, the
+// zero view when it shows names or the caller sees them all. ok is false when
+// the answer has been written: the judge's refusal, or a 500 when the
+// competition could not be read, since the read then cannot tell whether its
+// names are hidden. A competition that does not exist gives the zero view, and
+// the read answers its own 404. With no judge (names nil: a test mounting the
+// reads alone) every caller reads the names as stored.
+func publicReadView(c *gin.Context, names *publicNames, compID string) (maskView, bool) {
+	if names == nil {
+		return maskView{}, true
+	}
+	aud, ok := names.judge(c)
+	if !ok {
+		return maskView{}, false
+	}
+	comp, err := names.store.LoadCompetition(compID)
+	if err != nil {
+		internalError(c, err)
+		return maskView{}, false
+	}
+	if comp == nil {
+		return maskView{}, true
+	}
+	return viewerMaskView(names, comp, aud), true
+}
+
+// kachinukiRosterRead is the kachinuki roster read's answer: the engine's
+// roster, its fighters as the caller may read them, and the namesHidden marker
+// on a masked one, so the team editor never takes a label for a fighter's name.
+type kachinukiRosterRead struct {
+	engine.KachinukiRoster
+	namesHiddenMark
+}
+
+// maskKachinukiRoster is the roster as v reads it: each fighter's name as their
+// member label (a revealed team's names stay), found by member id, or by name
+// among the side's own team members for a fighter with no id. The sides' team
+// ids are the stored match's; a match that cannot be read leaves them unknown,
+// so an id-less fighter then reads "?". The zero view changes nothing.
+func maskKachinukiRoster(v maskView, names *publicNames, compID, matchID string, roster engine.KachinukiRoster) engine.KachinukiRoster {
+	if !v.namesHidden() {
+		return roster
+	}
+	var teamA, teamB string
+	snap, found, err := lookupMatchSnapshot(names.store, compID, matchID)
+	if err != nil {
+		log.Printf("mobileapp: kachinuki roster %s/%s: name mask: %v", compID, matchID, err)
+	}
+	if found && snap.Stored != nil {
+		teamA, teamB = snap.Stored.SideAID, snap.Stored.SideBID
+	}
+	roster.SideA = maskKachinukiSide(v, teamA, roster.SideA)
+	roster.SideB = maskKachinukiSide(v, teamB, roster.SideB)
+	return roster
+}
+
+// maskKachinukiSide is one side's queue as v reads it, a copy: the fighter on
+// and every fighter remaining.
+func maskKachinukiSide(v maskView, teamID string, side engine.KachinukiRosterSide) engine.KachinukiRosterSide {
+	fighter := func(f engine.KachinukiRosterFighter) engine.KachinukiRosterFighter {
+		if f.MemberID != "" {
+			f.Name = v.member(teamID, f.MemberID, f.Name, "")
+		} else {
+			f.Name = v.memberByName(teamID, f.Name)
+		}
+		return f
+	}
+	if side.On != nil {
+		on := fighter(*side.On)
+		side.On = &on
+	}
+	if side.Remaining != nil {
+		remaining := make([]engine.KachinukiRosterFighter, len(side.Remaining))
+		for i, f := range side.Remaining {
+			remaining[i] = fighter(f)
+		}
+		side.Remaining = remaining
+	}
+	return side
 }
 
 // FieldedLineupMaxBodyBytes caps the body of the public fielded-lineup read: a
@@ -398,11 +537,15 @@ type fieldedLineupRead struct {
 // `sourceRound` when it is a Lineups-page lineup (round 0 is the starting
 // lineup; a pointer, because 0 is a value to send). Neither is present when
 // nothing is saved.
+//
+// A read masked for the public (bc-hnam) carries `namesHidden: true`, its
+// positions holding member labels.
 type lineupInForceRead struct {
 	domain.TeamLineup
 	Saved         bool   `json:"saved"`
 	SourceMatchID string `json:"sourceMatchId,omitempty"`
 	SourceRound   *int   `json:"sourceRound,omitempty"`
+	namesHiddenMark
 }
 
 // newLineupInForceRead shapes the engine's answer. A team with nothing in
@@ -440,9 +583,13 @@ func newLineupInForceRead(compID, teamID, matchID string, in engine.InForceLineu
 // handler tests decode the RAW response body (map[string]any) rather than
 // through this struct specifically so that a future MarshalJSON silently
 // dropping `saved` would fail them rather than pass unnoticed.
+//
+// A read masked for the public (bc-hnam) also carries `namesHidden: true`, its
+// positions holding member labels; an unmasked one leaves it out.
 type teamLineupRead struct {
 	domain.TeamLineup
 	Saved bool `json:"saved"`
+	namesHiddenMark
 }
 
 // findMatchLineup scans the loaded lineup map for the match-scoped entry

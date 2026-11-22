@@ -87,7 +87,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Tournament-Password, X-Confirm-Password")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Tournament-Password, X-Confirm-Password, "+revealKeyHeader)
 		// Every answer names the build that gave it (bc-evts F2).
 		c.Writer.Header().Set(BuildHeader, AppBuild())
 		c.Writer.Header().Set("Access-Control-Expose-Headers", BuildHeader)
@@ -138,14 +138,24 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		}
 	})
 
-	// SSE Events endpoint
+	// The audience judge and the name masks (bc-hnam), one instance shared
+	// by every public read and the event stream, so a competition's mask is
+	// built once for all of them. It checks the password with the verifier
+	// the server was started with (in locked mode behind a digest cache).
+	names := newPublicNames(store, verifier)
+	hub.attachPublicNames(names)
+
+	// SSE Events endpoint. Each stream is answered for the audience of the
+	// single-use ticket it is opened with (POST /api/events/ticket, which
+	// judges the caller's headers), or for the public without one.
 	r.GET("/api/events", hub.HandleEvents())
+	r.POST("/api/events/ticket", hub.HandleEventTicket())
 
 	// Public viewer endpoints
 	viewer := r.Group("/api/viewer")
 	{
-		RegisterViewerHandlers(viewer, store, eng)
-		RegisterDisplayHandlers(viewer, store)
+		registerViewerHandlers(viewer, store, eng, names)
+		registerDisplayHandlers(viewer, store, names)
 	}
 
 	// Stateless schedule estimator, no auth, no state-store access.
@@ -169,15 +179,16 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// .../match-lineups/:matchId and .../lineup-in-force/:matchId, lineup
 	// assignments are visible to coaches and spectators; AdminLineup loads
 	// them before the operator has entered the admin password.
-	RegisterPublicEligibilityHandlers(api, store)
-	RegisterPublicLineupHandlers(api, store, store, eng)
-	RegisterPublicSwissHandlers(api, store, eng)
-	RegisterPublicLeagueHandlers(api, eng)
+	// The reads that name competitors take the audience judge (bc-hnam).
+	registerPublicEligibilityHandlers(api, store, names)
+	registerPublicLineupHandlers(api, store, store, eng, names)
+	registerPublicSwissHandlers(api, store, eng, names)
+	registerPublicLeagueHandlers(api, eng, names)
 	RegisterPublicAnnouncementHandlers(api, store)
 	RegisterPublicRegistrationHandlers(api, store, hub)
 	RegisterPublicSponsorHandlers(api, store)
 	RegisterPublicBrandingHandlers(api, store)
-	RegisterPublicLeagueTiebreakHandlers(api, eng, store)
+	registerPublicLeagueTiebreakHandlers(api, eng, store, names)
 
 	// Public password-reset + auth-config endpoints. Both must live
 	// outside the admin group; /reset is the recovery path for a

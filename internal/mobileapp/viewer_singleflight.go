@@ -16,6 +16,17 @@ import (
 // The handler maps it to HTTP 404; all other non-nil errors become 500.
 var errNotFound = errors.New("not found")
 
+// viewerFlightKey is a single-flight key for one audience's answer: the
+// build's own key (what it reads) plus the audience's whole key
+// (audience.key: the organiser, the public, or the reveal scopes held, sorted),
+// so two callers share a build only when they are answered the same bytes. A
+// masked payload can never reach the organiser, nor a revealed name a
+// caller whose links do not reveal it. The audience is judged (and any
+// invalid, expired or wrong-kind key dropped) before the key is formed.
+func viewerFlightKey(base string, aud audience) string {
+	return base + "#" + aud.key()
+}
+
 // viewerSingleFlight collapses concurrent identical builds of the expensive
 // polled viewer endpoints (GET /api/viewer/competitions, its /:id variant, and
 // the court feed GET /api/viewer/court/:court/matches) to a single in-flight

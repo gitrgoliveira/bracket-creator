@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -71,4 +73,59 @@ func TestLeagueStandings_Missing404(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, leagueStandingsReq("does-not-exist"))
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// A league that hides names (bc-hnam) answers its public standings with each
+// competitor's number where the name was, never cached; the organiser reads
+// the names, and a stale password is 401.
+func TestLeagueStandings_HideNamesFromThePublic(t *testing.T) {
+	store := newTempStore(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Cup", Date: "01-06-2030", Password: "secret-pw", Courts: []string{"A"},
+		Mode: state.TournamentModeOfficiated,
+	}))
+	eng := engine.New(store)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "league-comp", Name: "League", Kind: "individual",
+		Format: state.CompFormatLeague, PoolFormat: "full", PoolSize: 3,
+		Courts: []string{"A"}, StartTime: "09:00", PoolMatchDurationSeconds: 180,
+		Status: state.CompStatusSetup, NumberPrefix: "L", PublicNames: state.PublicNamesHidden,
+	}))
+	players := make([]domain.Player, 3)
+	for i := range players {
+		players[i] = domain.Player{ID: helper.NewUUID4(), Name: fmt.Sprintf("Hidden Person%d", i+1), Dojo: fmt.Sprintf("D%d", i+1)}
+	}
+	require.NoError(t, store.SaveParticipants("league-comp", players))
+	require.NoError(t, eng.StartCompetition("league-comp"))
+
+	r := gin.New()
+	registerPublicLeagueHandlers(r.Group("/api"), eng, newPublicNames(store, NewFileVerifier(store)))
+	get := func(password string) *httptest.ResponseRecorder {
+		req := leagueStandingsReq("league-comp")
+		if password != "" {
+			req.Header.Set("X-Tournament-Password", password)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	w := get("")
+	require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	assert.NotContains(t, w.Body.String(), "Hidden Person")
+	var standings []state.PlayerStanding
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &standings))
+	require.Len(t, standings, 3)
+	for _, s := range standings {
+		assert.NotEmpty(t, s.Player.ID, "ids stay")
+		assert.Regexp(t, `^L\d+$`, s.Player.Name, "the number stands where the name was")
+		assert.Equal(t, s.Player.Name, s.Player.DisplayName)
+	}
+
+	w = get("secret-pw")
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "Hidden Person1")
+
+	assert.Equal(t, http.StatusUnauthorized, get("stale").Code)
 }

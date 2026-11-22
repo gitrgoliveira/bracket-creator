@@ -207,13 +207,33 @@ func inGroup(ids map[string]bool, m state.MatchResult) (inA, inB bool) {
 // No Broadcaster is needed, this is a pure read.
 // Callers pass *engine.Engine and *state.Store which satisfy the local
 // interfaces by structural match.
+//
+// This form mounts the read with no judge (tests mount it alone this way);
+// NewRouterWithHub calls registerPublicLeagueTiebreakHandlers with the router's
+// shared judge.
 func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine, store LeagueTiebreakStore) {
+	registerPublicLeagueTiebreakHandlers(r, eng, store, nil)
+}
+
+// registerPublicLeagueTiebreakHandlers wires the candidates read. It judges its
+// caller first (publicReadView: a password sent but wrong is 401, the answer is
+// no-store) and masks the candidates for that audience (bc-hnam), marking a
+// masked answer `namesHidden: true`. Only a team league has candidates
+// (engine.LeagueTiebreakCandidates answers none for any other competition), and
+// a team keeps its name, id and dojo when names are hidden, so the mask changes
+// no candidate today; it is applied so a candidate that is ever a person reads
+// as their number.
+func registerPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine, store LeagueTiebreakStore, names *publicNames) {
 	// GET /competitions/:id/league-tiebreak/candidates
 	// Returns the consequential tied groups for this team-league competition.
 	// 200 [] when no ties (or competition is not a team league).
 	// 404 when the competition does not exist.
 	r.GET("/competitions/:id/league-tiebreak/candidates", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		v, ok := publicReadView(c, names, id)
 		if !ok {
 			return
 		}
@@ -244,9 +264,19 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"candidates": leagueTiebreakGroupsJSON(candidates),
-		})
+		if v.namesHidden() {
+			// Copies: the engine's groups are left as they were.
+			masked := make([]engine.TiedGroup, len(candidates))
+			for i, g := range candidates {
+				g.Teams = append([]state.PlayerStanding(nil), g.Teams...)
+				v.standings(g.Teams)
+				masked[i] = g
+			}
+			candidates = masked
+		}
+		answer := gin.H{"candidates": leagueTiebreakGroupsJSON(candidates)}
+		stampNamesHidden(answer, v)
+		c.JSON(http.StatusOK, answer)
 	})
 }
 

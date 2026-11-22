@@ -62,11 +62,29 @@ func (r *CompetitorStatusRequest) toDomain() domain.CompetitorStatus {
 // admin credentials. The write path (POST) stays on the admin group via
 // RegisterEligibilityHandlers.
 //
+// This form mounts the read with no judge (tests mount it alone this way);
+// NewRouterWithHub calls registerPublicEligibilityHandlers with the router's
+// shared judge.
+//
 // T091, FR-034.
 func RegisterPublicEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore) {
+	registerPublicEligibilityHandlers(r, store, nil)
+}
+
+// registerPublicEligibilityHandlers wires the competitor-status read. It judges
+// its caller like every public read of a competition's data (judgePublicRead: a
+// password sent but wrong is 401, the answer is no-store), but answers every
+// audience alike, since nothing in it is masked when a competition hides names
+// (bc-hnam): a status names its competitor and its match by id alone, and the
+// reasons the app writes are a decision and a match id. A reason the organiser
+// types is free text, shown as typed like every free text (E6).
+func registerPublicEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore, names *publicNames) {
 	r.GET("/competitions/:id/competitor-status", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
+			return
+		}
+		if !judgePublicRead(c, names) {
 			return
 		}
 		statuses, err := store.LoadCompetitorStatus(id)

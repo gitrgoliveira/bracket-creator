@@ -2,7 +2,9 @@ package helper
 
 import (
 	"fmt"
+	"net/url"
 
+	qrcode "github.com/skip2/go-qrcode"
 	excelize "github.com/xuri/excelize/v2"
 )
 
@@ -17,6 +19,30 @@ import (
 // representative player's Number is wrong whenever the prefix itself carries
 // a digit.
 func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string, numberPrefix string) error {
+	return CreateTagsSheetWithReveal(f, pools, publicURL, numberPrefix, nil)
+}
+
+// TagReveal gives a competitor's tag the competition's per-person reveal
+// link in place of the watchlist link. It is for a competition whose public
+// pages show numbers and whose option has per-person links
+// (state.PublicNamesPerson); every other competition passes nil, so no
+// secret is ever printed for it.
+type TagReveal struct {
+	// CompetitionID is the competition the link opens (the /reveal/ path).
+	CompetitionID string
+	// KeyFor is the competitor's own reveal key by participant id, or ""
+	// for a competitor that has none.
+	KeyFor func(participantID string) string
+}
+
+// CreateTagsSheetWithReveal is CreateTagsSheet with the tag QR of a
+// competitor who has a reveal key opening their own reveal link
+// (<publicURL>/reveal/<competition>#<key>) instead of the watchlist link,
+// so scanning the printed tag shows that one competitor's name. A nil reveal
+// or a competitor with no key keeps the watchlist link, which carries a
+// number only. The key travels in the fragment, so it never reaches a server
+// log.
+func CreateTagsSheetWithReveal(f *excelize.File, pools []Pool, publicURL string, numberPrefix string, reveal *TagReveal) error {
 	sheetName := SheetTags
 	index, err := f.NewSheet(sheetName)
 	if err != nil {
@@ -92,8 +118,17 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string, numberPre
 
 			// Generate QR once per player; reuse PNG for both tag copies.
 			// playerTagQRPNG returns nil,nil for empty inputs, so no guard needed.
+			// A competitor with a reveal key gets their own reveal link
+			// (a longer URL, so a denser code printed at the same size:
+			// medium error correction and a larger source image).
 			var qrPNG []byte
-			qrPNG, err = playerTagQRPNG(publicURL, player.Number)
+			qrScale := 0.6
+			if key := reveal.keyFor(player.ID); key != "" && publicURL != "" && player.Number != "" {
+				qrPNG, err = revealTagQRPNG(publicURL, reveal.CompetitionID, key)
+				qrScale = revealQRScale
+			} else {
+				qrPNG, err = playerTagQRPNG(publicURL, player.Number)
+			}
 			if err != nil {
 				return fmt.Errorf("QR for %s: %w", player.Number, err)
 			}
@@ -129,8 +164,8 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string, numberPre
 							PrintObject: &printObj,
 							OffsetX:     8,
 							OffsetY:     415,
-							ScaleX:      0.6,
-							ScaleY:      0.6,
+							ScaleX:      qrScale,
+							ScaleY:      qrScale,
 							Positioning: "oneCell",
 						},
 					}); err != nil {
@@ -164,6 +199,57 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string, numberPre
 
 	f.SetActiveSheet(index)
 	return nil
+}
+
+// keyFor is the competitor's reveal key; a nil reveal, an unset KeyFor or a
+// competitor with no participant id has none.
+func (r *TagReveal) keyFor(participantID string) string {
+	if r == nil || r.KeyFor == nil || participantID == "" {
+		return ""
+	}
+	return r.KeyFor(participantID)
+}
+
+// revealQRPx is the source size of a reveal link's QR image. Its link is
+// longer than the watchlist link, so the code has more modules; a larger
+// image scaled down by revealQRScale prints at the same 120 px (about 3.2
+// cm) as the watchlist code, keeping the modules whole pixels.
+const (
+	revealQRPx    = 400
+	revealQRScale = 0.3
+)
+
+// revealTagURL builds the link a competitor's tag QR opens:
+// <publicURL>/reveal/<competition>#<key>, composed through playerTagURL so
+// the public URL is judged by the same rule (http or https, a host, no
+// credentials, any path kept). "" when the public URL is not usable.
+func revealTagURL(publicURL, competitionID, key string) string {
+	base, err := url.Parse(playerTagURL(publicURL, "x"))
+	if err != nil || base.Host == "" {
+		return ""
+	}
+	base.Path += "reveal/" + competitionID
+	base.RawPath = ""
+	base.RawQuery = ""
+	base.Fragment = key
+	return base.String()
+}
+
+// revealTagQRPNG is the PNG QR code of a competitor's reveal link; nil, nil
+// when any input is empty, an error when the public URL is not usable.
+func revealTagQRPNG(publicURL, competitionID, key string) ([]byte, error) {
+	if publicURL == "" || competitionID == "" || key == "" {
+		return nil, nil
+	}
+	link := revealTagURL(publicURL, competitionID, key)
+	if link == "" {
+		return nil, fmt.Errorf("cannot build QR URL from %q", publicURL)
+	}
+	png, err := qrcode.Encode(link, qrcode.Medium, revealQRPx)
+	if err != nil {
+		return nil, fmt.Errorf("qr encode reveal link: %w", err)
+	}
+	return png, nil
 }
 
 // tagNumberStyle builds the Tags sheet's number-cell style: stacked (a

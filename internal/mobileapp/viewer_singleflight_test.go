@@ -240,3 +240,21 @@ func TestViewerSingleFlight_PanicRecoveredToError(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []byte("recovered"), data, "key should be usable after panic")
 }
+
+// TestViewerFlightKeySeparatesAudiences (bc-hnam): two callers share a viewer
+// build only when they are answered the same bytes, so the organiser, the
+// public and each reveal scope get keys of their own.
+func TestViewerFlightKeySeparatesAudiences(t *testing.T) {
+	public := viewerFlightKey("competitions", audience{})
+	organiser := viewerFlightKey("competitions", organiserAudience())
+	link := viewerFlightKey("competitions", audience{competitions: map[string]bool{"k": true}})
+	person := viewerFlightKey("competitions", audience{competitors: map[string]map[string]bool{"k": {"p1": true}}})
+	other := viewerFlightKey("competitions", audience{competitors: map[string]map[string]bool{"k": {"p2": true}}})
+	keys := map[string]bool{public: true, organiser: true, link: true, person: true, other: true}
+	if len(keys) != 5 {
+		t.Fatalf("audiences share a key: %q %q %q %q %q", public, organiser, link, person, other)
+	}
+	if viewerFlightKey("competitions", audience{}) != public {
+		t.Fatal("one audience must keep one key")
+	}
+}

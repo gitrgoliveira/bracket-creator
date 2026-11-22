@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +18,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // decodeHubEvent unmarshals a subscriber-channel entry's payload into an
@@ -827,4 +833,380 @@ func waitForFrame(t *testing.T, w *mockResponseWriter, want string) {
 	require.Eventually(t, func() bool {
 		return strings.Contains(w.BodyString(), want)
 	}, 2*time.Second, 5*time.Millisecond, "expected SSE frame %q not observed", want)
+}
+
+// --- Per-subscriber streams (bc-hnam) ----------------------------------------
+
+// TestSSEEventCatalogue_ClassifiesEveryEventType holds the catalogue to every
+// EventType constant declared in the package: a new event type must be
+// classified (masked, passes or organiser-only) before it can reach a stream
+// as broadcast.
+func TestSSEEventCatalogue_ClassifiesEveryEventType(t *testing.T) {
+	fset := token.NewFileSet()
+	dir, err := os.ReadDir(".")
+	require.NoError(t, err)
+	declared := map[EventType]bool{}
+	for _, de := range dir {
+		if de.IsDir() || !strings.HasSuffix(de.Name(), ".go") || strings.HasSuffix(de.Name(), "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, de.Name(), nil, 0)
+		require.NoError(t, err)
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs := spec.(*ast.ValueSpec)
+				if id, ok := vs.Type.(*ast.Ident); !ok || id.Name != "EventType" {
+					continue
+				}
+				for _, v := range vs.Values {
+					lit, ok := v.(*ast.BasicLit)
+					require.True(t, ok, "an EventType constant is a string literal")
+					declared[EventType(strings.Trim(lit.Value, `"`))] = true
+				}
+			}
+		}
+	}
+	require.Len(t, declared, 15, "the package declares 15 event types")
+	for et := range declared {
+		spec, ok := sseEventCatalogue[et]
+		if assert.True(t, ok, "event type %q is not classified in sseEventCatalogue", et) {
+			assert.NotZero(t, spec.class, et)
+			if spec.class == sseEventMasked {
+				assert.NotNil(t, spec.mask, "masked event %q has a mask", et)
+			}
+		}
+	}
+	assert.Len(t, sseEventCatalogue, len(declared), "the catalogue names only declared event types")
+}
+
+// hubWithNames is a hub with the fixture's judge and masks attached.
+func hubWithNames(f pnFixture) *Hub {
+	h := NewHub()
+	h.attachPublicNames(f.pn)
+	return h
+}
+
+// lastEntry is the newest event in the hub's history.
+func lastEntry(t *testing.T, h *Hub) *historyEntry {
+	t.Helper()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	seq := h.seq.Load()
+	require.Positive(t, seq)
+	return &h.history[(seq-1)%int64(h.HistorySize)]
+}
+
+func juniorsResult() *state.MatchResult {
+	return &state.MatchResult{
+		ID: "Pool A-0", SideA: "Alice Arai", SideAID: pnAlice, SideB: "Bob Baba", SideBID: pnBob,
+		Winner: "Alice Arai", WinnerID: pnAlice, Status: state.MatchStatusCompleted,
+	}
+}
+
+func broadcastJuniorsResult(h *Hub) {
+	h.Broadcast(EventMatchUpdated, gin.H{"competitionId": "juniors", "matchId": "Pool A-0", "result": matchPtrForBroadcast(juniorsResult())})
+}
+
+// warmMask builds the fixture's mask twice: the first build may run the
+// store's load-time repair, which rewrites the files it was built from.
+func warmMask(t *testing.T, f pnFixture) {
+	t.Helper()
+	for range 2 {
+		_, err := f.pn.view(f.comp, audience{})
+		require.NoError(t, err)
+	}
+}
+
+func TestHubProject_MasksMatchUpdatedForThePublic(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+	assert.Equal(t, "juniors", e.compID, "a masked event keeps the competition it names")
+	assert.Equal(t, EventMatchUpdated, e.typ)
+
+	public := h.project(e, &sseSubscriber{})
+	assert.NotContains(t, public, "Alice Arai")
+	assert.NotContains(t, public, "Bob Baba")
+	assert.Contains(t, public, `"sideA":"K1"`)
+	assert.Contains(t, public, `"sideB":"K2"`)
+	assert.Contains(t, public, `"namesHidden":true`)
+	assert.Contains(t, public, `"seq":`+fmt.Sprint(e.seq))
+	var env SSEEvent
+	require.NoError(t, json.Unmarshal([]byte(public), &env), "a masked copy is a well-formed envelope")
+	assert.Equal(t, EventMatchUpdated, env.Type)
+
+	require.NotNil(t, e.masked)
+	assert.True(t, e.masked.done, "the public copy is built once and shared")
+	assert.Equal(t, public, h.project(e, &sseSubscriber{}))
+
+	org := h.project(e, &sseSubscriber{aud: organiserAudience()})
+	assert.Equal(t, e.payload, org, "the organiser is sent the event as broadcast")
+	assert.Contains(t, org, "Alice Arai")
+
+	// The option is judged when the event is sent: shown again, the same
+	// stored event goes to the public as broadcast.
+	f.comp.PublicNames = state.PublicNamesShown
+	require.NoError(t, f.store.SaveCompetition(f.comp))
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}))
+}
+
+func TestHubProject_FailsClosed(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	h := hubWithNames(f)
+
+	// A masked event that names no competition.
+	h.Broadcast(EventMatchUpdated, gin.H{"result": matchPtrForBroadcast(juniorsResult())})
+	e := lastEntry(t, h)
+	out := h.project(e, &sseSubscriber{})
+	assert.NotContains(t, out, "Alice Arai")
+	assert.Contains(t, out, `"data":null`)
+	assert.Contains(t, out, `"type":"match_updated"`, "its type and seq still arrive, so no gap is seen")
+
+	// A competition that does not exist.
+	h.Broadcast(EventMatchUpdated, gin.H{"competitionId": "ghost", "result": matchPtrForBroadcast(juniorsResult())})
+	assert.Contains(t, h.project(lastEntry(t, h), &sseSubscriber{}), `"data":null`)
+
+	// An event type nobody classified.
+	h.Broadcast(EventType("brand_new_event"), gin.H{"competitionId": "juniors", "name": "Alice Arai"})
+	e = lastEntry(t, h)
+	assert.Contains(t, h.project(e, &sseSubscriber{}), `"data":null`)
+	assert.Contains(t, h.project(e, &sseSubscriber{aud: organiserAudience()}), "Alice Arai")
+
+	// An event that passes is sent as broadcast.
+	h.Broadcast(EventAnnouncement, []string{"Court A next"})
+	e = lastEntry(t, h)
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}))
+
+	// A bare hub (no judge attached) sends everything as broadcast.
+	bare := NewHub()
+	broadcastJuniorsResult(bare)
+	be := lastEntry(t, bare)
+	assert.Equal(t, be.payload, bare.project(be, &sseSubscriber{}))
+}
+
+func TestHubProject_RevealJudgedOnEveryEvent(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesCompetition)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+
+	link := &sseSubscriber{aud: audience{competitions: map[string]bool{"juniors": true}}}
+	assert.Equal(t, e.payload, h.project(e, link), "the competition link's stream sees the names")
+
+	// Past the links' expiry (an hour after the tournament's last day) the
+	// same stream sees numbers.
+	f.pn.now = func() time.Time { return f.now.Add(72 * time.Hour) }
+	assert.NotContains(t, h.project(e, link), "Alice Arai")
+	f.pn.now = func() time.Time { return f.now }
+
+	// Moved to per-person links: a competition link reveals nothing.
+	f.comp.PublicNames = state.PublicNamesPerson
+	require.NoError(t, f.store.SaveCompetition(f.comp))
+	assert.NotContains(t, h.project(e, link), "Alice Arai")
+
+	// A competitor's own link reveals that competitor alone.
+	own := &sseSubscriber{aud: audience{competitors: map[string]map[string]bool{"juniors": {pnAlice: true}}}}
+	out := h.project(e, own)
+	assert.Contains(t, out, "Alice Arai")
+	assert.NotContains(t, out, "Bob Baba")
+	assert.Contains(t, out, `"namesHidden":true`)
+	assert.NotContains(t, h.project(e, &sseSubscriber{}), "Alice Arai", "the shared public copy is not the overlay")
+}
+
+// ticketRouter mounts the stream and its ticket on a router whose hub has
+// the fixture's judge.
+func ticketRouter(f pnFixture) (*gin.Engine, *Hub) {
+	gin.SetMode(gin.TestMode)
+	h := hubWithNames(f)
+	r := gin.New()
+	r.GET("/api/events", h.HandleEvents())
+	r.POST("/api/events/ticket", h.HandleEventTicket())
+	return r, h
+}
+
+func askTicket(t *testing.T, r *gin.Engine, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/events/ticket", nil)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestEventTicket_JudgedOnceAndSpent(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	r, h := ticketRouter(f)
+
+	w := askTicket(t, r, map[string]string{"X-Tournament-Password": "wrong"})
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "a password sent but wrong gets no ticket")
+
+	w = askTicket(t, r, map[string]string{"X-Tournament-Password": "secret-pw"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	var body struct {
+		Ticket    string `json:"ticket"`
+		ExpiresAt int64  `json:"expiresAt"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Len(t, body.Ticket, 2*eventTicketBytes)
+	assert.Positive(t, body.ExpiresAt)
+
+	sub, ok := h.redeemTicket(body.Ticket)
+	require.True(t, ok)
+	assert.True(t, sub.aud.isOrganiser(), "the ticket carries the audience it was judged for")
+	_, ok = h.redeemTicket(body.Ticket)
+	assert.False(t, ok, "a ticket is used once")
+	_, ok = h.redeemTicket("not-a-ticket")
+	assert.False(t, ok)
+
+	// Expired before it is used.
+	now := time.Now()
+	h.tickets.now = func() time.Time { return now }
+	tk, _, err := h.issueTicket(sseSubscriber{})
+	require.NoError(t, err)
+	h.tickets.now = func() time.Time { return now.Add(eventTicketTTL) }
+	_, ok = h.redeemTicket(tk)
+	assert.False(t, ok, "a ticket past its time is refused")
+
+	// A reveal header is kept for the stream to be judged again.
+	key := "juniors:" + state.CompetitionRevealKey(f.comp)
+	w = askTicket(t, r, map[string]string{revealKeyHeader: key})
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	sub, ok = h.redeemTicket(body.Ticket)
+	require.True(t, ok)
+	assert.Equal(t, key, sub.reveal)
+	assert.Equal(t, audiencePublic, sub.aud.key(), "a hidden competition's key reveals nothing")
+}
+
+func TestEventTicket_BoundedAndBareHub(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	h := hubWithNames(f)
+	now := time.Now()
+	h.tickets.now = func() time.Time { return now }
+	h.tickets.m = map[string]eventTicket{}
+	for i := range maxEventTickets {
+		h.tickets.m[fmt.Sprint(i)] = eventTicket{expires: now.Add(time.Second)}
+	}
+	_, _, err := h.issueTicket(sseSubscriber{})
+	assert.ErrorIs(t, err, errTooManyEventTickets, "no new ticket while every one waiting is live")
+	h.tickets.now = func() time.Time { return now.Add(2 * time.Second) }
+	_, _, err = h.issueTicket(sseSubscriber{})
+	assert.NoError(t, err, "expired tickets make room")
+	assert.Len(t, h.tickets.m, 1)
+
+	gin.SetMode(gin.TestMode)
+	bare := NewHub()
+	r := gin.New()
+	r.POST("/api/events/ticket", bare.HandleEventTicket())
+	w := askTicket(t, r, nil)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestHandleEvents_RefusesAnUnusableTicket(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	r, h := ticketRouter(f)
+	tk, _, err := h.issueTicket(sseSubscriber{aud: organiserAudience()})
+	require.NoError(t, err)
+	_, ok := h.redeemTicket(tk)
+	require.True(t, ok)
+
+	for name, query := range map[string]string{"spent": tk, "unknown": "nope", "empty": ""} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/events?ticket="+query, nil))
+		assert.Equal(t, http.StatusUnauthorized, w.Code, name)
+		assert.Contains(t, w.Body.String(), codeEventTicketInvalid, name)
+		assert.NotContains(t, w.Body.String(), ": open", "a %s ticket opens no stream, not even a public one", name)
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	assert.Empty(t, h.clients)
+}
+
+func TestHandleEvents_StreamIsProjectedForItsTicket(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	r, h := ticketRouter(f)
+	broadcastJuniorsResult(h)
+
+	open := func(query string) (*mockResponseWriter, context.CancelFunc, chan struct{}) {
+		ctx, cancel := context.WithCancel(context.Background())
+		w := &mockResponseWriter{ResponseRecorder: httptest.NewRecorder(), closeChan: make(chan bool)}
+		req := httptest.NewRequest(http.MethodGet, "/api/events"+query, nil).WithContext(ctx)
+		done := make(chan struct{})
+		go func() {
+			r.ServeHTTP(w, req)
+			close(done)
+		}()
+		return w, cancel, done
+	}
+	tk, _, err := h.issueTicket(sseSubscriber{aud: organiserAudience()})
+	require.NoError(t, err)
+	orgW, orgCancel, orgDone := open("?lastEventId=0&ticket=" + tk)
+	pubW, pubCancel, pubDone := open("")
+	require.Eventually(t, func() bool {
+		h.mu.RLock()
+		defer h.mu.RUnlock()
+		return len(h.clients) == 2
+	}, 2*time.Second, 5*time.Millisecond)
+
+	broadcastJuniorsResult(h)
+	waitForFrame(t, orgW, "Alice Arai")
+	waitForFrame(t, pubW, `"sideA":"K1"`)
+	orgCancel()
+	pubCancel()
+	<-orgDone
+	<-pubDone
+	assert.NotContains(t, pubW.BodyString(), "Alice Arai")
+	assert.Equal(t, "no-store", pubW.HeaderGet("Cache-Control"))
+}
+
+func TestRejudgeRevealStreams_EndsOnlyChangedStreams(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesCompetition)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	header := "juniors:" + state.CompetitionRevealKey(f.comp)
+	judged := f.pn.revealAudience(header)
+	require.True(t, judged.revealsAll("juniors"))
+
+	link, _, _, _ := h.subscribeWithReplayFor(0, &sseSubscriber{aud: judged, reveal: header})
+	public, _, _, _ := h.subscribeWithReplayFor(0, &sseSubscriber{})
+	require.NotNil(t, link)
+	require.NotNil(t, public)
+
+	// Nothing changed: a tournament_updated leaves the reveal stream open.
+	h.Broadcast(EventTournamentUpdated, nil)
+	<-link
+	h.rejudges.Wait()
+	h.mu.RLock()
+	_, stillOpen := h.clients[link]
+	h.mu.RUnlock()
+	assert.True(t, stillOpen, "a reveal stream whose keys unlock the same stays open")
+
+	// The option moves to hidden: the link now unlocks nothing, so its
+	// stream ends after the event that told it.
+	f.comp.PublicNames = state.PublicNamesHidden
+	require.NoError(t, f.store.SaveCompetition(f.comp))
+	h.Broadcast(EventTournamentUpdated, nil)
+	h.rejudges.Wait()
+	msg, ok := <-link
+	require.True(t, ok, "the event is delivered before the stream ends")
+	assert.Equal(t, EventTournamentUpdated, msg.typ)
+	_, ok = <-link
+	assert.False(t, ok, "the reveal stream ended so it asks for a new ticket")
+
+	h.mu.RLock()
+	_, publicOpen := h.clients[public]
+	h.mu.RUnlock()
+	assert.True(t, publicOpen, "a public stream is never ended for an option change")
+	h.Close()
 }

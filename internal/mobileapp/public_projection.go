@@ -27,6 +27,12 @@ import (
 //     stripMatchesAudit, stripBracketAudit. Pass the deep copies returned by
 //     store.Load* (LoadPoolMatches/LoadBracket already copy), so the on-disk /
 //     cached state is never touched.
+//
+// These strippers never hide competitor NAMES. matchForBroadcast and
+// matchPtrForBroadcast also build the HTTP answers of match writes, which the
+// organiser's screens read back, so a name mask here would corrupt them.
+// Names are hidden per audience on the public reads and the event stream by
+// the name mask (public_names.go), applied to a copy after these strippers.
 
 // matchForBroadcast returns a copy of m with audit fields cleared, for use as a
 // PUBLIC SSE payload. m is taken by value so the caller's original (and its

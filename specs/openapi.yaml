@@ -12,7 +12,11 @@ info:
     `X-Tournament-Password` header for authentication, with several public exceptions:
 
     - **`GET /api/events`**: SSE stream; always public so viewers and spectator screens
-      can receive real-time updates without an admin credential.
+      can receive real-time updates without an admin credential. A caller holding a
+      password or reveal keys first asks `POST /api/events/ticket` (public, the
+      credentials as headers) and opens the stream with `?ticket=`; a competition that
+      hides names is masked on the stream for everyone else (see "Names a competition
+      hides").
     - **`GET /api/auth-config`**: always public; carries no secret material.
     - **`POST /api/tournament/reset`**: needs no password in file mode (the recovery path
       for a forgotten password) but answers only a caller on the machine running the
@@ -27,6 +31,33 @@ info:
     - **`POST /api/competitions/{id}/teams/{tid}/fielded-lineup/{matchId}`**: public read, in self-run mode too, that writes nothing; who a kachinuki team fields by member number in the empty places of a lineup form.
     - **`GET /api/competitions/{id}/swiss/standings`**: public read; always public.
     - **`GET /api/tournament/announcement`**: public read; returns the currently active admin broadcast announcement (204 when none/expired).
+
+    **Names a competition hides.** A competition whose `publicNames` is not `""`
+    shows its competitors to the public as numbers (their dojo and team names stay).
+    The public reads that carry competitor names (`/api/viewer/*`, the competitor
+    status read, the three lineup reads, `kachinuki-roster`, `fielded-lineup`, the
+    league tie-break candidates and standings, and `GET /api/events`) judge their
+    caller, per request and per competition:
+
+    - **The organiser**: a valid `X-Tournament-Password`. Every name, as stored.
+    - **A reveal key**: `X-Reveal-Key: <competitionId>:<key>[,<competitionId>:<key>...]`
+      (at most 32 keys and 8 KiB; anything past that is ignored). A competition key,
+      from the `competition` option, reveals every name in that competition; a
+      competitor key, from the `person` option, reveals that competitor's own name
+      (a team's, that team's members). A key reveals names on reads only: it is
+      never an admin credential and unlocks no write and no organiser-only read.
+      A key that is wrong, of the wrong kind for the competition's option, or past
+      its `revealUntil` is dropped without an error, and the caller is the public.
+    - **The public**: no credential. Names read as the competitor's number.
+
+    A password sent but wrong is `401` (`invalid admin password`), never the masked
+    view. A masked payload carries `namesHidden: true` (absent otherwise), so an
+    organiser surface can refuse to save a masked label as a fighter's name. Every
+    answer of these reads varies by caller and is sent `Cache-Control: no-store`
+    with `Vary: X-Tournament-Password, X-Reveal-Key`. `X-Reveal-Key` is in the CORS
+    allow-list. Free text (announcements, the awards note) is shown as typed: the
+    server filters none of it. A hiding option is refused on a self-run tournament
+    and on a Swiss competition, so neither is ever masked.
 
     **The build header.** Every answer of the Mobile/Admin API carries
     `X-App-Build`, the git commit of the server's build (`unknown` when the
@@ -406,13 +437,105 @@ paths:
         - `resync_required` and `heartbeat`: stream control frames. A
           `resync_required` says the replay ring cannot close the gap since
           `Last-Event-ID`, so the client refetches everything.
+
+        **Who the stream is for.** Opened without a `ticket`, the stream is the
+        public's: a competition that hides names (`publicNames`) is masked in every
+        event and in the replay, so a competitor reads as their number. Opened with
+        a `ticket` from `POST /api/events/ticket`, it is answered for the audience
+        that ticket was judged for (the organiser, a reveal key's competitions or
+        competitors, or the public), so no password or key ever sits in a URL. A
+        ticket is single use and valid 60 seconds. A spent, expired or unknown
+        ticket is refused with `401` `event_ticket_invalid`, never taken as the
+        public, so a signed-in console never lands silently on a masked stream: it
+        asks for a new ticket, on every reconnect too. What an event carries is
+        judged against the competition's option as it is when the event is sent, so
+        a change of an option needs no history reset; a `tournament_updated` ends
+        the streams opened with reveal keys whose keys now unlock something else,
+        and their clients reconnect with a new ticket. A masked event keeps ids and
+        numbers; it never carries the name it hides.
+        Every answer is `Cache-Control: no-store`.
+      parameters:
+        - in: query
+          name: ticket
+          required: false
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+          description: >
+            A single-use ticket from `POST /api/events/ticket`. Absent, the
+            stream is the public's.
       responses:
         '200':
           description: SSE stream of tournament events.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           content:
             text/event-stream:
               schema:
                 type: string
+        '401':
+          description: >
+            `event_ticket_invalid`: the `ticket` was already used, has expired
+            or was never handed out. Ask `POST /api/events/ticket` for a new one.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventTicketInvalidError'
+        '503':
+          description: >
+            The subscriber cap was reached, or the server is shutting down.
+            Carries `Retry-After`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/events/ticket:
+    post:
+      tags: [system]
+      summary: Ask for a single-use ticket to open the event stream
+      description: |
+        Public, and sent without a body. The caller's credentials are judged as for
+        any public read of competitor names: `X-Tournament-Password` makes the
+        organiser's audience, else `X-Reveal-Key` the audience of those keys, else
+        the public. The answer is a single-use ticket bound to that audience, valid
+        60 seconds, to open `GET /api/events?ticket=...`. The secret travels in a
+        header here and never in a URL.
+
+        A password sent but wrong is `401` `invalid admin password`. A reveal key
+        unlocks names on the stream only, never a write. The reveal keys are kept
+        with the ticket, so a later change of a competition's option is judged
+        against them again.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
+      responses:
+        '200':
+          description: The ticket and when it stops being valid.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventTicket'
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          description: >
+            Too many tickets are waiting (`Retry-After: 5`), or tickets are not
+            available on this server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   # ── Tournament (Admin, requires auth) ──────────────────────────────────────
 
@@ -5173,8 +5296,15 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
       responses:
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
         '200':
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           description: Each side's fighters left.
           content:
             application/json:
@@ -6023,9 +6153,17 @@ paths:
     get:
       tags: [competitions]
       summary: List competitor eligibility statuses
+      parameters:
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
       security: []
       responses:
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
         '200':
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           description: Current competitor statuses.
           content:
             application/json:
@@ -6150,6 +6288,9 @@ paths:
     get:
       tags: [competitions]
       summary: Get team lineup for round
+      parameters:
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
       description: |
         Always answers 200 while the competition exists (bc-k404, operator decision
         2026-09-27: a lineup either exists or it doesn't, and empty is a normal state,
@@ -6160,7 +6301,12 @@ paths:
         competition at all.
       security: []
       responses:
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
         '200':
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           description: Team lineup, saved or not (see `saved`).
           content:
             application/json:
@@ -6282,6 +6428,9 @@ paths:
     get:
       tags: [competitions]
       summary: Get team lineup for a specific match
+      parameters:
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
       description: |
         Match-scoped lineup (mp-825). Always answers 200 while the competition exists
         (bc-k404): `saved: false` and empty `positions` when no match-scoped entry
@@ -6291,7 +6440,12 @@ paths:
         id that names no competition at all.
       security: []
       responses:
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
         '200':
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           description: Team lineup, saved or not (see `saved`).
           content:
             application/json:
@@ -6479,6 +6633,9 @@ paths:
     get:
       tags: [competitions]
       summary: Get the lineup a team fields at a match
+      parameters:
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
       description: |
         The lineup in force for the team at the match (operator ruling 2026-10-05: by
         default a team carries the lineup of its previous team match, and may have a
@@ -6511,7 +6668,12 @@ paths:
         is also spelled out in `sourceMatchId` or `sourceRound`.
       security: []
       responses:
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
         '200':
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           description: The lineup in force, or none (see `saved`).
           content:
             application/json:
@@ -6546,6 +6708,9 @@ paths:
     post:
       tags: [competitions]
       summary: Who a kachinuki team fields by member number in a lineup form's empty places
+      parameters:
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
       description: |
         A READ that carries a body: it writes nothing and announces nothing. The
         lineup panel sends its form as it stands, saved or not, after every change,
@@ -6586,7 +6751,12 @@ paths:
                     type: string
                   description: Position key to the member id placed there.
       responses:
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
         '200':
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           description: The places the server fills by member number.
           content:
             application/json:
@@ -7096,6 +7266,9 @@ paths:
     get:
       tags: [competitions]
       summary: List consequential league tie-breaker tied groups
+      parameters:
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
       description: >
         Returns the consequential tied groups for a team-league competition
         once every regular league match is finished: groups of teams tied on
@@ -7110,7 +7283,12 @@ paths:
         non-team-league competitions.
       security: []
       responses:
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
         '200':
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           description: The tied groups.
           content:
             application/json:
@@ -7571,13 +7749,21 @@ paths:
     get:
       tags: [viewer]
       summary: Get public tournament info
+      parameters:
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
       description: |
         Returns tournament details with the password field redacted, or `null`
         when no tournament is configured yet (a normal bootstrap state, so the
         response is `200` with a null body rather than a `404`). Carries
         `tournamentVersion`, the version a settings save sends back.
       responses:
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
         '200':
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           description: Public tournament info, or null when no tournament is configured yet.
           content:
             application/json:
@@ -7592,19 +7778,29 @@ paths:
     get:
       tags: [viewer]
       summary: List competitions with players
+      parameters:
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
       description: >
         Returns all competitions, each with their player list populated. Every
         per-competition entry also carries the request-time `slotMinutes` and
         `knockoutSlotMinutes` described on CompetitionDetail.
       responses:
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
         '200':
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           description: List of competitions.
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/Competition'
+                  allOf:
+                    - $ref: '#/components/schemas/Competition'
+                    - $ref: '#/components/schemas/NamesHidden'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -7615,8 +7811,15 @@ paths:
       description: Returns config, pools, pool matches, standings, and bracket.
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
       responses:
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
         '200':
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           description: Full competition state.
           content:
             application/json:
@@ -7643,8 +7846,15 @@ paths:
           schema:
             type: string
           description: Court label (e.g. "A").
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
       responses:
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
         '200':
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           description: >
             The running match (status "current") or status "idle". The match
             fields are present only on the "current" branch.
@@ -7686,6 +7896,12 @@ paths:
                     description: Representative fighter for a pool daihyosen bout (team names in sideA/sideB); empty otherwise.
                   repPlayerB:
                     type: string
+                  namesHidden:
+                    type: boolean
+                    description: >
+                      `true` when the sides read as numbers because the
+                      competition hides its names from this caller. Absent
+                      otherwise.
         '404':
           description: Unknown court.
         '500':
@@ -7716,8 +7932,15 @@ paths:
           schema:
             type: string
           description: Court label (e.g. "A").
+        - $ref: '#/components/parameters/OptionalTournamentPassword'
+        - $ref: '#/components/parameters/RevealKey'
       responses:
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
         '200':
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
           description: Competitions with a match on the court, full match data each.
           content:
             application/json:
@@ -7735,6 +7958,11 @@ paths:
                       properties:
                         config:
                           $ref: '#/components/schemas/Competition'
+                        namesHidden:
+                          type: boolean
+                          description: >
+                            `true` when this competition's entry is masked for
+                            the caller (it hides its names). Absent otherwise.
                         poolMatches:
                           type: array
                           items:
@@ -7759,7 +7987,7 @@ components:
       name: X-Tournament-Password
       description: |
         Tournament admin password. Required for all `/api/` routes
-        except `/api/viewer/`, `/api/events`, the recovery endpoints
+        except `/api/viewer/`, `/api/events`, `/api/events/ticket`, the recovery endpoints
         `/api/auth-config` and `/api/tournament/reset` (which answers only the
         machine running the server),
         the public read endpoints `GET /api/schedule/estimate`,
@@ -7831,6 +8059,33 @@ components:
         defense: without it, an `id` like `../../../etc/passwd` would resolve
         through `filepath.Clean(filepath.Join(...))` and escape the data
         directory.
+    OptionalTournamentPassword:
+      name: X-Tournament-Password
+      in: header
+      required: false
+      schema:
+        type: string
+      description: >
+        The admin password, sent by the organiser's own pages so a competition
+        that hides names answers them with every name. Optional: without it the
+        caller is the public, or a reveal-key holder. A password sent but wrong
+        is `401`, never the masked view.
+    RevealKey:
+      name: X-Reveal-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 8192
+        example: 'mens-individual:3f9a...c1,womens-team:77b0...e4'
+      description: >
+        Reveal keys, `<competitionId>:<key>` pairs separated by commas (at most
+        32). A competition key reveals every name in its competition, a
+        competitor key only that competitor's own name. Ignored when a valid
+        `X-Tournament-Password` is sent. A key that is wrong, of the wrong kind
+        for the competition's option or past its `revealUntil` is dropped
+        without an error and the caller is the public. It reveals names on
+        reads only and unlocks no write.
     ConfirmPassword:
       name: X-Confirm-Password
       in: header
@@ -7851,6 +8106,13 @@ components:
       description: Match ID (e.g. "pool-a-0" or "bracket-r1-m0").
 
   headers:
+    NoStore:
+      description: >
+        `no-store`. The answer varies by who asks (the organiser, a reveal key,
+        the public), so no cache may keep it.
+      schema:
+        type: string
+        enum: [no-store]
     AppBuild:
       description: >
         The git commit of the build that answered (`unknown` when the binary
@@ -7858,6 +8120,17 @@ components:
       schema:
         type: string
   responses:
+    InvalidPassword:
+      description: >
+        `invalid admin password`: an `X-Tournament-Password` was sent and is
+        wrong. A public read never answers it with the masked view instead.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     BadRequest:
       description: Invalid input.
       content:
@@ -7906,6 +8179,41 @@ components:
             $ref: '#/components/schemas/Error'
 
   schemas:
+    EventTicket:
+      type: object
+      required: [ticket, expiresAt]
+      properties:
+        ticket:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: Single use. Open `GET /api/events?ticket=<ticket>` with it.
+        expiresAt:
+          type: integer
+          format: int64
+          description: When the ticket stops being valid, in unix milliseconds (60 seconds after it was handed out).
+    EventTicketInvalidError:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          enum: [event_ticket_invalid]
+    NamesHidden:
+      type: object
+      description: >
+        The marker a masked answer carries. A competition that hides names
+        answers the public with each name replaced by the competitor's number,
+        and the answer says so, so an organiser surface can refuse to save a
+        masked label as a name.
+      properties:
+        namesHidden:
+          type: boolean
+          description: >
+            `true` when the answer is masked for this caller; absent otherwise
+            (the organiser's answer, a revealed competition, a competition that
+            shows its names).
     RefusedWrite:
       type: object
       additionalProperties: false
@@ -10838,6 +11146,12 @@ components:
       properties:
         config:
           $ref: '#/components/schemas/Competition'
+        namesHidden:
+          type: boolean
+          description: >
+            `true` when this answer is masked for the caller: a competition that
+            hides its names (`publicNames`) answers the public with each
+            competitor's name replaced by their number. Absent otherwise.
         awardsVersion:
           type: string
           pattern: '^[0-9a-f]{16}$'
@@ -10986,6 +11300,13 @@ components:
           description: >
             When present, keys this lineup to a specific match/encounter rather
             than the team's starting lineup. Omitted for the starting lineup.
+        namesHidden:
+          type: boolean
+          readOnly: true
+          description: >
+            `true` on a read masked for the caller (a competition that hides its
+            names): the positions' fighter names read as member labels. Never
+            sent in a write.
         positions:
           type: object
           additionalProperties:

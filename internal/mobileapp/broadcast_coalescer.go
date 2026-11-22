@@ -286,6 +286,10 @@ func freshMatchRead(store matchPushStore, compID, matchID string, captured gin.H
 		return nil, false, nil
 	}
 	stampWithdrawnStatus(store, compID, r)
+	// The stored match goes out with its names (matchPtrForBroadcast strips
+	// only the audit fields): the hub keeps the event as broadcast and masks
+	// it per stream when it is sent (Hub.project, bc-hnam), so the
+	// organiser's console and team editor still read real fighter names.
 	out := make(gin.H, len(captured))
 	for k, v := range captured {
 		out[k] = v

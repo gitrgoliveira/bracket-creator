@@ -571,6 +571,29 @@ func TestPublicNamesView_FromStore(t *testing.T) {
 	assert.False(t, sv.namesHidden())
 }
 
+func TestPublicNamesView_SelfRunAlwaysShowsNames(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	require.True(t, f.pn.hides(f.comp))
+
+	tour, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	tour.Mode = state.TournamentModeSelfRun
+	require.NoError(t, f.store.SaveTournament(tour))
+
+	assert.False(t, f.pn.hides(f.comp), "self-run shows names whatever the competition's setting says")
+	v, err := f.pn.view(f.comp, audience{})
+	require.NoError(t, err)
+	assert.False(t, v.namesHidden())
+	loaded, err := f.store.LoadCompetition(f.comp.ID)
+	require.NoError(t, err)
+	assert.Equal(t, state.PublicNamesHidden, loaded.PublicNames, "the competition keeps its setting")
+
+	tour.Mode = state.TournamentModeOfficiated
+	require.NoError(t, f.store.SaveTournament(tour))
+	assert.True(t, f.pn.hides(f.comp), "switched back to officiated, the setting applies again")
+}
+
 func TestPublicNamesView_UnknownCompetitionFailsClosed(t *testing.T) {
 	f := newPNFixture(t, state.PublicNamesHidden)
 	ghost := &state.Competition{ID: "ghost", PublicNames: state.PublicNamesHidden}

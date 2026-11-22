@@ -921,6 +921,20 @@ func warmMask(t *testing.T, f pnFixture) {
 	}
 }
 
+func TestHubProject_SelfRunStreamKeepsNames(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	tour, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	tour.Mode = state.TournamentModeSelfRun
+	require.NoError(t, f.store.SaveTournament(tour))
+
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}), "a self-run stream carries the names")
+}
+
 func TestHubProject_MasksMatchUpdatedForThePublic(t *testing.T) {
 	f := newPNFixture(t, state.PublicNamesHidden)
 	warmMask(t, f)

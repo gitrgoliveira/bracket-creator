@@ -331,11 +331,26 @@ type maskView struct {
 	reveal map[string]bool
 }
 
+// hides reports whether the public pages hide comp's names right now: its
+// setting hides them and the tournament is not self-run. A self-run
+// tournament always shows names, whatever a competition's setting says (a
+// restore can leave one that hides them), because its competitors score their
+// own matches and need them; the competition keeps its setting, so it hides
+// names again if the tournament is switched back to officiated. A tournament
+// that cannot be read counts as officiated, so the names stay hidden.
+func (p *publicNames) hides(comp *state.Competition) bool {
+	if comp == nil || !comp.HidesNames() {
+		return false
+	}
+	t, err := p.store.LoadTournament()
+	return err != nil || !t.IsSelfRun()
+}
+
 // view is the mask view for comp and aud. The error is the mask's build
 // error (a file that could not be read); the view is still usable and fails
 // closed, so a caller logs the error and serves the view.
 func (p *publicNames) view(comp *state.Competition, aud audience) (maskView, error) {
-	if comp == nil || !comp.HidesNames() || aud.revealsAll(comp.ID) {
+	if !p.hides(comp) || aud.revealsAll(comp.ID) {
 		return maskView{}, nil
 	}
 	m, err := p.masks.get(comp.ID)

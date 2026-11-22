@@ -890,7 +890,7 @@ func (h *Hub) project(e *historyEntry, sub *sseSubscriber) string {
 	if err != nil || comp == nil {
 		return withoutData(e)
 	}
-	if !comp.HidesNames() {
+	if !names.hides(comp) {
 		return e.payload
 	}
 	aud := streamRevealFor(names, comp, sub.aud)

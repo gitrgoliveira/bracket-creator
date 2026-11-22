@@ -793,6 +793,15 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		var req struct {
 			state.Tournament
 			TournamentVersion string `json:"tournamentVersion"`
+			// ConfirmPublicNames is the organiser's yes to a new default
+			// public-names option changing the competitions it lists
+			// (public_names_apply_confirm). With it, the save sets every
+			// competition but a Swiss one to the default.
+			ConfirmPublicNames bool `json:"confirmPublicNames"`
+			// ConfirmShowNames is the organiser's yes to a save that creates
+			// the tournament self-run showing names in the competitions it
+			// lists (public_names_self_run_switch, showNamesForSelfRun).
+			ConfirmShowNames bool `json:"confirmShowNames"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -814,6 +823,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
+		t.DefaultPublicNames = strings.TrimSpace(t.DefaultPublicNames)
 		trimPublicInfoFields(&t)
 
 		// A save made from an older copy is told so before its body is judged:
@@ -905,6 +915,23 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// canonical check; POST already calls it for the same reason.
 		if err := state.ValidateTournamentMode(t.Mode); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// The default public-names option (E2). Changing it sets every
+		// competition but a Swiss one to it, once the organiser has seen the
+		// list: a save that would change any is answered 409 with the list
+		// until it carries confirmPublicNames. A save that leaves the default
+		// alone changes no competition, so each competition's own choice
+		// stands. A confirmed save applies the default even when it did not
+		// move, so sending it again finishes one a failure cut short.
+		publicNamesTargets, ok := judgePublicNamesDefault(c, store, stored, &t, req.ConfirmPublicNames)
+		if !ok {
+			return
+		}
+		// A PUT may create the tournament; created self-run, the
+		// competitions already on disk that hide names show them first.
+		if !showNamesForSelfRun(c, store, stored, &t, req.ConfirmShowNames) {
 			return
 		}
 
@@ -1092,6 +1119,16 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			internalError(c, err)
 			return
 		}
+		// The default landed; now the competitions it was confirmed for. The
+		// broadcast below tells open pages and streams either way.
+		var publicNamesFailed []string
+		if len(publicNamesTargets) > 0 {
+			var compsChanged bool
+			compsChanged, publicNamesFailed = applyPublicNamesDefault(store, publicNamesTargets, t.DefaultPublicNames)
+			if compsChanged && !changed {
+				hub.Broadcast(EventTournamentUpdated, nil)
+			}
+		}
 		if changed {
 			hub.Broadcast(EventTournamentUpdated, nil)
 			if passwordChanged {
@@ -1106,6 +1143,13 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 				// just typed the new credential and can type it again.
 				hub.Broadcast(EventPasswordReset, passwordResetEventData{})
 			}
+		}
+		if len(publicNamesFailed) > 0 {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":        fmt.Sprintf("The tournament settings were saved, but these competitions could not be changed to the new default: %s. Save again to retry.", strings.Join(publicNamesFailed, ", ")),
+				"competitions": publicNamesFailed,
+			})
+			return
 		}
 		// In locked mode the on-disk Password is irrelevant and must not
 		// leak through any response surface. GET strips it; apply the
@@ -1278,6 +1322,32 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 				existingMode = state.TournamentModeOfficiated
 			}
 			t.Mode = existingMode
+		}
+
+		// The default public-names option, judged on the mode just settled.
+		// POST sets no competition to it: a first save has none to follow it,
+		// and changing the default for existing competitions is the PUT's,
+		// with its confirmation.
+		t.DefaultPublicNames = strings.TrimSpace(t.DefaultPublicNames)
+		if msg := validatePublicNamesValue("defaultPublicNames", t.DefaultPublicNames); msg != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
+		if state.PublicNamesHidesNames(t.DefaultPublicNames) && t.IsSelfRun() {
+			c.JSON(http.StatusConflict, gin.H{"error": msgPublicNamesSelfRun, "code": codePublicNamesSelfRun})
+			return
+		}
+		// Created self-run, the competitions already on disk that hide
+		// names show them first, once the organiser has seen the list.
+		var confirm struct {
+			ConfirmShowNames bool `json:"confirmShowNames"`
+		}
+		if err := c.ShouldBindBodyWith(&confirm, binding.JSON); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if !showNamesForSelfRun(c, store, existingForPost, &t, confirm.ConfirmShowNames) {
+			return
 		}
 
 		if _, err := store.SaveTournamentChanged(&t); err != nil {

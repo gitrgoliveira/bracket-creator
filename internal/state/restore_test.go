@@ -316,6 +316,74 @@ func TestRestore_CopyTakesANewIDAndWarnsAboutThePrefix(t *testing.T) {
 	assert.Empty(t, pending)
 }
 
+// A competition's reveal secret is what its printed links derive from: a plain
+// restore and a replace bring the archive's secret back (same competition, same
+// links), while a copy is another competition and mints its own, so the
+// original's links never reveal the copy.
+func TestRestore_TheRevealSecretIsKeptByAPlainRestoreAndAReplaceAndNewForACopy(t *testing.T) {
+	secret := strings.Repeat("ab", 32)
+	src, _ := newRestoreTestStore(t)
+	addRestoreComp(t, src, "men", "Men", "K", MatchStatusScheduled, "A")
+	c, err := src.LoadCompetition("men")
+	require.NoError(t, err)
+	c.PublicNames = PublicNamesPerson
+	c.RevealSecret = secret
+	require.NoError(t, src.SaveCompetition(c))
+	a := archiveOf(t, src, ScopeCompetition, "men")
+
+	t.Run("plain restore into an empty folder keeps it", func(t *testing.T) {
+		s, _ := newRestoreTestStore(t)
+		_, err := s.Restore(RestoreRequest{Archive: a})
+		require.NoError(t, err)
+		c, err := s.LoadCompetition("men")
+		require.NoError(t, err)
+		assert.Equal(t, secret, c.RevealSecret)
+		assert.Equal(t, PublicNamesPerson, c.PublicNames)
+	})
+
+	t.Run("replace keeps the archive's, not the live one's", func(t *testing.T) {
+		s, _ := newRestoreTestStore(t)
+		addRestoreComp(t, s, "men", "Men", "K", MatchStatusScheduled, "A")
+		live, err := s.LoadCompetition("men")
+		require.NoError(t, err)
+		live.RevealSecret = strings.Repeat("cd", 32)
+		require.NoError(t, s.SaveCompetition(live))
+
+		_, err = s.Restore(RestoreRequest{Archive: a, Decisions: map[string]RestoreDecision{"men": {Action: RestoreReplace}}})
+		require.NoError(t, err)
+		c, err := s.LoadCompetition("men")
+		require.NoError(t, err)
+		assert.Equal(t, secret, c.RevealSecret)
+	})
+
+	t.Run("copy mints a new one and leaves the original's alone", func(t *testing.T) {
+		s, _ := newRestoreTestStore(t)
+		addRestoreComp(t, s, "men", "Men", "K", MatchStatusScheduled, "A")
+		live, err := s.LoadCompetition("men")
+		require.NoError(t, err)
+		live.RevealSecret = secret
+		require.NoError(t, s.SaveCompetition(live))
+
+		_, err = s.Restore(RestoreRequest{Archive: a, Decisions: map[string]RestoreDecision{"men": {Action: RestoreCopy, CopyName: "Men Copy"}}})
+		require.NoError(t, err)
+		cp, err := s.LoadCompetition("men-copy")
+		require.NoError(t, err)
+		assert.Len(t, cp.RevealSecret, 64)
+		assert.NotEqual(t, secret, cp.RevealSecret)
+		assert.Equal(t, PublicNamesPerson, cp.PublicNames, "the setting itself travels with the copy")
+		orig, err := s.LoadCompetition("men")
+		require.NoError(t, err)
+		assert.Equal(t, secret, orig.RevealSecret)
+	})
+
+	t.Run("copy of a config with no secret keeps none", func(t *testing.T) {
+		raw := []byte("---\nid: men\nname: Men\n---\n")
+		out, err := rewriteCopyConfig(raw, "men-copy", "Men Copy")
+		require.NoError(t, err)
+		assert.NotContains(t, string(out), "reveal_secret")
+	})
+}
+
 func TestRestore_PrefixAmbiguityCollision(t *testing.T) {
 	src, _ := newRestoreTestStore(t)
 	addRestoreComp(t, src, "k2", "K2 Comp", "K2", MatchStatusScheduled, "A")

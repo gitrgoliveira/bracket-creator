@@ -109,6 +109,7 @@ func TestTournamentVersionMovesWithEveryWrittenField(t *testing.T) {
 		"multiplier":  func(x *Tournament) { x.ClockToElapsedMultiplier = 2 },
 		"buffer":      func(x *Tournament) { x.SlowestCourtBufferPct = 20 },
 		"mode":        func(x *Tournament) { x.Mode = TournamentModeSelfRun },
+		"publicNames": func(x *Tournament) { x.DefaultPublicNames = PublicNamesHidden },
 		"publicURL":   func(x *Tournament) { x.PublicURL = "https://example.org" },
 		"address":     func(x *Tournament) { x.VenueAddress = "1 Road" },
 		"map":         func(x *Tournament) { x.VenueMapURL = "https://maps.example.org" },

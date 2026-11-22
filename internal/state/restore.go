@@ -994,8 +994,13 @@ func (s *Store) stageTournamentMD(tokenDir string, ai *restoreArchiveInfo, passw
 	return syncDir(s.root, newRoot)
 }
 
-// rewriteCopyConfig gives a copy's config.md its new id and name, leaving
-// every other key as the archive holds it.
+// rewriteCopyConfig gives a copy's config.md its new id and name, and a new
+// reveal secret when the archive's config holds one, leaving every other key
+// as the archive holds it. The copy is another competition, so the
+// original's reveal links must never reveal its names; a config with no
+// secret keeps none, and the copy mints its own the first time its option
+// moves to a kind with links. A plain restore and a replace write config.md
+// as the archive holds it, so the competition keeps its secret and its links.
 func rewriteCopyConfig(raw []byte, id, name string) ([]byte, error) {
 	var doc yaml.Node
 	if err := parseFrontMatter(raw, &doc); err != nil {
@@ -1010,7 +1015,25 @@ func rewriteCopyConfig(raw []byte, id, name string) ([]byte, error) {
 	}
 	setMappingScalar(top, "id", id)
 	setMappingScalar(top, "name", name)
+	if mappingScalar(top, "reveal_secret") != "" {
+		secret, err := NewRevealSecret()
+		if err != nil {
+			return nil, err
+		}
+		setMappingScalar(top, "reveal_secret", secret)
+	}
 	return writeFrontMatter(&doc)
+}
+
+// mappingScalar answers the value of key in mapping m, or "" when m does
+// not hold it.
+func mappingScalar(m *yaml.Node, key string) string {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1].Value
+		}
+	}
+	return ""
 }
 
 func setMappingScalar(m *yaml.Node, key, value string) {

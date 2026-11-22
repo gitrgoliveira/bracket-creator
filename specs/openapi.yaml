@@ -576,13 +576,25 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '409':
-          description: >
-            `tournament_changed`: the body's `tournamentVersion` is not the
-            stored settings' version. Nothing is written.
+          description: |
+            Two cases, told apart by `code`.
+
+            * `tournament_changed`: the body's `tournamentVersion` is not the
+              stored settings' version. Nothing is written.
+            * `public_names_self_run_switch`: the save switches the tournament
+              from officiated to self-run while competitions hide their names
+              (`publicNames` other than `""`). Nothing is written; the body
+              lists them in `competitions` (`id` and `name`). Send the save
+              again with `confirmShowNames: true` to go ahead: the same
+              transaction then sets every listed competition's `publicNames`
+              back to `""` (their names show on every public page, in every
+              stream) and a `tournament_updated` event is broadcast.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TournamentChangedError'
+                oneOf:
+                  - $ref: '#/components/schemas/TournamentChangedError'
+                  - $ref: '#/components/schemas/PublicNamesSelfRunSwitchError'
 
   /api/tournament/reset:
     post:
@@ -1035,6 +1047,10 @@ paths:
         before any live directory is replaced or removed. Every rename is journaled, so a
         restore that a crash interrupts is rolled forward on the next start.
         Colliding competition number prefixes are reassigned after the restore completes.
+        A competition's reveal-link secret (what its `publicNames` links are derived from)
+        comes back with it when it is restored in place or replaced, so printed links keep
+        working. A competition restored as a copy gets a new secret, so the original's
+        links never reveal the copy.
         No match comes back running: each match the archive holds as running is sent back
         to the queue (`scheduled`) with its score, as `POST /api/competitions/{id}/matches/{mid}/revert-to-queue` does, and the
         operator starts it again. Then the server broadcasts a `tournament_updated` event once over SSE.
@@ -1754,6 +1770,18 @@ paths:
           Send an explicit legal allocation (for example ["A", "B"]) to
           create a competition on such a venue.
 
+        - `publicNames` must be `""`, `"person"`, `"competition"` or `"hidden"`,
+          and `revealUntil` empty or a local `YYYY-MM-DDTHH:MM` date and time
+          (400 otherwise).
+        - A hiding `publicNames` (anything but `""`) on a Swiss competition is
+          refused with 400 `public_names_swiss`; the Swiss format does not
+          support hidden names yet.
+
+        A hiding `publicNames` while the tournament is self-run is refused with
+        409 `public_names_self_run` (see the 409 below): the public page is the
+        scoring surface there, and a participant has to see who is on the
+        court.
+
         String fields are trimmed server-side: `name`, `numberPrefix`, `kind`,
         `format`, `poolSizeMode`, `startTime`, `date`.
 
@@ -1782,7 +1810,9 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           description: |
-            Two cases. With no `code`: the roster in `players` breaks a roster
+            Three cases. With `code: public_names_self_run`: `publicNames` hides
+            names and the tournament is self-run, see `PublicNamesError`;
+            nothing is written. With no `code`: the roster in `players` breaks a roster
             rule (two participants with the same name and dojo, two teams
             with the same name at any dojo, or a team member's name colliding
             with another's); `error` names the
@@ -1799,7 +1829,7 @@ paths:
                 type: object
                 properties:
                   error: { type: string }
-                  code: { type: string, enum: [competition_id_unreadable] }
+                  code: { type: string, enum: [competition_id_unreadable, public_names_self_run] }
 
   /api/number-prefix-default:
     get:
@@ -2152,6 +2182,16 @@ paths:
               pools and bracket being fought were drawn from them, and
               `poolWinners` is read while the pools run. A bout changes
               shiaijo by a court move, never through these settings.
+            * `public_names_self_run`: the save sets a hiding `publicNames`
+              (anything but `""`) while the tournament is self-run. Nothing was
+              written; the body is `{code: "public_names_self_run", error}`
+              (`PublicNamesError`). Switch the tournament to officiated first,
+              or leave the names shown.
+
+            A hiding `publicNames` on a Swiss competition, or a `format` change
+            to `swiss` on a competition that hides names, is a 400 with
+            `{code: "public_names_swiss", error}`. An unknown `publicNames`, or
+            a `revealUntil` that is not `YYYY-MM-DDTHH:MM`, is a 400 too.
 
             A settings save that merely echoes an unchanged `format`, `kind` or
             `teamMatchType` back is never refused: every one of these gates
@@ -2162,6 +2202,7 @@ paths:
               schema:
                 anyOf:
                   - $ref: '#/components/schemas/ConfigChangedError'
+                  - $ref: '#/components/schemas/PublicNamesError'
                   - $ref: '#/components/schemas/Error'
         '500':
           description: |
@@ -6517,6 +6558,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/competitions/{id}/reveal-links:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    get:
+      tags: [competitions]
+      summary: Read a competition's reveal-link keys
+      description: |
+        The keys the settings page and the participant row turn into a QR code
+        and a Copy link: the competition key when the option is `competition`,
+        each participant's key when it is `person`, and the expiry in force.
+        Both stay absent for `""` and `hidden`. Organiser only, in a self-run
+        tournament too (the route is in the organiser-only list), and never
+        cached. A key is derived from the competition's secret, which no answer
+        carries.
+
+        A restore keeps the secret of a competition it replaces, so its links
+        keep working; a competition restored as a copy gets a new secret, so
+        the original's links never reveal the copy.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: The keys and the expiry.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevealLinks'
+        '400':
+          description: Malformed competition id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: '`invalid admin password`: missing or wrong.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No competition with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/competitions/{id}/team-members:
     parameters:
       - $ref: '#/components/parameters/CompetitionId'
@@ -8226,6 +8318,81 @@ components:
         error:
           type: string
 
+    PublicNamesError:
+      type: object
+      required: [code, error]
+      description: >
+        A hidden-names setting refused: `public_names_self_run` (409, a hiding
+        `publicNames` or `defaultPublicNames` while the tournament is self-run)
+        or `public_names_swiss` (400, a hiding `publicNames` on a Swiss
+        competition, or a format change to Swiss on one that hides names).
+        Nothing is written.
+      properties:
+        code:
+          type: string
+          enum: [public_names_self_run, public_names_swiss]
+        error:
+          type: string
+          description: A sentence the page shows as it is.
+
+    PublicNamesSelfRunSwitchError:
+      type: object
+      required: [code, error, competitions]
+      description: >
+        409 on `PUT /api/tournament`: the save switches the tournament to
+        self-run while competitions hide their names. Nothing is written. Send
+        the save again with `confirmShowNames: true` to show those names.
+      properties:
+        code:
+          type: string
+          enum: [public_names_self_run_switch]
+        error:
+          type: string
+        competitions:
+          type: array
+          description: The competitions that hide names, which the confirm would show.
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+
+    RevealLinks:
+      type: object
+      required: [publicNames, expiresAt]
+      description: >
+        The secret-bearing keys behind a competition's reveal links. The page
+        builds `/reveal/<competitionId>#<key>` from them; the key is never put
+        in a query string. Treat the answer as a password: it is organiser only
+        and `Cache-Control: no-store`.
+      properties:
+        publicNames:
+          type: string
+          enum: ["", person, competition, hidden]
+          description: The option in force, which decides which keys are present.
+        expiresAt:
+          type: string
+          description: >
+            The date and time the links stop working, as the server reads it
+            (`revealUntil`, or the end of the tournament plus one hour when that
+            is empty), `YYYY-MM-DDTHH:MM`.
+        open:
+          type: boolean
+          description: False once `expiresAt` has passed; the keys then reveal nothing.
+        competitionKey:
+          type: string
+          description: Present only when `publicNames` is `competition`.
+        competitorKeys:
+          type: object
+          description: >
+            Participant id to that participant's key. Present only when
+            `publicNames` is `person`; a team's key also reveals its members.
+          additionalProperties:
+            type: string
+
     CheckInStamp:
       type: object
       required: [modifiedAt]
@@ -8975,6 +9142,24 @@ components:
             `password`, which is redacted in locked mode). Defaults to `officiated` when
             omitted on POST (backward-compatible with pre-mp-7h7 tournaments whose
             `tournament.md` lacks the field).
+        defaultPublicNames:
+          type: string
+          enum: ["", person, competition, hidden]
+          description: |
+            The `publicNames` a new competition starts with, same values as
+            `Competition.publicNames`. Saving it applies it to every
+            competition except Swiss ones, after the organiser confirms the
+            list of competitions it will change; each competition can still be
+            changed on its own afterwards. A hiding value is refused in a
+            self-run tournament.
+        confirmShowNames:
+          type: boolean
+          writeOnly: true
+          description: |
+            Request only, on `PUT /api/tournament`. Send `true` to confirm
+            a switch to self-run that shows the names of competitions hiding
+            them; see the `public_names_self_run_switch` answer. Never stored
+            and never answered.
         theme:
           type: object
           description: >
@@ -9248,6 +9433,37 @@ components:
             still load with it blank; its next save or draw assigns one. Can
             be changed in any status, including after a draw exists; see the
             `PUT` endpoint's description.
+        publicNames:
+          type: string
+          enum: ["", person, competition, hidden]
+          description: |
+            What the public pages show for this competition's competitors.
+            Absent or `""` shows names, as before the setting existed. The other
+            values show each competitor's number instead of the name; the dojo
+            stays. What a reader can do to see names differs:
+
+            * `person`: a competitor's own reveal link shows that one name
+              (their tag QR, or the organiser's Copy link); a team's link shows
+              that team's members.
+            * `competition`: one competition reveal link shows every name in it.
+            * `hidden`: no reveal link exists; only the signed-in organiser
+              sees names.
+
+            Exactly one kind of link per competition. A hiding value is refused
+            while the tournament is self-run (409 `public_names_self_run`) and on
+            a Swiss competition (400 `public_names_swiss`). A new competition
+            takes the tournament's `defaultPublicNames` when the request leaves
+            the field out. The links come from
+            `GET /api/competitions/{id}/reveal-links`.
+        revealUntil:
+          type: string
+          description: |
+            When the reveal links stop working, a local date and time
+            `YYYY-MM-DDTHH:MM` read in the server's time zone, like every
+            schedule time. Empty means one hour after the tournament's closing
+            time on its last day (01:00 the morning after, with no closing time
+            set). Judged on every read, so moving it later makes the same links
+            work again. A malformed value is a 400.
         hasParticipantIDs:
           type: boolean
         rosterShuffled:

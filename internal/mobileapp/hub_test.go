@@ -1092,7 +1092,7 @@ func TestEventTicket_JudgedOnceAndSpent(t *testing.T) {
 	assert.False(t, ok, "a ticket past its time is refused")
 
 	// A reveal header is kept for the stream to be judged again.
-	key := "juniors:" + state.CompetitionRevealKey(f.comp)
+	key := "juniors:" + strings.Repeat("ab", 32)
 	w = askTicket(t, r, map[string]string{revealKeyHeader: key})
 	require.Equal(t, http.StatusOK, w.Code)
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
@@ -1238,9 +1238,52 @@ func TestEventTicket_RefusesACallerWithNoCredential(t *testing.T) {
 
 	w = askTicket(t, r, map[string]string{"X-Tournament-Password": "secret-pw"})
 	assert.Equal(t, http.StatusOK, w.Code, "the organiser still gets one")
-	w = askTicket(t, r, map[string]string{revealKeyHeader: "juniors:" + state.CompetitionRevealKey(f.comp)})
+	w = askTicket(t, r, map[string]string{revealKeyHeader: "juniors:" + strings.Repeat("ab", 32)})
 	assert.Equal(t, http.StatusOK, w.Code, "so does a caller holding a reveal key")
 	assert.Len(t, h.tickets.m, 2)
+}
+
+// A header with no well-formed reveal key is no credential: it earns no
+// ticket, and a ticket keeps only the well-formed entries of the header.
+func TestEventTicket_RefusesAMalformedRevealKey(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	r, h := ticketRouter(f)
+
+	for _, junk := range []string{"x", "juniors:short", "bad id:" + strings.Repeat("0", 64), ",,"} {
+		w := askTicket(t, r, map[string]string{revealKeyHeader: junk})
+		assert.Equal(t, http.StatusBadRequest, w.Code, junk)
+		assert.Contains(t, w.Body.String(), codeEventTicketNotNeeded, junk)
+	}
+	assert.Empty(t, h.tickets.m, "a malformed header filled no ticket")
+
+	key := "juniors:" + strings.Repeat("ab", 32)
+	w := askTicket(t, r, map[string]string{revealKeyHeader: "junk, " + key + ", " + key})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body struct {
+		Ticket string `json:"ticket"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	sub, ok := h.redeemTicket(body.Ticket)
+	require.True(t, ok)
+	assert.Equal(t, key, sub.reveal, "only the well-formed entry is kept, once")
+}
+
+// Callers holding only a reveal key fill the waiting tickets no further than
+// maxEventTickets less the organiser's reserve, so the organiser's stream can
+// still open.
+func TestEventTicket_KeepsRoomForTheOrganiser(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	h := hubWithNames(f)
+	now := time.Now()
+	h.tickets.now = func() time.Time { return now }
+	h.tickets.m = map[string]eventTicket{}
+	for i := range maxEventTickets - organiserTicketReserve {
+		h.tickets.m[fmt.Sprint(i)] = eventTicket{expires: now.Add(time.Second)}
+	}
+	_, _, err := h.issueTicket(sseSubscriber{reveal: "juniors:" + strings.Repeat("0", 64)})
+	assert.ErrorIs(t, err, errTooManyEventTickets, "a reveal-key caller leaves the reserve alone")
+	_, _, err = h.issueTicket(sseSubscriber{aud: organiserAudience()})
+	assert.NoError(t, err, "the organiser still gets a ticket")
 }
 
 // A stream is judged once, when it opens, so a changed admin password ends

@@ -29,6 +29,11 @@ const eventTicketTTL = 60 * time.Second
 // (503), so a flood of ticket requests cannot grow the map without bound.
 const maxEventTickets = 10000
 
+// organiserTicketReserve is the share of maxEventTickets only an organiser's
+// ticket may take: a caller holding a reveal key can fill the rest, but
+// never the room the organiser's console needs to open its stream.
+const organiserTicketReserve = 1000
+
 // eventTicketBytes is the size of a ticket's random part (hex on the wire).
 const eventTicketBytes = 32
 
@@ -69,13 +74,17 @@ func (h *Hub) issueTicket(sub sseSubscriber) (string, time.Time, error) {
 	if t.m == nil {
 		t.m = map[string]eventTicket{}
 	}
-	if len(t.m) >= maxEventTickets {
+	limit := maxEventTickets
+	if !sub.aud.isOrganiser() {
+		limit -= organiserTicketReserve
+	}
+	if len(t.m) >= limit {
 		for k, e := range t.m {
 			if !now.Before(e.expires) {
 				delete(t.m, k)
 			}
 		}
-		if len(t.m) >= maxEventTickets {
+		if len(t.m) >= limit {
 			return "", time.Time{}, errTooManyEventTickets
 		}
 	}
@@ -124,9 +133,10 @@ func (h *Hub) HandleEventTicket() gin.HandlerFunc {
 		if !aud.isOrganiser() {
 			// Kept even when it reveals nothing now: a later change of a
 			// competition's option is judged against it again.
-			sub.reveal = c.GetHeader(revealKeyHeader)
+			sub.reveal = canonicalRevealKeys(c.GetHeader(revealKeyHeader))
 			if sub.reveal == "" {
-				// A caller with no credential is the public, and the public
+				// A caller with no credential, or with a header holding no
+				// well-formed reveal key, is the public, and the public
 				// stream is opened with no ticket. Handing one out would let
 				// anyone fill the waiting tickets and lock the organiser out.
 				c.JSON(http.StatusBadRequest, gin.H{

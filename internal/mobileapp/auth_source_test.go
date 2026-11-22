@@ -1,9 +1,13 @@
 package mobileapp
 
 import (
+	"errors"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -140,4 +144,96 @@ func TestBcryptVerifier_Verify(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, ok)
 	})
+}
+
+// countingVerifier counts Verify calls and can hold them until released.
+type countingVerifier struct {
+	PasswordVerifier
+	calls   atomic.Int32
+	right   string
+	err     error
+	release chan struct{}
+}
+
+func (v *countingVerifier) Verify(p string) (bool, error) {
+	v.calls.Add(1)
+	if v.release != nil {
+		<-v.release
+	}
+	if v.err != nil {
+		return false, v.err
+	}
+	return p == v.right, nil
+}
+
+func TestCachedVerifier(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	inner := &countingVerifier{right: "right"}
+	v := newCachedVerifier(inner, func() time.Time { return now })
+
+	for i := 0; i < 3; i++ {
+		ok, err := v.Verify("right")
+		require.NoError(t, err)
+		assert.True(t, ok)
+	}
+	assert.EqualValues(t, 1, inner.calls.Load(), "the correct password skips bcrypt once seen")
+
+	for i := 0; i < 3; i++ {
+		ok, err := v.Verify("wrong")
+		require.NoError(t, err)
+		assert.False(t, ok)
+	}
+	assert.EqualValues(t, 2, inner.calls.Load(), "a wrong password costs one check while cached")
+
+	now = now.Add(wrongPasswordCacheTTL)
+	ok, err := v.Verify("wrong")
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.EqualValues(t, 3, inner.calls.Load(), "the wrong-password cache lasts 60 s")
+
+	inner.err = errors.New("boom")
+	_, err = v.Verify("other")
+	require.Error(t, err)
+	_, err = v.Verify("other")
+	require.Error(t, err)
+	assert.EqualValues(t, 5, inner.calls.Load(), "an error is never cached")
+
+	// The mode and policy methods pass through.
+	assert.Same(t, inner, v.PasswordVerifier)
+}
+
+func TestCachedVerifier_ConcurrentSharesOneCheck(t *testing.T) {
+	inner := &countingVerifier{right: "right", release: make(chan struct{})}
+	v := newCachedVerifier(inner, time.Now)
+	var wg sync.WaitGroup
+	results := make([]bool, 8)
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i], _ = v.Verify("wrong")
+		}(i)
+	}
+	require.Eventually(t, func() bool { return inner.calls.Load() == 1 }, time.Second, time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+	close(inner.release)
+	wg.Wait()
+	assert.EqualValues(t, 1, inner.calls.Load())
+	for _, r := range results {
+		assert.False(t, r)
+	}
+}
+
+func TestCachedVerifier_WrongCacheBounded(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	v := newCachedVerifier(&countingVerifier{right: "right"}, func() time.Time { return now })
+	for i := 0; i < wrongPasswordCacheMax+10; i++ {
+		_, err := v.Verify("wrong-" + strings.Repeat("x", i%7) + string(rune(i)))
+		require.NoError(t, err)
+	}
+	assert.LessOrEqual(t, len(v.bad), wrongPasswordCacheMax)
+	now = now.Add(wrongPasswordCacheTTL)
+	_, err := v.Verify("fresh-wrong")
+	require.NoError(t, err)
+	assert.Len(t, v.bad, 1, "expired entries are dropped when the cache is full")
 }

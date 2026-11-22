@@ -258,7 +258,6 @@ export function getLastBroadcastAt() {
 }
 
 // -----------------------------------------------------------------------
-// -----------------------------------------------------------------------
 // maskSnapshotForBridge: the competitions slice an operator tab hands to a
 // display tab, with every competitor of a competition whose public pages hide
 // names (competitionHidesNames) carried by number and id alone (bc-hnam).
@@ -341,10 +340,11 @@ function maskNode(node, ctx) {
 
 export function maskSnapshotForBridge(comps) {
     if (!Array.isArray(comps)) return comps;
+    const hides = (comp) => !!comp && typeof comp === 'object' && competitionHidesNames(null, comp);
     // The slice itself comes back when no competition in it hides its names.
-    if (!comps.some((comp) => comp && typeof comp === 'object' && competitionHidesNames(null, comp))) return comps;
+    if (!comps.some(hides)) return comps;
     return comps.map((comp) => {
-        if (!comp || typeof comp !== 'object' || !competitionHidesNames(null, comp)) return comp;
+        if (!hides(comp)) return comp;
         const ctx = { byId: new Map(), byName: new Map(), clashing: new Set() };
         collectNumbers(comp, ctx.byId, ctx.byName, ctx.clashing);
         return { ...maskNode(comp, ctx), namesHidden: true };

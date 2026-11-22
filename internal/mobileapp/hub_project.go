@@ -1,0 +1,402 @@
+package mobileapp
+
+import (
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"sync"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
+)
+
+// --- Per-subscriber streams (bc-hnam, Q4 a) ---------------------------------
+//
+// The stream hides names the way the public reads do, per subscriber. A
+// browser cannot send a header on an EventSource, so a caller with
+// credentials (the password, reveal keys) first asks POST /api/events/ticket
+// for a single-use ticket bound to its audience and opens
+// /api/events?ticket=..., so no secret ever sits in a URL. No ticket is the
+// public.
+//
+// Every event is classified in sseEventCatalogue. One that can name a
+// competitor is masked: it names its competition, and each stream not
+// entitled to that competition's names is sent a masked copy, built from the
+// stored bytes when it is sent and judged on the competition's option and
+// reveal expiry at that moment, so changing the option needs no reset of the
+// replay history. The public copy is built once per event and shared
+// (historyEntry.masked); only a stream holding competitors' own links has a
+// copy built for it alone.
+
+// maskedPayload memoises what every stream asks of a masked event: its
+// public projection (no names revealed), and the judgement of the
+// competition it names.
+type maskedPayload struct {
+	mu      sync.Mutex
+	done    bool
+	payload string
+	// judged is the competition's judgement, taken by the first stream that
+	// needs it and reused by the others while the competition is not written
+	// again (judgeCompetition).
+	judged *competitionJudgement
+}
+
+// competitionJudgement is a masked event's competition as read and whether
+// the public pages hide its names, valid for the write token it was taken at.
+type competitionJudgement struct {
+	token uint64
+	comp  *state.Competition
+	hides bool
+}
+
+// sseEventClass is what a stream not entitled to every name is sent for an
+// event.
+type sseEventClass int
+
+const (
+	// sseEventPasses: the event names no competitor, so every stream is sent
+	// it as broadcast.
+	sseEventPasses sseEventClass = iota + 1
+	// sseEventMasked: the event can name competitors of the competition it
+	// names (data.competitionId), so a stream not entitled to that
+	// competition's names is sent a masked copy.
+	sseEventMasked
+	// sseEventOrganiserOnly: only the organiser's stream is sent its data;
+	// every other stream is sent the event with no data, so its seq still
+	// arrives and no gap is seen.
+	sseEventOrganiserOnly
+)
+
+// sseEventSpec classifies one event type. mask rewrites a masked event's
+// data object in place through v.
+type sseEventSpec struct {
+	class sseEventClass
+	mask  func(data map[string]json.RawMessage, v maskView) error
+}
+
+// sseEventCatalogue classifies EVERY event type the hub sends; a type missing
+// from it is sent to no one but the organiser with its data (fail closed).
+// TestSSEEventCatalogue_ClassifiesEveryEventType holds it to every EventType
+// constant in the package.
+var sseEventCatalogue = map[EventType]sseEventSpec{
+	// A match's result: its sides, winner, bout rows and representative-bout
+	// fighters name competitors and team members.
+	EventMatchUpdated: {class: sseEventMasked, mask: maskMatchUpdatedData},
+	// The rest carry ids, numbers of rounds or nothing at all.
+	EventCompetitionStarted:      {class: sseEventPasses},
+	EventCompetitionCompleted:    {class: sseEventPasses},
+	EventTournamentUpdated:       {class: sseEventPasses},
+	EventScheduleUpdated:         {class: sseEventPasses},
+	EventCompetitorStatusUpdated: {class: sseEventPasses}, // a player id and a reason code
+	EventParticipantsUpdated:     {class: sseEventPasses},
+	EventPasswordReset:           {class: sseEventPasses}, // an originator id, or nothing
+	// Free text the organiser typed: shown to everyone as typed (E6; the
+	// announcement box warns while a competition hides names).
+	EventAnnouncement:       {class: sseEventPasses},
+	EventDrawGenerated:      {class: sseEventPasses},
+	EventDrawDiscarded:      {class: sseEventPasses},
+	EventBracketQuarantined: {class: sseEventPasses},
+	EventLineupUpdated:      {class: sseEventPasses}, // competition, team and match ids
+	EventResyncRequired:     {class: sseEventPasses},
+	// Swiss never hides names (Q-swiss), and the event carries counts only.
+	EventSwissRoundGenerated: {class: sseEventPasses},
+}
+
+// sseEventClassOf is t's class; an unknown type is organiser-only.
+func sseEventClassOf(t EventType) sseEventClass {
+	if spec, ok := sseEventCatalogue[t]; ok {
+		return spec.class
+	}
+	return sseEventOrganiserOnly
+}
+
+// eventCompetitionID is the competition a masked event names: its data's
+// competitionId, read from the value when it is a map and from the
+// marshalled envelope otherwise.
+func eventCompetitionID(data any, payload []byte) string {
+	switch d := data.(type) {
+	case gin.H:
+		id, _ := d["competitionId"].(string)
+		return id
+	case map[string]any:
+		id, _ := d["competitionId"].(string)
+		return id
+	case map[string]string:
+		return d["competitionId"]
+	}
+	var probe struct {
+		Data struct {
+			CompetitionID string `json:"competitionId"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &probe); err != nil {
+		return ""
+	}
+	return probe.Data.CompetitionID
+}
+
+// project is what sub's stream is sent for e: the event as broadcast for the
+// organiser, for an event that names no one, and for a competition that
+// shows names or whose names sub may see; a masked copy otherwise. Whatever
+// cannot be judged (an unknown event type, a masked event naming no
+// competition, a competition that cannot be read, a copy that cannot be
+// built) is sent with no data, never as broadcast.
+func (h *Hub) project(e *historyEntry, sub *sseSubscriber) string {
+	names := h.names
+	if names == nil || sub == nil || sub.aud.isOrganiser() {
+		return e.payload
+	}
+	spec, known := sseEventCatalogue[e.typ]
+	if !known || spec.class == sseEventOrganiserOnly {
+		return withoutData(e)
+	}
+	if spec.class == sseEventPasses {
+		return e.payload
+	}
+	if e.compID == "" {
+		return withoutData(e)
+	}
+	comp, hides := e.judgeCompetition(names)
+	if comp == nil {
+		return withoutData(e)
+	}
+	if !hides {
+		return e.payload
+	}
+	aud := streamRevealFor(names, comp, sub.aud)
+	if aud.revealsAll(comp.ID) {
+		return e.payload
+	}
+	if len(aud.revealedCompetitors(comp.ID)) > 0 {
+		// A stream holding competitors' own links: a copy for it alone.
+		out, ok := maskEvent(names, comp, aud, e, spec)
+		if !ok {
+			return withoutData(e)
+		}
+		return out
+	}
+	return e.publicCopy(func() (string, bool) { return maskEvent(names, comp, audience{}, e, spec) })
+}
+
+// judgeCompetition is the competition e names and whether the public pages
+// hide its names, nil when the competition cannot be read. The first stream
+// to ask reads it and the rest reuse the answer, so a masked event costs one
+// read of the competition and one of the tournament however many streams are
+// open, not one per stream. The answer is kept only while the competition is
+// not written again (CompetitionWriteToken, read before the competition is,
+// so a write in between is never missed), so a replayed event is still
+// judged on the option as it stands then. The tournament's mode is chosen
+// once at creation, and a save that creates it self-run, like a restore,
+// writes the competitions it changes, which moves their tokens.
+func (e *historyEntry) judgeCompetition(names *publicNames) (*state.Competition, bool) {
+	if e.masked == nil {
+		return judgeCompetitionNow(names, e.compID)
+	}
+	e.masked.mu.Lock()
+	defer e.masked.mu.Unlock()
+	token := names.store.CompetitionWriteToken(e.compID)
+	if j := e.masked.judged; j != nil && j.token == token {
+		return j.comp, j.hides
+	}
+	comp, hides := judgeCompetitionNow(names, e.compID)
+	if comp != nil {
+		e.masked.judged = &competitionJudgement{token: token, comp: comp, hides: hides}
+	}
+	return comp, hides
+}
+
+// judgeCompetitionNow reads the competition compID and judges its names.
+func judgeCompetitionNow(names *publicNames, compID string) (*state.Competition, bool) {
+	comp, err := names.store.LoadCompetition(compID)
+	if err != nil || comp == nil {
+		return nil, false
+	}
+	return comp, names.hides(comp)
+}
+
+// publicCopy is e's public projection, built by build the first time a
+// stream needs it and shared after. A copy build could not finish (a file
+// that could not be read: the mask failed closed) is sent but not kept, so
+// the next stream builds it again.
+func (e *historyEntry) publicCopy(build func() (string, bool)) string {
+	if e.masked == nil {
+		if out, ok := build(); ok {
+			return out
+		}
+		return withoutData(e)
+	}
+	e.masked.mu.Lock()
+	defer e.masked.mu.Unlock()
+	if e.masked.done {
+		return e.masked.payload
+	}
+	out, ok := build()
+	if !ok {
+		return withoutData(e)
+	}
+	e.masked.payload, e.masked.done = out, true
+	return out
+}
+
+// streamRevealFor is what aud's reveal links unlock in comp NOW: a stream
+// keeps the audience its ticket was judged for, so the option and the
+// expiry are judged again on every event. A competition link counts only
+// while the competition gives competition links, competitors' own links only
+// while it gives per-person links, and either only while its links are open
+// (state.RevealOpen).
+func streamRevealFor(names *publicNames, comp *state.Competition, aud audience) audience {
+	wantAll := aud.competitions[comp.ID]
+	own := aud.revealedCompetitors(comp.ID)
+	if !wantAll && len(own) == 0 {
+		return audience{}
+	}
+	t, err := names.store.LoadTournament()
+	if err != nil || t == nil || !state.RevealOpen(comp, t, names.now()) {
+		return audience{}
+	}
+	switch {
+	case comp.PublicNames == state.PublicNamesCompetition && wantAll:
+		return audience{competitions: map[string]bool{comp.ID: true}}
+	case comp.PublicNames == state.PublicNamesPerson && len(own) > 0:
+		return audience{competitors: map[string]map[string]bool{comp.ID: own}}
+	}
+	return audience{}
+}
+
+// sseEnvelope is the wire envelope, read back from the stored bytes to be
+// masked. Field order matches SSEEvent's.
+type sseEnvelope struct {
+	Type EventType                  `json:"type"`
+	Data map[string]json.RawMessage `json:"data"`
+	Seq  int64                      `json:"seq"`
+}
+
+// maskEvent builds e's masked copy for aud from the stored bytes. The second
+// return is false when no copy could be built. A copy built through a mask
+// that failed closed (a file that could not be read) is still a copy, sent
+// with every unknown name as "?", but is reported as not finished, so it is
+// not shared.
+func maskEvent(names *publicNames, comp *state.Competition, aud audience, e *historyEntry, spec sseEventSpec) (string, bool) {
+	v, viewErr := names.view(comp, aud)
+	if viewErr != nil {
+		slog.Warn("mobile-app: event stream: names masked with what could be read", "competition", comp.ID, "err", viewErr)
+	}
+	var env sseEnvelope
+	if err := json.Unmarshal([]byte(e.payload), &env); err != nil || env.Data == nil {
+		return "", false
+	}
+	if err := spec.mask(env.Data, v); err != nil {
+		slog.Warn("mobile-app: event stream: an event could not be masked; sent without its data", "type", e.typ, "competition", comp.ID, "err", err)
+		return "", false
+	}
+	if v.namesHidden() {
+		env.Data["namesHidden"] = json.RawMessage("true")
+	}
+	out, err := json.Marshal(env)
+	if err != nil {
+		return "", false
+	}
+	if viewErr != nil {
+		return string(out), false
+	}
+	return string(out), true
+}
+
+// maskMatchUpdatedData masks a match_updated's result: the stored match the
+// push carried (pool, league or knockout, as a MatchResult). A push that
+// carries no result, or a null one, names no one.
+func maskMatchUpdatedData(data map[string]json.RawMessage, v maskView) error {
+	raw, ok := data["result"]
+	if !ok || string(raw) == "null" {
+		return nil
+	}
+	var m state.MatchResult
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return fmt.Errorf("match_updated result: %w", err)
+	}
+	v.match(&m)
+	b, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("match_updated result: %w", err)
+	}
+	data["result"] = b
+	return nil
+}
+
+// withoutData is e with its data dropped: its type and seq still reach the
+// stream, so the client sees no gap and refetches what it reads.
+func withoutData(e *historyEntry) string {
+	out, err := json.Marshal(SSEEvent{Type: e.typ, Seq: e.seq})
+	if err != nil {
+		return fmt.Sprintf(`{"type":%q,"data":null,"seq":%d}`, e.typ, e.seq)
+	}
+	return string(out)
+}
+
+// endOrganiserStreamsLocked ends every stream opened as the organiser, after
+// the admin password changed: a stream is judged once, when its ticket is
+// redeemed, so one opened with the old password would otherwise keep being
+// sent unmasked results and organiser-only events. The password_reset that
+// ends them is already in each stream's channel, and an ended stream sends
+// what its channel holds first. Its client asks for a new ticket with the
+// password it holds now, and is refused if that is the old one. Caller holds
+// h.mu for writing.
+func (h *Hub) endOrganiserStreamsLocked() {
+	for ch, sub := range h.clients {
+		if sub != nil && sub.aud.isOrganiser() {
+			h.unsubscribeLocked(ch)
+		}
+	}
+}
+
+// rejudgeRevealStreams judges every stream opened with reveal keys again,
+// after a tournament_updated (a competition's option, its expiry or its
+// format may have changed), and ends each one whose keys now unlock
+// something else. Its client opens a new stream with a new ticket and reads
+// again, so it shows what the keys unlock now. Streams whose keys unlock the
+// same are left open: what they are sent is judged on every event anyway
+// (streamRevealFor). The event that started this is already in every
+// stream's channel, and an ended stream sends what its channel holds before
+// it ends.
+func (h *Hub) rejudgeRevealStreams() {
+	names := h.names
+	if names == nil {
+		return
+	}
+	type held struct {
+		ch  chan historyEntry
+		sub *sseSubscriber
+	}
+	var reveal []held
+	h.mu.RLock()
+	for ch, sub := range h.clients {
+		if sub != nil && sub.reveal != "" && !sub.aud.isOrganiser() {
+			reveal = append(reveal, held{ch, sub})
+		}
+	}
+	h.mu.RUnlock()
+	if len(reveal) == 0 {
+		return
+	}
+	judged := map[string]string{}
+	var ended []chan historyEntry
+	for _, r := range reveal {
+		key, ok := judged[r.sub.reveal]
+		if !ok {
+			key = names.revealAudience(r.sub.reveal).key()
+			judged[r.sub.reveal] = key
+		}
+		if key != r.sub.aud.key() {
+			ended = append(ended, r.ch)
+		}
+	}
+	if len(ended) == 0 {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, ch := range ended {
+		h.unsubscribeLocked(ch)
+	}
+}

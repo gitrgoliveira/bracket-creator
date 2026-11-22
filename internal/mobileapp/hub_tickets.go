@@ -1,0 +1,152 @@
+package mobileapp
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
+
+// codeEventTicketInvalid: /api/events was opened with a ticket that is
+// spent, expired or unknown (401). The client asks for a new ticket.
+const codeEventTicketInvalid = "event_ticket_invalid"
+
+// codeEventTicketNotNeeded: a ticket was asked for with no password and no
+// reveal key (400). The public stream needs none.
+const codeEventTicketNotNeeded = "event_ticket_not_needed"
+
+// eventTicketTTL is how long a ticket waits to be used.
+const eventTicketTTL = 60 * time.Second
+
+// maxEventTickets bounds the tickets waiting to be used. Past it, expired
+// ones are dropped; while every one is still live, no new ticket is given
+// (503), so a flood of ticket requests cannot grow the map without bound.
+const maxEventTickets = 10000
+
+// eventTicketBytes is the size of a ticket's random part (hex on the wire).
+const eventTicketBytes = 32
+
+// eventTickets holds the event-stream tickets handed out and not yet used.
+type eventTickets struct {
+	mu sync.Mutex
+	m  map[string]eventTicket
+	// now is the clock tickets are timed by; nil is time.Now.
+	now func() time.Time
+}
+
+type eventTicket struct {
+	sub     sseSubscriber
+	expires time.Time
+}
+
+func (t *eventTickets) clock() time.Time {
+	if t.now != nil {
+		return t.now()
+	}
+	return time.Now()
+}
+
+// errTooManyEventTickets: maxEventTickets live tickets are waiting.
+var errTooManyEventTickets = errors.New("too many event-stream tickets waiting")
+
+// issueTicket hands out a single-use ticket for sub, valid eventTicketTTL.
+func (h *Hub) issueTicket(sub sseSubscriber) (string, time.Time, error) {
+	var b [eventTicketBytes]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", time.Time{}, fmt.Errorf("event ticket: %w", err)
+	}
+	ticket := hex.EncodeToString(b[:])
+	t := &h.tickets
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := t.clock()
+	if t.m == nil {
+		t.m = map[string]eventTicket{}
+	}
+	if len(t.m) >= maxEventTickets {
+		for k, e := range t.m {
+			if !now.Before(e.expires) {
+				delete(t.m, k)
+			}
+		}
+		if len(t.m) >= maxEventTickets {
+			return "", time.Time{}, errTooManyEventTickets
+		}
+	}
+	expires := now.Add(eventTicketTTL)
+	t.m[ticket] = eventTicket{sub: sub, expires: expires}
+	return ticket, expires, nil
+}
+
+// redeemTicket spends ticket: the subscriber it was handed out for, and
+// whether it was waiting and unexpired. A ticket is gone once asked for,
+// whatever the answer.
+func (h *Hub) redeemTicket(ticket string) (sseSubscriber, bool) {
+	t := &h.tickets
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e, ok := t.m[ticket]
+	if !ok {
+		return sseSubscriber{}, false
+	}
+	delete(t.m, ticket)
+	if !t.clock().Before(e.expires) {
+		return sseSubscriber{}, false
+	}
+	return e.sub, true
+}
+
+// HandleEventTicket is POST /api/events/ticket: the caller's credentials,
+// sent as headers (X-Tournament-Password, X-Reveal-Key), are judged as for a
+// public read, and a single-use ticket bound to that audience is answered,
+// {ticket, expiresAt}, to open /api/events?ticket=... within eventTicketTTL.
+// A password sent but wrong is 401, as on every public read. A reveal key
+// unlocks names on the stream only, never a write. A caller with neither is
+// the public, which opens the stream with no ticket: 400.
+func (h *Hub) HandleEventTicket() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		names := h.names
+		if names == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "event-stream tickets are not available"})
+			return
+		}
+		aud, ok := names.judge(c)
+		if !ok {
+			return
+		}
+		sub := sseSubscriber{aud: aud}
+		if !aud.isOrganiser() {
+			// Kept even when it reveals nothing now: a later change of a
+			// competition's option is judged against it again.
+			sub.reveal = c.GetHeader(revealKeyHeader)
+			if sub.reveal == "" {
+				// A caller with no credential is the public, and the public
+				// stream is opened with no ticket. Handing one out would let
+				// anyone fill the waiting tickets and lock the organiser out.
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": "A stream with no password or reveal key needs no ticket. Open /api/events without one.",
+					"code":  codeEventTicketNotNeeded,
+				})
+				return
+			}
+		}
+		ticket, expires, err := h.issueTicket(sub)
+		if errors.Is(err, errTooManyEventTickets) {
+			c.Header("Retry-After", "5")
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Too many event-stream tickets are waiting; retry shortly"})
+			return
+		}
+		if err != nil {
+			slog.Error("mobile-app: event-stream ticket not issued", "err", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ticket": ticket, "expiresAt": expires.UnixMilli()})
+	}
+}

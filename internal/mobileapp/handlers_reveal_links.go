@@ -281,7 +281,8 @@ func judgeSelfRunSwitch(store *state.Store, stored, t *state.Tournament, confirm
 // self-run tournament with a competition hiding names, and sending the save
 // again finishes the rest. Each competition keeps its reveal secret (E3). It
 // answers the 500 naming the competitions it could not change, nil when all
-// changed; the caller broadcasts tournament_updated once the tournament lands.
+// changed; the caller broadcasts tournament_updated once the tournament lands, or defers tellSwitchUnlessSaved
+// until it does.
 //
 // The listing was read before the tournament's own lock, which the lock
 // order (competitions, then the tournament) forbids holding here. A second
@@ -306,6 +307,17 @@ func applySelfRunSwitch(hub *Hub, store *state.Store, targets []publicNamesTarge
 		"error":        fmt.Sprintf("The tournament was not saved: these competitions could not be changed to show names: %s. Save again to retry.", strings.Join(failed, ", ")),
 		"competitions": failed,
 	}}
+}
+
+// tellSwitchUnlessSaved is deferred by a tournament save that ran
+// applySelfRunSwitch: when the save then fails (saved is still false), the
+// competitions are already showing names while the tournament is not
+// self-run, so open pages and streams are told now, as they are when the
+// switch itself fails part way. A save that lands broadcasts for itself.
+func tellSwitchUnlessSaved(hub *Hub, targets []publicNamesTarget, saved *bool) {
+	if len(targets) > 0 && !*saved {
+		hub.Broadcast(EventTournamentUpdated, nil)
+	}
 }
 
 // revealLinksResponse is GET /api/competitions/:id/reveal-links: what the

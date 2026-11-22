@@ -196,4 +196,44 @@ describe('Court calls through the outbox (bc-obox)', () => {
       c.restore();
     }
   });
+  // The call is announced to every public screen as typed, so a competition
+  // that hides names on the public pages is called by number, never by name.
+  describe('a competition that hides names', () => {
+    const numbered = (id, name, number) => ({ ...courtSide(id, name), number });
+    const feed = () => [courtMatch('m1', 'scheduled', {
+      sideA: numbered('m1-a', 'Alice Arai', 'K1'), sideB: numbered('m1-b', 'Bob Baba', 'K2'),
+    })];
+    const sent = async (opts) => {
+      window.API.sendAnnouncement = vi.fn(async () => callAnswer('ann-1').answer);
+      const c = await mountCourt(feed(), opts);
+      try {
+        await tapCall(c);
+        return window.API.sendAnnouncement.mock.calls[0][0];
+      } finally { c.restore(); }
+    };
+
+    it('is called by number', async () => {
+      const msg = await sent({ comps: [{ id: 'c1', name: 'Cup', publicNames: 'hidden' }] });
+      expect(msg).toBe('Now calling K2 and K1 to Shiaijo A.');
+    });
+
+    it('is called by side colour when a side has no number yet', async () => {
+      window.API.sendAnnouncement = vi.fn(async () => callAnswer('ann-1').answer);
+      const c = await mountCourt([courtMatch('m1', 'scheduled')], { comps: [{ id: 'c1', name: 'Cup', publicNames: 'person' }] });
+      try {
+        await tapCall(c);
+        expect(window.API.sendAnnouncement.mock.calls[0][0]).toBe('Now calling Shiro and Aka to Shiaijo A.');
+      } finally { c.restore(); }
+    });
+
+    it('is called by name in a self-run tournament, which always shows names', async () => {
+      const msg = await sent({ comps: [{ id: 'c1', name: 'Cup', publicNames: 'hidden' }], tournament: { mode: 'self-run' } });
+      expect(msg).toBe('Now calling Bob Baba and Alice Arai to Shiaijo A.');
+    });
+
+    it('is called by name when the competition shows names', async () => {
+      const msg = await sent({ comps: [{ id: 'c1', name: 'Cup' }] });
+      expect(msg).toBe('Now calling Bob Baba and Alice Arai to Shiaijo A.');
+    });
+  });
 });

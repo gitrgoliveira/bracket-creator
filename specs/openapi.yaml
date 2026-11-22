@@ -509,7 +509,11 @@ paths:
         A password sent but wrong is `401` `invalid admin password`. A reveal key
         unlocks names on the stream only, never a write. The reveal keys are kept
         with the ticket, so a later change of a competition's option is judged
-        against them again.
+        against them again. A caller with neither a password nor a reveal key is
+        the public, which opens `GET /api/events` with no ticket: it is answered
+        `400` `event_ticket_not_needed`. When the admin password changes, the
+        streams opened with the old one are ended after the `password_reset`
+        event, so their clients ask for a new ticket.
       security: []
       parameters:
         - $ref: '#/components/parameters/OptionalTournamentPassword'
@@ -524,6 +528,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EventTicket'
+        '400':
+          description: >
+            No password and no reveal key were sent (`code: event_ticket_not_needed`).
+            The public stream needs no ticket.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/InvalidPassword'
         '500':

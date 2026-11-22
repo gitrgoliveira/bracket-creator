@@ -984,6 +984,8 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		if answerPublicNames(c, refusal, err) || answerPublicNames(c, applySelfRunSwitch(hub, store, switchTargets), nil) {
 			return
 		}
+		saved := false
+		defer tellSwitchUnlessSaved(hub, switchTargets, &saved)
 		// Track whether the persisted password actually changed so we
 		// can fire EventPasswordReset (in addition to
 		// EventTournamentUpdated) and other admin sessions log out
@@ -1134,6 +1136,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			internalError(c, err)
 			return
 		}
+		saved = true
 		// The default landed; now the competitions it was confirmed for. The
 		// broadcast below tells open pages and streams either way.
 		var publicNamesFailed []string
@@ -1359,11 +1362,14 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		if answerPublicNames(c, refusal, err) || answerPublicNames(c, applySelfRunSwitch(hub, store, switchTargets), nil) {
 			return
 		}
+		saved := false
+		defer tellSwitchUnlessSaved(hub, switchTargets, &saved)
 
 		if _, err := store.SaveTournamentChanged(&t); err != nil {
 			internalError(c, err)
 			return
 		}
+		saved = true
 
 		// The default landed; now the competitions it was confirmed for.
 		var publicNamesFailed []string

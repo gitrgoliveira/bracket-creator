@@ -193,3 +193,33 @@ func TestPublicNames_SelfRunSwitchPartialFailureIsA500AndTellsOpenPages(t *testi
 		})
 	}
 }
+
+// The competitions are changed before the tournament is written. When the
+// tournament then cannot be saved, they already show names while the
+// tournament is not self-run, so open pages are told.
+func TestPublicNames_SelfRunSwitchThenFailedTournamentSaveTellsOpenPages(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		t.Run(method, func(t *testing.T) {
+			f := newPartialFailureFixture(t, "")
+			f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout, PublicNames: state.PublicNamesHidden})
+			// The folder refuses a new tournament.md, while the competition's
+			// own folder still takes the switch.
+			require.NoError(t, os.Chmod(f.dir, 0o555))
+			t.Cleanup(func() { _ = os.Chmod(f.dir, 0o755) })
+			events := f.hub.Subscribe()
+			defer f.hub.Unsubscribe(events)
+
+			body := map[string]any{
+				"name": "New", "date": "01-06-2026", "courts": []string{"A"}, "password": publicNamesPassword,
+				"mode": state.TournamentModeSelfRun, "confirmShowNames": true,
+			}
+			if method == http.MethodPut {
+				body = withStoredTournamentVersion(t, f.store, body)
+			}
+			w := f.send(method, "/api/tournament", "", body)
+			require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+			assert.Equal(t, state.PublicNamesShown, f.comp(t, "c1").PublicNames, "the switch landed before the save failed")
+			assert.Positive(t, tournamentUpdates(events), "open pages are told the competition shows names")
+		})
+	}
+}

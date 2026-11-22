@@ -1224,3 +1224,70 @@ func TestRejudgeRevealStreams_EndsOnlyChangedStreams(t *testing.T) {
 	assert.True(t, publicOpen, "a public stream is never ended for an option change")
 	h.Close()
 }
+
+// A caller with no credential is the public, which opens the stream with no
+// ticket, so it is handed none and cannot fill the tickets waiting.
+func TestEventTicket_RefusesACallerWithNoCredential(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	r, h := ticketRouter(f)
+
+	w := askTicket(t, r, nil)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), codeEventTicketNotNeeded)
+	assert.Empty(t, h.tickets.m, "no ticket was kept for the public")
+
+	w = askTicket(t, r, map[string]string{"X-Tournament-Password": "secret-pw"})
+	assert.Equal(t, http.StatusOK, w.Code, "the organiser still gets one")
+	w = askTicket(t, r, map[string]string{revealKeyHeader: "juniors:" + state.CompetitionRevealKey(f.comp)})
+	assert.Equal(t, http.StatusOK, w.Code, "so does a caller holding a reveal key")
+	assert.Len(t, h.tickets.m, 2)
+}
+
+// A stream is judged once, when it opens, so a changed admin password ends
+// the organiser's streams (after the event that tells them) and leaves the
+// public's open.
+func TestBroadcast_PasswordResetEndsOrganiserStreams(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	h := hubWithNames(f)
+	organiser, _, _, _ := h.subscribeWithReplayFor(0, &sseSubscriber{aud: organiserAudience()})
+	public, _, _, _ := h.subscribeWithReplayFor(0, &sseSubscriber{})
+	require.NotNil(t, organiser)
+	require.NotNil(t, public)
+
+	h.Broadcast(EventPasswordReset, passwordResetEventData{})
+	msg, ok := <-organiser
+	require.True(t, ok, "the event is delivered before the stream ends")
+	assert.Equal(t, EventPasswordReset, msg.typ)
+	_, ok = <-organiser
+	assert.False(t, ok, "the organiser's stream ended so it asks for a new ticket")
+
+	h.mu.RLock()
+	_, publicOpen := h.clients[public]
+	h.mu.RUnlock()
+	assert.True(t, publicOpen, "a public stream is never ended for a password change")
+	h.Close()
+}
+
+// The competition a masked event names is read and judged once for every
+// stream, and again once the competition has been written.
+func TestHubProject_JudgesTheCompetitionOncePerWrite(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+	require.Nil(t, e.masked.judged)
+
+	h.project(e, &sseSubscriber{})
+	first := e.masked.judged
+	require.NotNil(t, first)
+	assert.True(t, first.hides)
+	h.project(e, &sseSubscriber{aud: audience{competitors: map[string]map[string]bool{"juniors": {pnAlice: true}}}})
+	assert.Same(t, first, e.masked.judged, "a second stream reuses the judgement")
+
+	f.comp.PublicNames = state.PublicNamesShown
+	require.NoError(t, f.store.SaveCompetition(f.comp))
+	h.project(e, &sseSubscriber{})
+	assert.NotSame(t, first, e.masked.judged, "a written competition is judged again")
+	assert.False(t, e.masked.judged.hides)
+}

@@ -93,8 +93,9 @@ make docs/clean        # Remove .venv-docs and the built site/
 # docs/requirements.txt. Never call zensical (or a system mkdocs) directly for
 # verification; use make docs/build. The deploy (.github/workflows/doc.yaml)
 # runs the same target, then docs/publish_docs.py publishes a VERSION with
-# mike (Zensical's fork): main as `dev`, each release tag from v2.5 as its
-# MAJOR.MINOR folder, the newest as `latest` (the site root's default). Plain
+# mike (Zensical's fork): main as `dev`, a release tag from v2.5 that is the
+# newest of its line as its MAJOR.MINOR folder, the newest of all also as
+# `latest` (the site root's default). Prereleases publish nothing. Plain
 # pushes to gh-pages, never a force push. Never run publish_docs.py --push from
 # a checkout whose origin is GitHub: it publishes the live site (a rehearsal
 # did, 2026-11-22). Rehearse in a scratch clone whose origin is a local bare repo.

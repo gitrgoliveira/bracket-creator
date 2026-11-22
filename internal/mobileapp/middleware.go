@@ -191,9 +191,15 @@ func requireExistingCompetition(c *gin.Context, comps CompetitionStore, compID s
 	return ok
 }
 
+// competitionLoader is the one store method loadExistingCompetition needs, so a
+// handler family whose own store interface is narrower can ask it too.
+type competitionLoader interface {
+	LoadCompetition(id string) (*state.Competition, error)
+}
+
 // loadExistingCompetition is requireExistingCompetition for a caller that
 // also needs the competition it found.
-func loadExistingCompetition(c *gin.Context, comps CompetitionStore, compID string) (*state.Competition, bool) {
+func loadExistingCompetition(c *gin.Context, comps competitionLoader, compID string) (*state.Competition, bool) {
 	comp, err := comps.LoadCompetition(compID)
 	if err != nil {
 		internalError(c, err)

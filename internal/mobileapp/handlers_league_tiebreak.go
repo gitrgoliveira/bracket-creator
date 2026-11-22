@@ -233,21 +233,16 @@ func registerPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 		if !ok {
 			return
 		}
-		v, ok := publicReadView(c, names, id)
+		v, comp, ok := publicReadViewOf(c, names, id)
 		if !ok {
 			return
 		}
-
-		comp, err := store.LoadCompetition(id)
-		if err != nil {
-			// Public endpoint: don't leak internal store error strings.
-			log.Printf("league-tiebreak candidates LoadCompetition(%s): %v", id, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-			return
-		}
 		if comp == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-			return
+			// No judge, or no such competition: the store answers (a public
+			// endpoint, so internalError leaks no store error string).
+			if _, ok := loadExistingCompetition(c, store, id); !ok {
+				return
+			}
 		}
 
 		candidates, err := eng.LeagueTiebreakCandidates(id)

@@ -1268,6 +1268,29 @@ func TestBroadcast_PasswordResetEndsOrganiserStreams(t *testing.T) {
 	h.Close()
 }
 
+// A masked copy built before the competition was written is built again after
+// it, while the names are still hidden: a changed number reads as the new one.
+func TestHubProject_PublicCopyFollowsAWrittenCompetition(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+	assert.Contains(t, h.project(e, &sseSubscriber{}), `"sideA":"K1"`)
+
+	pools, err := f.store.LoadPools(f.comp.ID)
+	require.NoError(t, err)
+	for i := range pools[0].Players {
+		pools[0].Players[i].Number = "Z" + string(rune('1'+i))
+	}
+	require.NoError(t, f.store.SavePools(f.comp.ID, pools))
+	warmMask(t, f)
+
+	public := h.project(e, &sseSubscriber{})
+	assert.Contains(t, public, `"sideA":"Z1"`, "the copy is built again once the competition was written")
+	assert.NotContains(t, public, "Alice Arai")
+}
+
 // The competition a masked event names is read and judged once for every
 // stream, and again once the competition has been written.
 func TestHubProject_JudgesTheCompetitionOncePerWrite(t *testing.T) {

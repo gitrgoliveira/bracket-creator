@@ -251,11 +251,8 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !ok {
 			return
 		}
-		v, ok := publicReadView(c, names, compID)
+		v, ok := publicReadExisting(c, names, comps, compID)
 		if !ok {
-			return
-		}
-		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
 		lineups, err := store.LoadTeamLineups(compID)
@@ -279,11 +276,8 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !ok {
 			return
 		}
-		v, ok := publicReadView(c, names, compID)
+		v, ok := publicReadExisting(c, names, comps, compID)
 		if !ok {
-			return
-		}
-		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
 		lineups, err := store.LoadTeamLineups(compID)
@@ -309,11 +303,8 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !ok {
 			return
 		}
-		v, ok := publicReadView(c, names, compID)
+		v, ok := publicReadExisting(c, names, comps, compID)
 		if !ok {
-			return
-		}
-		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
 		in, err := eng.LineupInForce(compID, teamID, matchID)
@@ -437,22 +428,44 @@ func judgePublicRead(c *gin.Context, names *publicNames) bool {
 // the read answers its own 404. With no judge (names nil: a test mounting the
 // reads alone) every caller reads the names as stored.
 func publicReadView(c *gin.Context, names *publicNames, compID string) (maskView, bool) {
+	v, _, ok := publicReadViewOf(c, names, compID)
+	return v, ok
+}
+
+// publicReadViewOf is publicReadView that also gives the competition it read,
+// so a read that needs the competition does not load it a second time. The
+// competition is nil when there is no judge or the competition does not exist.
+func publicReadViewOf(c *gin.Context, names *publicNames, compID string) (maskView, *state.Competition, bool) {
 	if names == nil {
-		return maskView{}, true
+		return maskView{}, nil, true
 	}
 	aud, ok := names.judge(c)
 	if !ok {
-		return maskView{}, false
+		return maskView{}, nil, false
 	}
 	comp, err := names.store.LoadCompetition(compID)
 	if err != nil {
 		internalError(c, err)
-		return maskView{}, false
+		return maskView{}, nil, false
 	}
 	if comp == nil {
-		return maskView{}, true
+		return maskView{}, nil, true
 	}
-	return viewerMaskView(names, comp, aud), true
+	return viewerMaskView(names, comp, aud), comp, true
+}
+
+// publicReadExisting is publicReadView for a read that answers 404 for an
+// unknown competition: the competition the judge's own read found is not asked
+// for again, and with no judge or no such competition comps answers it.
+func publicReadExisting(c *gin.Context, names *publicNames, comps CompetitionStore, compID string) (maskView, bool) {
+	v, comp, ok := publicReadViewOf(c, names, compID)
+	if !ok {
+		return maskView{}, false
+	}
+	if comp == nil && !requireExistingCompetition(c, comps, compID) {
+		return maskView{}, false
+	}
+	return v, true
 }
 
 // kachinukiRosterRead is the kachinuki roster read's answer: the engine's

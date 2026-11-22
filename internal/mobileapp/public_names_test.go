@@ -588,6 +588,45 @@ func TestPublicNamesView_SelfRunAlwaysShowsNames(t *testing.T) {
 	assert.True(t, f.pn.hides(f.comp), "switched back to officiated, the setting applies again")
 }
 
+// A real name that equals its own mask (a competitor named "?" or by their own
+// number) is still masked: the zekken name goes with it, never left readable.
+func TestMaskCurrentMatchPayload_NameEqualToItsMaskStillMasksTheZekkenName(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	v, err := f.pn.view(f.comp, audience{})
+	require.NoError(t, err)
+	require.True(t, v.namesHidden())
+
+	payload := gin.H{
+		"sideA": gin.H{"playerId": pnAlice, "name": "K1", "displayName": "ARAI"},
+		"sideB": gin.H{"playerId": "unknown-id", "name": maskedUnknown, "displayName": "BABA"},
+	}
+	maskCurrentMatchPayload(v, payload)
+	a, b := payload["sideA"].(gin.H), payload["sideB"].(gin.H)
+	assert.Equal(t, "K1", a["displayName"], "a name equal to the competitor's number still masks the zekken name")
+	assert.Equal(t, maskedUnknown, b["displayName"], "a name equal to the unknown-competitor mark still masks the zekken name")
+}
+
+// Reveal links with a RevealUntil of their own work before tournament.md exists,
+// as state.RevealOpen and the reveal-links read say they do.
+func TestRevealAudience_NoTournamentYet(t *testing.T) {
+	store := newTempStore(t) // no tournament saved: LoadTournament answers nil
+	secret, err := state.NewRevealSecret()
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "juniors", Name: "Juniors", Kind: "individual", Format: state.CompFormatKnockout,
+		PublicNames: state.PublicNamesCompetition, RevealSecret: secret, RevealUntil: "2099-01-01T10:00",
+	}))
+	comp, err := store.LoadCompetition("juniors")
+	require.NoError(t, err)
+	pn := newPublicNames(store, NewFileVerifier(store))
+
+	aud := pn.revealAudience("juniors:" + state.CompetitionRevealKey(comp))
+	assert.True(t, aud.revealsAll("juniors"), "the link reveals the names")
+	own := streamRevealFor(pn, comp, audience{competitions: map[string]bool{"juniors": true}})
+	assert.True(t, own.revealsAll("juniors"), "a stream holding the link keeps what it unlocks")
+}
+
 func TestPublicNamesView_UnknownCompetitionFailsClosed(t *testing.T) {
 	f := newPNFixture(t, state.PublicNamesHidden)
 	ghost := &state.Competition{ID: "ghost", PublicNames: state.PublicNamesHidden}

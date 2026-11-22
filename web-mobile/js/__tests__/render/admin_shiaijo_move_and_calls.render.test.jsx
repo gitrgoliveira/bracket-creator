@@ -231,6 +231,11 @@ describe('Court calls through the outbox (bc-obox)', () => {
       expect(msg).toBe('Now calling Bob Baba and Alice Arai to Shiaijo A.');
     });
 
+    it('is called by team name in a team competition, whose team names stay visible', async () => {
+      const msg = await sent({ comps: [{ id: 'c1', name: 'Cup', kind: 'team', teamSize: 5, publicNames: 'hidden' }] });
+      expect(msg).toBe('Now calling Bob Baba and Alice Arai to Shiaijo A.');
+    });
+
     it('is called by name when the competition shows names', async () => {
       const msg = await sent({ comps: [{ id: 'c1', name: 'Cup' }] });
       expect(msg).toBe('Now calling Bob Baba and Alice Arai to Shiaijo A.');

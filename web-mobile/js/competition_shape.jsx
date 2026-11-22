@@ -405,13 +405,16 @@ export function checkInApplies(tournament, checkInEnabled) {
 }
 // Whether the public pages show comp's competitors by number rather than name
 // right now: the client mirror of the server's publicNames.hides (the
-// competition's setting hides them, and the tournament is not self-run, which
-// always shows names). Asked by anything the console writes for the public
-// that would otherwise carry a name, such as a court call.
+// competition's setting hides them, the tournament is not self-run, which
+// always shows names, and the competition is not a team one, whose team names
+// stay visible while only its team members' names are hidden). Asked by
+// anything the console writes for the public that would otherwise carry a
+// name, such as a court call.
 export function competitionHidesNames(tournament, comp) {
   const v = comp && comp.publicNames;
   const hidingValues = ["person", "competition", "hidden"];
-  return hidingValues.includes(v) && !(tournament && tournament.mode === "self-run");
+  const isTeam = !!comp && (comp.kind === "team" || Number(comp.teamSize) > 0);
+  return hidingValues.includes(v) && !isTeam && !(tournament && tournament.mode === "self-run");
 }
 // Whether "Shuffle unseeded" (Participants) can change anything: it reorders
 // the unseeded competitors only, so it needs at least two of them, and sends

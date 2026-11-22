@@ -199,6 +199,9 @@ func (e *historyEntry) judgeCompetition(names *publicNames) (*state.Competition,
 	if j := e.masked.judged; j != nil && j.token == token {
 		return j.comp, j.hides
 	}
+	// The competition was written since the public copy was built (a number
+	// prefix or a team roster changed), so that copy is stale: build it again.
+	e.masked.done, e.masked.payload = false, ""
 	comp, hides := judgeCompetitionNow(names, e.compID)
 	if comp != nil {
 		e.masked.judged = &competitionJudgement{token: token, comp: comp, hides: hides}
@@ -252,7 +255,7 @@ func streamRevealFor(names *publicNames, comp *state.Competition, aud audience) 
 		return audience{}
 	}
 	t, err := names.store.LoadTournament()
-	if err != nil || t == nil || !state.RevealOpen(comp, t, names.now()) {
+	if err != nil || !state.RevealOpen(comp, t, names.now()) {
 		return audience{}
 	}
 	switch {

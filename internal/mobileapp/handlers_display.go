@@ -429,9 +429,9 @@ func maskCurrentMatchPayload(v maskView, payload gin.H) gin.H {
 		}
 		name, _ := side["name"].(string)
 		id, _ := side["playerId"].(string)
-		if masked := v.side(name, id); masked != name {
-			side["name"] = masked
-			side["displayName"] = masked
+		if reading, masked := v.sideReading(name, id); masked {
+			side["name"] = reading
+			side["displayName"] = reading
 		}
 	}
 	stampNamesHidden(payload, v)

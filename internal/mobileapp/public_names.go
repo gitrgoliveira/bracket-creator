@@ -217,8 +217,10 @@ func (p *publicNames) revealAudience(header string) audience {
 	if len(entries) == 0 {
 		return audience{}
 	}
+	// A missing tournament (nil, no tournament.md yet) is no refusal: a
+	// competition's own RevealUntil still opens its links (state.RevealOpen).
 	t, err := p.store.LoadTournament()
-	if err != nil || t == nil {
+	if err != nil {
 		return audience{}
 	}
 	now := p.now()
@@ -366,19 +368,28 @@ func (v maskView) revealed(id string) bool { return id != "" && v.reveal[id] }
 // reads "?". An empty side (a bye) and the draw's placeholders ("Winner of
 // ...", "Pool A-1st") are not competitors and stay as they are.
 func (v maskView) side(name, id string) string {
+	reading, _ := v.sideReading(name, id)
+	return reading
+}
+
+// sideReading is side's answer and whether the side was masked at all, so a
+// caller never has to compare the reading with the name to tell: a real name
+// that happens to equal its own mask ("?" or the competitor's number) reads
+// the same either way.
+func (v maskView) sideReading(name, id string) (string, bool) {
 	if v.m == nil || v.m.team || v.revealed(id) {
-		return name
+		return name, false
 	}
 	if id != "" {
 		if n := v.m.numbers[id]; n != "" {
-			return n
+			return n, true
 		}
-		return maskedUnknown
+		return maskedUnknown, true
 	}
 	if name == "" || helper.IsWinnerOfPlaceholder(name) || helper.IsPoolFinalistPlaceholder(name) {
-		return name
+		return name, false
 	}
-	return maskedUnknown
+	return maskedUnknown, true
 }
 
 // players masks a roster copy in place. An individual's Name and DisplayName

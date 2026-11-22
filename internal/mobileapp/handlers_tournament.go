@@ -980,7 +980,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 				return
 			}
 		}
-		if !showNamesForSelfRun(c, store, stored, &t, req.ConfirmShowNames) {
+		if !showNamesForSelfRun(c, hub, store, stored, &t, req.ConfirmShowNames) {
 			return
 		}
 		// Track whether the persisted password actually changed so we
@@ -1360,7 +1360,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if !showNamesForSelfRun(c, store, existingForPost, &t, confirm.ConfirmShowNames) {
+		if !showNamesForSelfRun(c, hub, store, existingForPost, &t, confirm.ConfirmShowNames) {
 			return
 		}
 

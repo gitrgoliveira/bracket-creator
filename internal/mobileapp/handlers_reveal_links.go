@@ -231,7 +231,7 @@ func publicNamesHidingTargets(comps []*state.Competition) []publicNamesTarget {
 // again finishes the rest. Each competition keeps its reveal secret (E3).
 // ok is false when the answer has been written; the caller broadcasts
 // tournament_updated once the tournament lands.
-func showNamesForSelfRun(c *gin.Context, store *state.Store, stored, t *state.Tournament, confirmed bool) bool {
+func showNamesForSelfRun(c *gin.Context, hub *Hub, store *state.Store, stored, t *state.Tournament, confirmed bool) bool {
 	if stored != nil || !t.IsSelfRun() {
 		return true
 	}
@@ -252,7 +252,13 @@ func showNamesForSelfRun(c *gin.Context, store *state.Store, stored, t *state.To
 		})
 		return false
 	}
-	if _, failed := applyPublicNamesDefault(store, targets, state.PublicNamesShown); len(failed) > 0 {
+	changed, failed := applyPublicNamesDefault(store, targets, state.PublicNamesShown)
+	if len(failed) > 0 {
+		// The competitions that did change are already showing names: tell
+		// open pages now, as the tournament save's own failure path does.
+		if changed {
+			hub.Broadcast(EventTournamentUpdated, nil)
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":        fmt.Sprintf("The tournament was not saved: these competitions could not be changed to show names: %s. Save again to retry.", strings.Join(failed, ", ")),
 			"competitions": failed,

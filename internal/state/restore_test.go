@@ -814,6 +814,32 @@ func TestRestore_WarnsWhenACompetitionThatHidesNamesComesBackIntoASelfRunTournam
 	}
 }
 
+func TestRestore_TheWarningNamesTheCopyNotTheArchivedCompetition(t *testing.T) {
+	src, _ := newRestoreTestStore(t)
+	restoreTestTournament(t, src, "pw", "A", "B")
+	addRestoreComp(t, src, "men", "Men", "M", MatchStatusScheduled, "A")
+	hiding, err := src.LoadCompetition("men")
+	require.NoError(t, err)
+	hiding.PublicNames = PublicNamesHidden
+	require.NoError(t, src.SaveCompetition(hiding))
+
+	dst, _ := newRestoreTestStore(t)
+	require.NoError(t, dst.SaveTournament(&Tournament{
+		Name: "Self Run Taikai", Date: "03-11-2026", Courts: []string{"A", "B"}, Password: "pw",
+		DurationDays: 1, Mode: TournamentModeSelfRun,
+	}))
+	addRestoreComp(t, dst, "men", "Men", "M", MatchStatusScheduled, "A")
+
+	plan, err := dst.PlanRestore(RestoreRequest{
+		Archive:   archiveOf(t, src, ScopeCompetition, "men"),
+		Decisions: map[string]RestoreDecision{"men": {Action: RestoreCopy, CopyName: "Men Copy"}},
+	})
+	require.NoError(t, err)
+	warned := warningsWithCode(plan.Warnings, RestoreWarnPublicNamesSelfRun)
+	require.Len(t, warned, 1)
+	assert.Contains(t, warned[0].Message, "Men Copy hides competitor names")
+}
+
 func TestRestore_TournamentRestoreRequeuesRunningPoolAndBracketMatches(t *testing.T) {
 	src, _ := newRestoreTestStore(t)
 	restoreTestTournament(t, src, "pw", "A", "B")

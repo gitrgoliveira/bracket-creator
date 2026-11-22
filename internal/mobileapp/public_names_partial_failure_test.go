@@ -1,7 +1,7 @@
 package mobileapp
 
 // A tournament save that sets competitions' public names but cannot change
-// every one of them: the tournament default's apply (PUT) and the self-run
+// every one of them: the tournament default's apply (PUT and POST) and the self-run
 // switch (POST and PUT) each answer 500 naming the competitions left as they
 // were, tell open pages about the ones that did change, and finish the rest
 // when the same save is sent again.
@@ -114,6 +114,40 @@ func TestPublicNames_DefaultApplyPartialFailureIsA500AndSendingAgainFinishesIt(t
 	unlock()
 	w = f.admin(http.MethodPut, "/api/tournament", body())
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, state.PublicNamesPerson, f.comp(t, "c2").PublicNames)
+}
+
+// The POST door runs the same apply after its save, so a competition it cannot
+// write is answered the same 500 naming it, and sending the POST again
+// finishes the rest.
+func TestPublicNames_PostDefaultApplyPartialFailureIsA500AndSendingAgainFinishesIt(t *testing.T) {
+	f := newPartialFailureFixture(t, state.TournamentModeOfficiated)
+	f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout})
+	f.saveComp(t, &state.Competition{ID: "c2", Name: "Shiai", Kind: "individual", Format: state.CompFormatKnockout})
+	unlock := f.lockCompetition(t, "c2")
+	events := f.hub.Subscribe()
+	defer f.hub.Unsubscribe(events)
+	stored, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	body := map[string]any{
+		"name": stored.Name, "date": stored.Date, "courts": stored.Courts, "password": publicNamesPassword,
+		"mode": stored.Mode, "defaultPublicNames": state.PublicNamesPerson, "confirmPublicNames": true,
+	}
+
+	w := f.admin(http.MethodPost, "/api/tournament", body)
+	require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+	assert.Equal(t, []string{"c2"}, failedCompetitions(t, w.Body.Bytes()))
+	assert.Contains(t, w.Body.String(), "Save again to retry")
+	after, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, state.PublicNamesPerson, after.DefaultPublicNames, "the settings themselves were saved")
+	assert.Equal(t, state.PublicNamesPerson, f.comp(t, "c1").PublicNames)
+	assert.Empty(t, f.comp(t, "c2").PublicNames, "the competition that could not be written keeps its option")
+	assert.Positive(t, tournamentUpdates(events), "open pages are told what changed")
+
+	unlock()
+	w = f.admin(http.MethodPost, "/api/tournament", body)
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 	assert.Equal(t, state.PublicNamesPerson, f.comp(t, "c2").PublicNames)
 }
 

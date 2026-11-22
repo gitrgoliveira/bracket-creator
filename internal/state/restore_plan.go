@@ -487,7 +487,11 @@ func checkRestorePublicNames(tournament bool, inPlace []string, ai *restoreArchi
 		})
 	}
 	for _, t := range w.targets {
-		warnHidden(t.dstID, ai.names[t.srcID], ai.comps[t.srcID])
+		name := ai.names[t.srcID]
+		if t.action == RestoreCopy {
+			name = t.name // the copy is what comes back, under its new name
+		}
+		warnHidden(t.dstID, name, ai.comps[t.srcID])
 	}
 	for _, id := range inPlace {
 		warnHidden(id, competitionName(live, id), live.comps[id])

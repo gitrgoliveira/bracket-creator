@@ -34,6 +34,14 @@ const maxEventTickets = 10000
 // never the room the organiser's console needs to open its stream.
 const organiserTicketReserve = 1000
 
+// maxIdleEventTickets bounds the waiting tickets of callers whose reveal keys
+// reveal nothing now (a key of a closed or expired link, or one made up: a
+// well-formed key is ticketed whether or not it is the competition's, since a
+// later change of an option is judged against it). Past it, such a caller is
+// refused, so an anonymous flood of invented keys cannot take the room phones
+// holding a real key need.
+const maxIdleEventTickets = 1000
+
 // eventTicketBytes is the size of a ticket's random part (hex on the wire).
 const eventTicketBytes = 32
 
@@ -48,6 +56,21 @@ type eventTickets struct {
 type eventTicket struct {
 	sub     sseSubscriber
 	expires time.Time
+	// idle: the subscriber is no organiser and holds no key that reveals
+	// anything now (counted against maxIdleEventTickets).
+	idle bool
+}
+
+// idleTickets counts the waiting tickets that reveal nothing. Call it with
+// the lock held.
+func (t *eventTickets) idleTickets() int {
+	n := 0
+	for _, e := range t.m {
+		if e.idle {
+			n++
+		}
+	}
+	return n
 }
 
 func (t *eventTickets) clock() time.Time {
@@ -78,18 +101,22 @@ func (h *Hub) issueTicket(sub sseSubscriber) (string, time.Time, error) {
 	if !sub.aud.isOrganiser() {
 		limit -= organiserTicketReserve
 	}
-	if len(t.m) >= limit {
-		for k, e := range t.m {
-			if !now.Before(e.expires) {
+	idle := !sub.aud.isOrganiser() && sub.aud.key() == audiencePublic
+	expires := now.Add(eventTicketTTL)
+	full := func() bool {
+		return len(t.m) >= limit || (idle && t.idleTickets() >= maxIdleEventTickets)
+	}
+	if full() {
+		for k, old := range t.m {
+			if !now.Before(old.expires) {
 				delete(t.m, k)
 			}
 		}
-		if len(t.m) >= limit {
+		if full() {
 			return "", time.Time{}, errTooManyEventTickets
 		}
 	}
-	expires := now.Add(eventTicketTTL)
-	t.m[ticket] = eventTicket{sub: sub, expires: expires}
+	t.m[ticket] = eventTicket{sub: sub, expires: expires, idle: idle}
 	return ticket, expires, nil
 }
 

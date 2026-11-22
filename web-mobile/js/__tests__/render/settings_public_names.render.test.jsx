@@ -88,7 +88,9 @@ describe('Settings: competitor names on public pages', () => {
     const buttons = Array.from(panel.querySelectorAll('button'));
     expect(buttons.find((b) => b.textContent === 'Copy link')).toBeTruthy();
     expect(buttons.find((b) => b.textContent === 'Show QR code to print').disabled).toBe(true);
-    expect(panel.querySelector('[data-testid="reveal-links-no-public-url"]')).toBeTruthy();
+    const warning = panel.querySelector('[data-testid="reveal-links-no-public-url"]');
+    expect(warning).toBeTruthy();
+    expect(warning.textContent).toContain('a copied link');
     expect(panel.textContent).toContain('2026-11-23 at 01:00');
   });
 

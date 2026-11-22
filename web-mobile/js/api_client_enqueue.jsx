@@ -358,6 +358,12 @@ function _placeWrite(base, descriptor) {
     const docField = DOC_VERSION_FIELD[descriptor.kind];
     if (docField) {
         descriptor.payload = { ...descriptor.payload, [docField]: prev.payload ? prev.payload[docField] : descriptor.payload[docField] };
+        // The organiser's confirmation that the new public-names default is
+        // applied to every competition stands for the save that takes its
+        // place: the server judges the merged save against the stored default.
+        if (prev.payload && prev.payload.confirmPublicNames) {
+            descriptor.payload.confirmPublicNames = true;
+        }
         for (const k of _afterKeys(prev)) _addAfter(descriptor, k);
         return key;
     }

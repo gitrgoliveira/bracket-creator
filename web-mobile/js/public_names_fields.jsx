@@ -41,6 +41,10 @@ export const HINT_PUBLIC_NAMES_SELF_RUN = "A self-run tournament always shows na
 export const HINT_PUBLIC_NAMES_SWISS = "Showing numbers instead of names is not available for Swiss competitions yet, because a Swiss draw gives competitors no numbers to show.";
 export const HINT_PUBLIC_NAMES_APPLY = "Saving a change here also sets every competition that is not Swiss to this choice, after you confirm the list. Each competition can still be changed on its own afterwards.";
 export const WARN_PUBLIC_NAMES_FREE_TEXT = "Anything typed in the announcement box or the awards note is shown to everyone exactly as typed. Do not put competitor names in them.";
+// Said where a reveal link is copied while the tournament has no Public URL:
+// the link is built from this device's own address, which other phones may
+// not be able to open.
+export const WARN_REVEAL_LINK_NO_PUBLIC_URL = "It points at this device's own address, which other phones may not reach. Set a Public URL in the tournament details to fix that.";
 export const LABEL_REVEAL_UNTIL = "Links stop working at";
 export const HINT_REVEAL_UNTIL = "Leave empty to stop the links one hour after the tournament's closing time on its last day (at 01:00 the next morning when no closing time is set). Switching links off, or moving this time later, makes the same links work again.";
 
@@ -74,6 +78,21 @@ export function publicNamesApplyMessage(targets, value) {
   const n = targets.length;
   const names = andList(targets.map((c) => `${c.name} (now: ${publicNamesLabel(c.publicNames)})`));
   return `Saving this changes ${n === 1 ? "1 competition" : `${n} competitions`} to "${publicNamesLabel(value)}": ${names}. Each one can still be changed on its own afterwards.`;
+}
+// The server's code for a save whose changed default would change competitions
+// the save has not confirmed. It lists them as `competitions`, which can differ
+// from the form's own list (one was added or changed on another device).
+export const PUBLIC_NAMES_APPLY_CONFIRM = "public_names_apply_confirm";
+// The operator's yes to setting every listed competition to `value`; the
+// promise answers true or false. Shared by the form's own question and the one
+// the server's list asks.
+export function confirmPublicNamesApply(targets, value) {
+  return window.confirmDialog({
+    title: "Change these competitions?",
+    message: publicNamesApplyMessage(targets, value),
+    confirmLabel: "Change them all",
+    danger: publicNamesHides(value),
+  });
 }
 
 // The link a competition's QR code and the Copy button carry:

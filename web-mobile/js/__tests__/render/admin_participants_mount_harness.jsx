@@ -65,7 +65,7 @@ export async function mountParticipants(c, overrides = {}) {
     result = render(
       <AdminParticipants
         c={c}
-        tournament={{ name: 'Spring Taikai', courts: ['A'] }}
+        tournament={{ name: 'Spring Taikai', courts: ['A'], ...overrides.tournament }}
         onUpdate={overrides.onUpdate || noop}
         password=""
         showToast={overrides.showToast || noop}

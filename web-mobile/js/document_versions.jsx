@@ -57,6 +57,13 @@ export function tournamentRefusal(err, status) {
         e.code = 'tournament_changed';
         e.tournament = err.tournament || null;
     }
+    // bc-hnam: a changed public-names default the save has not confirmed: the
+    // code and the server's list of competitions it would change, which the
+    // caller asks about before sending the save again confirmed.
+    if (status === 409 && err.code === 'public_names_apply_confirm') {
+        e.code = 'public_names_apply_confirm';
+        e.competitions = Array.isArray(err.competitions) ? err.competitions : [];
+    }
     return e;
 }
 

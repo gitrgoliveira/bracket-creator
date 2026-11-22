@@ -188,7 +188,7 @@ import { MAX_EXPECTED_PARTICIPANTS } from './competition_put_body.jsx';
 import { useDraftEstimate, DraftEstimatePanel } from './draft_estimate.jsx';
 import {
   PublicNamesFields, publicNamesApplies, publicNamesHides, publicNamesHasLinks,
-  anyCompetitionHidesNames, publicNamesApplyTargets, publicNamesApplyMessage,
+  anyCompetitionHidesNames, publicNamesApplyTargets, confirmPublicNamesApply,
   HINT_PUBLIC_NAMES_APPLY, WARN_PUBLIC_NAMES_FREE_TEXT,
 } from './public_names_fields.jsx';
 
@@ -380,13 +380,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
       if (tournamentMode !== "self-run" && defaultPublicNames !== (tournament.defaultPublicNames || "")) {
         const targets = publicNamesApplyTargets(tournament.competitions, defaultPublicNames);
         if (targets.length > 0) {
-          const ok = await window.confirmDialog({
-            title: "Change these competitions?",
-            message: publicNamesApplyMessage(targets, defaultPublicNames),
-            confirmLabel: "Change them all",
-            danger: publicNamesHides(defaultPublicNames),
-          });
-          if (!ok) return;
+          if (!(await confirmPublicNamesApply(targets, defaultPublicNames))) return;
           confirmPublicNames = true;
         }
       }

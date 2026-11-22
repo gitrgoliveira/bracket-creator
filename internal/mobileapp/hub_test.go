@@ -1286,6 +1286,36 @@ func TestEventTicket_KeepsRoomForTheOrganiser(t *testing.T) {
 	assert.NoError(t, err, "the organiser still gets a ticket")
 }
 
+// A flood of well-formed keys that reveal nothing takes no more than
+// maxIdleEventTickets of the waiting tickets: a phone holding a key that
+// reveals names still gets its ticket, and so does the organiser.
+func TestEventTicket_InventedKeysCannotCrowdOutRealOnes(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	h := hubWithNames(f)
+	invented := sseSubscriber{reveal: "juniors:" + strings.Repeat("0", 64)}
+	for range maxIdleEventTickets {
+		_, _, err := h.issueTicket(invented)
+		require.NoError(t, err)
+	}
+	_, _, err := h.issueTicket(invented)
+	assert.ErrorIs(t, err, errTooManyEventTickets, "invented keys stop at their own limit")
+
+	real := sseSubscriber{
+		reveal: invented.reveal,
+		aud:    audience{competitions: map[string]bool{"juniors": true}},
+	}
+	_, _, err = h.issueTicket(real)
+	assert.NoError(t, err, "a key that reveals names still gets a ticket")
+	_, _, err = h.issueTicket(sseSubscriber{aud: organiserAudience()})
+	assert.NoError(t, err, "the organiser still gets a ticket")
+
+	// Spent or expired tickets free their room.
+	now := time.Now()
+	h.tickets.now = func() time.Time { return now.Add(eventTicketTTL) }
+	_, _, err = h.issueTicket(invented)
+	assert.NoError(t, err, "expired tickets make room")
+}
+
 // A stream is judged once, when it opens, so a changed admin password ends
 // the organiser's streams (after the event that tells them) and leaves the
 // public's open.

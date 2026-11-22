@@ -130,7 +130,7 @@ export function makeSettingsCompetition(overrides = {}) {
 
 // Mounts AdminCompetition on its settings tab for `comp` and returns whatever
 // @testing-library/react's render() returned.
-export async function mountSettings(comp, onUpdate) {
+export async function mountSettings(comp, onUpdate, tournamentOverrides = {}) {
   if (!AdminCompetition) {
     throw new Error(
       'mountSettings: AdminCompetition is not loaded. Call installSettingsHarness() ' +
@@ -141,6 +141,7 @@ export async function mountSettings(comp, onUpdate) {
     name: 'Spring Taikai',
     courts: ['A', 'B'],
     competitions: [comp, { id: 'c2', name: 'Yudansha' }],
+    ...tournamentOverrides,
   };
   let result;
   await act(async () => {

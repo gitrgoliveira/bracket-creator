@@ -28,6 +28,7 @@ import { serverHeldCheckIns, NO_CHECK_IN_HELD_SENTENCE } from './qualifier_previ
 import { isOffline, savedOfflineSentence } from './write_result.jsx';
 import { dismissToastById } from './toast_queue.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
+import { PUBLIC_NAMES_APPLY_CONFIRM, confirmPublicNamesApply } from './public_names_fields.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 
 const { useState, useEffect, useRef } = React;
@@ -738,7 +739,16 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // Surface the new password to the parent BEFORE the API call so the
         // session/store updates even if the request errors after.
         if (onPasswordChange) onPasswordChange(patch.password);
-        const saved = await window.API.updateTournamentPassword(sendBody, password);
+        let saved;
+        try {
+          saved = await window.API.updateTournamentPassword(sendBody, password);
+        } catch (e) {
+          // The server's own list of competitions the changed default would set
+          // differs from the form's: ask about it, then send the save confirmed.
+          if (!e || e.code !== PUBLIC_NAMES_APPLY_CONFIRM) throw e;
+          if (!(await confirmPublicNamesApply(e.competitions, sendBody.defaultPublicNames))) return false;
+          saved = await window.API.updateTournamentPassword({ ...sendBody, confirmPublicNames: true }, password);
+        }
         // Bail if the admin navigated away during the in-flight PUT.
         if (!mountedRef.current) return false;
         // Re-read tRef.current AFTER the await: the patch just persisted is
@@ -762,37 +772,58 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           onUpdateRef.current(tournamentFromConflict(tRef.current, copy, password, locked));
         }
       };
-      const res = await window.API.updateTournament(sendBody, password, {
-        onRefusal: (e) => {
-          // The save was not made: the "saved, goes out once the connection is
-          // back" toast is no longer true, whoever tells the refusal (shown or
-          // still queued behind another toast).
-          dismissToastById(SETTINGS_SAVED_OFFLINE_TOAST);
-          // The form, when open now, says it itself (with what was typed kept);
-          // else the outbox's alert does.
-          if (!mountedRef.current || viewKindRef.current !== "editTournament") return false;
-          setLateRefusal({ code: e && e.code, message: e && e.message });
-          return true;
-        },
-      });
-      // The settings the operator just saved show at once (the freshest
-      // snapshot with the patch on top, as before); the version they were
-      // saved at comes with the server's answer.
-      onUpdateRef.current(mergeTournamentPatch(tRef.current, stored, password, locked));
-      // Kept on this device and sent when the link allows: a save made with no
-      // connection says so now, not when it lands (the same line the court-call
-      // composer gives).
-      if (isOffline()) showToast(savedOfflineSentence("Tournament settings"), "success", { id: SETTINGS_SAVED_OFFLINE_TOAST });
-      onDocumentSettled(res.settled, (saved) => {
-        // Discarded from the held-writes list (or sent by another tab, whose
-        // answer this one does not hold): nothing of it is known here, so the
-        // stored settings come back.
-        if (!saved || saved.discarded) { takeCurrentCopy(null); return; }
-        // Only the version: tRef.current already holds the patch, and a later
-        // save of the operator's, queued behind this one, must not be undone.
-        onUpdateRef.current({ ...tRef.current, tournamentVersion: saved.tournamentVersion });
-        if (mountedRef.current) showToast("Tournament updated");
-      }, takeCurrentCopy);
+      // bc-hnam: the server judged the changed default against the competitions
+      // it holds, and its list differs from the one the form asked about (one
+      // was added or changed on another device). The form is closed by now, so
+      // the question is asked here, about the server's list; Yes sends the same
+      // save confirmed, No leaves the stored settings (takeCurrentCopy brought
+      // them back as the refusal settled).
+      const askApplyThenResend = async (e, body) => {
+        if (!(await confirmPublicNamesApply(e.competitions, body.defaultPublicNames))) return;
+        try {
+          await queueSave({ ...body, confirmPublicNames: true });
+        } catch (err) {
+          showToast(err.message, "error");
+        }
+      };
+      const queueSave = async (body) => {
+        const res = await window.API.updateTournament(body, password, {
+          onRefusal: (e) => {
+            // The save was not made: the "saved, goes out once the connection is
+            // back" toast is no longer true, whoever tells the refusal (shown or
+            // still queued behind another toast).
+            dismissToastById(SETTINGS_SAVED_OFFLINE_TOAST);
+            if (e && e.code === PUBLIC_NAMES_APPLY_CONFIRM) {
+              askApplyThenResend(e, body);
+              return true;
+            }
+            // The form, when open now, says it itself (with what was typed kept);
+            // else the outbox's alert does.
+            if (!mountedRef.current || viewKindRef.current !== "editTournament") return false;
+            setLateRefusal({ code: e && e.code, message: e && e.message });
+            return true;
+          },
+        });
+        // The settings the operator just saved show at once (the freshest
+        // snapshot with the patch on top, as before); the version they were
+        // saved at comes with the server's answer.
+        onUpdateRef.current(mergeTournamentPatch(tRef.current, stored, password, locked));
+        // Kept on this device and sent when the link allows: a save made with no
+        // connection says so now, not when it lands (the same line the court-call
+        // composer gives).
+        if (isOffline()) showToast(savedOfflineSentence("Tournament settings"), "success", { id: SETTINGS_SAVED_OFFLINE_TOAST });
+        onDocumentSettled(res.settled, (saved) => {
+          // Discarded from the held-writes list (or sent by another tab, whose
+          // answer this one does not hold): nothing of it is known here, so the
+          // stored settings come back.
+          if (!saved || saved.discarded) { takeCurrentCopy(null); return; }
+          // Only the version: tRef.current already holds the patch, and a later
+          // save of the operator's, queued behind this one, must not be undone.
+          onUpdateRef.current({ ...tRef.current, tournamentVersion: saved.tournamentVersion });
+          if (mountedRef.current) showToast("Tournament updated");
+        }, takeCurrentCopy);
+      };
+      await queueSave(sendBody);
       return true;
     } catch (e) {
       if (!mountedRef.current) return false;

@@ -61,6 +61,7 @@ import { andList } from './list_phrase.jsx';
 import {
   PublicNamesFields, publicNamesApplies, publicNamesHasLinks,
   fetchRevealLinks, revealLinkUrl, formatRevealExpiry, copyText, RevealQrSheet,
+  WARN_REVEAL_LINK_NO_PUBLIC_URL,
 } from './public_names_fields.jsx';
 import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor, TIME_WRITE_KINDS } from './queued_writes_wait.jsx';
 import {
@@ -151,7 +152,7 @@ function RevealLinksPanel({ c, tournament, password, showToast, unsaved }) {
   const url = key ? revealLinkUrl(shareBase, c.id, key) : "";
   const copy = () => {
     copyText(url).then(
-      () => showToast && showToast("Competition link copied!"),
+      () => showToast && showToast(publicBase ? "Competition link copied!" : `Competition link copied. ${WARN_REVEAL_LINK_NO_PUBLIC_URL}`),
       () => showToast && showToast("Copy failed. Open the QR code sheet and select the link there.", "error"),
     );
   };
@@ -178,7 +179,7 @@ function RevealLinksPanel({ c, tournament, password, showToast, unsaved }) {
       )}
       {key && !publicBase && (
         <div className="field__hint field__hint--warn" data-testid="reveal-links-no-public-url">
-          {"Set a Public URL in the tournament details to get a QR code. Without it a printed code would point at this device's own address."}
+          {"Set a Public URL in the tournament details to get a QR code. Without it, a copied link and a printed code would point at this device's own address, which other phones may not reach."}
         </div>
       )}
       {sheetOpen && url && publicBase && (

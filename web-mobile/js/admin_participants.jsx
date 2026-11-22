@@ -12,7 +12,7 @@ import { canShuffleUnseeded } from './competition_shape.jsx';
 import { downloadBlob } from './blob_download.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { PillButton } from './competition_fields.jsx';
-import { publicNamesApplies, fetchRevealLinks, revealLinkUrl, copyText } from './public_names_fields.jsx';
+import { publicNamesApplies, fetchRevealLinks, revealLinkUrl, copyText, WARN_REVEAL_LINK_NO_PUBLIC_URL } from './public_names_fields.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 
@@ -498,9 +498,10 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   const copyRevealLink = (p) => {
     const key = revealKeys && revealKeys.get(p.id);
     if (!key) return;
-    const base = (tournament && tournament.publicURL || "").trim() || (window.linkBase || (() => window.location.origin))(tournament);
+    const publicBase = (tournament && tournament.publicURL || "").trim();
+    const base = publicBase || (window.linkBase || (() => window.location.origin))(tournament);
     copyText(revealLinkUrl(base, c.id, key)).then(
-      () => showToast(`Reveal link for ${p.name} copied`),
+      () => showToast(publicBase ? `Reveal link for ${p.name} copied` : `Reveal link for ${p.name} copied. ${WARN_REVEAL_LINK_NO_PUBLIC_URL}`),
       () => showToast("Copy failed", "error"),
     );
   };

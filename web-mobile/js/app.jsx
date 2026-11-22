@@ -1184,6 +1184,9 @@ function App() {
   // The open competition's detail. Declared ahead of the SSE effect below,
   // whose handlers write it.
   const [selectedCompData, setSelectedCompData] = useState(null);
+  // The audience now, for a detail read still out when it changes (bc-hnam).
+  const audienceRef = useRef(audienceNow);
+  audienceRef.current = audienceNow;
   // The server pushes applied to selectedCompData, for its refetches
   // (push-wins, createPushLedger, patch.jsx).
   const [compPushes] = useState(() => createPushLedger());
@@ -1203,10 +1206,15 @@ function App() {
     // older state (keepNewerDetail, patch.jsx), nor behind a push applied
     // after they were sent (push-wins): a self-run score editor reads this
     // data. The display reads `tournament`, never this. Called as the fetch
-    // is sent; it answers what takes the fetch's answer.
+    // is sent; it answers what takes the fetch's answer. An answer read as
+    // another audience than the page's now (the organiser signed out while it
+    // was out) is dropped, never shown: its names were not the public's.
     const takeCompDetail = () => {
         const keep = compPushes.detail();
-        return (data) => setSelectedCompData((prev) => keep(prev, data));
+        const sentAs = audienceRef.current;
+        return (data) => {
+            if (audienceRef.current === sentAs) setSelectedCompData((prev) => keep(prev, data));
+        };
     };
 
     // maybeLoad gates the full-aggregate refetch. While the shiaijo operator

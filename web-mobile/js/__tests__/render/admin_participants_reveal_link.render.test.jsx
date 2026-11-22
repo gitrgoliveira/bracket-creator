@@ -38,7 +38,23 @@ describe('Participants: Copy reveal link', () => {
 
     await act(async () => { fireEvent.click(buttons[1]); });
     expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/reveal/c1#key-bob`);
-    expect(showToast).toHaveBeenCalledWith('Reveal link for Bob copied');
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Reveal link for Bob copied. It points at this device'));
+  });
+
+  it('says nothing about the address when the tournament has a Public URL', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ publicNames: 'person', open: true, competitors: [{ id: 'p-1', name: 'Alice', dojo: 'Dojo Alice', key: 'key-alice' }] }),
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const showToast = vi.fn();
+
+    const { container } = await mountParticipants(makeParticipantsCompetition({ publicNames: 'person' }), { showToast, tournament: { publicURL: 'https://cup.example.org' } });
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { fireEvent.click(revealButtons(container)[0]); });
+    expect(writeText).toHaveBeenCalledWith('https://cup.example.org/reveal/c1#key-alice');
+    expect(showToast).toHaveBeenCalledWith('Reveal link for Alice copied');
   });
 
   it('offers no button, and reads nothing, for any other choice', async () => {

@@ -2151,7 +2151,7 @@ paths:
               its `courts` were changed after the competition started. The
               pools and bracket being fought were drawn from them, and
               `poolWinners` is read while the pools run. A bout changes
-              shiaijo by a court move, never by this list.
+              shiaijo by a court move, never through these settings.
 
             A settings save that merely echoes an unchanged `format`, `kind` or
             `teamMatchType` back is never refused: every one of these gates
@@ -8894,8 +8894,8 @@ components:
             holds is refused with 400** (on POST as well as PUT, since POST is
             re-POSTed against an existing record). That covers a competition
             in `setup` and `draw-ready` as well as one under way. `error` and
-            `message` name every blocking competition and the shiaijo it still
-            runs on (`message` is that alone, as a sentence the app shows as
+            `message` name every blocking competition and the shiaijo it uses
+            (`message` is that alone, as a sentence the app shows as
             it is), and nothing is written. A competition's `courts` change
             only until its draw is made (the settings PUT refuses them after
             that), so a drawn one frees its shiaijo when it finishes, and a

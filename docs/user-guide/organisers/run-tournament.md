@@ -72,7 +72,7 @@ Set the **Public URL** field to the externally reachable address of your app (fo
 
 Save closes the form at once. If the details were saved on another device after you opened them, the save is refused when it reaches the server, and an alert says "Tournament settings were not saved: they were changed on another device. Open them and save again." The app then shows the current details. If you have opened **Edit details** again by then, the form says "Not saved: the tournament details changed somewhere else after you opened this page (another screen or device). Reload to see the current details, then make your change again.", keeps what you typed, and **Reload** shows the current details.
 
-Lowering the number of shiai-jo is refused while a competition that has not finished still uses one you would remove; the alert names it.
+Lowering the number of shiai-jo is refused while a competition that has not finished still uses one you would remove; the alert names it. To go ahead, take that shiai-jo out of the competition's **Assigned shiaijo (courts)** first. That field locks once the draw is generated: discard the draw to change it, or, once the competition has started, wait until it finishes.
 
 !!! note
     For guidance on making the app reachable over the internet, refer to [Hosting](../install/hosting.md).

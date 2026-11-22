@@ -33,7 +33,7 @@ Use mixed for most events. Pools give every competitor several matches before th
 **Who fights whom** sets how many matches each pool holds. Either way, every competitor in a pool fights the same number of times:
 
 - **Everyone fights everyone**: every competitor meets every other competitor in the pool. A pool of 4 has 6 matches. This is the default.
-- **Each fights two**: competitors sit in a ring and each meets the two beside them, so everyone fights twice. A pool of 4 has 4 matches. In a pool of 2 or 3 this is the same as everyone fights everyone.
+- **Each fights two**: competitors sit in a ring and each meets the two beside them. A pool of 4 has 4 matches, two for each competitor. In a pool of 2 or 3 this is the same as everyone fights everyone.
 
 The knockout half is not a fresh random draw. Each shiai-jo gets its own block of the bracket. A pool's winner stays in that block, and its other qualifiers cross into a partner shiai-jo's block. This keeps two competitors from the same pool apart for as long as the bracket allows. Byes are worked out within each block, and the seeds you set decide which quarter of the draw the top competitors land in. Refer to [The knockout draw](knockout-draw.md) for the full rules and worked examples.
 

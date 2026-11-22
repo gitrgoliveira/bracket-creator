@@ -143,3 +143,43 @@ func TestLegacyUpgrade_ConfigWithoutRetiredLeagueTiebreakKeysIsUntouched(t *test
 	require.NoError(t, err)
 	assert.True(t, info.ModTime().Equal(old), "config.md was not written")
 }
+
+// Opening a data folder a released version wrote drops its pool_format key
+// from config.md and changes nothing else: the round_robin value the operator
+// chose is what the pool shape reads, whatever pool_format said.
+func TestLegacyUpgrade_DropsRetiredPoolFormatKey(t *testing.T) {
+	for _, value := range []string{"full", "partial"} {
+		t.Run(value, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := state.NewStore(dir)
+			require.NoError(t, err)
+			require.NoError(t, store.SaveCompetition(&state.Competition{
+				ID: "mixed-x", Name: "Mixed X", Format: state.CompFormatMixed,
+				Status: state.CompStatusSetup, Courts: []string{"A"},
+				PoolSize: 4, PoolWinners: 2, RoundRobin: false,
+			}))
+			_, err = state.NewStore(dir)
+			require.NoError(t, err)
+			path := filepath.Join(dir, "competitions", "mixed-x", "config.md")
+			current, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Contains(t, string(current), "\nround_robin: false\n")
+
+			released := strings.Replace(string(current), "\nround_robin: false\n",
+				"\npool_format: "+value+"\nround_robin: false\n", 1)
+			require.NoError(t, os.WriteFile(path, []byte(released), 0o600))
+
+			store, err = state.NewStore(dir) // the startup sweep runs inside this call
+			require.NoError(t, err)
+			after, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.NotContains(t, string(after), "pool_format")
+			assert.Equal(t, string(current), string(after), "nothing else in config.md changes")
+
+			comp, err := store.LoadCompetition("mixed-x")
+			require.NoError(t, err)
+			require.NotNil(t, comp)
+			assert.False(t, comp.RoundRobin, "the stored ring stays the ring")
+		})
+	}
+}

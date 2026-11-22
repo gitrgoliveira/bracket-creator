@@ -166,10 +166,10 @@ export function describeSettingsEdits(edits) {
   if (!edits || typeof edits !== "object") return "";
   const keys = Object.keys(edits);
   if (keys.length === 0) return "";
-  const parts = [];
-  keys.forEach((k) => {
+  const parts = keys.map((k) => {
     const label = SETTINGS_FIELD_LABELS[k] || k;
-    parts.push(`${label} to ${formatEditValue(k, edits[k])}`);
+    const val = formatEditValue(k, edits[k]);
+    return `${label} to ${val}`;
   });
   return parts.join(", ") + ".";
 }

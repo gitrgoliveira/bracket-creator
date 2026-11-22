@@ -1155,8 +1155,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       roundRobin,
     });
     // Knockout qualifiers (bc-qual LP-5a). Set after construction:
-    // buildCompetition (data.jsx) takes no such argument. Only meaningful for "mixed" (pools + knockout); the
-    // radio itself only renders under poolMode === "min", and
+    // buildCompetition (data.jsx) takes no such argument. Only meaningful
+    // for "mixed" (pools + knockout); the radio itself only renders under
+    // poolMode === "min", and
     // resetExtraQualifiersOnPoolModeChange keeps the stored value at
     // standard ("") whenever poolMode isn't "min", so this is never a
     // non-standard value outside the shape ValidateExtraQualifiers accepts.

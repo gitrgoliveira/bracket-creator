@@ -108,8 +108,9 @@ export function formatHint(format) {
 // ruling 2026-11-22), so a pool is drawn one of two ways, chosen by the
 // stored roundRobin alone (internal/engine/pools.go createPoolMatches):
 // true is EVERYONE (helper.CreatePoolRoundRobinMatches), false the RING
-// (helper.CreatePoolMatches: each fights the two beside them; a pool of 3 is
-// all three pairs, so the ring only differs from pools of 4 up). The two
+// (helper.CreatePoolMatches: each fights the two beside them; a pool of 2 is
+// one fight and a pool of 3 all three pairs, so the ring only differs from
+// pools of 4 up). The two
 // screens used to show this as two controls, which read as one choice; it
 // is one control now, mapped onto roundRobin here and nowhere else. A
 // competition saved with the old box unticked shows the ring.
@@ -118,7 +119,7 @@ export const POOL_SHAPE_ALL = "all";
 export const POOL_SHAPE_RING = "ring";
 export const POOL_SHAPE_OPTIONS = [
   { value: POOL_SHAPE_ALL, label: "Everyone fights everyone", hint: "Every competitor fights every other competitor: a pool of 4 has 6 fights." },
-  { value: POOL_SHAPE_RING, label: "Each fights two", hint: "Competitors sit in a ring and each fights the two beside them, so everyone fights twice: a pool of 4 has 4 fights. A pool of 3 is the same as everyone fights everyone." },
+  { value: POOL_SHAPE_RING, label: "Each fights two", hint: "Competitors sit in a ring and each fights the two beside them: a pool of 4 has 4 fights, two each. A pool of 2 or 3 is the same as everyone fights everyone." },
 ];
 
 // poolShapeOf: the shape roundRobin draws. It counts as false only when it

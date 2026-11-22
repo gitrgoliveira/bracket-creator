@@ -134,10 +134,13 @@ describe('Who fights whom: one control over roundRobin (bc-rrsh)', () => {
     expect(LABEL_POOL_SHAPE).toBe('Who fights whom');
     expect(POOL_SHAPE_OPTIONS.map((o) => o.label)).toEqual(['Everyone fights everyone', 'Each fights two']);
     for (const o of POOL_SHAPE_OPTIONS) expect(poolShapeHint(o.value)).toBe(o.hint);
-    // The ring is all three pairs in a pool of 3 (helper.CreatePoolMatches),
-    // so its hint must say so, or the default pool size shows two pills
-    // that draw the same thing with nothing to explain it.
-    expect(poolShapeHint(POOL_SHAPE_RING)).toContain('A pool of 3 is the same as everyone fights everyone.');
+    // The ring is one fight in a pool of 2 and all three pairs in a pool of 3
+    // (helper.CreatePoolMatches), so its hint must say so, or the default
+    // pool size shows two pills that draw the same thing with nothing to
+    // explain it. It must not claim everyone fights twice: a pool of 2 is
+    // one fight each.
+    expect(poolShapeHint(POOL_SHAPE_RING)).toContain('A pool of 2 or 3 is the same as everyone fights everyone.');
+    expect(poolShapeHint(POOL_SHAPE_RING)).not.toContain('everyone fights twice');
   });
 });
 

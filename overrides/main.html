@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+
+{#- The banner on every docs version but the newest release: `dev` (the next
+    release, built from main) and older releases. The theme shows it when the
+    version being read is not the picker's default, `latest`. The link goes to
+    the site root, which opens the newest release. -#}
+{% block outdated %}
+  You are reading docs for a version other than the newest release.
+  <a href="{{ '../' ~ base_url }}"><strong>Go to the newest release's docs.</strong></a>
+{% endblock %}

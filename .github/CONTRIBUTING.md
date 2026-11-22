@@ -62,7 +62,7 @@ The run lists the screenshots that changed. Look at each, and copy the ones
 your change meant to alter from `scripts/screenshots/out/` into
 `docs/screenshots/`. Videos are not compared, so copy a video only when your
 change alters what it shows. The
-[contributing guide](https://gitrgoliveira.github.io/bracket-creator/dev-guide/contributing/#regenerate-the-documentation-screenshots)
+[contributing guide](https://gitrgoliveira.github.io/bracket-creator/latest/dev-guide/contributing/#regenerate-the-documentation-screenshots)
 has the details.
 
 ## Create a commit

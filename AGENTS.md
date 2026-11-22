@@ -19,6 +19,7 @@ Detailed domain rulings (match results and marks, match writes and the offline q
 - **Embedding:** Both `web/*` and `web-mobile/*` are embedded via `//go:embed` in `main.go`. Rebuild with `make go/build` after modifying any web assets.
 - **League tie rule** (of the podium places, only 3rd can be shared; lots only when the bouts cannot separate the tie): read `.claude/rules/draw-and-seeding.md` before changing it.
 - **Court limit:** `--courts` is rejected if greater than 16 (`helper.MaxCourts`), the most any one competition can legally be allocated.
+- **Docs publishing:** `.github/workflows/doc.yaml` publishes versioned docs with mike through `docs/publish_docs.py` (main as `dev`, each release from v2.5 as its `X.Y` folder, the newest as `latest`). Never run `docs/publish_docs.py --push` from a checkout whose origin is GitHub: it publishes the live site. Rehearse in a scratch clone whose origin is a local bare repository.
 - **Excel Layout:** Standardized on an **8-column per court** structure. Column A (Red Name) and Column G (White Name/Rank) are set to 30 units wide. Columns B–F and H are 5 units wide.
 - **Pool Spacing:** There is exactly one blank row of space between the end of one pool's ranking summary and the start of the next pool's header.
 - **API Documentation:** The OpenAPI specification for the web API is located in `specs/openapi.yaml` and is fully synchronized with the backend implementation.

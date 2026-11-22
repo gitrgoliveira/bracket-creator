@@ -206,10 +206,16 @@ func loadExistingCompetition(c *gin.Context, comps competitionLoader, compID str
 		return nil, false
 	}
 	if comp == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+		respondCompetitionNotFound(c)
 		return nil, false
 	}
 	return comp, true
+}
+
+// respondCompetitionNotFound answers the 404 for a competition id that names
+// no competition.
+func respondCompetitionNotFound(c *gin.Context) {
+	c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 }
 
 // isSelfRunMainGatedConfigRoute reports whether the given (method, route)

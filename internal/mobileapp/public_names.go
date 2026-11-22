@@ -859,7 +859,9 @@ func (c *nameMaskCache) build(compID string) (*nameMask, error) {
 		}
 		return failClosedMask(&state.Competition{ID: compID}), fmt.Errorf("name mask: %w", err)
 	}
-	players, err := c.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
+	// A mask reads names, dojos, numbers and ids, never a seed, so seeds.csv
+	// is not read.
+	players, err := c.store.LoadParticipantsOpt(compID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{HasIDs: comp.ParticipantIDsHint()})
 	if err != nil {
 		return failClosedMask(comp), fmt.Errorf("name mask: participants: %w", err)
 	}

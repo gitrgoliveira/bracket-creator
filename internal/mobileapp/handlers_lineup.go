@@ -455,17 +455,24 @@ func publicReadViewOf(c *gin.Context, names *publicNames, compID string) (maskVi
 }
 
 // publicReadExisting is publicReadView for a read that answers 404 for an
-// unknown competition: the competition the judge's own read found is not asked
-// for again, and with no judge or no such competition comps answers it.
-func publicReadExisting(c *gin.Context, names *publicNames, comps CompetitionStore, compID string) (maskView, bool) {
+// unknown competition. The judge's own read is the one read of the
+// competition: it is not asked for again, and its finding none is the 404.
+// With no judge comps answers (a public endpoint, so internalError leaks no
+// store error string).
+func publicReadExisting(c *gin.Context, names *publicNames, comps competitionLoader, compID string) (maskView, bool) {
 	v, comp, ok := publicReadViewOf(c, names, compID)
 	if !ok {
 		return maskView{}, false
 	}
-	if comp == nil && !requireExistingCompetition(c, comps, compID) {
+	if comp != nil {
+		return v, true
+	}
+	if names != nil {
+		respondCompetitionNotFound(c)
 		return maskView{}, false
 	}
-	return v, true
+	_, ok = loadExistingCompetition(c, comps, compID)
+	return v, ok
 }
 
 // kachinukiRosterRead is the kachinuki roster read's answer: the engine's

@@ -42,12 +42,12 @@ type maskedPayload struct {
 	judged *competitionJudgement
 }
 
-// competitionJudgement is a masked event's competition as read and whether
-// the public pages hide its names, valid for the write token it was taken at.
+// competitionJudgement is a masked event's competition as read, valid for the
+// write token it was taken at. Whether the public pages hide its names is not
+// kept: it reads the tournament's mode too, which no competition token moves.
 type competitionJudgement struct {
 	token uint64
 	comp  *state.Competition
-	hides bool
 }
 
 // sseEventClass is what a stream not entitled to every name is sent for an
@@ -181,41 +181,45 @@ func (h *Hub) project(e *historyEntry, sub *sseSubscriber) string {
 
 // judgeCompetition is the competition e names and whether the public pages
 // hide its names, nil when the competition cannot be read. The first stream
-// to ask reads it and the rest reuse the answer, so a masked event costs one
-// read of the competition and one of the tournament however many streams are
-// open, not one per stream. The answer is kept only while the competition is
-// not written again (CompetitionWriteToken, read before the competition is,
-// so a write in between is never missed), so a replayed event is still
-// judged on the option as it stands then. The tournament's mode is chosen
-// once at creation, and a save that creates it self-run, like a restore,
-// writes the competitions it changes, which moves their tokens.
+// to ask reads the competition and the rest reuse it, so a masked event costs
+// one read of the competition however many streams are open, not one per
+// stream. The competition is kept only while it is not written again
+// (CompetitionWriteToken, read before the competition is, so a write in
+// between is never missed), so a replayed event is still judged on the option
+// as it stands then. Whether its names are hidden is judged on every call,
+// because it also reads the tournament's mode, which a restore that keeps the
+// competition in place can change without moving the competition's token (a
+// kept answer would show the names of a tournament that was self-run when the
+// event was first judged); the store caches the tournament read.
 func (e *historyEntry) judgeCompetition(names *publicNames) (*state.Competition, bool) {
 	if e.masked == nil {
-		return judgeCompetitionNow(names, e.compID)
+		comp := loadJudgedCompetition(names, e.compID)
+		return comp, names.hides(comp)
 	}
 	e.masked.mu.Lock()
 	defer e.masked.mu.Unlock()
 	token := names.store.CompetitionWriteToken(e.compID)
 	if j := e.masked.judged; j != nil && j.token == token {
-		return j.comp, j.hides
+		return j.comp, names.hides(j.comp)
 	}
 	// The competition was written since the public copy was built (a number
 	// prefix or a team roster changed), so that copy is stale: build it again.
 	e.masked.done, e.masked.payload = false, ""
-	comp, hides := judgeCompetitionNow(names, e.compID)
+	comp := loadJudgedCompetition(names, e.compID)
 	if comp != nil {
-		e.masked.judged = &competitionJudgement{token: token, comp: comp, hides: hides}
-	}
-	return comp, hides
-}
-
-// judgeCompetitionNow reads the competition compID and judges its names.
-func judgeCompetitionNow(names *publicNames, compID string) (*state.Competition, bool) {
-	comp, err := names.store.LoadCompetition(compID)
-	if err != nil || comp == nil {
-		return nil, false
+		e.masked.judged = &competitionJudgement{token: token, comp: comp}
 	}
 	return comp, names.hides(comp)
+}
+
+// loadJudgedCompetition reads the competition compID, nil when it cannot be
+// read.
+func loadJudgedCompetition(names *publicNames, compID string) *state.Competition {
+	comp, err := names.store.LoadCompetition(compID)
+	if err != nil {
+		return nil
+	}
+	return comp
 }
 
 // publicCopy is e's public projection, built by build the first time a

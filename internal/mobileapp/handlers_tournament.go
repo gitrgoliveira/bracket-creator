@@ -514,6 +514,22 @@ func validateTournamentDurationDays(durationDays int) error {
 // participants out mid-scoring (self-run → officiated).
 var errModeImmutable = errors.New("tournament mode cannot be changed after creation")
 
+// changesMode reports whether a save naming mode would change the mode of the
+// stored tournament current. An empty mode names none (the stored one is
+// kept), and a stored empty mode reads as officiated, so an idempotent save
+// sending "officiated" against a legacy tournament is no change. Nothing
+// stored means nothing to change.
+func changesMode(current *state.Tournament, mode string) bool {
+	if current == nil || mode == "" {
+		return false
+	}
+	currentMode := current.Mode
+	if currentMode == "" {
+		currentMode = state.TournamentModeOfficiated
+	}
+	return mode != currentMode
+}
+
 // trimPublicInfoFields trims all optional public tournament info string fields
 // and normalises the Contacts slice: each entry's Label/Value is trimmed and
 // all-empty entries are dropped. Called identically by the PUT and POST
@@ -918,17 +934,6 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
-		// The default public-names option (E2). Changing it sets every
-		// competition but a Swiss one to it, once the organiser has seen the
-		// list: a save that would change any is answered 409 with the list
-		// until it carries confirmPublicNames. A save that leaves the default
-		// alone changes no competition, so each competition's own choice
-		// stands. A confirmed save applies the default even when it did not
-		// move, so sending it again finishes one a failure cut short.
-		publicNamesTargets, refusal, err := judgePublicNamesDefault(store, stored, &t, req.ConfirmPublicNames)
-		if answerPublicNames(c, refusal, err) {
-			return
-		}
 		// Preserve the stored Password when the incoming body omits it
 		// or sends "". The frontend AdminEditTournament uses
 		// `password: pass || undefined` (admin_setup.jsx:89) so an
@@ -963,23 +968,42 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			c.JSON(http.StatusBadRequest, gin.H{"error": "password rotation is disabled in locked mode; restart with a new TOURNAMENT_PASSWORD_HASH"})
 			return
 		}
-		// A PUT may create the tournament; created self-run, the
-		// competitions already on disk that hide names show them first. The
-		// refusals that do not depend on the competitions are judged before
-		// any is touched, so a save the transform below would refuse leaves
-		// them as they were: with no tournament stored, a missing password
-		// and a pause the tournament's days cannot hold (the transform
-		// judges both again under the lock).
-		if stored == nil {
-			if !locked && t.Password == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": errPasswordRequired.Error()})
-				return
-			}
-			if verr := validatePauseDays(t.Pauses, nil, t.DurationDays); verr != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": verr.Error()})
-				return
-			}
+		// The refusals that do not depend on the competitions are judged before
+		// any is asked about or touched, so a save the transform below would
+		// refuse is refused first, never after a confirmation the organiser
+		// gave for nothing, and leaves the competitions as they were: a mode
+		// the tournament does not take, with no tournament stored a missing
+		// password, and a pause the tournament's days cannot hold (the
+		// transform judges them again under the lock).
+		if changesMode(stored, t.Mode) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": errModeImmutable.Error()})
+			return
 		}
+		if stored == nil && !locked && t.Password == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": errPasswordRequired.Error()})
+			return
+		}
+		var storedPauses []state.Pause
+		if stored != nil {
+			storedPauses = stored.Pauses
+		}
+		if verr := validatePauseDays(t.Pauses, storedPauses, t.DurationDays); verr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": verr.Error()})
+			return
+		}
+		// The default public-names option (E2). Changing it sets every
+		// competition but a Swiss one to it, once the organiser has seen the
+		// list: a save that would change any is answered 409 with the list
+		// until it carries confirmPublicNames. A save that leaves the default
+		// alone changes no competition, so each competition's own choice
+		// stands. A confirmed save applies the default even when it did not
+		// move, so sending it again finishes one a failure cut short.
+		publicNamesTargets, refusal, err := judgePublicNamesDefault(store, stored, &t, req.ConfirmPublicNames)
+		if answerPublicNames(c, refusal, err) {
+			return
+		}
+		// A PUT may create the tournament; created self-run, the
+		// competitions already on disk that hide names show them first.
 		switchTargets, refusal, err := judgeSelfRunSwitch(store, stored, &t, req.ConfirmShowNames)
 		if answerPublicNames(c, refusal, err) || answerPublicNames(c, applySelfRunSwitch(hub, store, switchTargets), nil) {
 			return
@@ -1065,20 +1089,12 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// comparing so an idempotent PUT sending mode:"officiated" against a
 			// legacy tournament (empty Mode on disk) is accepted rather than
 			// rejected as a mutation ("" != "officiated").
-			if current != nil {
-				if desired.Mode == "" {
-					// Preserve on omit, backward-compat and "no change" intent.
-					desired.Mode = current.Mode
-				} else {
-					// Normalize legacy empty current mode before comparing.
-					currentMode := current.Mode
-					if currentMode == "" {
-						currentMode = state.TournamentModeOfficiated
-					}
-					if desired.Mode != currentMode {
-						return errModeImmutable
-					}
-				}
+			if changesMode(current, desired.Mode) {
+				return errModeImmutable
+			}
+			if current != nil && desired.Mode == "" {
+				// Preserve on omit, backward-compat and "no change" intent.
+				desired.Mode = current.Mode
 			}
 			// Normalize empty Mode so new tournaments always have a canonical value.
 			if desired.Mode == "" {

@@ -233,16 +233,9 @@ func registerPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 		if !ok {
 			return
 		}
-		v, comp, ok := publicReadViewOf(c, names, id)
+		v, ok := publicReadExisting(c, names, store, id)
 		if !ok {
 			return
-		}
-		if comp == nil {
-			// No judge, or no such competition: the store answers (a public
-			// endpoint, so internalError leaks no store error string).
-			if _, ok := loadExistingCompetition(c, store, id); !ok {
-				return
-			}
 		}
 
 		candidates, err := eng.LeagueTiebreakCandidates(id)

@@ -1347,7 +1347,7 @@ func TestHubProject_JudgesTheCompetitionOncePerWrite(t *testing.T) {
 	h.project(e, &sseSubscriber{})
 	first := e.masked.judged
 	require.NotNil(t, first)
-	assert.True(t, first.hides)
+	assert.True(t, first.comp.HidesNames(), "the kept competition hides its names")
 	h.project(e, &sseSubscriber{aud: audience{competitors: map[string]map[string]bool{"juniors": {pnAlice: true}}}})
 	assert.Same(t, first, e.masked.judged, "a second stream reuses the judgement")
 
@@ -1355,5 +1355,34 @@ func TestHubProject_JudgesTheCompetitionOncePerWrite(t *testing.T) {
 	require.NoError(t, f.store.SaveCompetition(f.comp))
 	h.project(e, &sseSubscriber{})
 	assert.NotSame(t, first, e.masked.judged, "a written competition is judged again")
-	assert.False(t, e.masked.judged.hides)
+	assert.False(t, e.masked.judged.comp.HidesNames())
+}
+
+// A tournament saved into another mode while a competition is kept in place
+// (a restore does this) does not move the competition's write token, so the
+// judgement kept for a replayed event must not carry the mode with it: an
+// event judged while the tournament was self-run, and so sent with names,
+// is masked again once the tournament is officiated.
+func TestHubProject_ReplayedEventFollowsATournamentModeChange(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	tour, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	tour.Mode = state.TournamentModeSelfRun
+	require.NoError(t, f.store.SaveTournament(tour))
+
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}), "self-run: the names are shown")
+	require.NotNil(t, e.masked.judged)
+	token := f.store.CompetitionWriteToken(f.comp.ID)
+	require.Equal(t, token, e.masked.judged.token)
+
+	tour.Mode = state.TournamentModeOfficiated
+	require.NoError(t, f.store.SaveTournament(tour))
+	require.Equal(t, token, f.store.CompetitionWriteToken(f.comp.ID), "the competition was not written")
+
+	public := h.project(e, &sseSubscriber{})
+	assert.NotContains(t, public, "Alice Arai", "officiated again: the replayed event is masked")
 }

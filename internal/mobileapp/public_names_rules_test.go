@@ -268,6 +268,30 @@ func tournamentPutBody(t *testing.T, f publicNamesFixture, extra map[string]any)
 	return withStoredTournamentVersion(t, f.store, body)
 }
 
+// A save the transform would refuse is refused before the organiser is asked
+// to confirm what the default would change: a confirmation given for it
+// would only be followed by the same refusal.
+func TestPublicNames_TournamentDefaultSaveRefusedForItsOtherFieldsBeforeTheConfirmation(t *testing.T) {
+	f := newPublicNamesFixture(t, state.TournamentModeOfficiated)
+	f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout})
+
+	w := f.admin(http.MethodPut, "/api/tournament", tournamentPutBody(t, f, map[string]any{"defaultPublicNames": "person", "mode": state.TournamentModeSelfRun}))
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), errModeImmutable.Error())
+
+	w = f.admin(http.MethodPut, "/api/tournament", tournamentPutBody(t, f, map[string]any{
+		"defaultPublicNames": "person",
+		"pauses":             []map[string]any{{"name": "Lunch", "start": "12:00", "length": "1h", "day": 9}},
+	}))
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "Day 9")
+
+	stored, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	assert.Empty(t, stored.DefaultPublicNames)
+	assert.Empty(t, f.comp(t, "c1").PublicNames)
+}
+
 func TestPublicNames_TournamentDefaultAppliesAfterConfirmation(t *testing.T) {
 	f := newPublicNamesFixture(t, state.TournamentModeOfficiated)
 	f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout})

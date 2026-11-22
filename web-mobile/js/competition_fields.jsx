@@ -58,7 +58,7 @@
 import { useStableId } from './stable_id.jsx';
 import {
   LABEL_POOL_SHAPE, POOL_SHAPE_ALL, POOL_SHAPE_RING, POOL_SHAPE_OPTIONS,
-  poolShapeOf, poolShapeFields, poolShapeHint,
+  poolShapeOf, roundRobinOf, poolShapeHint,
 } from './competition_shape.jsx';
 
 // PillButton: one radio pill. The ONE owner of "a pill says whether it is
@@ -136,7 +136,7 @@ const GLYPH_FIGHTS = {
   [POOL_SHAPE_ALL]: "M4 4H14V14H4Z M4 4L14 14 M14 4L4 14",
   [POOL_SHAPE_RING]: "M4 4H14V14H4Z",
 };
-export function PoolShapeGlyph({ shape }) {
+function PoolShapeGlyph({ shape }) {
   return (
     <svg className="pool-shape-glyph" viewBox="0 0 18 18" width="18" height="18" aria-hidden="true" focusable="false">
       <path d={GLYPH_FIGHTS[shape]} fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
@@ -146,9 +146,9 @@ export function PoolShapeGlyph({ shape }) {
 }
 
 // PoolShapeField: the "Who fights whom" pill row both screens render (bc-rrsh).
-// It reads the shape from roundRobin and hands back the field a pick writes
-// (competition_shape.jsx owns both directions), so neither screen spells the
-// mapping. `hintSuffix` carries the settings screen's lock note.
+// It reads the shape from roundRobin and hands back the roundRobin a pick
+// stores (competition_shape.jsx owns both directions), so neither screen
+// spells the mapping. `hintSuffix` carries the settings screen's lock note.
 export function PoolShapeField({ roundRobin, onChange, disabled, hintSuffix = "" }) {
   const shape = poolShapeOf(roundRobin);
   const options = POOL_SHAPE_OPTIONS.map((o) => ({
@@ -157,7 +157,7 @@ export function PoolShapeField({ roundRobin, onChange, disabled, hintSuffix = ""
   }));
   return (
     <PillGroup label={LABEL_POOL_SHAPE} options={options} value={shape}
-      onChange={(v) => onChange(poolShapeFields(v))} disabled={disabled}
+      onChange={(v) => onChange(roundRobinOf(v))} disabled={disabled}
       hint={`${poolShapeHint(shape)}${hintSuffix}`} />
   );
 }

@@ -1350,7 +1350,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           {poolShapeVisible(format) && (
             <PoolShapeField roundRobin={roundRobin}
-              onChange={(f) => setRoundRobin(f.roundRobin)} />
+              onChange={setRoundRobin} />
           )}
 
           {format === FORMAT_MIXED && (

@@ -1271,8 +1271,8 @@ a:hover {
 }
 
 /* A field that takes no input right now (a setting locked after the draw)
-   looks it: the muted surface and ink the aria-disabled .btn and the lineup
-   name box use, and the not-allowed cursor. Without it a locked field looked
+   looks it: the muted surface (--surface-2) and not-allowed cursor the
+   aria-disabled .btn uses, with --ink-3 ink. Without it a locked field looked
    exactly like an editable one and a tap did nothing. */
 .input:disabled,
 .textarea:disabled,

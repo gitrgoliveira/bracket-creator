@@ -72,6 +72,8 @@ Set the **Public URL** field to the externally reachable address of your app (fo
 
 Save closes the form at once. If the details were saved on another device after you opened them, the save is refused when it reaches the server, and an alert says "Tournament settings were not saved: they were changed on another device. Open them and save again." The app then shows the current details. If you have opened **Edit details** again by then, the form says "Not saved: the tournament details changed somewhere else after you opened this page (another screen or device). Reload to see the current details, then make your change again.", keeps what you typed, and **Reload** shows the current details.
 
+Lowering the number of shiai-jo is refused while a competition that has not finished still uses one you would remove; the alert names it.
+
 !!! note
     For guidance on making the app reachable over the internet, refer to [Hosting](../install/hosting.md).
 
@@ -149,7 +151,7 @@ On a drawn competition, a **Date** or **Start time** change moves its matches. R
 
 ### Assigning shiai-jo
 
-The competition **Settings** page has an **Assigned shiai-jo (courts)** field listing every shiai-jo in the venue. Pick the ones this competition runs on; the number you pick is how many of its matches can run at the same time.
+The competition **Settings** page has an **Assigned shiaijo (courts)** field listing every shiai-jo in the venue. Pick the ones this competition runs on; the number you pick is how many of its matches can run at the same time.
 
 Assign **1, 2, 4, 8 or 16 shiai-jo**. The knockout draw gives each shiai-jo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly all the way down. Being even is not enough on its own: six blocks pair off into three, and three cannot pair off again, so 6 and 10 are refused just as 3, 5 and 7 are. When you pick a count the rule does not allow, the settings page names the counts to use instead, and it always offers 1. A single shiai-jo is always allowed. Where a competition sends two or more qualifiers up from each pool, its bracket splits into two half-blocks that act as partner shiai-jo, so the draw has the same shape as a two-shiai-jo one. Where each pool sends up a single competitor, nothing crosses between shiai-jo, and the bracket is left whole. 16 is the highest, and it is also the most shiai-jo a tournament can have, so no shiai-jo you can add is one a competition could not be given. Refer to [The knockout draw](knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
 

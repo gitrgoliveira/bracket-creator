@@ -1,6 +1,6 @@
 # create-pools
 
-Generates a **Pools & Knockout** bracket: round-robin pools followed by a knockout elimination tree. It is meant for scripts and automation; to prepare a tournament, use the [tournament app](../start-here/first-tournament.md).
+Generates a **Pools & Knockout** bracket: pools, drawn as a ring unless you pass `--round-robin`, followed by a knockout elimination tree. It is meant for scripts and automation; to prepare a tournament, use the [tournament app](../start-here/first-tournament.md).
 
 ```
 bracket-creator create-pools [flags]

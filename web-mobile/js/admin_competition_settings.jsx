@@ -667,7 +667,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // when they were added -- the ninth is the one that says something
   // slightly different.
   const lockedAfterDraw = isDrawReady || isStarted;
-  const lockedNote = lockedAfterDraw ? " Locked after draw." : "";
+  // lockedHint is the note on its own; lockedNote follows another hint.
+  const lockedHint = lockedAfterDraw ? "Locked after draw." : "";
+  const lockedNote = lockedHint && ` ${lockedHint}`;
 
   // Kind lock: a ROSTER lock, not the isDrawReady/isStarted pair above.
   // Individual and team rosters don't translate (competition_shape.jsx's
@@ -1123,7 +1125,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           now locks from the draw on. */}
       {poolShapeVisible(local.format) && (
         <PoolShapeField roundRobin={local.roundRobin}
-          onChange={(f) => update("roundRobin", f.roundRobin)}
+          onChange={(on) => update("roundRobin", on)}
           disabled={lockedAfterDraw} hintSuffix={lockedNote} />
       )}
       {local.format === FORMAT_MIXED && (
@@ -1147,7 +1149,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <PillGroup label={LABEL_POOL_SIZE_MODE} options={POOL_SIZE_MODE_OPTIONS}
             isActive={(v) => resolvePoolSizeMode(local.poolSizeMode) === v}
             onChange={(v) => { update("poolSizeMode", v); if (v === POOL_SIZE_MODE_MAX) update("extraQualifiers", resetExtraQualifiersOnPoolModeChange(POOL_SIZE_MODE_MAX, local.extraQualifiers)); }}
-            disabled={lockedAfterDraw} hint={lockedNote.trim()} />
+            disabled={lockedAfterDraw} hint={lockedHint} />
           <div className="row">
             {/* Same NaN-as-"" + gated-save pattern as Team size above. */}
             {/* min=3 is a PRODUCT floor, not the backend's, which this */}
@@ -1169,7 +1171,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           </div>
           {lockedAfterDraw && (
             <div className="field">
-              <div className="field__hint" data-testid="pool-sizing-locked">{lockedNote.trim()}</div>
+              <div className="field__hint" data-testid="pool-sizing-locked">{lockedHint}</div>
             </div>
           )}
           {/* Rendered for ANY invalid poolSize/poolWinners, staged or already
@@ -1304,7 +1306,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <div className="field__hint field__hint--locked">
             {isDrawReady
               ? "Set by the draw. Discard the draw to change shiaijo."
-              : lockedNote.trim()}
+              : lockedHint}
           </div>
         )}
         <window.FieldError testId="orphan-shiaijo-hint">{orphanedCourtsErr}</window.FieldError>

@@ -128,9 +128,9 @@ export function poolShapeOf(roundRobin) {
   return roundRobin === false ? POOL_SHAPE_RING : POOL_SHAPE_ALL;
 }
 
-// poolShapeFields: the stored field a shape writes.
-export function poolShapeFields(shape) {
-  return { roundRobin: shape !== POOL_SHAPE_RING };
+// roundRobinOf: the roundRobin a shape stores (poolShapeOf's inverse).
+export function roundRobinOf(shape) {
+  return shape !== POOL_SHAPE_RING;
 }
 
 // poolShapeHint: the hint under the pills for the shape that is lit.

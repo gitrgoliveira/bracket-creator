@@ -8889,18 +8889,19 @@ components:
             `Competition.courts` is per competition, never per venue, so a
             3-, 5- or 7-shiaijo tournament is legal and is expected.
 
-            **Removing a shiaijo a competition still in progress still holds
-            is refused with 400** (on POST as well as PUT, since POST is
-            re-POSTed against an existing record). `error` and `message` name
-            every blocking competition and the shiaijo it still runs on
-            (`message` is that alone, as a sentence the app shows as it is),
-            and nothing is written. A competition's `courts` change only until its draw is
-            made (the settings PUT refuses them after that), so a drawn one
-            frees its shiaijo when it finishes, and a bout moves to another
-            shiaijo with a court move. Only competitions in progress block: `completed` and
-            `invalid` ones are history and are ignored, so a multi-day event
-            that ran the morning on 4 shiaijo can still shrink to 2 for the
-            afternoon. The refusal stops an orphan being CREATED; records
+            **Removing a shiaijo that a competition not yet completed still
+            holds is refused with 400** (on POST as well as PUT, since POST is
+            re-POSTed against an existing record). That covers a competition
+            in `setup` and `draw-ready` as well as one under way. `error` and
+            `message` name every blocking competition and the shiaijo it still
+            runs on (`message` is that alone, as a sentence the app shows as
+            it is), and nothing is written. A competition's `courts` change
+            only until its draw is made (the settings PUT refuses them after
+            that), so a drawn one frees its shiaijo when it finishes, and a
+            bout moves to another shiaijo with a court move. `completed` and
+            `invalid` competitions are history and never block, so a
+            multi-day event that ran the morning on 4 shiaijo can still shrink
+            to 2 for the afternoon. The refusal stops an orphan being CREATED; records
             orphaned before it existed, or by a hand-edited config.md or an
             imported manifest, are caught instead by the draw gate, which is
             what makes "a competition is never drawn onto a shiaijo the

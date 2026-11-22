@@ -1924,6 +1924,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 						return nil, nil
 					}
 				}
+				// started: the competition has left setup (a legacy record with no
+				// status counts as setup). Asked once, before the settings merge
+				// below changes current, and reused by every started guard.
+				started := current.Status != state.CompStatusSetup && current.Status != ""
 				// Once started, the draw's shape stays locked as it does while
 				// draw-ready (operator decision bc-rrsh r5, 2026-11-22): the
 				// pools and bracket being fought were drawn from it, and winners
@@ -1933,7 +1937,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// the zekken name option and match durations stay editable. The
 				// shiaijo stay as drawn too (bc-rrsh r7): a bout changes court by
 				// a court move, never by this list.
-				if current.Status != state.CompStatusSetup && current.Status != "" && (drawShapeChanged || courtsChanged) {
+				if started && (drawShapeChanged || courtsChanged) {
 					drawShapeStartedFlag = true
 					return nil, nil
 				}
@@ -2101,7 +2105,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// it drew with: the guards above have already refused any change
 				// to them, and a league's request was zeroed by
 				// normalizePoolConfig, which must not overwrite the stored pair.
-				if current.Status == state.CompStatusSetup || current.Status == "" {
+				if !started {
 					current.PoolSize = comp.PoolSize
 					current.PoolWinners = comp.PoolWinners
 				}
@@ -2125,15 +2129,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// between there and here touches either side of that
 				// comparison, so recomputing it would only restate it.
 				current.NumberPrefix = comp.NumberPrefix
-				// started is computed here, ahead of the Format/Kind gate that
-				// needs it, rather than down by the Naginata/Engi guards below
-				// (its original position): those guards run AFTER their own
-				// field's merge and compare against the FRESH current value, but
-				// Format/Kind are merged right here, so the comparison has to
-				// happen before these two assignments or it would compare a
-				// value against itself. Reused unchanged by every started-guard
-				// below.
-				started := current.Status != state.CompStatusSetup && current.Status != ""
+				// started (above) was taken before this merge, ahead of the
+				// Format/Kind gate that needs it: the Naginata/Engi guards below
+				// run AFTER their own field's merge and compare against the
+				// FRESH current value, but Format/Kind are merged right here, so
+				// the comparison has to happen before these two assignments or
+				// it would compare a value against itself.
 				// Format and Kind repoint pool-vs-bracket generation and
 				// team-vs-individual scoring while results already exist (see
 				// comp.Format read live in engine/scoring_tx.go's mixed-pool

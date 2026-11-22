@@ -281,7 +281,7 @@ Quick lookup: scan, then `Ctrl+F` the class name to jump to its subsection.
 | `.btn--sm` / `.btn--lg` | Compact rows / hero CTAs |
 | `.btn--full` | Full-width (forms, modal footers) |
 
-States: `:hover` brightens border to `--ink-4`; `:disabled` drops to 0.5 opacity. No loading state: show a `.spinner` next to or inside the button instead.
+States: `:hover` brightens border to `--ink-4`; `:disabled` drops to 0.6 opacity. No loading state: show a `.spinner` next to or inside the button instead.
 
 ### Cards: `.card`
 

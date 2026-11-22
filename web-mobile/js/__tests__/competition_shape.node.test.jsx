@@ -6,7 +6,7 @@ import {
   LABEL_FORMAT, FORMAT_OPTIONS, formatHint,
   LABEL_POOL_SHAPE, poolShapeVisible,
   POOL_SHAPE_ALL, POOL_SHAPE_RING, POOL_SHAPE_OPTIONS,
-  poolShapeOf, poolShapeFields, poolShapeHint,
+  poolShapeOf, roundRobinOf, poolShapeHint,
   LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS, swissRoundsVisible,
   LABEL_POOL_DURATION, HINT_POOL_DURATION, poolDurationLabel, poolDurationHint,
   LABEL_KNOCKOUT_DURATION, HINT_KNOCKOUT_DURATION,
@@ -125,9 +125,9 @@ describe('Who fights whom: one control over roundRobin (bc-rrsh)', () => {
   });
 
   it('each shape writes the roundRobin the engine reads back as that shape', () => {
-    expect(poolShapeFields(POOL_SHAPE_ALL)).toEqual({ roundRobin: true });
-    expect(poolShapeFields(POOL_SHAPE_RING)).toEqual({ roundRobin: false });
-    for (const o of POOL_SHAPE_OPTIONS) expect(poolShapeOf(poolShapeFields(o.value).roundRobin)).toBe(o.value);
+    expect(roundRobinOf(POOL_SHAPE_ALL)).toBe(true);
+    expect(roundRobinOf(POOL_SHAPE_RING)).toBe(false);
+    for (const o of POOL_SHAPE_OPTIONS) expect(poolShapeOf(roundRobinOf(o.value))).toBe(o.value);
   });
 
   it('names the control and both shapes, and a hint per shape', () => {

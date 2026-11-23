@@ -24,7 +24,7 @@ func TestPublicNames_Values(t *testing.T) {
 	// One kind of link at a time: there is no "both".
 	for _, v := range []string{"both", "Person", " hidden", "none", "numbers"} {
 		assert.False(t, ValidPublicNames(v), "%q is not a value", v)
-		assert.False(t, PublicNamesHidesNames(v), "%q hides nothing", v)
+		assert.True(t, PublicNamesHidesNames(v), "%q fails closed: it hides", v)
 		assert.False(t, PublicNamesHasLinks(v), "%q gives no link", v)
 	}
 

@@ -65,9 +65,10 @@ export function tournamentRefusal(err, status) {
         e.competitions = Array.isArray(err.competitions) ? err.competitions : [];
     }
     // bc-hnam: the settings landed but some competitions could not be set to the
-    // changed default (a 500 listing them). The form sends the save again
-    // confirmed, since the default it holds now equals the stored one.
-    if (status === 500 && Array.isArray(err.competitions)) {
+    // changed default (a 409 listing them, never a 5xx, which the outbox would
+    // retry unseen). The form sends the save again confirmed, since the default
+    // it holds now equals the stored one.
+    if (status === 409 && err.code === 'public_names_apply_failed') {
         e.code = 'public_names_apply_failed';
         e.competitions = err.competitions;
     }

@@ -589,6 +589,29 @@ func TestPublicNames_APostThatLeavesAStoredHidingDefaultAloneIsNotRefused(t *tes
 	assert.Equal(t, codePublicNamesSelfRun, codeOf(t, w))
 }
 
+// The create flow sends no default, so a POST over a tournament that exists and
+// names none keeps the stored default: it is no move to showing names, which
+// would be answered 409 public_names_apply_confirm to a client that cannot
+// confirm it, and the competitions are left as they are.
+func TestPublicNames_APostThatNamesNoDefaultKeepsTheStoredOne(t *testing.T) {
+	f := newPublicNamesFixture(t, state.TournamentModeOfficiated)
+	stored, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	edited := *stored
+	edited.DefaultPublicNames = state.PublicNamesPerson
+	require.NoError(t, f.store.SaveTournament(&edited))
+	f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout, PublicNames: state.PublicNamesPerson})
+
+	w := f.admin(http.MethodPost, "/api/tournament", map[string]any{
+		"name": stored.Name, "date": stored.Date, "courts": stored.Courts, "password": publicNamesPassword,
+	})
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	after, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, state.PublicNamesPerson, after.DefaultPublicNames)
+	assert.Equal(t, state.PublicNamesPerson, f.comp(t, "c1").PublicNames)
+}
+
 // A started competition cannot change its format, so switching it to Swiss is
 // told that, and not first that its hidden names do not suit Swiss.
 func TestPublicNames_AStartedHidingCompetitionSwitchedToSwissIsToldTheStartedRefusalFirst(t *testing.T) {

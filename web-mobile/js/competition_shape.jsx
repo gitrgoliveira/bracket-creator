@@ -422,7 +422,9 @@ export function tournamentShowsEveryName(tournament) {
 // competitionCallsByNumber).
 export function competitionHidesNames(tournament, comp) {
   const v = comp && comp.publicNames;
-  return ["person", "competition", "hidden"].includes(v) && !tournamentShowsEveryName(tournament);
+  // Any value but empty hides, one no setting has included (Go's
+  // PublicNamesHidesNames fails closed the same way).
+  return !!v && !tournamentShowsEveryName(tournament);
 }
 // Whether a court call names comp's competitors by number: the competition
 // hides its names and it is not a team one, whose calls name the two teams,

@@ -1,10 +1,10 @@
 package mobileapp
 
 // A tournament save that sets competitions' public names but cannot change
-// every one of them: the tournament default's apply (PUT and POST) and the self-run
-// switch (POST and PUT) each answer 500 naming the competitions left as they
-// were, tell open pages about the ones that did change, and finish the rest
-// when the same save is sent again.
+// every one of them: the tournament default's apply (PUT and POST) answers 409
+// public_names_apply_failed (a 5xx would be retried unseen by the offline
+// queue) naming the competitions left as they were, tells open pages about the
+// ones that did change, and finishes the rest when the same save is sent again.
 
 import (
 	"encoding/json"
@@ -87,7 +87,7 @@ func failedCompetitions(t *testing.T, body []byte) []string {
 	return out.Competitions
 }
 
-func TestPublicNames_DefaultApplyPartialFailureIsA500AndSendingAgainFinishesIt(t *testing.T) {
+func TestPublicNames_DefaultApplyPartialFailureIsA409AndSendingAgainFinishesIt(t *testing.T) {
 	f := newPartialFailureFixture(t, state.TournamentModeOfficiated)
 	f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout})
 	f.saveComp(t, &state.Competition{ID: "c2", Name: "Shiai", Kind: "individual", Format: state.CompFormatKnockout})
@@ -99,7 +99,8 @@ func TestPublicNames_DefaultApplyPartialFailureIsA500AndSendingAgainFinishesIt(t
 		return tournamentPutBody(t, f.publicNamesFixture, map[string]any{"defaultPublicNames": "person", "confirmPublicNames": true})
 	}
 	w := f.admin(http.MethodPut, "/api/tournament", body())
-	require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Equal(t, codePublicNamesApplyFailed, codeOf(t, w))
 	assert.Equal(t, []string{"c2"}, failedCompetitions(t, w.Body.Bytes()))
 	assert.Contains(t, w.Body.String(), "Save again to retry")
 	stored, err := f.store.LoadTournament()
@@ -118,9 +119,9 @@ func TestPublicNames_DefaultApplyPartialFailureIsA500AndSendingAgainFinishesIt(t
 }
 
 // The POST door runs the same apply after its save, so a competition it cannot
-// write is answered the same 500 naming it, and sending the POST again
+// write is answered the same 409 naming it, and sending the POST again
 // finishes the rest.
-func TestPublicNames_PostDefaultApplyPartialFailureIsA500AndSendingAgainFinishesIt(t *testing.T) {
+func TestPublicNames_PostDefaultApplyPartialFailureIsA409AndSendingAgainFinishesIt(t *testing.T) {
 	f := newPartialFailureFixture(t, state.TournamentModeOfficiated)
 	f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout})
 	f.saveComp(t, &state.Competition{ID: "c2", Name: "Shiai", Kind: "individual", Format: state.CompFormatKnockout})
@@ -135,7 +136,8 @@ func TestPublicNames_PostDefaultApplyPartialFailureIsA500AndSendingAgainFinishes
 	}
 
 	w := f.admin(http.MethodPost, "/api/tournament", body)
-	require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Equal(t, codePublicNamesApplyFailed, codeOf(t, w))
 	assert.Equal(t, []string{"c2"}, failedCompetitions(t, w.Body.Bytes()))
 	assert.Contains(t, w.Body.String(), "Save again to retry")
 	after, err := f.store.LoadTournament()

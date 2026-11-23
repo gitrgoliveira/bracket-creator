@@ -31,6 +31,10 @@ const (
 	// default would change these competitions (409); the save is sent again
 	// with confirmPublicNames once the organiser has seen the list.
 	codePublicNamesApplyConfirm = "public_names_apply_confirm"
+	// codePublicNamesApplyFailed: the settings saved but some competitions
+	// could not be set to the new default; sending the save again confirmed
+	// finishes it.
+	codePublicNamesApplyFailed = "public_names_apply_failed"
 )
 
 const (
@@ -201,20 +205,24 @@ func publicNamesSelfRunAnswer() *publicNamesAnswer {
 	return &publicNamesAnswer{http.StatusConflict, gin.H{"error": msgPublicNamesSelfRun, "code": codePublicNamesSelfRun}}
 }
 
-// publicNamesDefaultFailedAnswer is the 500 for a tournament save that landed
+// publicNamesDefaultFailedAnswer is the 409 for a tournament save that landed
 // while some competitions could not be set to its default (failed names them,
-// and is empty when the competitions could not be listed at all). Either way
-// `competitions` is a list, which is how the form knows to send the save again
-// confirmed.
+// and is empty when the competitions could not be listed at all). It is a 409
+// and not a 500 because the settings are saved: the offline queue keeps
+// retrying a 5xx, which would hide the answer from the open form, while a 409
+// is settled and told, and the form then sends the save again confirmed
+// (`competitions` is a list either way).
 func publicNamesDefaultFailedAnswer(failed []string) *publicNamesAnswer {
 	if len(failed) == 0 {
-		return &publicNamesAnswer{http.StatusInternalServerError, gin.H{
+		return &publicNamesAnswer{http.StatusConflict, gin.H{
 			"error":        "The tournament settings were saved, but the competitions could not be read to change them to the new default. Save again to retry.",
+			"code":         codePublicNamesApplyFailed,
 			"competitions": []string{},
 		}}
 	}
-	return &publicNamesAnswer{http.StatusInternalServerError, gin.H{
+	return &publicNamesAnswer{http.StatusConflict, gin.H{
 		"error":        fmt.Sprintf("The tournament settings were saved, but these competitions could not be changed to the new default: %s. Save again to retry.", strings.Join(failed, ", ")),
+		"code":         codePublicNamesApplyFailed,
 		"competitions": failed,
 	}}
 }

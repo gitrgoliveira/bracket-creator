@@ -5,7 +5,7 @@
     { "name": "per person", "publicNames": "person", "mode": "officiated", "hides": true },
     { "name": "per competition", "publicNames": "competition", "mode": "officiated", "hides": true },
     { "name": "hidden", "publicNames": "hidden", "mode": "officiated", "hides": true },
-    { "name": "a value no setting has", "publicNames": "bogus", "mode": "officiated", "hides": false },
+    { "name": "a value no setting has fails closed", "publicNames": "bogus", "mode": "officiated", "hides": true },
     { "name": "self-run shows names whatever the setting says", "publicNames": "hidden", "mode": "self-run", "hides": false },
     { "name": "self-run per person", "publicNames": "person", "mode": "self-run", "hides": false },
     { "name": "a team competition hides its members", "publicNames": "person", "mode": "officiated", "kind": "team", "teamSize": 3, "hides": true },

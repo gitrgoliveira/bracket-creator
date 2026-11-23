@@ -631,7 +631,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           description: |
-            Two cases, told apart by `code`. Nothing is written.
+            Three cases, told apart by `code`. Nothing is written in the first
+            two.
 
             * `public_names_apply_confirm`: the body's `defaultPublicNames`
               differs from the stored one (from showing names, when the
@@ -639,30 +640,25 @@ paths:
               `publicNames` of competitions already on disk (Swiss ones are
               left out). The body lists them in `competitions`. Send the
               request again with `confirmPublicNames: true` to set them all to
-              the new default.
+              the new default. A body that names no `defaultPublicNames` over a
+              tournament that exists keeps the stored default and asks nothing.
             * `public_names_self_run`: the body sets a hiding
               `defaultPublicNames` on a self-run tournament, and is not the
               default the stored tournament already holds.
+            * `public_names_apply_failed`: the tournament WAS saved, but some
+              competitions could not be changed to the new default
+              (`competitions` lists them; the `error` sentence says which
+              case). The others are changed. Send the same request again with
+              `confirmPublicNames: true` to retry the rest. It is a 409 and not
+              a 5xx so that a client that queues its writes does not retry it
+              unseen.
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: '#/components/schemas/PublicNamesApplyConfirmError'
                   - $ref: '#/components/schemas/PublicNamesError'
-        '500':
-          description: |
-            Some competitions could not be changed (`competitions` lists them),
-            told apart by whether the tournament was saved (the `error`
-            sentence says which). Any other server error carries the usual
-            `error` alone.
-
-            * With `confirmPublicNames: true`, the tournament WAS saved and the
-              competitions listed keep their old option. Send the same request
-              again with `confirmPublicNames: true` to retry the rest.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PublicNamesApplyFailedError'
+                  - $ref: '#/components/schemas/PublicNamesApplyFailedError'
     put:
       tags: [tournament]
       summary: Update tournament configuration
@@ -748,7 +744,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           description: |
-            Four cases, told apart by `code`. Nothing is written in any of them.
+            Four cases, told apart by `code`. Nothing is written in the first
+            three.
 
             * `tournament_changed`: the body's `tournamentVersion` is not the
               stored settings' version.
@@ -762,6 +759,13 @@ paths:
               every listed competition is then set to the new default.
             * `public_names_self_run`: the save sets a hiding
               `defaultPublicNames` on a self-run tournament.
+            * `public_names_apply_failed`: the settings WERE saved (the new
+              `defaultPublicNames` is stored), but some competitions could not
+              be changed to it. `competitions` lists the ids that were not
+              changed (the `error` sentence says which case); the others are
+              changed. Send the same save again with `confirmPublicNames: true`
+              to retry the rest. It is a 409 and not a 5xx so that a client that
+              queues its writes does not retry it unseen.
           content:
             application/json:
               schema:
@@ -769,21 +773,7 @@ paths:
                   - $ref: '#/components/schemas/TournamentChangedError'
                   - $ref: '#/components/schemas/PublicNamesApplyConfirmError'
                   - $ref: '#/components/schemas/PublicNamesError'
-        '500':
-          description: |
-            Some competitions could not be changed, told apart by whether the
-            settings were saved (the `error` sentence says which). `competitions`
-            lists the ids that were not changed. Any other server error carries
-            the usual `error` alone.
-
-            * With `confirmPublicNames: true`, the settings WERE saved (the new
-              `defaultPublicNames` is stored) and the competitions listed keep
-              their old option. Send the same save again with
-              `confirmPublicNames: true` to retry the rest.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PublicNamesApplyFailedError'
+                  - $ref: '#/components/schemas/PublicNamesApplyFailedError'
 
   /api/tournament/reset:
     post:
@@ -8753,16 +8743,17 @@ components:
 
     PublicNamesApplyFailedError:
       type: object
-      required: [error, competitions]
+      required: [code, error, competitions]
       description: >
-        500 on `POST` or `PUT /api/tournament`: some competitions could not be
-        changed. A failure on one competition does not stop the others, and
-        `competitions` lists the ids of the ones that were not changed. On
-        the answer to a `confirmPublicNames` save, the tournament
-        settings were saved (the default moved) and the others are changed:
-        send the same save again with `confirmPublicNames: true` to retry the
-        rest.
+        409 on `POST` or `PUT /api/tournament`: the settings were saved (the
+        default moved) but some competitions could not be changed. A failure on
+        one competition does not stop the others, and `competitions` lists the
+        ids of the ones that were not changed. Send the same save again with
+        `confirmPublicNames: true` to retry the rest.
       properties:
+        code:
+          type: string
+          enum: [public_names_apply_failed]
         error:
           type: string
           description: The sentence to show, saying whether the settings were saved.

@@ -53,9 +53,12 @@ func ValidPublicNames(v string) bool {
 }
 
 // PublicNamesHidesNames reports whether v shows numbers instead of names
-// on the public pages.
+// on the public pages. Every value but "shown" hides, a value no setting has
+// (a hand-edited config.md) included: a privacy setting that cannot be read
+// fails closed, as HidesNamesIn does for a tournament it cannot read, and the
+// organiser sets it again from the setup page.
 func PublicNamesHidesNames(v string) bool {
-	return v != PublicNamesShown && ValidPublicNames(v)
+	return v != PublicNamesShown
 }
 
 // PublicNamesHasLinks reports whether v gives reveal links (per person or

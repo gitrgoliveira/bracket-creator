@@ -1354,6 +1354,13 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// default sets the competitions already on disk once the organiser has
 		// seen the list.
 		t.DefaultPublicNames = strings.TrimSpace(t.DefaultPublicNames)
+		// A re-bootstrap that names no default (the create flow never sends one)
+		// keeps the stored one, as it keeps the stored mode and password: it is
+		// no move to "shown", which would ask for a confirmation the create
+		// flow cannot give. The settings PUT is the door that moves a default.
+		if existingForPost != nil && t.DefaultPublicNames == "" {
+			t.DefaultPublicNames = existingForPost.DefaultPublicNames
+		}
 		applyPublicNames, refusal, err := judgePublicNamesDefault(store, existingForPost, &t, confirm.ConfirmPublicNames)
 		if answerPublicNames(c, refusal, err) {
 			return

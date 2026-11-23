@@ -33,6 +33,10 @@ const { useState, useEffect, useLayoutEffect, useRef, useCallback } = React;
 // state from the URL.
 const AppRouter = window.AppRouter || null;
 
+// bc-hnam: how long the page waits before reading again when a read as a new
+// audience failed (the reload effect in App).
+const AUDIENCE_RETRY_MS = 3000;
+
 const THEME = {
   "accentColor": "#1d3557",
   "showDojo": true,
@@ -590,6 +594,9 @@ function App() {
   // numbers on the admin route the operator saves from.
   const [dataAudience, setDataAudience] = useState(audienceNow);
   const dataReadAsNow = everyName || dataAudience === audienceNow;
+  // Whether the last read as audienceNow failed: the spinner then says the
+  // page is trying again (the reload effect below).
+  const [audienceReadFailed, setAudienceReadFailed] = useState(false);
   // Set before any effect reads (a layout effect runs first), and the event
   // stream reopened with a ticket for it when it changed.
   useLayoutEffect(() => {
@@ -882,11 +889,12 @@ function App() {
   const load = async () => {
     // bc-hnam: an answer read as another audience than the page reads as by
     // the time it lands (the route changed meanwhile) is dropped: the change
-    // of audience reads again.
+    // of audience reads again. It answers whether the page now holds an
+    // answer read as that audience (the reload effect below waits for one).
     const readAs = currentReadAudienceKey();
     try {
       const t = await window.API.fetchTournament();
-      if (currentReadAudienceKey() !== readAs) return;
+      if (currentReadAudienceKey() !== readAs) return false;
       if (!t || t.error) {
         // null = no tournament configured yet: fetchTournament returns null for
         // the bootstrap state (a 200 with a null body on newer servers, or a 404
@@ -894,7 +902,7 @@ function App() {
         setTournament(null);
       } else {
         const comps = await window.API.fetchCompetitions();
-        if (currentReadAudienceKey() !== readAs) return;
+        if (currentReadAudienceKey() !== readAs) return false;
         t.competitions = comps;
         // A display takes the fetch whole: no score editor reads it, and a
         // reload must discard its optimistic broadcast overlay (see below).
@@ -902,6 +910,7 @@ function App() {
         else updateTournament(t);
         applyTheme(t.theme); // mp-scf: apply custom colors
       }
+      return true;
     } catch (e) {
       // A failed fetch (network, 5xx) says nothing about whether a tournament
       // exists, so it never opens the create-tournament gate over one already
@@ -915,6 +924,7 @@ function App() {
       // either: dropStaleCredential has taken the page off the admin audience,
       // and that change of audience reads again.
       if (!(e && e.code === CREDENTIAL_REFUSED)) setTournament((prev) => (prev === undefined ? null : prev));
+      return false;
     } finally {
       setLoading(false);
     }
@@ -1583,16 +1593,30 @@ function App() {
   // bc-hnam: the competitions held were read as another audience (the page
   // moved between an admin route and a public one, the organiser signed in
   // or out, the phone took a reveal key). They are dropped, never shown, and
-  // read again; the page shows the spinner meanwhile (the gate below).
+  // read again; the page shows the spinner meanwhile (the gate below). A read
+  // that fails (the venue Wi-Fi drops) keeps the spinner, says so, and reads
+  // again every AUDIENCE_RETRY_MS, so the page never shows the emptied
+  // tournament as if its competitions were gone.
   useEffect(() => {
     if (dataReadAsNow) return undefined;
     let cancelled = false;
+    let retry = null;
     setTournament((prev) => (prev && Array.isArray(prev.competitions) ? { ...prev, competitions: [] } : prev));
     setSelectedCompData(null);
-    Promise.resolve(loadRef.current()).finally(() => {
-      if (!cancelled) setDataAudience(audienceNow);
-    });
-    return () => { cancelled = true; };
+    const readAgain = () => {
+      Promise.resolve(loadRef.current()).then((read) => {
+        if (cancelled) return;
+        if (read) {
+          setAudienceReadFailed(false);
+          setDataAudience(audienceNow);
+          return;
+        }
+        setAudienceReadFailed(true);
+        retry = setTimeout(readAgain, AUDIENCE_RETRY_MS);
+      });
+    };
+    readAgain();
+    return () => { cancelled = true; clearTimeout(retry); };
   }, [audienceNow, dataAudience, dataReadAsNow, loadRef]);
 
   const requestAdmin = () => {
@@ -1669,7 +1693,9 @@ function App() {
   if (loading && !selectedCompData) return <window.LoadingSpinner text="Loading..." />;
   // bc-hnam: data read as another audience is never shown; it is being read
   // again as this one (the reload effect above).
-  if (!dataReadAsNow) return <window.LoadingSpinner text="Loading..." />;
+  if (!dataReadAsNow) {
+    return <window.LoadingSpinner text={audienceReadFailed ? "Connection interrupted. Trying again…" : "Loading..."} />;
+  }
 
   // Gate ALL rendering on the initial data load. The spinner stays visible
   // until both fetchTournament and fetchAuthConfig have resolved (setting

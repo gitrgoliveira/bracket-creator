@@ -190,9 +190,27 @@ func (v maskView) bracketMatch(m *state.BracketMatch) {
 	}
 	m.HoldTeamResult()
 	m.SubResults = v.bouts(m.SubResults, m.SideAID, m.SideBID, m.SideA, m.SideB)
+	m.Winner = v.bracketWinner(m)
 	m.SideA = v.side(m.SideA, m.SideAID)
 	m.SideB = v.side(m.SideB, m.SideBID)
-	m.Winner = v.side(m.Winner, m.WinnerID)
+}
+
+// bracketWinner is what a knockout match's winner reads as, from the names as
+// stored. A winner with an id reads as side reads it. A winner with a name and
+// no id is a legacy row a repair has not reached, one of the id-less shapes a
+// BracketMatch may hold: it reads as the side whose stored name it is, so the
+// public bracket shows that side's number rather than "?". A name both sides
+// share, or neither holds, still reads "?".
+func (v maskView) bracketWinner(m *state.BracketMatch) string {
+	if m.WinnerID == "" && m.Winner != "" && m.SideA != m.SideB {
+		switch m.Winner {
+		case m.SideA:
+			return v.side(m.SideA, m.SideAID)
+		case m.SideB:
+			return v.side(m.SideB, m.SideBID)
+		}
+	}
+	return v.side(m.Winner, m.WinnerID)
 }
 
 // bouts is a masked copy of a team match's bout rows. teamAID/teamBID are

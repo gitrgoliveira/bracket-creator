@@ -337,6 +337,33 @@ func TestMaskView_Individual(t *testing.T) {
 	assert.Equal(t, "Bob Baba", awards[0].RecipientName, "awards are masked in a copy")
 }
 
+// A knockout row whose sides carry ids but whose winner carries a name and no
+// id (a legacy row a repair has not reached) shows the winning side's number,
+// not "?"; a winner name both sides share stays "?".
+func TestMaskView_BracketWinnerWithNoID(t *testing.T) {
+	v := maskView{m: individualMask()}
+	b := &state.Bracket{Rounds: [][]state.BracketMatch{{
+		{ID: "r1-m1", SideA: "Alice Arai", SideAID: pnAlice, SideB: "Bob Baba", SideBID: pnBob, Winner: "Bob Baba"},
+		{ID: "r1-m2", SideA: "Alice Arai", SideAID: pnAlice, SideB: "Bob Baba", SideBID: pnBob, Winner: "Alice Arai"},
+		{ID: "r1-m3", SideA: "Same Name", SideAID: pnAlice, SideB: "Same Name", SideBID: pnBob, Winner: "Same Name"},
+		{ID: "r1-m4", SideA: "Alice Arai", SideAID: pnAlice, SideB: "Bob Baba", SideBID: pnBob, Winner: "Somebody Else"},
+		{ID: "r1-m5", SideA: "Alice Arai", SideAID: pnAlice, SideB: "Bob Baba", SideBID: pnBob, Winner: "Bob Baba", WinnerID: pnBob},
+	}}}
+	v.bracket(b)
+	got := make([]string, 0, len(b.Rounds[0]))
+	for _, m := range b.Rounds[0] {
+		got = append(got, m.Winner)
+	}
+	assert.Equal(t, []string{"K2", "K1", "?", "?", "K2"}, got)
+
+	revealed := maskView{m: individualMask(), reveal: map[string]bool{pnBob: true}}
+	rb := &state.Bracket{Rounds: [][]state.BracketMatch{{
+		{ID: "r1-m1", SideA: "Alice Arai", SideAID: pnAlice, SideB: "Bob Baba", SideBID: pnBob, Winner: "Bob Baba"},
+	}}}
+	revealed.bracket(rb)
+	assert.Equal(t, "Bob Baba", rb.Rounds[0][0].Winner, "a revealed side's winner reads its name")
+}
+
 func TestMaskView_IndividualRevealOverlay(t *testing.T) {
 	v := maskView{m: individualMask(), reveal: map[string]bool{pnAlice: true}}
 	assert.Equal(t, "Alice Arai", v.side("Alice Arai", pnAlice))

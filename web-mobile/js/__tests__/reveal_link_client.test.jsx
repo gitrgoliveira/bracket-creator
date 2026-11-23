@@ -274,6 +274,16 @@ describe('api_client_events.jsx: the stream ticket', () => {
     unsub();
   });
 
+  it('a server that needs no ticket (a self-run tournament) lets a signed-in console open the public stream', async () => {
+    ticketAnswers.push({ status: 400, body: { code: 'event_ticket_not_needed' } });
+    mods.events.setAudienceAndReconnect('admin', 'pw');
+    const unsub = mods.API.subscribeToEvents(() => {});
+    await flush();
+    expect(tickets).toHaveLength(1);
+    expect(FakeEventSource.instances.map((s) => s.url)).toEqual(['/api/events']);
+    unsub();
+  });
+
   it('the organiser asks a ticket with the password, and a new one on every reconnect', async () => {
     mods.events.setAudienceAndReconnect('admin', 'pw');
     const unsub = mods.API.subscribeToEvents(() => {});

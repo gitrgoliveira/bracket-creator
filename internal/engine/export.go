@@ -15,9 +15,11 @@ import (
 // their own reveal link: only a competition whose option has per-person links
 // (state.PublicNamesPerson) gets one, keyed by state.CompetitorRevealKey, so
 // no secret-derived key is ever printed for any other option. nil otherwise,
-// and the tags keep the watchlist link (a number only).
-func tagReveal(comp *state.Competition) *helper.TagReveal {
-	if comp == nil || comp.PublicNames != state.PublicNamesPerson {
+// and the tags keep the watchlist link (a number only). A self-run tournament
+// hides no names on its public pages, whatever a competition's stored setting
+// says, so its tags keep the watchlist link too.
+func tagReveal(comp *state.Competition, tourn *state.Tournament) *helper.TagReveal {
+	if comp == nil || tourn.IsSelfRun() || comp.PublicNames != state.PublicNamesPerson {
 		return nil
 	}
 	return &helper.TagReveal{
@@ -220,7 +222,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		// never read by this sheet.
 		tagsPools = []helper.Pool{{Players: namesToPrintPlayers}}
 	}
-	if err := helper.CreateTagsSheetWithReveal(f, tagsPools, publicURL, comp.EffectiveNumberPrefix(), tagReveal(comp)); err != nil {
+	if err := helper.CreateTagsSheetWithReveal(f, tagsPools, publicURL, comp.EffectiveNumberPrefix(), tagReveal(comp, tourn)); err != nil {
 		return nil, err
 	}
 	finishTemplate(f, comp, pools, draw, numCourts)

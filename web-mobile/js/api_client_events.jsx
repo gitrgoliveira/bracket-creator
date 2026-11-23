@@ -73,8 +73,9 @@ function _eventsUrl(ticket) {
 // retried with the backoff, and NEVER a fall back to the public stream: a
 // signed-in console must not land on a masked stream without a word. The one
 // exception is the server saying no ticket is needed (event_ticket_not_needed:
-// reveal keys none of which is well formed), where the public stream is what
-// the page is owed anyway; never for the password.
+// reveal keys none of which is well formed, or a self-run tournament, which
+// hides no names), where the public stream is what the page is owed anyway;
+// never for a refused password (401).
 //
 // _ticketGen tells a ticket's answer whether it is still wanted: a reconnect,
 // the last unsubscribe or a new credential bumps it, and an answer for an
@@ -177,7 +178,7 @@ function _ensureConnected() {
             _openSource(_eventsUrl(body.ticket));
             return;
         }
-        if (res.status === 400 && body && body.code === EVENT_TICKET_NOT_NEEDED && !headers['X-Tournament-Password']) {
+        if (res.status === 400 && body && body.code === EVENT_TICKET_NOT_NEEDED) {
             _openSource(_eventsUrl());
             return;
         }

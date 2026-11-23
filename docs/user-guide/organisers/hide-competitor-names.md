@@ -41,7 +41,7 @@ A competitor who opens their link sees the competition with their own name shown
 
 ## When the links stop working
 
-Links stop revealing names at the time in **Links stop working at**. Leave it empty and they stop one hour after the tournament's closing time on its last day, or at 01:00 the next morning when no closing time is set. Moving the time later makes the same links work again, so a link you printed is never lost. Switching the links off and on again brings back the links you switched off, but not a link that has already expired; for that, move the time later.
+Links stop revealing names at the time in **Links stop working at**. Leave it empty and they stop one hour after the tournament's closing time on its last day, or at 01:00 the next morning when no closing time is set. That default needs the tournament's date: if the date has been cleared, the links reveal no names until you set the date or fill in **Links stop working at**. Moving the time later makes the same links work again, so a link you printed is never lost. Switching the links off and on again brings back the links you switched off, but not a link that has already expired; for that, move the time later.
 
 ## What this does not cover
 

@@ -83,7 +83,7 @@ func judgeRequest(t *testing.T, pn *publicNames, headers map[string]string) (aud
 	return aud, ok, w
 }
 
-func TestJudge_SelfRunAnswersAWrongPasswordThePublicViewButTicketsStillRefuseIt(t *testing.T) {
+func TestJudge_SelfRunAnswersAWrongPasswordThePublicView(t *testing.T) {
 	f := newPNFixture(t, state.PublicNamesCompetition)
 	stored, err := f.store.LoadTournament()
 	require.NoError(t, err)
@@ -98,14 +98,6 @@ func TestJudge_SelfRunAnswersAWrongPasswordThePublicViewButTicketsStillRefuseIt(
 	aud, ok, _ = judgeRequest(t, f.pn, map[string]string{"X-Tournament-Password": "secret-pw"})
 	require.True(t, ok)
 	assert.True(t, aud.isOrganiser(), "the right password is still the organiser's")
-
-	tw := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(tw)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/events/ticket", nil)
-	c.Request.Header.Set("X-Tournament-Password", "wrong")
-	_, ok = f.pn.judgeTicket(c)
-	assert.False(t, ok)
-	assert.Equal(t, http.StatusUnauthorized, tw.Code)
 }
 
 func TestAudienceKeys(t *testing.T) {
@@ -500,6 +492,7 @@ func TestNameMaskCache_DropsADeletedCompetition(t *testing.T) {
 
 	require.NoError(t, fx.store.DeleteCompetition("seniors"))
 	cache.entries["juniors"] = nameMaskEntry{} // out of date: the next read rebuilds
+	cache.lastEvict = time.Time{}              // the sweep runs at most once a minute
 	_, err = cache.get("juniors")
 	require.NoError(t, err)
 	assert.Len(t, cache.entries, 1, "the deleted competition's mask is gone")
@@ -508,7 +501,6 @@ func TestNameMaskCache_DropsADeletedCompetition(t *testing.T) {
 
 	_, err = cache.get("seniors")
 	require.Error(t, err)
-	assert.NotContains(t, cache.entries, "seniors", "a failed build leaves no entry")
 }
 
 func TestFailClosedMask(t *testing.T) {
@@ -517,6 +509,14 @@ func TestFailClosedMask(t *testing.T) {
 	assert.Equal(t, "Winner of r1-m1", v.side("Winner of r1-m1", ""))
 	tv := maskView{m: failClosedMask(&state.Competition{ID: "t", Kind: "team", TeamSize: 3})}
 	assert.Equal(t, "?", tv.member(pnTeamA, pnMemA1, "Ken Kato", "Tigers"))
+}
+
+// A member whose name equals their team's is still a member: only a side that
+// records no member id (the team itself, in a legacy row) keeps the team's name.
+func TestMaskViewMember_ANameLikeTheTeamsIsMaskedWhenAMemberIDIsRecorded(t *testing.T) {
+	tv := maskView{m: failClosedMask(&state.Competition{ID: "t", Kind: "team", TeamSize: 3})}
+	assert.Equal(t, "?", tv.member(pnTeamA, pnMemA1, "Tigers", "Tigers"), "a member named like the team")
+	assert.Equal(t, "Tigers", tv.member(pnTeamA, "", "Tigers", "Tigers"), "the team's own name stays")
 }
 
 func TestPublicNamesView_FromStore(t *testing.T) {

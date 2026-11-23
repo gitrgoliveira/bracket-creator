@@ -511,7 +511,9 @@ paths:
         with the ticket, so a later change of a competition's option is judged
         against them again. A caller with neither a password nor a reveal key is
         the public, which opens `GET /api/events` with no ticket: it is answered
-        `400` `event_ticket_not_needed`. When the admin password changes, the
+        `400` `event_ticket_not_needed`. So is every caller of a self-run
+        tournament, which hides no names: a stale password is not refused there
+        either. When the admin password changes, the
         streams opened with the old one are ended after the `password_reset`
         event, so their clients ask for a new ticket.
       security: []
@@ -530,8 +532,8 @@ paths:
                 $ref: '#/components/schemas/EventTicket'
         '400':
           description: >
-            No password and no reveal key were sent (`code: event_ticket_not_needed`).
-            The public stream needs no ticket.
+            No password and no reveal key were sent, or the tournament is self-run
+            (`code: event_ticket_not_needed`). The public stream needs no ticket.
           content:
             application/json:
               schema:

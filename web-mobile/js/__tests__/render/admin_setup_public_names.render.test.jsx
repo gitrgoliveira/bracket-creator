@@ -138,10 +138,10 @@ describe('Tournament default for competitor names', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  it('offers no picker in a self-run tournament, and says why', async () => {
+  it('shows no public names setting in a self-run tournament', async () => {
     const { container } = await mountEditor(makeTournament({ mode: 'self-run' }), vi.fn());
     expect(pill(container, 'Numbers only')).toBeUndefined();
-    expect(container.querySelector('[data-testid="public-names-self-run"]')).toBeTruthy();
+    expect(container.textContent).not.toContain('Competitor names on public pages');
   });
 
   it('warns on the awards note that free text is shown as typed, while a competition hides names', async () => {
@@ -192,10 +192,10 @@ describe('Add competition: competitor names on public pages', () => {
     expect(onCreate.mock.calls[0][0].publicNames).toBe('');
   });
 
-  it('offers no picker in a self-run tournament', async () => {
+  it('shows no public names setting in a self-run tournament', async () => {
     const { container, onCreate } = await mountCreate(makeTournament({ mode: 'self-run' }));
     expect(pill(container, 'Numbers only')).toBeUndefined();
-    expect(container.querySelector('[data-testid="public-names-self-run"]')).toBeTruthy();
+    expect(container.textContent).not.toContain('Competitor names on public pages');
     await act(async () => { fireEvent.change(container.querySelector('input.input'), { target: { value: 'Men' } }); });
     await act(async () => { fireEvent.click(createButton(container)); });
     expect(onCreate.mock.calls[0][0].publicNames).toBe('');

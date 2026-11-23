@@ -108,12 +108,18 @@ func TestExportCompetitionXlsx_OtherOptionsPrintNoRevealLinkOnTags(t *testing.T)
 }
 
 func TestTagReveal_OnlyPerPerson(t *testing.T) {
-	assert.Nil(t, tagReveal(nil))
+	assert.Nil(t, tagReveal(nil, nil))
 	for _, option := range []string{state.PublicNamesShown, state.PublicNamesCompetition, state.PublicNamesHidden} {
-		assert.Nilf(t, tagReveal(&state.Competition{ID: "c", PublicNames: option}), "option %q", option)
+		assert.Nilf(t, tagReveal(&state.Competition{ID: "c", PublicNames: option}, nil), "option %q", option)
 	}
-	r := tagReveal(&state.Competition{ID: "c", PublicNames: state.PublicNamesPerson})
+	r := tagReveal(&state.Competition{ID: "c", PublicNames: state.PublicNamesPerson}, nil)
 	require.NotNil(t, r)
 	assert.Equal(t, "c", r.CompetitionID)
 	assert.Empty(t, r.KeyFor("p1"), "no secret, no key")
+}
+
+func TestTagReveal_NoneInASelfRunTournament(t *testing.T) {
+	comp := &state.Competition{ID: "c", PublicNames: state.PublicNamesPerson}
+	assert.Nil(t, tagReveal(comp, &state.Tournament{Mode: state.TournamentModeSelfRun}), "a self-run tournament shows names, so no reveal link is printed")
+	assert.NotNil(t, tagReveal(comp, &state.Tournament{}), "an officiated tournament still prints them")
 }

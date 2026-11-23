@@ -1056,6 +1056,26 @@ func askTicket(t *testing.T, r *gin.Engine, headers map[string]string) *httptest
 	return w
 }
 
+func TestEventTicket_SelfRunNeedsNoTicket(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	r, h := ticketRouter(f)
+	tour, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	tour.Mode = state.TournamentModeSelfRun
+	require.NoError(t, f.store.SaveTournament(tour))
+
+	for name, headers := range map[string]map[string]string{
+		"the right password": {"X-Tournament-Password": "secret-pw"},
+		"a stale password":   {"X-Tournament-Password": "wrong"},
+		"no credential":      {},
+	} {
+		w := askTicket(t, r, headers)
+		assert.Equal(t, http.StatusBadRequest, w.Code, name)
+		assert.Contains(t, w.Body.String(), codeEventTicketNotNeeded, name)
+	}
+	assert.Empty(t, h.tickets.m, "no ticket is handed out")
+}
+
 func TestEventTicket_JudgedOnceAndSpent(t *testing.T) {
 	f := newPNFixture(t, state.PublicNamesHidden)
 	r, h := ticketRouter(f)

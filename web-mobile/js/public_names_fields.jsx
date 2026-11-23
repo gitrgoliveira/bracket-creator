@@ -37,7 +37,6 @@ export const PUBLIC_NAMES_HINTS = {
 };
 export const HINT_PUBLIC_NAMES_TEAM = "Team names stay visible. The names of the team members are hidden.";
 export const HINT_PUBLIC_NAMES_DOJO = "Dojo names stay visible, and so do organiser screens and exports.";
-export const HINT_PUBLIC_NAMES_SELF_RUN = "A self-run tournament always shows names on the public pages, because the competitors run their own matches from them.";
 export const HINT_PUBLIC_NAMES_SWISS = "Showing numbers instead of names is not available for Swiss competitions yet, because a Swiss draw gives competitors no numbers to show.";
 export const HINT_PUBLIC_NAMES_APPLY = "Saving a change here also sets every competition that is not Swiss to this choice, after you confirm the list. Each competition can still be changed on its own afterwards.";
 export const WARN_PUBLIC_NAMES_FREE_TEXT = "Anything typed in the announcement box or the awards note is shown to everyone exactly as typed. Do not put competitor names in them.";
@@ -203,14 +202,8 @@ export function RevealQrSheet({ compName, url, expiresAt, onClose, showToast }) 
 // `children` carries what only the saved competition can show (its link).
 export function PublicNamesFields({ tournament, format, kind, teamSize, value, onChange, revealUntil, onRevealUntilChange, applyNote, children }) {
   const untilId = useStableId("reveal-until");
-  if (!publicNamesApplies(tournament)) {
-    return (
-      <div className="field">
-        <label className="field__label">{LABEL_PUBLIC_NAMES}</label>
-        <div className="field__hint" data-testid="public-names-self-run">{HINT_PUBLIC_NAMES_SELF_RUN}</div>
-      </div>
-    );
-  }
+  // A self-run tournament always shows names, so it has no such setting to show.
+  if (!publicNamesApplies(tournament)) return null;
   if (format === FORMAT_SWISS) {
     return (
       <div className="field">

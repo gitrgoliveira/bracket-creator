@@ -143,19 +143,6 @@ func (a audience) competitionParts() []string {
 // invalid, expired or wrong-kind key is dropped here, before any key is
 // formed from the audience, so it folds into the public.
 func (p *publicNames) judge(c *gin.Context) (audience, bool) {
-	return p.judgeCredentials(c, false)
-}
-
-// judgeTicket judges the credentials of an event-stream ticket request. The
-// ticket exists for the credentials it is asked with, so a wrong password is
-// refused in every mode: the page is told to ask for the password again.
-func (p *publicNames) judgeTicket(c *gin.Context) (audience, bool) {
-	return p.judgeCredentials(c, true)
-}
-
-// judgeCredentials is the judge behind both; refuseSelfRun says whether a
-// wrong password is refused in a self-run tournament too.
-func (p *publicNames) judgeCredentials(c *gin.Context, refuseSelfRun bool) (audience, bool) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Vary", "X-Tournament-Password, "+revealKeyHeader)
 
@@ -168,7 +155,7 @@ func (p *publicNames) judgeCredentials(c *gin.Context, refuseSelfRun bool) (audi
 		if valid {
 			return organiserAudience(), true
 		}
-		if refuseSelfRun || !p.selfRun() {
+		if !p.selfRun() {
 			respondInvalidPassword(c)
 			return audience{}, false
 		}

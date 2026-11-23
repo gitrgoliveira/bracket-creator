@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -19,22 +20,57 @@ type nameMaskToken [len(nameMaskFiles)]struct {
 	version uint64
 }
 
+// nameMaskEntry is a built mask. A build that failed is kept too (err set,
+// mask fail-closed) until retryAt, so an unreadable file is read once per
+// nameMaskRetryAfter, not once per public read.
 type nameMaskEntry struct {
-	token nameMaskToken
-	mask  *nameMask
+	token   nameMaskToken
+	mask    *nameMask
+	err     error
+	retryAt time.Time
+}
+
+const (
+	// nameMaskRetryAfter is how long a failed build is served before the
+	// files are read again.
+	nameMaskRetryAfter = 2 * time.Second
+	// nameMaskEvictEvery is how often a rebuild also drops the entries of
+	// competitions that no longer exist.
+	nameMaskEvictEvery = time.Minute
+)
+
+// maskFlightKey names one build: a competition's files as they were (token).
+type maskFlightKey struct {
+	compID string
+	token  nameMaskToken
+}
+
+// maskFlight is a build in progress; its waiters read mask and err once done
+// is closed.
+type maskFlight struct {
+	done chan struct{}
+	mask *nameMask
+	err  error
 }
 
 // nameMaskCache holds one mask per competition, valid while the files it was
 // built from are unchanged (Store.FileToken: the in-process write counter and
-// the mtime, for an edit made outside the app).
+// the mtime, for an edit made outside the app). Concurrent reads that find
+// the same stale token share one build.
 type nameMaskCache struct {
-	store   *state.Store
-	mu      sync.Mutex
-	entries map[string]nameMaskEntry
+	store     *state.Store
+	now       func() time.Time
+	build     func(compID string) (*nameMask, error)
+	mu        sync.Mutex
+	entries   map[string]nameMaskEntry
+	flights   map[maskFlightKey]*maskFlight
+	lastEvict time.Time
 }
 
 func newNameMaskCache(store *state.Store) *nameMaskCache {
-	return &nameMaskCache{store: store, entries: map[string]nameMaskEntry{}}
+	c := &nameMaskCache{store: store, now: time.Now, entries: map[string]nameMaskEntry{}, flights: map[maskFlightKey]*maskFlight{}}
+	c.build = c.buildMask
+	return c
 }
 
 func (c *nameMaskCache) token(compID string) nameMaskToken {
@@ -47,29 +83,51 @@ func (c *nameMaskCache) token(compID string) nameMaskToken {
 
 // get is compID's mask, built when the cached one is out of date. The token
 // is sampled BEFORE the files are read, so a write landing during the build
-// leaves an entry whose token is already stale and is rebuilt next time. On a
-// read error the mask fails closed (failClosedMask, or what could be read)
-// and is not cached, so the next read tries again. Every rebuild also drops
-// the entries of competitions that no longer exist (evictGone), so a deleted
-// or replaced competition's names do not stay in memory.
+// leaves an entry whose token is already stale and is rebuilt next time.
+// Readers that find the same stale token share one build. On a read error the
+// mask fails closed (failClosedMask, or what could be read) and that answer is
+// kept for nameMaskRetryAfter, then the files are read again. A rebuild also
+// drops, at most once per nameMaskEvictEvery, the entries of competitions that
+// no longer exist (evictGone), so a deleted or replaced competition's names do
+// not stay in memory.
 func (c *nameMaskCache) get(compID string) (*nameMask, error) {
 	tok := c.token(compID)
+	key := maskFlightKey{compID, tok}
 	c.mu.Lock()
-	e, ok := c.entries[compID]
-	c.mu.Unlock()
-	if ok && e.token == tok {
-		return e.mask, nil
+	if e, ok := c.entries[compID]; ok && e.token == tok && (e.err == nil || c.now().Before(e.retryAt)) {
+		c.mu.Unlock()
+		return e.mask, e.err
 	}
-	m, err := c.build(compID)
+	if f, ok := c.flights[key]; ok {
+		c.mu.Unlock()
+		<-f.done
+		return f.mask, f.err
+	}
+	f := &maskFlight{done: make(chan struct{})}
+	c.flights[key] = f
+	c.mu.Unlock()
+
+	// A build that panics still releases its waiters, with a mask that hides.
+	f.mask, f.err = failClosedMask(&state.Competition{ID: compID}), fmt.Errorf("name mask: build did not finish")
+	defer func() {
+		c.mu.Lock()
+		delete(c.flights, key)
+		c.mu.Unlock()
+		close(f.done)
+	}()
+	f.mask, f.err = c.build(compID)
+
 	c.mu.Lock()
-	if err != nil {
-		delete(c.entries, compID)
-	} else {
-		c.entries[compID] = nameMaskEntry{token: tok, mask: m}
+	c.entries[compID] = nameMaskEntry{token: tok, mask: f.mask, err: f.err, retryAt: c.now().Add(nameMaskRetryAfter)}
+	evict := c.now().Sub(c.lastEvict) >= nameMaskEvictEvery
+	if evict {
+		c.lastEvict = c.now()
 	}
 	c.mu.Unlock()
-	c.evictGone()
-	return m, err
+	if evict {
+		c.evictGone()
+	}
+	return f.mask, f.err
 }
 
 // evictGone drops the entry of every competition the store no longer lists. A
@@ -93,7 +151,7 @@ func (c *nameMaskCache) evictGone() {
 	}
 }
 
-func (c *nameMaskCache) build(compID string) (*nameMask, error) {
+func (c *nameMaskCache) buildMask(compID string) (*nameMask, error) {
 	comp, err := c.store.LoadCompetition(compID)
 	if err != nil || comp == nil {
 		if err == nil {

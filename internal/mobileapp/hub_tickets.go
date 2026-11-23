@@ -172,13 +172,25 @@ func (h *Hub) redeemTicket(ticket string) (sseSubscriber, bool) {
 	return e.sub, true
 }
 
+// respondTicketNotNeeded answers 400 event_ticket_not_needed: the caller's
+// stream is the public one, opened with no ticket.
+func respondTicketNotNeeded(c *gin.Context) {
+	c.JSON(http.StatusBadRequest, gin.H{
+		"error": "A stream with no password or reveal key needs no ticket. Open /api/events without one.",
+		"code":  codeEventTicketNotNeeded,
+	})
+}
+
 // HandleEventTicket is POST /api/events/ticket: the caller's credentials,
 // sent as headers (X-Tournament-Password, X-Reveal-Key), are judged as for a
 // public read, and a single-use ticket bound to that audience is answered,
 // {ticket, expiresAt}, to open /api/events?ticket=... within eventTicketTTL.
 // A password sent but wrong is 401, as on every public read. A reveal key
 // unlocks names on the stream only, never a write. A caller with neither is
-// the public, which opens the stream with no ticket: 400.
+// the public, which opens the stream with no ticket: 400. So is every caller
+// of a self-run tournament, which hides no names (publicNames.hides): its
+// console opens the public stream as it always did, and is never refused a
+// ticket for a stale password or a full ticket map.
 func (h *Hub) HandleEventTicket() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		names := h.names
@@ -186,10 +198,14 @@ func (h *Hub) HandleEventTicket() gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "event-stream tickets are not available"})
 			return
 		}
+		if names.selfRun() {
+			respondTicketNotNeeded(c)
+			return
+		}
 		// Read before the password is judged: a change landing between the
 		// two leaves this ticket with the old count, and it is refused.
 		judgedAt := h.tickets.epochNow()
-		aud, ok := names.judgeTicket(c)
+		aud, ok := names.judge(c)
 		if !ok {
 			return
 		}
@@ -203,10 +219,7 @@ func (h *Hub) HandleEventTicket() gin.HandlerFunc {
 				// well-formed reveal key, is the public, and the public
 				// stream is opened with no ticket. Handing one out would let
 				// anyone fill the waiting tickets and lock the organiser out.
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error": "A stream with no password or reveal key needs no ticket. Open /api/events without one.",
-					"code":  codeEventTicketNotNeeded,
-				})
+				respondTicketNotNeeded(c)
 				return
 			}
 		}

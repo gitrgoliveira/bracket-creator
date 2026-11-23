@@ -227,14 +227,16 @@ func (v maskView) bouts(subs []state.SubMatchResult, teamAID, teamBID, teamA, te
 }
 
 // member is what a team member's name reads as: the name when the member's
-// team is revealed (E7) or when it is the team's own name (team names stay),
-// the member's label ("T10.1") otherwise, or "?" when the member is not known
-// by id. An empty name stays empty.
+// team is revealed (E7) or when no member id is recorded and it is the team's
+// own name (a legacy side that holds the team, whose name stays), the
+// member's label ("T10.1") otherwise, or "?" when the member is not known by
+// id. A member with an id is masked even when their name equals the team's.
+// An empty name stays empty.
 func (v maskView) member(teamID, memberID, name, teamName string) string {
 	if v.m == nil || name == "" {
 		return name
 	}
-	if teamName != "" && name == teamName {
+	if memberID == "" && teamName != "" && name == teamName {
 		return name
 	}
 	if memberID != "" {

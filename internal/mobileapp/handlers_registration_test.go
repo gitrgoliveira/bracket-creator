@@ -109,16 +109,20 @@ func TestRegistration_GET_SelfRun_ReturnsMetadata(t *testing.T) {
 
 // The public form labels its name field and asks the engi entry rule from the
 // GET, so it must carry both engi and engiSolo for every shape: a pair, one
-// competitor per side, and a competition that is not engi at all.
+// competitor per side, and a competition that is not engi at all. engiSolo
+// means something only with engi, so a config that holds engi_solo without engi
+// (a hand edit, a restore) answers false.
 func TestRegistration_GET_CarriesEngiAndEngiSolo(t *testing.T) {
 	cases := []struct {
 		name     string
 		engi     bool
 		engiSolo bool
+		want     bool
 	}{
-		{"not engi", false, false},
-		{"engi pairs", true, false},
-		{"engi one competitor per side", true, true},
+		{"not engi", false, false, false},
+		{"engi pairs", true, false, false},
+		{"engi one competitor per side", true, true, true},
+		{"engi_solo stored without engi", false, true, false},
 	}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,7 +142,7 @@ func TestRegistration_GET_CarriesEngiAndEngiSolo(t *testing.T) {
 			var meta map[string]any
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &meta))
 			assert.Equal(t, tc.engi, meta["engi"], "engi is always answered")
-			assert.Equal(t, tc.engiSolo, meta["engiSolo"], "engiSolo is always answered")
+			assert.Equal(t, tc.want, meta["engiSolo"], "engiSolo is always answered, and only with engi")
 		})
 	}
 }
@@ -185,6 +189,29 @@ func TestRegistration_GET_TeamComp_Returns404(t *testing.T) {
 	w := doGetMeta(r, compID)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Contains(t, w.Body.String(), "not available")
+}
+
+// A team competition is one with a team kind or a team size (Competition.IsTeam),
+// so a config with a team size and no kind gets no public form either.
+func TestRegistration_TeamSizeWithoutKind_Returns404(t *testing.T) {
+	r, store, spy, _ := setupRegistrationRouter(t, selfRunTournament())
+
+	const compID = "comp-team-size"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       compID,
+		Name:     "Team Comp",
+		Status:   state.CompStatusSetup,
+		TeamSize: 3,
+	}))
+
+	w := doGetMeta(r, compID)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Contains(t, w.Body.String(), "not available")
+
+	w = doRegister(r, compID, map[string]any{"name": "Alice", "dojo": "Dojo"})
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Contains(t, w.Body.String(), "not available")
+	assert.Equal(t, 0, spy.count())
 }
 
 func TestRegistration_POST_TeamComp_Returns404(t *testing.T) {

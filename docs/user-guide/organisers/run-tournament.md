@@ -293,7 +293,7 @@ For how to enter scores and navigate between matches, refer to [Score a match](.
 
 For kiken, fusenpai, daihyosen, and other special decisions, refer to [Recording decisions](../court-operators/recording-decisions.md).
 
-For naginata divisions, refer to [Naginata](naginata.md); for a pair kata competition in any art, refer to [Engi](engi.md).
+For naginata divisions, refer to [Naginata](naginata.md); for a kata competition in any art, refer to [Engi](engi.md).
 
 ## Results and awards
 

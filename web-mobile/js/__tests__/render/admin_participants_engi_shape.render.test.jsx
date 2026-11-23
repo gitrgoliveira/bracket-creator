@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fireEvent } from '@testing-library/react';
+import { act, fireEvent } from '@testing-library/react';
 import { installParticipantsHarness, makeParticipantsCompetition, mountParticipants } from './admin_participants_mount_harness.jsx';
 
 // The stored-rows notice: a roster saved under one setting of "One competitor
@@ -97,7 +97,7 @@ describe('AdminParticipants stored-rows notice for an engi competition', () => {
     const n = notice(container);
     expect(n).toBeTruthy();
     expect(n.textContent).toContain('Alice Smith - Bob Jones');
-    expect(n.textContent).toContain('The competition has started, so these rows and the "One competitor per side" setting can no longer be changed.');
+    expect(n.textContent).toContain('The competition has started, so the "One competitor per side" setting can no longer be changed, and these rows can no longer be edited on this page.');
     expect(n.textContent).not.toContain('Edit the rows');
     expect(n.textContent).not.toContain('Settings');
     expect(container.querySelector('button[aria-label="Edit Alice Smith - Bob Jones"]')).toBeNull();
@@ -138,6 +138,35 @@ describe('AdminParticipants stored-rows notice for an engi competition', () => {
     fireEvent.click(solo.container.querySelector('button[aria-label="Edit Akira Tanaka"]'));
     expect(document.getElementById('participant-replace-name-label').textContent).toBe('Name *');
     expect(document.querySelector('[aria-labelledby="participant-replace-name-label"]').getAttribute('placeholder')).toBe('Replacement name');
+  });
+
+  it('the Edit dialog saves a row that no longer fits when its name is left as it is, and judges a changed name', async () => {
+    const savedAPI = window.API;
+    const savedMetadata = window.buildPlayerMetadata;
+    const replaceParticipant = vi.fn().mockResolvedValue({ id: 'p-1', name: 'Alice Smith - Bob Jones', dojo: 'Dojo Z' });
+    window.API = { ...savedAPI, replaceParticipant };
+    window.buildPlayerMetadata = () => undefined;
+    try {
+      const showToast = vi.fn();
+      const { container, getByText } = await mountParticipants(makeParticipantsCompetition({
+        status: 'draw-ready', engi: true, engiSolo: true, players: [PAIR_ROW],
+      }), { showToast });
+      fireEvent.click(container.querySelector('button[aria-label="Edit Alice Smith - Bob Jones"]'));
+      fireEvent.change(document.querySelector('[aria-labelledby="participant-replace-dojo-label"]'), { target: { value: 'Dojo Z' } });
+      await act(async () => { fireEvent.click(getByText('Save')); });
+      expect(showToast.mock.calls.filter((c) => c[1] === 'error')).toEqual([]);
+      expect(replaceParticipant).toHaveBeenCalledTimes(1);
+      expect(replaceParticipant.mock.calls[0][2]).toMatchObject({ name: 'Alice Smith - Bob Jones', dojo: 'Dojo Z' });
+
+      // A name typed over it is judged as at every other door.
+      fireEvent.click(container.querySelector('button[aria-label="Edit Alice Smith - Bob Jones"]'));
+      fireEvent.change(document.querySelector('[aria-labelledby="participant-replace-name-label"]'), { target: { value: 'Alice Smith - Bob Smith' } });
+      await act(async () => { fireEvent.click(getByText('Save')); });
+      expect(replaceParticipant).toHaveBeenCalledTimes(1);
+    } finally {
+      window.API = savedAPI;
+      window.buildPlayerMetadata = savedMetadata;
+    }
   });
 
   it('lists the first five names and counts the rest', async () => {

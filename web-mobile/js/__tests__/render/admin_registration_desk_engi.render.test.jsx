@@ -107,8 +107,8 @@ function walkUpLabel(result) {
   return result.container.querySelector('.rd-walkup .field__label').textContent;
 }
 
-async function openEdit(engiSolo) {
-  const stored = engiSolo ? SOLO : PAIR;
+async function openEdit(engiSolo, storedName) {
+  const stored = storedName || (engiSolo ? SOLO : PAIR);
   const result = await mount(tournamentFor(engiSolo, [
     { id: 'p1', name: stored, dojo: 'Gyokusen', checkedIn: false },
   ]));
@@ -208,6 +208,17 @@ describe('Registration desk Edit asks the engi entry rule', () => {
     await act(async () => { fireEvent.click(result.getByText('Save changes')); });
     expect(result.queryByRole('alert')).toBeNull();
     expect(window.API.replaceParticipant).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Registration desk Edit leaves a name that is left as it is unjudged', () => {
+  it('saves a changed dojo on a pair row in a competition with one competitor per side', async () => {
+    const result = await openEdit(true, PAIR);
+    fireEvent.change(result.getByRole('dialog').querySelectorAll('input')[1], { target: { value: 'Getsurin' } });
+    await act(async () => { fireEvent.click(result.getByText('Save changes')); });
+    expect(result.queryByRole('alert')).toBeNull();
+    expect(window.API.replaceParticipant).toHaveBeenCalledTimes(1);
+    expect(window.API.replaceParticipant.mock.calls[0][2]).toMatchObject({ name: PAIR, dojo: 'Getsurin' });
   });
 });
 

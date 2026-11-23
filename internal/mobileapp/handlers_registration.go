@@ -49,7 +49,7 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 			return
 		}
 
-		if comp.Kind == "team" {
+		if comp.IsTeam() {
 			c.JSON(http.StatusNotFound, gin.H{"error": "registration is not available for this competition"})
 			return
 		}
@@ -64,7 +64,7 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 			"withZekkenName": comp.WithZekkenName,
 			"status":         comp.Status,
 			"engi":           comp.Engi,
-			"engiSolo":       comp.EngiSolo,
+			"engiSolo":       comp.Engi && comp.EngiSolo,
 		})
 	})
 
@@ -90,7 +90,7 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 			return
 		}
 
-		if comp.Kind == "team" {
+		if comp.IsTeam() {
 			c.JSON(http.StatusNotFound, gin.H{"error": "registration is not available for this competition"})
 			return
 		}

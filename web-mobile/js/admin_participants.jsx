@@ -805,8 +805,11 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
     const name = replaceName.trim(), dojo = replaceDojo.trim(), danGrade = replaceDanGrade.trim();
     const zekken = replaceZekken.trim();
     // Same validation as add: an engi name must fit the side's shape on edit
-    // too (both member names for a pair, one competitor for solo).
-    const formErr = participantFormError({ name, dojo, shape: engiSide });
+    // too (both member names for a pair, one competitor for solo). A name left
+    // as it is is not judged: once the draw is made the setting is locked, so
+    // the dojo, grade or zekken of a row that no longer fits must still save.
+    const nameKept = name === (replaceTarget.name || "").trim();
+    const formErr = participantFormError({ name, dojo, shape: nameKept ? null : engiSide });
     if (formErr) { showToast(formErr, "error"); return; }
     // Capture the old name before the await so the success toast is accurate
     // even if replaceTarget has changed by the time the response arrives.
@@ -1058,8 +1061,8 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
 
   // Rows already stored that the current "One competitor per side" setting
   // would refuse today (a pair row after the setting was turned on, a one-name
-  // row after it was turned off). The setting stays editable at every status,
-  // so nothing blocks; the notice below names the rows and the way out. The
+  // row after it was turned off). The setting is locked once the draw is
+  // made, so nothing blocks; the notice below names the rows and the way out. The
   // entry rule (engiEntryProblem) is the one judge, as at every entry door.
   const engiMisfits = engiSide
     ? (c.players || []).filter((p) => engiEntryProblem(p.name, engiSide === "solo"))
@@ -1104,7 +1107,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
           {engiMisfits.length === 1 ? "1 saved row does not" : `${engiMisfits.length} saved rows do not`} fit
           {engiSide === "solo" ? " this competition, which takes one competitor per side" : " this competition, which takes pairs"}: {engiMisfitNames}.
           {isStarted
-            ? " The competition has started, so these rows and the \"One competitor per side\" setting can no longer be changed."
+            ? " The competition has started, so the \"One competitor per side\" setting can no longer be changed, and these rows can no longer be edited on this page."
             : isDrawReady
               ? " Edit the rows, or discard the draw (from the competition header) to change \"One competitor per side\" in Settings."
               : " Edit the rows, or change \"One competitor per side\" back in Settings. Applying a pasted list with rows like these is refused."}

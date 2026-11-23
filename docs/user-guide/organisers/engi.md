@@ -1,12 +1,12 @@
-# Engi (pair kata) competitions
+# Engi (kata) competitions
 
-Engi is a kata competition for pairs. Two competitors perform a set of
-choreographed forms together, and a panel of referees each raise a flag for the
-side they judge superior. It suits any kata competition judged that way:
-naginata engi-kyogi, kendo kata, jodo and other kata performed in pairs. Each
-side must be a pair, so a kata performed alone, such as iaido, cannot be entered
-as engi yet. It is scored entirely differently from a combat (shiai) bout: there
-are no ippon, no time on the clock, and no draws.
+Engi is a kata competition. A panel of referees each raise a flag for the side
+they judge superior. A side is usually a pair: two competitors perform a set of
+choreographed forms together, as in naginata engi-kyogi, kendo kata and jodo. A
+side can also be one competitor, for a kata performed alone, such as iaido: tick
+**One competitor per side** and every side in the competition is one person. It
+is scored entirely differently from a combat (shiai) bout: there are no ippon,
+no time on the clock, and no draws.
 
 ## Turn it on
 
@@ -14,6 +14,14 @@ Tick **Engi (kata competition)** on the **Add competition** form or on an
 individual competition's **Settings** tab to switch its score editor to flag counting. It is offered for individual
 competitions only, works with every format (knockout, pools then knockout,
 league and Swiss), and is locked once the draw is generated.
+
+When Engi is ticked, **One competitor per side (solo kata, such as iaido)**
+appears under it. Leave it unticked for pairs, the default. Tick it when each
+side is a single competitor. It is locked with Engi once the draw is generated;
+to change it before the competition starts, discard the draw first. Rows you
+have already entered are not changed when you switch it. The **Participants**
+page lists any row that no longer fits, so you can edit it. Once the
+competition has started the setting cannot be changed.
 
 Engi is its own setting, independent of **Naginata competition**. Ticking
 **Naginata competition** does two things: it adds the Sune ippon button, which
@@ -52,6 +60,29 @@ Name 1 - Name 2, ZEKKEN1 - ZEKKEN2, Dojo
 The two names display stacked on one side of the match. The pair counts as
 one entry in the draw and one line in the standings.
 
+## Add one competitor per side
+
+With **One competitor per side** ticked, enter each competitor as an ordinary
+row, one name and a dojo, the same as an individual competition:
+
+```
+Name, Dojo
+```
+
+With zekken names on, the zekken column holds the competitor's own zekken.
+
+Every place that takes a name checks it against this setting: the paste box and
+CSV import, the Add and Edit forms, the registration desk and the public
+sign-up form. A pair typed as `Name 1 - Name 2` is refused with a message that
+tells you to turn the setting off, and a pair competition refuses a row with
+only one name. A hyphen inside a name, such as `Jean-Paul Martin`, is fine. A
+row you edit and leave with its name unchanged is saved without this check, so a
+row that no longer fits can still have its dojo or grade corrected.
+
+Everything else works as it does for pairs: flag scoring, the standings columns
+and the tie rules. The only difference on screen is the name column of the
+standings tables, headed **Player** instead of **Pair**.
+
 ## Score with flags
 
 The score editor becomes a flag counter with one column per side, Shiro (white)
@@ -75,7 +106,7 @@ on the left and Aka (red) on the right:
 
 ## Standings
 
-In Engi pools, leagues, and Swiss competitions, pairs are ranked by wins first,
+In Engi pools, leagues, and Swiss competitions, sides (pairs, or single competitors with **One competitor per side**) are ranked by wins first,
 then by the flags they accumulated:
 
 1. Total wins.

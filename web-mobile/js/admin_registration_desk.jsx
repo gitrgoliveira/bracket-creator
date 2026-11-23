@@ -35,7 +35,7 @@
 
 import { checkinPid, checkinApiPid } from './data.jsx';
 import { NO_ID_HINT, NoIdHint } from './data_integrity.jsx';
-import { checkInApplies, tournamentHasCheckIn, SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
+import { checkInApplies, isTeamCompetition, tournamentHasCheckIn, SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { acceptTap } from './tap_guard.jsx';
 import { Icon } from './icon.jsx';
@@ -493,7 +493,7 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
 // Participants page does: "Team name" for a team, the pair format for a pair
 // engi competition, else "Name" (one competitor per side included).
 function rdNameField(comp) {
-  if (comp.kind === "team") return { label: "Team name", placeholder: "Tora A" };
+  if (isTeamCompetition(comp)) return { label: "Team name", placeholder: "Tora A" };
   const shape = engiShape(comp);
   return {
     label: engiNameFieldLabel(shape),
@@ -624,7 +624,9 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
   const save = async () => {
     const n = name.trim(), d = dojo.trim();
     if (!n || !d) { showToast(isTeam ? "Team name and dojo are required" : "Name and dojo are required", "error"); return; }
-    const problem = rdNameProblem(comp, n);
+    // A name left as it is is not judged: the setting is locked once the draw
+    // is made, so the dojo, grade or zekken of a misfit row must still save.
+    const problem = n === (player.name || "").trim() ? null : rdNameProblem(comp, n);
     if (problem) { setNameErr(problem); return; }
     setBusy(true);
     try {

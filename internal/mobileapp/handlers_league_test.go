@@ -87,7 +87,7 @@ func TestLeagueStandings_HideNamesFromThePublic(t *testing.T) {
 	eng := engine.New(store)
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: "league-comp", Name: "League", Kind: "individual",
-		Format: state.CompFormatLeague, PoolFormat: "full", PoolSize: 3,
+		Format: state.CompFormatLeague, PoolSize: 3,
 		Courts: []string{"A"}, StartTime: "09:00", PoolMatchDurationSeconds: 180,
 		Status: state.CompStatusSetup, NumberPrefix: "L", PublicNames: state.PublicNamesHidden,
 	}))

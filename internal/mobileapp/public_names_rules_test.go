@@ -637,11 +637,10 @@ func TestPublicNames_RevealLinks(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 		assert.Equal(t, state.CompetitionRevealKey(c), got.CompetitionKey)
 		assert.NotEmpty(t, got.CompetitionKey)
-		assert.Empty(t, got.Competitors)
 		assert.True(t, got.Open)
 		assert.Equal(t, "2099-01-01T10:00", got.ExpiresAt)
 	})
-	t.Run("per person answers each competitor's key", func(t *testing.T) {
+	t.Run("per person answers no key: each competitor's is read on its own", func(t *testing.T) {
 		f := newPublicNamesFixture(t, state.TournamentModeOfficiated)
 		c := &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout, PublicNames: state.PublicNamesPerson, RevealSecret: strings.Repeat("56", 32)}
 		f.saveComp(t, c)
@@ -653,10 +652,8 @@ func TestPublicNames_RevealLinks(t *testing.T) {
 		var got revealLinksResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 		assert.Empty(t, got.CompetitionKey)
-		require.Len(t, got.Competitors, 2)
-		for i, p := range players {
-			assert.Equal(t, p.ID, got.Competitors[i].ID)
-			assert.Equal(t, state.CompetitorRevealKey(c, p.ID), got.Competitors[i].Key)
+		for _, p := range players {
+			assert.NotContains(t, w.Body.String(), state.CompetitorRevealKey(c, p.ID), "no competitor's key is in the competition's read")
 		}
 		// The tournament ends 01-06-2026 with no Closing time: 01:00 the next morning.
 		assert.Equal(t, "2026-06-02T01:00", got.ExpiresAt)
@@ -670,7 +667,6 @@ func TestPublicNames_RevealLinks(t *testing.T) {
 		var got revealLinksResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 		assert.Empty(t, got.CompetitionKey)
-		assert.Empty(t, got.Competitors)
 		assert.False(t, got.Open)
 	})
 	t.Run("an unknown competition is 404", func(t *testing.T) {
@@ -688,5 +684,61 @@ func TestPublicNames_RevealLinks(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		w = f.admin(http.MethodGet, "/api/competitions/c1/reveal-links", nil)
 		assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	})
+}
+
+// A competitor's own link is read one at a time, when the organiser taps
+// Reveal link beside their name, and the server logs each read.
+func TestPublicNames_CompetitorRevealLink(t *testing.T) {
+	personComp := func(f publicNamesFixture, t *testing.T) (*state.Competition, []domain.Player) {
+		t.Helper()
+		c := &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout, PublicNames: state.PublicNamesPerson, RevealSecret: strings.Repeat("56", 32), RevealUntil: "2099-01-01T10:00"}
+		f.saveComp(t, c)
+		require.NoError(t, f.store.SaveParticipants("c1", []domain.Player{{Name: "Sato", Dojo: "Tora"}, {Name: "Kato", Dojo: "Kuma"}}))
+		players, err := f.store.LoadParticipants("c1", false)
+		require.NoError(t, err)
+		return c, players
+	}
+	t.Run("answers that competitor's key and logs it", func(t *testing.T) {
+		f := newPublicNamesFixture(t, state.TournamentModeOfficiated)
+		c, players := personComp(f, t)
+		logged := captureLog(t)
+		w := f.admin(http.MethodGet, "/api/competitions/c1/reveal-links/"+players[1].ID, nil)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+		assert.NotContains(t, w.Body.String(), c.RevealSecret, "the secret never leaves the server")
+		var got revealLinkCompetitorResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		assert.Equal(t, players[1].ID, got.ID)
+		assert.Equal(t, "Kato", got.Name)
+		assert.Equal(t, state.CompetitorRevealKey(c, players[1].ID), got.Key)
+		assert.NotContains(t, w.Body.String(), state.CompetitorRevealKey(c, players[0].ID), "only the competitor asked for")
+		assert.Equal(t, "2099-01-01T10:00", got.ExpiresAt)
+		assert.True(t, got.Open)
+		assert.Contains(t, logged.String(), `reveal link shown for competitor "Kato" (`+players[1].ID+`) of competition "c1"`)
+	})
+	t.Run("no link per person, or no such competitor, is 404 and logs nothing", func(t *testing.T) {
+		f := newPublicNamesFixture(t, state.TournamentModeOfficiated)
+		_, players := personComp(f, t)
+		logged := captureLog(t)
+		w := f.admin(http.MethodGet, "/api/competitions/c1/reveal-links/not-a-competitor", nil)
+		assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		assert.Equal(t, codeNoRevealLink, codeOf(t, w))
+		f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout, PublicNames: state.PublicNamesCompetition, RevealSecret: strings.Repeat("56", 32)})
+		w = f.admin(http.MethodGet, "/api/competitions/c1/reveal-links/"+players[0].ID, nil)
+		assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		assert.Equal(t, codeNoRevealLink, codeOf(t, w))
+		w = f.admin(http.MethodGet, "/api/competitions/nope/reveal-links/"+players[0].ID, nil)
+		assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		assert.NotContains(t, logged.String(), "reveal link shown")
+	})
+	t.Run("organiser only, in self-run too", func(t *testing.T) {
+		f := newPublicNamesFixture(t, state.TournamentModeSelfRun)
+		_, players := personComp(f, t)
+		assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodGet, "/api/competitions/:id/reveal-links/:participantId"))
+		w := f.send(http.MethodGet, "/api/competitions/c1/reveal-links/"+players[0].ID, "", nil)
+		assert.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		w = f.send(http.MethodGet, "/api/competitions/c1/reveal-links/"+players[0].ID, "wrong", nil)
+		assert.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	})
 }

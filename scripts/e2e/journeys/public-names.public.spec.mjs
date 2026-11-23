@@ -12,8 +12,9 @@
 // fresh one, and every reveal link is opened in a phone context of its own, so
 // a key one phone keeps never reaches another. The tournament is seeded from a
 // SECOND context with the operator's iPad (OPERATOR_DEVICE), through the
-// interface; that context may read the clipboard, which is where the app's
-// Copy buttons put a reveal link.
+// interface; that context may read the clipboard, which is where the
+// competition link's Copy button puts it. A competitor's own link is read off
+// the Reveal link sheet, which shows it as a QR code and as text.
 //
 // Two individual competitions:
 //   J  Junior Open  6 competitors, two pools of 3, court A: names shown at
@@ -26,6 +27,7 @@ import { journeyShots } from '../fixtures/shots.mjs';
 import { createTournament } from '../fixtures/setup.mjs';
 import { PUBLIC_NAMES, choosePublicNames, createCompetition, publicNamesGroup } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
+import { dwell } from '../fixtures/pace.mjs';
 import {
   competitionTab, matchCard, namesHiddenNote, namesOnPage, numbersOf, numbersOnPage, openRevealLink, openViewer,
   revealPage, scheduleRows,
@@ -47,8 +49,8 @@ const JUNIOR_NAMES = names(JUNIORS);
 const CADET_NAMES = names(CADETS);
 const EVERY_NAME = [...JUNIOR_NAMES, ...CADET_NAMES];
 
-// A reveal link as the Copy buttons build it: /reveal/<competition>#<key>, the
-// key a hex HMAC.
+// A reveal link as the app builds it: /reveal/<competition>#<key>, the key a
+// hex HMAC.
 const REVEAL_LINK = /\/reveal\/[^/#]+#[0-9a-f]{64}$/;
 
 const settingsPath = (id) => `/admin/competition/${id}/settings`;
@@ -208,10 +210,20 @@ test.describe('competitor names hidden on the public pages', () => {
   });
 
   test('a competitor\'s own reveal link shows that competitor\'s name alone', async ({ page }) => {
-    await test.step('the organiser copies Akira Tanaka\'s link from the Participants tab', async () => {
+    await test.step('the organiser shows Akira Tanaka\'s link as a QR code from the Participants tab', async () => {
       await op.goto(`/admin/competition/${ids.junior}/participants`);
-      links.akira = await copiedLink(op, op.getByRole('button', { name: 'Copy reveal link for Akira Tanaka', exact: true }));
-      await expect(op.getByText(/^Reveal link for Akira Tanaka copied/)).toBeVisible();
+      await op.getByRole('button', { name: 'Reveal link for Akira Tanaka', exact: true }).tap();
+      const sheet = op.getByRole('dialog', { name: 'Reveal link: Akira Tanaka' });
+      await expect(sheet.locator('canvas.share-link__qr')).toBeVisible();
+      const shown = Date.now();
+      await expect(sheet.getByText(/^Turn the screen so Akira Tanaka can scan this code\./)).toBeVisible();
+      links.akira = (await sheet.getByTestId('share-link-url').innerText()).trim();
+      expect(links.akira).toMatch(REVEAL_LINK);
+      await shot(op, 'organiser-reveal-link-sheet');
+      // The sheet ignores a tap inside the bounce window of its opening.
+      await dwell(op, shown);
+      await sheet.locator('.modal__foot').getByRole('button', { name: 'Close', exact: true }).tap();
+      await expect(sheet).toHaveCount(0);
     });
 
     await test.step('a phone that opens it sees Akira Tanaka by name and everyone else by number', async () => {

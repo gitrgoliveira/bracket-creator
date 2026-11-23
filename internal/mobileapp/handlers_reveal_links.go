@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"log"
 	"net/http"
 	"time"
 
@@ -9,9 +10,11 @@ import (
 )
 
 // revealLinksResponse is GET /api/competitions/:id/reveal-links: what the
-// organiser's settings and participant rows need to show the reveal QR codes
-// and Copy link buttons. Keys are derived from the competition's secret,
-// which never leaves the server.
+// organiser's settings need to show the competition link. Keys are derived
+// from the competition's secret, which never leaves the server. A
+// competitor's own key is not in it: the Participants tab's Reveal link reads
+// it from GET .../reveal-links/:participantId when the organiser taps it, so
+// the server logs each one it hands out.
 type revealLinksResponse struct {
 	// PublicNames is the competition's option.
 	PublicNames string `json:"publicNames"`
@@ -26,24 +29,36 @@ type revealLinksResponse struct {
 	// CompetitionKey is the key of the one competition link; "" unless the
 	// option is per competition.
 	CompetitionKey string `json:"competitionKey"`
-	// Competitors holds each competitor's own key; empty unless the option
-	// is per person. A competitor with no participant id has no key and is
-	// left out.
-	Competitors []revealLinkCompetitor `json:"competitors"`
 }
 
-// revealLinkCompetitor is one competitor's own reveal key.
-type revealLinkCompetitor struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Dojo string `json:"dojo"`
-	Key  string `json:"key"`
+// revealLinkCompetitorResponse is GET
+// /api/competitions/:id/reveal-links/:participantId: one competitor's own
+// key, with the expiry the Reveal link sheet shows beside its QR code.
+type revealLinkCompetitorResponse struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Key       string `json:"key"`
+	ExpiresAt string `json:"expiresAt"`
+	Open      bool   `json:"open"`
 }
 
-// RegisterRevealLinkHandlers registers the organiser's read of a
-// competition's reveal links. It is an admin route (the password gate), and
-// in self-run it stays organiser-only (isSelfRunMainGatedConfigRoute): the
-// keys it answers unlock names on the public pages.
+// codeNoRevealLink answers a competitor's link read when the competition has
+// no link per person, or holds no competitor with that id.
+const codeNoRevealLink = "no_reveal_link"
+
+// revealExpiryText is the expiry in force in state.RevealUntilLayout, "" when
+// none can be worked out (no tournament date).
+func revealExpiryText(comp *state.Competition, tourn *state.Tournament, now time.Time) string {
+	if expiry, ok := state.RevealExpiry(comp, tourn, now.Location()); ok {
+		return expiry.Format(state.RevealUntilLayout)
+	}
+	return ""
+}
+
+// RegisterRevealLinkHandlers registers the organiser's reads of a
+// competition's reveal links. They are admin routes (the password gate), and
+// in self-run they stay organiser-only (isSelfRunMainGatedConfigRoute): the
+// keys they answer unlock names on the public pages.
 func RegisterRevealLinkHandlers(r *gin.RouterGroup, store *state.Store) {
 	r.GET("/competitions/:id/reveal-links", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -60,16 +75,36 @@ func RegisterRevealLinkHandlers(r *gin.RouterGroup, store *state.Store) {
 			return
 		}
 		now := time.Now()
-		answer := revealLinksResponse{
+		// The key unlocks names: never kept by a cache on the way.
+		c.Header("Cache-Control", "no-store")
+		c.JSON(http.StatusOK, revealLinksResponse{
 			PublicNames:    comp.PublicNames,
 			RevealUntil:    comp.RevealUntil,
+			ExpiresAt:      revealExpiryText(comp, tourn, now),
 			Open:           state.RevealOpen(comp, tourn, now),
 			CompetitionKey: state.CompetitionRevealKey(comp),
-			Competitors:    []revealLinkCompetitor{},
+		})
+	})
+
+	// One competitor's own link, read when the organiser taps Reveal link
+	// beside their name. Each read is logged, so the server's log says when a
+	// competitor's link was shown, and to which address.
+	r.GET("/competitions/:id/reveal-links/:participantId", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
 		}
-		if expiry, ok := state.RevealExpiry(comp, tourn, now.Location()); ok {
-			answer.ExpiresAt = expiry.Format(state.RevealUntilLayout)
+		comp, ok := loadExistingCompetition(c, store, id)
+		if !ok {
+			return
 		}
+		tourn, err := store.LoadTournament()
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		pid := c.Param("participantId")
+		var key, name string
 		if comp.PublicNames == state.PublicNamesPerson {
 			players, err := store.LoadParticipantsOpt(id, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{HasIDs: comp.ParticipantIDsHint()})
 			if err != nil {
@@ -77,15 +112,25 @@ func RegisterRevealLinkHandlers(r *gin.RouterGroup, store *state.Store) {
 				return
 			}
 			for _, p := range players {
-				key := state.CompetitorRevealKey(comp, p.ID)
-				if key == "" {
-					continue
+				if p.ID == pid {
+					key, name = state.CompetitorRevealKey(comp, p.ID), p.Name
+					break
 				}
-				answer.Competitors = append(answer.Competitors, revealLinkCompetitor{ID: p.ID, Name: p.Name, Dojo: p.Dojo, Key: key})
 			}
 		}
-		// The keys unlock names: never kept by a cache on the way.
+		if key == "" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "this competition has no reveal link for that competitor", "code": codeNoRevealLink})
+			return
+		}
+		now := time.Now()
+		log.Printf("mobileapp: reveal link shown for competitor %q (%s) of competition %q, to %s", name, pid, id, c.Request.RemoteAddr)
 		c.Header("Cache-Control", "no-store")
-		c.JSON(http.StatusOK, answer)
+		c.JSON(http.StatusOK, revealLinkCompetitorResponse{
+			ID:        pid,
+			Name:      name,
+			Key:       key,
+			ExpiresAt: revealExpiryText(comp, tourn, now),
+			Open:      state.RevealOpen(comp, tourn, now),
+		})
 	})
 }

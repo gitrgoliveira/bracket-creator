@@ -142,7 +142,7 @@ function RevealLinksPanel({ c, tournament, password, showToast, unsaved }) {
   if (saved === "person") {
     return (
       <div className="field__hint" data-testid="reveal-links-person">
-        {"Each competitor's link is the QR code on their printed tag (from Export) and the Copy reveal link button next to their name on the Participants tab."}
+        {"Each competitor's link is the QR code on their printed tag (from Export). The Reveal link button next to their name on the Participants tab shows it on this screen for them to scan."}
       </div>
     );
   }

@@ -12,7 +12,7 @@ import { canShuffleUnseeded } from './competition_shape.jsx';
 import { downloadBlob } from './blob_download.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { PillButton } from './competition_fields.jsx';
-import { publicNamesApplies, fetchRevealLinks, revealLinkUrl, copyText, WARN_REVEAL_LINK_NO_PUBLIC_URL } from './public_names_fields.jsx';
+import { publicNamesApplies, fetchCompetitorRevealLink, revealLinkUrl, RevealCompetitorSheet } from './public_names_fields.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 
@@ -481,30 +481,19 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
     || (withZekken && replaceZekken !== (replaceTarget.displayName || "")));
   useUnsavedInput(rosterDirty || addTyped || editChanged);
   const players = useMemo(() => c.players || [], [c.players]);
-  // bc-hnam: with a link per person, each competitor's own reveal key is read
-  // (organiser only) so the row can copy their link. Read again when the roster
-  // (by id, so a swapped row of the same count counts) or the expiry moves; a key
-  // that cannot be read simply leaves the button out.
-  const rosterIds = players.map((p) => p.id).join(",");
+  // bc-hnam: with a link per person, each competitor's row has Reveal link,
+  // which reads that competitor's own key (the server logs each read) and shows
+  // the link as a QR code on this screen, for the competitor to scan.
   const revealPerson = c.publicNames === "person" && publicNamesApplies(tournament);
-  const [revealKeys, setRevealKeys] = useState(null);
-  useEffect(() => {
-    setRevealKeys(null);
-    if (!revealPerson) return undefined;
-    let live = true;
-    fetchRevealLinks(c.id, password)
-      .then((answer) => { if (live) setRevealKeys(new Map((answer.competitors || []).map((x) => [x.id, x.key]))); })
-      .catch(() => { if (live) setRevealKeys(null); });
-    return () => { live = false; };
-  }, [c.id, revealPerson, c.revealUntil, rosterIds, password]);
-  const copyRevealLink = (p) => {
-    const key = revealKeys && revealKeys.get(p.id);
-    if (!key) return;
-    const publicBase = (tournament && tournament.publicURL || "").trim();
-    const base = publicBase || (window.linkBase || (() => window.location.origin))(tournament);
-    copyText(revealLinkUrl(base, c.id, key)).then(
-      () => showToast(publicBase ? `Reveal link for ${p.name} copied` : `Reveal link for ${p.name} copied. ${WARN_REVEAL_LINK_NO_PUBLIC_URL}`),
-      () => showToast("Copy failed", "error"),
+  const [revealSheet, setRevealSheet] = useState(null);
+  const showRevealLink = (p) => {
+    fetchCompetitorRevealLink(c.id, p.id, password).then(
+      (answer) => {
+        const publicURL = (tournament && tournament.publicURL || "").trim();
+        const base = publicURL || (window.linkBase || (() => window.location.origin))(tournament);
+        setRevealSheet({ name: p.name, url: revealLinkUrl(base, c.id, answer.key), expiresAt: answer.expiresAt, open: answer.open, publicURL });
+      },
+      (e) => showToast((e && e.message) || "Could not read the reveal link.", "error"),
     );
   };
   // First-run: with no participants yet there is nothing to seed or check in,
@@ -1235,6 +1224,9 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
               )}
             </div>
           )}
+          {revealSheet && (
+            <RevealCompetitorSheet {...revealSheet} onClose={() => setRevealSheet(null)} showToast={showToast} />
+          )}
           {replaceTarget && (
             <div role="dialog" aria-modal="true" aria-labelledby="edit-modal-title" ref={editOpenedRef} onClickCapture={editOnClickCapture} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) setReplaceTarget(null); }}>
               <EscapeListener onClose={() => setReplaceTarget(null)} />
@@ -1353,8 +1345,8 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
                           draw (engine.ReplaceParticipantInDrawTx, mp-et2); it 409s
                           once the competition has started, so the pencil goes then.
                           Operator ruling bc-prow, reversing the 26dcd631 hide. */}
-                      {revealPerson && revealKeys && revealKeys.get(p.id) && (
-                        <button type="button" className="btn btn--sm seed-row__reveal" onClick={() => copyRevealLink(p)} aria-label={`Copy reveal link for ${p.name}`}>Copy reveal link</button>
+                      {revealPerson && p.id && (
+                        <button type="button" className="btn btn--sm seed-row__reveal" onClick={() => showRevealLink(p)} aria-label={`Reveal link for ${p.name}`}>Reveal link</button>
                       )}
                       {(isSetup || isDrawReady) && (
                         <button type="button" className="btn btn--sm btn--icon-sm" title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(withZekken ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}><Icon name="pencil" size={14} /></button>

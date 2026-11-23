@@ -6795,15 +6795,16 @@ paths:
       - $ref: '#/components/parameters/CompetitionId'
     get:
       tags: [competitions]
-      summary: Read a competition's reveal-link keys
+      summary: Read a competition's reveal link
       description: |
-        The keys the settings page and the participant row turn into a QR code
-        and a Copy link: the competition key when the option is `competition`,
-        each participant's key when it is `person`, and the expiry in force.
-        Both stay absent for `""` and `hidden`. Organiser only, in a self-run
-        tournament too (the route is in the organiser-only list), and never
-        cached. A key is derived from the competition's secret, which no answer
-        carries.
+        What the settings page turns into the competition link's QR code and
+        Copy link: the competition key when the option is `competition`, and
+        the expiry in force. The key is empty for every other option. A
+        competitor's own key is not in this answer: it is read one at a time
+        from `GET /api/competitions/{id}/reveal-links/{participantId}`, which
+        the server logs. Organiser only, in a self-run tournament too (the
+        route is in the organiser-only list), and never cached. A key is
+        derived from the competition's secret, which no answer carries.
 
         A restore keeps the secret of a competition it replaces, so its links
         keep working; a competition restored as a copy gets a new secret, so
@@ -6836,6 +6837,76 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: No competition with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/competitions/{id}/reveal-links/{participantId}:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+      - name: participantId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The competitor's participant id.
+    get:
+      tags: [competitions]
+      summary: Read one competitor's own reveal link
+      description: |
+        The key behind one competitor's own reveal link, read when the
+        organiser taps **Reveal link** beside their name on the Participants
+        tab, which shows the link as a QR code for the competitor to scan. The
+        server logs each read, with the competitor, the competition and the
+        address that asked. Only a competition whose option is `person` has
+        such a link. Organiser only, in a self-run tournament too, and never
+        cached. A team's key also reveals its members.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: The competitor's key and the expiry.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, key, expiresAt, open]
+                properties:
+                  id:
+                    type: string
+                    description: The participant id.
+                  name:
+                    type: string
+                  key:
+                    type: string
+                  expiresAt:
+                    type: string
+                    description: As in `RevealLinks.expiresAt`.
+                  open:
+                    type: boolean
+                    description: As in `RevealLinks.open`.
+        '400':
+          description: Malformed competition id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: '`invalid admin password`: missing or wrong.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: >
+            No competition with this id, or `no_reveal_link`: the competition
+            has no link per person, or holds no competitor with this id.
           content:
             application/json:
               schema:
@@ -8799,9 +8870,9 @@ components:
 
     RevealLinks:
       type: object
-      required: [publicNames, revealUntil, expiresAt, open, competitionKey, competitors]
+      required: [publicNames, revealUntil, expiresAt, open, competitionKey]
       description: >
-        The secret-bearing keys behind a competition's reveal links. The page
+        The secret-bearing key behind a competition's one reveal link. The page
         builds `/reveal/<competitionId>#<key>` from them; the key is never put
         in a query string. Treat the answer as a password: it is organiser only
         and `Cache-Control: no-store`.
@@ -8809,7 +8880,7 @@ components:
         publicNames:
           type: string
           enum: ["", person, competition, hidden]
-          description: The option in force, which decides which keys are present.
+          description: The option in force, which decides whether the key is present.
         revealUntil:
           type: string
           description: >
@@ -8831,25 +8902,6 @@ components:
         competitionKey:
           type: string
           description: The key of the one competition link; empty unless `publicNames` is `competition`.
-        competitors:
-          type: array
-          description: >
-            Each competitor's own key; empty unless `publicNames` is `person`.
-            A competitor with no participant id has no key and is left out. A
-            team's key also reveals its members.
-          items:
-            type: object
-            required: [id, name, dojo, key]
-            properties:
-              id:
-                type: string
-                description: The participant id.
-              name:
-                type: string
-              dojo:
-                type: string
-              key:
-                type: string
 
     CheckInStamp:
       type: object

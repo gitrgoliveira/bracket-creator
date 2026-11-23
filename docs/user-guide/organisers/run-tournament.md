@@ -349,7 +349,7 @@ The lean container image omits LibreOffice and returns a clear message when a PD
 
 When the **Public URL** is set and competitors have assigned numbers, each printed tag includes a QR code that opens the viewer and adds that competitor to the scanner's watchlist. Refer to [Hosting](../install/hosting.md) for guidance on setting the public URL.
 
-In a competition whose names are hidden with **a link per person**, a competitor's tag carries that competitor's own link in place of the watchlist link: scanning it follows the competitor and shows their name on that phone. Competitors on a competition with another choice keep the watchlist code. The **Participants** tab also offers **Copy reveal link** next to a name. Refer to [Hide competitor names from the public](hide-competitor-names.md#hand-out-the-links).
+In a competition whose names are hidden with **a link per person**, a competitor's tag carries that competitor's own link in place of the watchlist link: scanning it follows the competitor and shows their name on that phone. Competitors on a competition with another choice keep the watchlist code. The **Participants** tab also offers **Reveal link** next to a name, which shows that competitor's link as a QR code on screen for them to scan. Refer to [Hide competitor names from the public](hide-competitor-names.md#hand-out-the-links).
 
 ## Data format
 

@@ -146,6 +146,7 @@ var leakRoutes = map[string]leakRouteClass{
 	"GET /api/competitions/:id/matches/:mid/start-check":                 leakOrganiser,
 	"GET /api/competitions/:id/participants":                             leakOrganiser,
 	"GET /api/competitions/:id/reveal-links":                             leakOrganiser,
+	"GET /api/competitions/:id/reveal-links/:participantId":              leakOrganiser,
 	"GET /api/competitions/:id/schedule/clashes":                         leakOrganiser,
 	"GET /api/competitions/:id/schedule/estimate":                        leakOrganiser,
 	"GET /api/competitions/:id/seeds":                                    leakOrganiser,
@@ -664,7 +665,7 @@ func (c *leakComp) leakParams() map[string]string {
 	}
 	match := url.PathEscape(c.scoredMatch)
 	return map[string]string{
-		"id": c.id, "mid": match, "matchId": match, "tid": team, "pid": team,
+		"id": c.id, "mid": match, "matchId": match, "tid": team, "pid": team, "participantId": team,
 		"memberId": member, "round": "0", "poolId": url.PathEscape(c.poolName), "court": c.court,
 		"name": "none.zip", "index": "0", "file": "none.png", "type": "pools",
 	}

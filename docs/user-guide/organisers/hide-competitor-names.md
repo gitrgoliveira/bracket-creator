@@ -36,12 +36,12 @@ Only one kind of link is active at a time. Saving a change to the tournament's s
 
 Links appear once you have saved a choice that has them.
 
-- **A link per person.** Each competitor's link is the QR code on their printed tag (from **Export**). You can also open the **Participants** tab and press **Copy reveal link** next to a name.
+- **A link per person.** Each competitor's link is the QR code on their printed tag (from **Export**). You can also open the **Participants** tab and press **Reveal link** next to a name. The link shows as a QR code on your screen: turn the screen towards the competitor so they can scan it. The app's log records each time a competitor's link is shown, with the competition and the device's address.
 - **One competition link.** Open the competition's **Settings**. Under **Competition link**, press **Copy link**, or **Show QR code to print** to put the code on a sheet at the venue.
 
 A person's link belongs to their place in the competition, not to their name. If you replace a competitor with a substitute in the **Participants** tab, the substitute takes over the same link, so the link already given to the first competitor now shows the substitute's name. Hand the substitute their own copy and tell the first competitor their link has changed hands.
 
-Set a **Public URL** in the tournament details first. Without it, the printed tags carry no QR code and the competition's **Settings** do not offer one, and a copied link points at the address of the device you are using, which other phones may not be able to open. The app warns you when you copy a link without one.
+Set a **Public URL** in the tournament details first. Without it, the printed tags carry no QR code and the competition's **Settings** do not offer one, and a link you show or copy points at the address of the device you are using, which other phones may not be able to open. The app warns you when it shows or copies a link without one.
 
 A competitor who opens their link sees the competition with their own name shown. The phone keeps the link, so the name stays shown on that phone. A link that has stopped working, or one for a competition whose links you switched off, says so and offers the competition by numbers.
 

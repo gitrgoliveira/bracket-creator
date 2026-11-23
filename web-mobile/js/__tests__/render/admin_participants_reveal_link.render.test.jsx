@@ -1,12 +1,18 @@
 import React from 'react';
 import { act, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { installParticipantsHarness, makeParticipantsCompetition, mountParticipants } from './admin_participants_mount_harness.jsx';
 
-// bc-hnam: with a link per person, every participant row offers "Copy reveal
-// link"; with any other choice the page asks the server for nothing.
+// bc-hnam: with a link per person, every participant row offers "Reveal link".
+// A tap reads that one competitor's key (the server logs each read) and shows
+// the link as a QR code on this screen; nothing is read before the tap, and
+// with any other choice the row offers no button.
 
 installParticipantsHarness();
+beforeAll(async () => {
+  // qr.jsx publishes window.qrFits / window.renderQR, which the sheet reads.
+  await import('../../qr.jsx');
+});
 
 afterEach(() => {
   delete global.fetch;
@@ -14,84 +20,68 @@ afterEach(() => {
 });
 
 const revealButtons = (container) => Array.from(container.querySelectorAll('button.seed-row__reveal'));
+const answer = (body) => ({ ok: true, json: async () => body });
 
-describe('Participants: Copy reveal link', () => {
-  it('puts each competitor\'s own link on the clipboard', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        publicNames: 'person', open: true,
-        competitors: [{ id: 'p-1', name: 'Alice', dojo: 'Dojo Alice', key: 'key-alice' }, { id: 'p-2', name: 'Bob', dojo: 'Dojo Bob', key: 'key-bob' }],
-      }),
-    });
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    const showToast = vi.fn();
-
-    const { container } = await mountParticipants(makeParticipantsCompetition({ publicNames: 'person' }), { showToast });
+describe('Participants: Reveal link', () => {
+  it('reads nothing until a tap, then shows that competitor\'s own link as a QR code', async () => {
+    global.fetch = vi.fn().mockResolvedValue(answer({ id: 'p-2', name: 'Bob', key: 'key-bob', open: true, expiresAt: '2099-01-01T10:00' }));
+    const { container } = await mountParticipants(makeParticipantsCompetition({ publicNames: 'person' }));
     await act(async () => { await Promise.resolve(); });
 
-    expect(global.fetch.mock.calls[0][0]).toBe('/api/competitions/c1/reveal-links');
+    expect(global.fetch).not.toHaveBeenCalled();
     const buttons = revealButtons(container);
-    expect(buttons).toHaveLength(2);
-    expect(buttons[0].getAttribute('aria-label')).toBe('Copy reveal link for Alice');
+    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Reveal link for Alice', 'Reveal link for Bob']);
+    expect(buttons[0].textContent).toBe('Reveal link');
 
     await act(async () => { fireEvent.click(buttons[1]); });
-    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/reveal/c1#key-bob`);
-    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Reveal link for Bob copied. It points at this device'));
-  });
-
-  it('says nothing about the address when the tournament has a Public URL', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ publicNames: 'person', open: true, competitors: [{ id: 'p-1', name: 'Alice', dojo: 'Dojo Alice', key: 'key-alice' }] }),
-    });
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    const showToast = vi.fn();
-
-    const { container } = await mountParticipants(makeParticipantsCompetition({ publicNames: 'person' }), { showToast, tournament: { publicURL: 'https://cup.example.org' } });
-    await act(async () => { await Promise.resolve(); });
-    await act(async () => { fireEvent.click(revealButtons(container)[0]); });
-    expect(writeText).toHaveBeenCalledWith('https://cup.example.org/reveal/c1#key-alice');
-    expect(showToast).toHaveBeenCalledWith('Reveal link for Alice copied');
-  });
-
-  it('reads the keys again when a swapped row keeps the roster the same size', async () => {
-    const key = { 'p-1': 'key-alice', 'p-2': 'key-bob', 'p-3': 'key-cara' };
-    global.fetch = vi.fn().mockImplementation(async () => ({
-      ok: true,
-      json: async () => ({ publicNames: 'person', open: true, competitors: Object.keys(key).map((id) => ({ id, key: key[id] })) }),
-    }));
-    const c = makeParticipantsCompetition({ publicNames: 'person' });
-    const { container, rerender } = await mountParticipants(c);
     await act(async () => { await Promise.resolve(); });
     expect(global.fetch).toHaveBeenCalledTimes(1);
-
-    const swapped = { ...c, players: [c.players[0], { id: 'p-3', name: 'Cara', dojo: 'Dojo Cara' }] };
-    await act(async () => {
-      rerender(<window.AdminParticipants c={swapped} tournament={{ name: 'Spring Taikai', courts: ['A'] }} onUpdate={() => {}} password="" showToast={() => {}} onSection={() => {}} />);
-    });
-    await act(async () => { await Promise.resolve(); });
-
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(revealButtons(container).map((b) => b.getAttribute('aria-label'))).toEqual(['Copy reveal link for Alice', 'Copy reveal link for Cara']);
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/competitions/c1/reveal-links/p-2');
+    expect(document.querySelector('[data-testid="share-link-url"]').textContent).toBe(`${window.location.origin}/reveal/c1#key-bob`);
+    expect(document.querySelector('canvas.share-link__qr')).not.toBeNull();
+    expect(document.body.textContent).toContain('Reveal link: Bob');
+    expect(document.body.textContent).toContain('Turn the screen so Bob can scan this code.');
+    expect(document.body.textContent).toContain('It works until 2099-01-01 at 10:00.');
+    expect(document.querySelector('[data-testid="reveal-competitor-no-public-url"]')).not.toBeNull();
   });
 
-  it('offers no button, and reads nothing, for any other choice', async () => {
+  it('uses the Public URL, and says nothing about the address, when the tournament has one', async () => {
+    global.fetch = vi.fn().mockResolvedValue(answer({ id: 'p-1', name: 'Alice', key: 'key-alice', open: true, expiresAt: '' }));
+    const { container } = await mountParticipants(makeParticipantsCompetition({ publicNames: 'person' }), { tournament: { publicURL: 'https://cup.example.org' } });
+    await act(async () => { fireEvent.click(revealButtons(container)[0]); });
+    await act(async () => { await Promise.resolve(); });
+    expect(document.querySelector('[data-testid="share-link-url"]').textContent).toBe('https://cup.example.org/reveal/c1#key-alice');
+    expect(document.querySelector('[data-testid="reveal-competitor-no-public-url"]')).toBeNull();
+  });
+
+  it('says so when the link has stopped working', async () => {
+    global.fetch = vi.fn().mockResolvedValue(answer({ id: 'p-1', name: 'Alice', key: 'key-alice', open: false, expiresAt: '2026-06-02T01:00' }));
+    const { container } = await mountParticipants(makeParticipantsCompetition({ publicNames: 'person' }));
+    await act(async () => { fireEvent.click(revealButtons(container)[0]); });
+    await act(async () => { await Promise.resolve(); });
+    expect(document.querySelector('[data-testid="reveal-competitor-closed"]').textContent).toContain('The link stopped working at 2026-06-02 at 01:00.');
+  });
+
+  it('tells the organiser when the link cannot be read, and shows no sheet', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({ error: 'this competition has no reveal link for that competitor' }) });
+    const showToast = vi.fn();
+    const { container } = await mountParticipants(makeParticipantsCompetition({ publicNames: 'person' }), { showToast });
+    await act(async () => { fireEvent.click(revealButtons(container)[0]); });
+    await act(async () => { await Promise.resolve(); });
+    expect(showToast).toHaveBeenCalledWith('this competition has no reveal link for that competitor', 'error');
+    expect(document.querySelector('[data-testid="share-link-url"]')).toBeNull();
+  });
+
+  it('offers no button to a competitor with no id, nor for any other choice', async () => {
     global.fetch = vi.fn();
+    const noId = await mountParticipants(makeParticipantsCompetition({ publicNames: 'person', players: [{ id: 'p-1', name: 'Alice', dojo: 'Dojo Alice' }, { name: 'Bob', dojo: 'Dojo Bob' }] }));
+    expect(revealButtons(noId.container).map((b) => b.getAttribute('aria-label'))).toEqual(['Reveal link for Alice']);
+    noId.unmount();
     for (const publicNames of ['', 'competition', 'hidden']) {
       const { container, unmount } = await mountParticipants(makeParticipantsCompetition({ publicNames }));
       expect(revealButtons(container)).toHaveLength(0);
       unmount();
     }
     expect(global.fetch).not.toHaveBeenCalled();
-  });
-
-  it('leaves the button out when the keys cannot be read', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({ error: 'boom' }) });
-    const { container } = await mountParticipants(makeParticipantsCompetition({ publicNames: 'person' }));
-    await act(async () => { await Promise.resolve(); });
-    expect(revealButtons(container)).toHaveLength(0);
   });
 });

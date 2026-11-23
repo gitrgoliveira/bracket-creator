@@ -40,7 +40,7 @@ export const HINT_PUBLIC_NAMES_DOJO = "Dojo names stay visible, and so do organi
 export const HINT_PUBLIC_NAMES_SWISS = "Showing numbers instead of names is not available for Swiss competitions yet, because a Swiss draw gives competitors no numbers to show.";
 export const HINT_PUBLIC_NAMES_APPLY = "Saving a change here also sets every competition that is not Swiss to this choice, after you confirm the list. Each competition can still be changed on its own afterwards.";
 export const WARN_PUBLIC_NAMES_FREE_TEXT = "Anything typed in the announcement box or the awards note is shown to everyone exactly as typed. Do not put competitor names in them.";
-// Said where a reveal link is copied while the tournament has no Public URL:
+// Said where a reveal link is shown or copied while the tournament has no Public URL:
 // the link is built from this device's own address, which other phones may
 // not be able to open.
 export const WARN_REVEAL_LINK_NO_PUBLIC_URL = "It points at this device's own address, which other phones may not reach. Set a Public URL in the tournament details to fix that.";
@@ -122,6 +122,19 @@ export async function fetchRevealLinks(compId, password) {
   return res.json();
 }
 
+// One competitor's own reveal link, read when the organiser taps Reveal link
+// beside their name; the server logs each read. Organiser only.
+export async function fetchCompetitorRevealLink(compId, participantId, password) {
+  const res = await fetch(`/api/competitions/${encodeURIComponent(compId)}/reveal-links/${encodeURIComponent(participantId)}`, {
+    headers: { "X-Tournament-Password": password || "" },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Could not read the reveal link (status ${res.status}).`);
+  }
+  return res.json();
+}
+
 // copyText puts text on the clipboard. The same two-step copy as ui.jsx's
 // copyToClipboard (which is not exported): the Clipboard API where the page is
 // a secure context, and a selected textarea on a plain-http venue LAN.
@@ -193,6 +206,47 @@ export function RevealQrSheet({ compName, url, expiresAt, onClose, showToast }) 
           </p>
           {showQR && (
             <button type="button" className="btn" onClick={() => printRevealPoster({ title: compName, url, expiresAt })}>Print the QR code</button>
+          )}
+        </>
+      )}
+    </window.ShareLinkModal>
+  );
+}
+
+// RevealCompetitorSheet: one competitor's own link as a QR code on this
+// screen, for the organiser to turn towards the competitor to scan. The sheet
+// is the shared ShareLinkModal.
+export function RevealCompetitorSheet({ name, url, expiresAt, open, publicURL, onClose, showToast }) {
+  return (
+    <window.ShareLinkModal
+      title={`Reveal link: ${name}`}
+      url={url}
+      onClose={onClose}
+      onCopy={(ok) => {
+        if (!showToast) return;
+        if (ok) showToast(`Reveal link for ${name} copied`);
+        else showToast("Copy failed; select the link above manually", "error");
+      }}
+    >
+      {(showQR) => (
+        <>
+          <p className="share-link__note">
+            {showQR
+              ? `Turn the screen so ${name} can scan this code. It shows their name on the public pages, and no one else's.`
+              : `Anyone who opens this link sees ${name}'s name on the public pages, and no one else's.`}
+            {open && expiresAt ? ` It works until ${formatRevealExpiry(expiresAt)}.` : ""}
+          </p>
+          {!open && (
+            <p className="share-link__note field__hint--warn" data-testid="reveal-competitor-closed">
+              {expiresAt
+                ? `The link stopped working at ${formatRevealExpiry(expiresAt)}. Move that time later in the competition settings to make it work again.`
+                : "The link does not work yet because the tournament has no start date."}
+            </p>
+          )}
+          {!publicURL && (
+            <p className="share-link__note field__hint--warn" data-testid="reveal-competitor-no-public-url">
+              {WARN_REVEAL_LINK_NO_PUBLIC_URL}
+            </p>
           )}
         </>
       )}

@@ -7368,9 +7368,10 @@ details[open] > summary::before { transform: rotate(90deg); }
 .numbered-name__text:empty { display: none; }
 .num-prefix:has(+ .numbered-name__text:empty) { margin-right: 0; }
 .numbered-name__text:empty + .num-prefix--after { margin-left: 0; }
-/* The line a public competition page shows while its names are hidden. */
+/* The line a public competition page shows while its names are hidden, the
+   first line of the page body, so it takes the body's side gutter. */
 .names-hidden-note {
-  margin: 8px 0;
+  margin: 0 0 12px;
   font-size: var(--fs-sm);
   color: var(--ink-3);
 }

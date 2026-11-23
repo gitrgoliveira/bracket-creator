@@ -395,12 +395,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
             )}
           </div>
         )}
-        {c.namesHidden && (
-          <p className="names-hidden-note" data-testid="names-hidden-note">
-            Names are hidden in this competition. Competitors appear by their number.
-          </p>
-        )}
         <div className="viewer__body">
+          {c.namesHidden && (
+            <p className="names-hidden-note" data-testid="names-hidden-note">
+              Names are hidden in this competition. Competitors appear by their number.
+            </p>
+          )}
           {effectiveTab === "overview" && (
             <ViewerOverview
               c={c}

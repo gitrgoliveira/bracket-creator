@@ -13,6 +13,8 @@ Public pages are the spectator view, the court displays, the stream overlay and 
 
 Anything you type in the announcement box or the awards note is shown exactly as typed. Do not put competitor names in them.
 
+![A competition page on a phone with names hidden: each competitor reads as their number above their dojo](../../screenshots/public-names-viewer-masked.png)
+
 ## Choose what the public sees
 
 Set the choice for one competition in its **Settings**, or for the whole tournament in the tournament details, where it is the starting choice for new competitions.
@@ -24,7 +26,11 @@ Set the choice for one competition in its **Settings**, or for the whole tournam
 | Numbers, one competition link | Numbers | One link for the whole competition shows every name |
 | Numbers only | Numbers | There is no link. Only the signed-in organiser sees names |
 
+![The Competitor names on public pages choice in a competition's Settings, with the link expiry and the competition link](../../screenshots/public-names-setting.png)
+
 Only one kind of link is active at a time. Saving a change to the tournament's starting choice also sets every competition to it, after you confirm the list of competitions it will change. Each competition can still be changed on its own afterwards.
+
+![The Competitor names section of the tournament details, the starting choice for new competitions](../../screenshots/public-names-tournament.png)
 
 ## Hand out the links
 
@@ -38,6 +44,8 @@ A person's link belongs to their place in the competition, not to their name. If
 Set a **Public URL** in the tournament details first. Without it, the printed tags carry no QR code and the competition's **Settings** do not offer one, and a copied link points at the address of the device you are using, which other phones may not be able to open. The app warns you when you copy a link without one.
 
 A competitor who opens their link sees the competition with their own name shown. The phone keeps the link, so the name stays shown on that phone. A link that has stopped working, or one for a competition whose links you switched off, says so and offers the competition by numbers.
+
+![The same competition page after the competition link was opened: every name is shown](../../screenshots/public-names-viewer-revealed.png)
 
 ## When the links stop working
 

@@ -138,6 +138,36 @@ describe('Tournament default for competitor names', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  it('asks again and sends the yes when a save landed but some competitions could not follow', async () => {
+    confirmDialog.mockReset().mockResolvedValue(true);
+    const failed = Object.assign(new Error('The tournament settings were saved, but these competitions could not be changed to the new default: Men. Save again to retry.'), {
+      code: 'public_names_apply_failed', competitions: ['Men'],
+    });
+    const onSave = vi.fn().mockRejectedValueOnce(failed).mockResolvedValue(true);
+    // The default the form holds now equals the stored one; Men is still to follow.
+    const tournament = makeTournament({
+      defaultPublicNames: 'hidden',
+      competitions: [{ id: 'a', name: 'Men', format: 'knockout', publicNames: '' }],
+    });
+    const { container } = await mountEditor(tournament, onSave);
+    await act(async () => { fireEvent.click(buttonByText(container, 'Save changes')); });
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(confirmDialog).not.toHaveBeenCalled();
+    expect('confirmPublicNames' in onSave.mock.calls[0][0]).toBe(false);
+
+    await act(async () => { fireEvent.click(buttonByText(container, 'Save changes')); });
+    expect(confirmDialog).toHaveBeenCalledTimes(1);
+    expect(confirmDialog.mock.calls[0][0].message).toContain('Men (now: Show names)');
+    expect(onSave).toHaveBeenCalledTimes(2);
+    expect(onSave.mock.calls[1][0].confirmPublicNames).toBe(true);
+
+    // Landed: the next save is an ordinary one again.
+    confirmDialog.mockClear();
+    await act(async () => { fireEvent.click(buttonByText(container, 'Save changes')); });
+    expect(confirmDialog).not.toHaveBeenCalled();
+    expect('confirmPublicNames' in onSave.mock.calls[2][0]).toBe(false);
+  });
+
   it('shows no public names setting in a self-run tournament', async () => {
     const { container } = await mountEditor(makeTournament({ mode: 'self-run' }), vi.fn());
     expect(pill(container, 'Numbers only')).toBeUndefined();

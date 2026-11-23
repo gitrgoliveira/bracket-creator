@@ -188,7 +188,7 @@ import { MAX_EXPECTED_PARTICIPANTS } from './competition_put_body.jsx';
 import { useDraftEstimate, DraftEstimatePanel } from './draft_estimate.jsx';
 import {
   PublicNamesFields, publicNamesApplies, publicNamesHides, publicNamesHasLinks,
-  anyCompetitionHidesNames, publicNamesApplyTargets, confirmPublicNamesApply,
+  anyCompetitionHidesNames, publicNamesApplyTargets, confirmPublicNamesApply, PUBLIC_NAMES_APPLY_FAILED,
   HINT_PUBLIC_NAMES_APPLY, WARN_PUBLIC_NAMES_FREE_TEXT,
 } from './public_names_fields.jsx';
 
@@ -287,6 +287,10 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
   // re-render flips it and fire duplicate PUTs. The ref is mutated and read
   // synchronously within the same tick, so the second call sees it.
   const savingRef = useRef(false);
+  // A save whose new default landed but did not reach every competition: the
+  // default now equals the stored one, so the next Save asks about the
+  // competitions still to follow and sends the yes by itself.
+  const applyUnfinishedRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
 
@@ -377,7 +381,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
       // operator is shown which ones first (the server asks for the same yes:
       // confirmPublicNames). Cancelling sends nothing.
       let confirmPublicNames = false;
-      if (tournamentMode !== "self-run" && defaultPublicNames !== (tournament.defaultPublicNames || "")) {
+      if (tournamentMode !== "self-run" && (applyUnfinishedRef.current || defaultPublicNames !== (tournament.defaultPublicNames || ""))) {
         const targets = publicNamesApplyTargets(tournament.competitions, defaultPublicNames);
         if (targets.length > 0) {
           if (!(await confirmPublicNamesApply(targets, defaultPublicNames))) return;
@@ -412,11 +416,13 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
         contacts: contacts.filter(c => (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
         theme: { ...theme, logoOnLobby: !!logoOnLobby },
       });
+      applyUnfinishedRef.current = false;
     } catch (e) {
       if (e && e.code === "tournament_changed") {
         if (mountedRef.current) setConflict(true);
         return;
       }
+      if (e && e.code === PUBLIC_NAMES_APPLY_FAILED) applyUnfinishedRef.current = true;
       // Server rejection (orphaned shiaijo, immutable mode, duplicate court
       // label, ...). Report it in the form's own banner, not only in the
       // toast that AdminApp already fired and that expires in 8s. errorField

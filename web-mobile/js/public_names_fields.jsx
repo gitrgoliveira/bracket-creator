@@ -82,6 +82,11 @@ export function publicNamesApplyMessage(targets, value) {
 // the save has not confirmed. It lists them as `competitions`, which can differ
 // from the form's own list (one was added or changed on another device).
 export const PUBLIC_NAMES_APPLY_CONFIRM = "public_names_apply_confirm";
+// The code a save is refused with once its settings landed but some competitions
+// could not be set to the new default (the server's 500, which lists them as
+// `competitions`). The default now equals the stored one, so the form has to
+// send the confirmation again by itself to finish the rest.
+export const PUBLIC_NAMES_APPLY_FAILED = "public_names_apply_failed";
 // The operator's yes to setting every listed competition to `value`; the
 // promise answers true or false. Shared by the form's own question and the one
 // the server's list asks.

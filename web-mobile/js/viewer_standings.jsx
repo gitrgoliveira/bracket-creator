@@ -32,6 +32,7 @@ import { SideLabel } from './side_cell.jsx';
 import { teamNameMark } from './match_scoreboard.jsx';
 import { barredNameMark } from './barred_chip.jsx';
 import { Icon } from './icon.jsx';
+import { engiShape } from './engi_entry.jsx';
 
 const { useState, useMemo } = React;
 const EmptyState = window.EmptyState;
@@ -177,7 +178,7 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   // tie-break data the backend now tallies (mp-8pba), instead of the
   // individual W/L/D/PW/PL shape that renders zeros for both.
   const isEngi = !!c.engi;
-  const isSolo = isEngi && !!c.engiSolo;
+  const isSolo = engiShape(c) === "solo";
   const isTeam = !isEngi && (c.teamSize || 0) > 0;
   const emptyColSpan = isEngi ? 4 : isTeam ? 10 : 7;
   const rankedBy = isEngi
@@ -311,7 +312,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
 
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
   const isEngi = !!(competition && competition.engi);
-  const isSolo = isEngi && !!competition.engiSolo;
+  const isSolo = engiShape(competition) === "solo";
   const isCompleted = c.status === "completed";
   const winner = isCompleted && standings.length > 0 ? standings[0] : null;
 
@@ -846,7 +847,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
   // Engi-Kyogi (kata competition): flag-count scoring. Standings show
   // Victories (V) and total Flags columns only.
   const isEngi = !!(competition && competition.engi);
-  const isSolo = isEngi && !!competition.engiSolo;
+  const isSolo = engiShape(competition) === "solo";
   // FR-050 / FR-051: league competitions render Final standings instead of
   // pool standings, and surface a Winner badge once every match is complete.
   // Format check is value-based so older competitions without a Format

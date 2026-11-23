@@ -14,6 +14,7 @@ import { isBarredMatch } from './ineligible_match.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 import { Icon } from './icon.jsx';
 import { andList } from './list_phrase.jsx';
+import { engiShape } from './engi_entry.jsx';
 
 const { useState, useMemo, useRef } = React;
 const StatusBadge = window.StatusBadge;
@@ -518,7 +519,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   const isEngi = !!(c && c.engi);
   // A solo engi competition (one competitor per side) heads its name column
   // "Player", as an individual table does; a pair competition heads "Pair".
-  const isSolo = isEngi && !!c.engiSolo;
+  const isSolo = engiShape(c) === "solo";
   const leaguePoolName = isLeague && pools && pools[0] ? pools[0].poolName : null;
   const leagueStandings = leaguePoolName && standings ? (standings[leaguePoolName] || []) : [];
   // A league is decided when the competition is completed, never merely when

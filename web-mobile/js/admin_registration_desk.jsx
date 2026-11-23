@@ -39,7 +39,7 @@ import { checkInApplies, isTeamCompetition, tournamentHasCheckIn, SELF_RUN_NO_CH
 import { useUnsavedInput } from './app_version.jsx';
 import { acceptTap } from './tap_guard.jsx';
 import { Icon } from './icon.jsx';
-import { engiShape, engiEntryProblem, engiNameFieldLabel } from './engi_entry.jsx';
+import { engiShape, engiEntryProblem, engiNameFieldLabel, engiSettingLocked } from './engi_entry.jsx';
 
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
@@ -507,11 +507,11 @@ function rdNameField(comp) {
 // competition's shape, null when it fits or the competition is not engi. The
 // server keeps no such rule, so the desk asks before it writes.
 function rdNameProblem(comp, name) {
-  return engiEntryProblem(name, engiShape(comp));
+  return engiEntryProblem(name, engiShape(comp), engiSettingLocked(comp));
 }
 
 function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCheckInRefused, onCancel }) {
-  const isTeam = comp.kind === "team";
+  const isTeam = isTeamCompetition(comp);
   const [name, setName] = useState(seedName || "");
   const [dojo, setDojo] = useState("");
   const [zekken, setZekken] = useState("");
@@ -606,7 +606,7 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCheckInRefus
 // the same replace endpoint as the Participants tab.
 // ---------------------------------------------------------------------------
 function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
-  const isTeam = comp.kind === "team";
+  const isTeam = isTeamCompetition(comp);
   const Modal = window.Modal;
   const [name, setName] = useState(player.name || "");
   const [dojo, setDojo] = useState(player.dojo || "");

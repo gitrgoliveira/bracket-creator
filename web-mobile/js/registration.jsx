@@ -10,25 +10,19 @@
 
 import { useUnsavedInput } from './app_version.jsx';
 import { isNoConnection, REGISTRATION_NOT_CONFIRMED } from './write_result.jsx';
-import { engiShape, engiEntryProblem, engiNameFieldLabel, ENGI_SOLO_PROBLEM } from './engi_entry.jsx';
+import { engiShape, engiEntryProblem, engiNameFieldLabel } from './engi_entry.jsx';
 
 const { useState, useEffect, useRef } = React;
 
-// The sentence the public form answers for a pair typed into a competition
-// that takes one competitor per side. The operator's sentence
-// (ENGI_SOLO_PROBLEM) points at Settings, which a participant cannot reach, so
-// the form says what the participant can do instead.
-export const REGISTER_ENGI_SOLO_PROBLEM = "This competition takes one competitor per side. Enter one name.";
-
 // registrationNameProblem asks the one engi entry rule (engi_entry.jsx) for a
 // competition of the given engiShape and words its answer for a participant:
-// null when the name fits, or the competition is not engi. A pair
-// competition's sentence ("Enter both names of the pair as ...") already
-// reads for a participant and is kept as it is. The blank name is the form's
-// own "Name is required." and never reaches here.
+// null when the name fits, or the competition is not engi. A participant
+// cannot reach Settings, so a solo refusal is asked as one whose setting is
+// locked. A pair competition's sentence ("Enter both names of the pair as
+// ...") already reads for a participant. The blank name is the form's own
+// "Name is required." and never reaches here.
 export function registrationNameProblem(shape, name) {
-  const problem = engiEntryProblem(name, shape);
-  return problem === ENGI_SOLO_PROBLEM ? REGISTER_ENGI_SOLO_PROBLEM : problem;
+  return engiEntryProblem(name, shape, true);
 }
 
 function RegistrationForm({ compId, onBack }) {

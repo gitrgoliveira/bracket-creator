@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { act, fireEvent } from '@testing-library/react';
-import { ENGI_SOLO_PROBLEM } from '../../engi_entry.jsx';
+import { ENGI_SOLO_PROBLEM, ENGI_SOLO_PROBLEM_LOCKED } from '../../engi_entry.jsx';
 import { installParticipantsHarness, makeParticipantsCompetition, mountParticipants } from './admin_participants_mount_harness.jsx';
 
 // The stored-rows notice: a roster saved under one setting of "One competitor
@@ -167,7 +167,9 @@ describe('AdminParticipants stored-rows notice for an engi competition', () => {
       expect(replaceParticipant).toHaveBeenCalledTimes(1);
       const errors = showToast.mock.calls.filter((c) => c[1] === 'error');
       expect(errors).toHaveLength(1);
-      expect(errors[0][0]).toContain(ENGI_SOLO_PROBLEM);
+      // The draw exists, so the setting is locked and the sentence does not advise changing it.
+      expect(errors[0][0]).toContain(ENGI_SOLO_PROBLEM_LOCKED);
+      expect(errors[0][0]).not.toContain('Settings');
     } finally {
       window.API = savedAPI;
       window.buildPlayerMetadata = savedMetadata;

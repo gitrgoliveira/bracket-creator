@@ -2,7 +2,7 @@ import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { ENGI_PAIR_PROBLEM, ENGI_SOLO_PROBLEM } from '../../engi_entry.jsx';
+import { ENGI_PAIR_PROBLEM, ENGI_SOLO_PROBLEM, ENGI_SOLO_PROBLEM_LOCKED } from '../../engi_entry.jsx';
 
 // The Registration desk asks the one engi entry rule (engi_entry.jsx) before
 // it writes, on the walk-up add and on the Edit dialog alike: a pair
@@ -219,6 +219,46 @@ describe('Registration desk Edit leaves a name that is left as it is unjudged', 
     expect(result.queryByRole('alert')).toBeNull();
     expect(window.API.replaceParticipant).toHaveBeenCalledTimes(1);
     expect(window.API.replaceParticipant.mock.calls[0][2]).toMatchObject({ name: PAIR, dojo: 'Getsurin' });
+  });
+});
+
+describe('Registration desk Edit once the One competitor per side setting is locked', () => {
+  it('refuses a pair on a drawn competition without advising the locked setting', async () => {
+    const result = await mount({
+      name: 'Spring Taikai',
+      competitions: [{
+        id: 'kata', name: 'Kata', kind: 'individual', status: 'draw-ready', checkInEnabled: true,
+        engi: true, engiSolo: true,
+        players: [{ id: 'p1', name: SOLO, dojo: 'Gyokusen', checkedIn: false }],
+      }],
+    });
+    fireEvent.click(result.container.querySelectorAll('.rd-rail__item')[1]);
+    fireEvent.click(result.container.querySelector(`button[aria-label="Edit ${SOLO}"]`));
+    fireEvent.change(editNameInput(result), { target: { value: PAIR } });
+    await act(async () => { fireEvent.click(result.getByText('Save changes')); });
+    expect(result.getByRole('alert').textContent).toBe(ENGI_SOLO_PROBLEM_LOCKED);
+    expect(window.API.replaceParticipant).not.toHaveBeenCalled();
+  });
+});
+
+describe('Registration desk walk-up reads a team competition one way', () => {
+  it('words the field, the toast and the fields for kind individual with a team size', async () => {
+    const toasts = [];
+    const result = await mount({
+      name: 'Spring Taikai',
+      competitions: [{
+        id: 'tm', name: 'Teams', kind: 'individual', teamSize: 3, status: 'setup', checkInEnabled: true,
+        withZekkenName: true,
+        players: [{ id: 'p1', name: 'Tora A', dojo: 'Tora', checkedIn: false }],
+      }],
+    }, (msg) => toasts.push(msg));
+    fireEvent.click(result.container.querySelectorAll('.rd-rail__item')[1]);
+    fireEvent.click(result.getByText('+ Add walk-up'));
+    expect(walkUpLabel(result)).toBe('Team name');
+    // A team has neither a zekken nor a dan field.
+    expect(result.container.querySelectorAll('.rd-walkup input').length).toBe(2);
+    await act(async () => { fireEvent.click(result.getByText('Add & check in')); });
+    expect(toasts[0]).toBe('Team name and dojo are required');
   });
 });
 

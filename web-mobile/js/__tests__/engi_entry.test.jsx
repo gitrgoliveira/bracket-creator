@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  engiEntryProblem, engiShape, engiNameFieldLabel,
-  ENGI_PAIR_PROBLEM, ENGI_SOLO_PROBLEM, ENGI_SOLO_BLANK,
+  engiEntryProblem, engiShape, engiNameFieldLabel, engiSettingLocked,
+  ENGI_PAIR_PROBLEM, ENGI_SOLO_PROBLEM, ENGI_SOLO_PROBLEM_LOCKED, ENGI_SOLO_BLANK,
 } from '../engi_entry.jsx';
 
 // engi_entry.jsx is the one owner of "does this name fit an engi side". A pair
@@ -13,6 +13,7 @@ describe('engi entry sentences', () => {
   it('say what to do, word for word', () => {
     expect(ENGI_PAIR_PROBLEM).toBe('Enter both names of the pair as "Name 1 - Name 2".');
     expect(ENGI_SOLO_PROBLEM).toBe('This competition takes one competitor per side. To enter pairs, turn off "One competitor per side" in Settings.');
+    expect(ENGI_SOLO_PROBLEM_LOCKED).toBe('This competition takes one competitor per side. Enter one name.');
     expect(ENGI_SOLO_BLANK).toBe("Enter the competitor's name.");
   });
 });
@@ -51,6 +52,12 @@ describe('engiEntryProblem, solo', () => {
       expect(engiEntryProblem(name, 'solo')).toBe(ENGI_SOLO_PROBLEM);
     }
   });
+  it('refuses a pair without the advice to change the setting once it is locked', () => {
+    for (const name of ['A - B', 'Alice -', '- Bob']) {
+      expect(engiEntryProblem(name, 'solo', true)).toBe(ENGI_SOLO_PROBLEM_LOCKED);
+    }
+    expect(engiEntryProblem('Akira Tanaka', 'solo', true)).toBeNull();
+  });
   it('refuses a blank name with its own sentence', () => {
     for (const name of ['', '   ', null, undefined]) {
       expect(engiEntryProblem(name, 'solo')).toBe(ENGI_SOLO_BLANK);
@@ -77,6 +84,20 @@ describe('engiShape', () => {
   });
   it('is "solo" for engi with engiSolo', () => {
     expect(engiShape({ engi: true, engiSolo: true })).toBe('solo');
+  });
+});
+
+describe('engiSettingLocked', () => {
+  it('is false while the competition is in setup or has no status', () => {
+    expect(engiSettingLocked(null)).toBe(false);
+    expect(engiSettingLocked({})).toBe(false);
+    expect(engiSettingLocked({ status: '' })).toBe(false);
+    expect(engiSettingLocked({ status: 'setup' })).toBe(false);
+  });
+  it('is true from draw-ready onward', () => {
+    for (const status of ['draw-ready', 'pools', 'knockout', 'completed']) {
+      expect(engiSettingLocked({ status })).toBe(true);
+    }
   });
 });
 

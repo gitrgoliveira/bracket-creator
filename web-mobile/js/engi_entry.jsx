@@ -15,6 +15,12 @@ export const ENGI_PAIR_PROBLEM = 'Enter both names of the pair as "Name 1 - Name
 // competition.
 export const ENGI_SOLO_PROBLEM = 'This competition takes one competitor per side. To enter pairs, turn off "One competitor per side" in Settings.';
 
+// The sentence a solo competition answers for a pair typed once its setting can
+// no longer change (a draw exists), and on the public form, whose participant
+// cannot reach Settings: the advice to turn the setting off could not be
+// followed, so it says what to do instead.
+export const ENGI_SOLO_PROBLEM_LOCKED = "This competition takes one competitor per side. Enter one name.";
+
 // The sentence a solo competition answers for a blank name.
 export const ENGI_SOLO_BLANK = "Enter the competitor's name.";
 
@@ -28,26 +34,37 @@ export function engiShape(c) {
 
 // engiEntryProblem returns the sentence that refuses `name` for an engi side
 // of the given engiShape ("pair" or "solo"), or null when the name fits or the
-// shape is null (not an engi competition, no engi rule applies). The name is trimmed first, as the paste box and the
-// forms trim, so "Alice - " is judged as "Alice -".
+// shape is null (not an engi competition, no engi rule applies). The name is
+// trimmed first, as the paste box and the forms trim, so "Alice - " is judged
+// as "Alice -". `settingLocked` (engiSettingLocked, or true on the public form)
+// words a solo refusal without the advice to change the setting.
 //   pair: both halves around the FIRST " - " are non-blank (the same split as
 //         window.engiPairParts), so "Alice -", "- Bob", "-" and " - Bob" are
 //         refused and "Mary-Jane Smith - Ren Fujita" passes.
 //   solo: refused when the name holds " - " or begins or ends with "-" (a
 //         pair typed into a solo competition); a hyphenated name with no
 //         spaces around the hyphen ("Jean-Paul Martin") passes.
-export function engiEntryProblem(name, shape) {
+export function engiEntryProblem(name, shape, settingLocked = false) {
   if (!shape) return null;
   const s = String(name ?? "").trim();
   if (shape === "solo") {
     if (s === "") return ENGI_SOLO_BLANK;
-    if (s.includes(" - ") || s.startsWith("-") || s.endsWith("-")) return ENGI_SOLO_PROBLEM;
+    if (s.includes(" - ") || s.startsWith("-") || s.endsWith("-")) {
+      return settingLocked ? ENGI_SOLO_PROBLEM_LOCKED : ENGI_SOLO_PROBLEM;
+    }
     return null;
   }
   const i = s.indexOf(" - ");
   if (i < 0) return ENGI_PAIR_PROBLEM;
   if (s.slice(0, i).trim() === "" || s.slice(i + 3).trim() === "") return ENGI_PAIR_PROBLEM;
   return null;
+}
+
+// engiSettingLocked is true once the competition's One competitor per side
+// setting can no longer be changed: from draw-ready onward, the same lock the
+// Settings checkbox carries (admin_competition_settings.jsx, lockedAfterDraw).
+export function engiSettingLocked(c) {
+  return !!c && !!c.status && c.status !== "setup";
 }
 
 // engiNameFieldLabel is the label of a form's name field for a competition of

@@ -15,7 +15,7 @@ import { PillButton } from './competition_fields.jsx';
 import { publicNamesApplies, fetchCompetitorRevealLink, revealLinkUrl, RevealCompetitorSheet } from './public_names_fields.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
-import { engiShape, engiEntryProblem, engiNameFieldLabel } from './engi_entry.jsx';
+import { engiShape, engiEntryProblem, engiNameFieldLabel, engiSettingLocked } from './engi_entry.jsx';
 
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -217,7 +217,7 @@ function generateRosterText(playersList, withZekkenName) {
 // competition): an engi row is judged by engiEntryProblem (engi_entry.jsx),
 // whose sentence is the row's reason, and only a pair competition's
 // missing-dojo hint names the pair format.
-function validateRosterRows(parsed, withZekkenName, shape) {
+function validateRosterRows(parsed, withZekkenName, shape, settingLocked = false) {
   const problems = [];
   (parsed || []).forEach((p, i) => {
     const name = (p.name || "").trim();
@@ -226,7 +226,7 @@ function validateRosterRows(parsed, withZekkenName, shape) {
       problems.push({ index: i, name, reason: "missing name" });
       return;
     }
-    const engiProblem = engiEntryProblem(name, shape);
+    const engiProblem = engiEntryProblem(name, shape, settingLocked);
     if (engiProblem) {
       problems.push({ index: i, name, reason: engiProblem });
       return;
@@ -265,9 +265,9 @@ function participantTemplateCSV(c) {
 // engiShape: "pair" needs both member names as "Name 1 - Name 2", "solo" one
 // competitor), judged by engiEntryProblem (engi_entry.jsx), whose sentence is
 // the error. Exported for tests.
-function participantFormError({ name, dojo, shape }) {
+function participantFormError({ name, dojo, shape, settingLocked = false }) {
   if (!name || !dojo) return "Name and dojo are required";
-  const engiProblem = engiEntryProblem(name, shape);
+  const engiProblem = engiEntryProblem(name, shape, settingLocked);
   if (engiProblem) return engiProblem;
   return null;
 }
@@ -296,6 +296,9 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   // The engi side's shape ("pair", "solo", or null when not engi): every
   // per-shape word on this page and the entry rule read it.
   const engiSide = engiShape(c);
+  // True once the One competitor per side setting is locked (a draw exists), so
+  // a solo refusal does not advise changing it.
+  const engiLocked = engiSettingLocked(c);
   // Roster line format for this competition, shown once, in the participant
   // list card's head (the CSV drop zone under it says only what it does).
   const rosterFormat = c.kind === "team" ? "Team name, Dojo"
@@ -783,7 +786,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
     const zekken = addZekken.trim();
     // Name + dojo always required; an engi name must fit the side's shape (a
     // pair as "Name 1 - Name 2", or one competitor), see participantFormError.
-    const formErr = participantFormError({ name, dojo, shape: engiSide });
+    const formErr = participantFormError({ name, dojo, shape: engiSide, settingLocked: engiLocked });
     if (formErr) { showToast(formErr, "error"); return; }
     setAddLoading(true);
     try {
@@ -814,7 +817,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
     // as it is is not judged: once the draw is made the setting is locked, so
     // the dojo, grade or zekken of a row that no longer fits must still save.
     const nameKept = name === (replaceTarget.name || "").trim();
-    const formErr = participantFormError({ name, dojo, shape: nameKept ? null : engiSide });
+    const formErr = participantFormError({ name, dojo, shape: nameKept ? null : engiSide, settingLocked: engiLocked });
     if (formErr) { showToast(formErr, "error"); return; }
     // Capture the old name before the await so the success toast is accurate
     // even if replaceTarget has changed by the time the response arrives.
@@ -869,7 +872,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
       // misformatted paste (e.g. a two-column "Name, Dojo" line in a zekken
       // competition, parsed as {displayName: dojo, dojo: ""}) up front with an
       // actionable message, instead of relying on the server 400 round-trip.
-      const rowProblems = validateRosterRows(parsed, withZekken, engiSide);
+      const rowProblems = validateRosterRows(parsed, withZekken, engiSide, engiLocked);
       if (rowProblems.length > 0) {
         const first = rowProblems[0];
         const label = first.name ? `"${first.name}"` : `line ${first.index + 1}`;

@@ -599,20 +599,22 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
           />
         </div>
         {/* bc-hnam: the tournament default for competitor names on public pages */}
-        <div className="card card--pad-lg">
-          <div className="card__head">
-            <div>
-              <div className="card__title">Competitor names</div>
-              <div className="card__sub">What the public pages show for each competition. New competitions start with this choice.</div>
+        {publicNamesApplies(tournament) && (
+          <div className="card card--pad-lg">
+            <div className="card__head">
+              <div>
+                <div className="card__title">Competitor names</div>
+                <div className="card__sub">What the public pages show for each competition. New competitions start with this choice.</div>
+              </div>
             </div>
+            <PublicNamesFields
+              tournament={tournament}
+              value={defaultPublicNames}
+              onChange={setDefaultPublicNames}
+              applyNote={HINT_PUBLIC_NAMES_APPLY}
+            />
           </div>
-          <PublicNamesFields
-            tournament={tournament}
-            value={defaultPublicNames}
-            onChange={setDefaultPublicNames}
-            applyNote={HINT_PUBLIC_NAMES_APPLY}
-          />
-        </div>
+        )}
         {/* mp-ef3: Tournament Information (Public) */}
         {/* mp-sspn: collapsible: all fields here are optional, so the section */}
         {/* is a disclosure that opens by default only when data already exists. */}

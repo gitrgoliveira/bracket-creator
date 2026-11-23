@@ -142,6 +142,7 @@ describe('Tournament default for competitor names', () => {
     const { container } = await mountEditor(makeTournament({ mode: 'self-run' }), vi.fn());
     expect(pill(container, 'Numbers only')).toBeUndefined();
     expect(container.textContent).not.toContain('Competitor names on public pages');
+    expect(container.textContent).not.toContain('Competitor names');
   });
 
   it('warns on the awards note that free text is shown as typed, while a competition hides names', async () => {

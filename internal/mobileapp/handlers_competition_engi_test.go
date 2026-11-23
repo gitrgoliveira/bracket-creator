@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -213,9 +215,33 @@ func TestPUTCompetition_EngiSoloLockedAfterTheDraw(t *testing.T) {
 	running := engiSoloSeed(t, store, "solo-running", true, state.CompStatusKnockout)
 	w = cvPut(t, r, running.ID, cvSettingsBody(t, running, "", map[string]any{"engiSolo": false}))
 	require.Equalf(t, http.StatusBadRequest, w.Code, "%s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "cannot be changed once the competition has started",
+		"a started competition cannot discard its draw, so it is not told to")
+	assert.NotContains(t, w.Body.String(), "discard the draw")
 	got, err = store.LoadCompetition(running.ID)
 	require.NoError(t, err)
 	assert.True(t, got.EngiSolo)
+}
+
+// A config.md holding engi_solo without engi (hand-edited, or restored) is not
+// a change the operator makes: a settings save on a started competition goes
+// through and stores it off, instead of refusing every save.
+func TestPUTCompetition_EngiSoloStoredWithoutEngiDoesNotBlockSaves(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "solo-drift", Name: "Drift", Kind: "individual", Format: state.CompFormatKnockout,
+		PoolSize: 3, Courts: []string{"A"}, EngiSolo: true, Status: state.CompStatusKnockout,
+	}))
+	stored, err := store.LoadCompetition("solo-drift")
+	require.NoError(t, err)
+	require.True(t, stored.EngiSolo, "the drifted record is on disk")
+
+	w := cvPut(t, r, stored.ID, cvSettingsBody(t, stored, "", map[string]any{"name": "Drift Renamed"}))
+	require.Equalf(t, http.StatusOK, w.Code, "%s", w.Body.String())
+	got, err := store.LoadCompetition(stored.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Drift Renamed", got.Name)
+	assert.False(t, got.EngiSolo, "the save corrects the drift")
 }
 
 // config.md keeps the setting across a save and a load, writes no key for
@@ -232,6 +258,19 @@ func TestEngiSolo_ConfigRoundTrip(t *testing.T) {
 	assert.False(t, pairs.EngiSolo)
 	assert.NotContains(t, string(cvConfigBytes(t, dir, "pairs-disk")), "engi_solo",
 		"pairs write no key, so a config.md from before the setting is the same file")
+
+	// A config.md written before the setting (engi, no engi_solo key) loads as
+	// pairs, with no migration step.
+	legacy := cvConfigBytes(t, dir, "pairs-disk")
+	require.Contains(t, string(legacy), "engi: true")
+	legacyDir := filepath.Join(dir, "competitions", "legacy-disk")
+	require.NoError(t, os.MkdirAll(legacyDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(legacyDir, "config.md"), legacy, 0o644))
+	loaded, err := store.LoadCompetition("legacy-disk")
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	assert.True(t, loaded.Engi)
+	assert.False(t, loaded.EngiSolo, "an absent engi_solo key reads as pairs")
 }
 
 // The viewer and public competition reads carry engiSolo, which the public

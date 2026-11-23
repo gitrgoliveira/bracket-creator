@@ -2349,10 +2349,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// omits it stores false, which is why the client round-trips it.
 				// Locked after the draw like Engi (operator decision D8): the
 				// draw-ready status counts as started here, so the operator
-				// discards the draw to change it before the start.
+				// discards the draw to change it before the start. Only a
+				// draw-ready competition can discard its draw, so a running or
+				// finished one is told it cannot be changed. The stored value is
+				// read as the save derives it (beside Engi), so a config.md that
+				// holds engi_solo without engi is no change: the save stores it off.
 				engiSolo := comp.Engi && comp.EngiSolo
-				if started && engiSolo != current.EngiSolo {
-					validationErr = fmt.Errorf("one competitor per side can only be changed before the draw is made; discard the draw to change it")
+				if started && engiSolo != (current.Engi && current.EngiSolo) {
+					if current.Status == state.CompStatusDrawReady {
+						validationErr = fmt.Errorf("one competitor per side can only be changed before the draw is made; discard the draw to change it")
+					} else {
+						validationErr = fmt.Errorf("one competitor per side cannot be changed once the competition has started")
+					}
 					return nil, nil
 				}
 				current.Engi = comp.Engi

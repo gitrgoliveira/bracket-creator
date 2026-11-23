@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -138,4 +141,61 @@ func TestNameMaskCache_SweepsDeletedCompetitionsAtMostOnceAMinute(t *testing.T) 
 	_, err = cache.get(fx.comp.ID)
 	require.NoError(t, err)
 	assert.NotContains(t, cache.entries, "gone")
+}
+
+// A write to any of the files a mask is built from makes the cached mask
+// stale, so the next read builds again; a read with no write keeps it.
+func TestNameMaskCache_AWriteToAnyMaskFileInvalidatesTheMask(t *testing.T) {
+	fx := newPNFixture(t, state.PublicNamesHidden)
+	cache := fx.pn.masks
+	const cid = "teams-cache"
+	tigers := helper.NewUUID4()
+	teams := []domain.Player{{ID: tigers, Name: "Tigers", Dojo: "Dojo One"}}
+	comp := &state.Competition{ID: cid, Name: "Teams", Kind: "team", TeamSize: 3, Format: state.CompFormatMixed, Status: state.CompStatusPools}
+	require.NoError(t, fx.store.SaveCompetition(comp))
+	require.NoError(t, fx.store.SaveParticipants(cid, teams))
+	var builds int
+	cache.build = func(string) (*nameMask, error) {
+		builds++
+		return failClosedMask(comp), nil
+	}
+
+	n := 0
+	writes := map[string]func() error{
+		"config.md": func() error { comp.Name = fmt.Sprintf("Teams %d", n); return fx.store.SaveCompetition(comp) },
+		"participants.csv": func() error {
+			return fx.store.SaveParticipants(cid, []domain.Player{{ID: tigers, Name: "Tigers", Dojo: fmt.Sprintf("Dojo %d", n)}})
+		},
+		"pools.csv": func() error {
+			return fx.store.SavePools(cid, []helper.Pool{{PoolName: fmt.Sprintf("P%d", n), Players: teams}})
+		},
+		"bracket.json": func() error {
+			return fx.store.SaveBracket(cid, &state.Bracket{Rounds: [][]state.BracketMatch{{{ID: fmt.Sprintf("M%d", n)}}}})
+		},
+		"team-members.yaml": func() error {
+			_, err := fx.store.AddTeamMember(cid, tigers, fmt.Sprintf("Member %d", n))
+			return err
+		},
+	}
+	require.Len(t, writes, len(nameMaskFiles), "every file a mask is built from is exercised")
+
+	_, err := cache.get(cid)
+	require.NoError(t, err)
+	_, err = cache.get(cid)
+	require.NoError(t, err)
+	require.Equal(t, 1, builds, "with no write the mask is built once")
+
+	for _, file := range nameMaskFiles {
+		write, ok := writes[file]
+		require.True(t, ok, "%s has no write in this test", file)
+		n++
+		before := builds
+		require.NoError(t, write(), file)
+		_, err = cache.get(cid)
+		require.NoError(t, err)
+		assert.Equal(t, before+1, builds, "a write to %s builds the mask again", file)
+		_, err = cache.get(cid)
+		require.NoError(t, err)
+		assert.Equal(t, before+1, builds, "the mask built after the %s write is kept", file)
+	}
 }

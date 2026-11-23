@@ -202,6 +202,32 @@ func TestCachedVerifier(t *testing.T) {
 	assert.Same(t, inner, v.PasswordVerifier)
 }
 
+// An empty password is never cached: every one goes to the wrapped verifier,
+// answers false, and leaves the cache as it was.
+func TestCachedVerifier_AnEmptyPasswordBypassesTheCache(t *testing.T) {
+	inner := &countingVerifier{right: "right"}
+	v := newCachedVerifier(inner, time.Now)
+
+	for i := 0; i < 3; i++ {
+		ok, err := v.Verify("")
+		require.NoError(t, err)
+		assert.False(t, ok)
+	}
+	assert.EqualValues(t, 3, inner.calls.Load(), "each empty password is checked, none answered from the cache")
+	assert.Empty(t, v.bad, "an empty password is not remembered as wrong")
+	assert.Empty(t, v.inflight)
+	assert.False(t, v.haveGood)
+
+	ok, err := v.Verify("right")
+	require.NoError(t, err)
+	require.True(t, ok)
+	ok, err = v.Verify("")
+	require.NoError(t, err)
+	assert.False(t, ok, "a cached good password does not admit an empty one")
+	assert.EqualValues(t, 5, inner.calls.Load())
+	assert.Empty(t, v.bad)
+}
+
 func TestCachedVerifier_ConcurrentSharesOneCheck(t *testing.T) {
 	inner := &countingVerifier{right: "right", release: make(chan struct{})}
 	v := newCachedVerifier(inner, time.Now)

@@ -80,8 +80,10 @@ row you edit and leave with its name unchanged is saved without this check, so a
 row that no longer fits can still have its dojo or grade corrected.
 
 Everything else works as it does for pairs: flag scoring, the standings columns
-and the tie rules. The only difference on screen is the name column of the
-standings tables, headed **Player** instead of **Pair**.
+and the tie rules. On screen, the name column of the standings tables is headed
+**Player** instead of **Pair**, and each side shows one name instead of two.
+In the sections below, read "pair" as "competitor" when this setting is on: the
+standings, tie, Swiss and Excel rules apply unchanged.
 
 ## Score with flags
 

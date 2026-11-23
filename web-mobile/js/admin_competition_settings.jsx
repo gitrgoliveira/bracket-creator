@@ -1534,7 +1534,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             operator unable to see, let alone recover, a setting they
             remember configuring. */}
         <CheckboxField label={LABEL_ZEKKEN} checked={local.withZekkenName} onChange={(on) => update("withZekkenName", on)} disabled={isDrawReady || !zekkenApplies(local.kind)} hint={!zekkenApplies(local.kind) ? HINT_KIND_ONLY_INDIVIDUAL : HINT_ZEKKEN} />
-        <CheckboxField label={LABEL_ENGI} checked={!!local.engi} onChange={(on) => { update("engi", on); if (!on) update("engiSolo", false); }} disabled={lockedAfterDraw || !engiApplies(local.kind)} hint={!engiApplies(local.kind) ? HINT_KIND_ONLY_INDIVIDUAL : `${HINT_ENGI}${lockedNote}`} />
+        <CheckboxField label={LABEL_ENGI} checked={!!local.engi} onChange={(on) => { update("engi", on); if (!on && local.engiSolo) update("engiSolo", false); }} disabled={lockedAfterDraw || !engiApplies(local.kind)} hint={!engiApplies(local.kind) ? HINT_KIND_ONLY_INDIVIDUAL : `${HINT_ENGI}${lockedNote}`} />
         {/* One competitor per side (bc-solo): shown only while Engi applies
             and is ticked, since it describes an engi side and nothing else
             (the PUT body sends it false whenever engi is). Locked with Engi

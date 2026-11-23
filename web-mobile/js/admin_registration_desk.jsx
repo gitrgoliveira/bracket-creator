@@ -498,6 +498,7 @@ function rdNameField(comp) {
   return {
     label: engiNameFieldLabel(shape),
     placeholder: shape === "pair" ? "Akira Tanaka - Ren Fujita" : "Akira Tanaka",
+    zekkenPlaceholder: shape === "pair" ? "TANAKA - FUJITA" : "TANAKA",
   };
 }
 
@@ -506,8 +507,7 @@ function rdNameField(comp) {
 // competition's shape, null when it fits or the competition is not engi. The
 // server keeps no such rule, so the desk asks before it writes.
 function rdNameProblem(comp, name) {
-  const shape = engiShape(comp);
-  return shape ? engiEntryProblem(name, shape === "solo") : null;
+  return engiEntryProblem(name, engiShape(comp));
 }
 
 function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCheckInRefused, onCancel }) {
@@ -582,7 +582,7 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCheckInRefus
         {!isTeam && comp.withZekkenName && (
           <label className="field">
             <span className="field__label">Zekken</span>
-            <input className="input" maxLength={40} value={zekken} onChange={(e) => setZekken(e.target.value)} placeholder="TANAKA" />
+            <input className="input" maxLength={40} value={zekken} onChange={(e) => setZekken(e.target.value)} placeholder={nameField.zekkenPlaceholder} />
           </label>
         )}
         {!isTeam && (
@@ -672,7 +672,7 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
         {!isTeam && comp.withZekkenName && (
           <label className="field">
             <span className="field__label">Zekken</span>
-            <input className="input" maxLength={40} value={zekken} onChange={(e) => setZekken(e.target.value)} placeholder="TANAKA" />
+            <input className="input" maxLength={40} value={zekken} onChange={(e) => setZekken(e.target.value)} placeholder={nameField.zekkenPlaceholder} />
           </label>
         )}
         {!isTeam && (

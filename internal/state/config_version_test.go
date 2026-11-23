@@ -149,7 +149,6 @@ func TestConfigVersion_ChangesWhenAllowlistedFieldChanges(t *testing.T) {
 		{"SwissRounds", func(c *Competition) { c.SwissRounds = 5 }},
 		{"Naginata", func(c *Competition) { c.Naginata = true }},
 		{"Engi", func(c *Competition) { c.Engi = true }},
-		{"EngiSolo", func(c *Competition) { c.Engi = true; c.EngiSolo = true }},
 		{"TeamMatchType", func(c *Competition) { c.TeamMatchType = TeamMatchTypeKachinuki }},
 		{"TwoThirdPlaces", func(c *Competition) { c.TwoThirdPlaces = &twoThirdsFalse }},
 		{"ExpectedParticipants", func(c *Competition) { c.ExpectedParticipants = 24 }},
@@ -164,6 +163,15 @@ func TestConfigVersion_ChangesWhenAllowlistedFieldChanges(t *testing.T) {
 			assert.NotEqual(t, baseVer, mutatedVer, "version must change when %s changes", tc.name)
 		})
 	}
+}
+
+// EngiSolo is judged on its own, against an engi competition that already holds
+// Engi, so the version change cannot come from Engi.
+func TestConfigVersion_ChangesWhenEngiSoloChanges(t *testing.T) {
+	c := &Competition{ID: "engi", Name: "Engi", Kind: "individual", Format: CompFormatKnockout, Engi: true}
+	pairs := ConfigVersion(c)
+	c.EngiSolo = true
+	assert.NotEqual(t, pairs, ConfigVersion(c), "version must change when EngiSolo changes")
 }
 
 // An engi competition stored before EngiSolo existed (pairs, the key absent)

@@ -100,6 +100,32 @@ describe('Settings configVersion pinning, conflict alert, and reload', () => {
     expect(alert.textContent).toContain('Not saved: this competition changed somewhere else');
   });
 
+  it('1b. unticking Engi on a pair competition does not list One competitor per side among the changes', async () => {
+    const onUpdate = vi.fn();
+    const initialComp = makeSettingsCompetition({ configVersion: 'v-initial', kind: 'individual', engi: true, engiSolo: false });
+    const { container, updateComp } = renderSettings(initialComp, onUpdate);
+
+    const engiBox = Array.from(container.querySelectorAll('label'))
+      .find((l) => l.textContent.includes('Engi (kata competition)') && l.querySelector('input[type="checkbox"]'))
+      .querySelector('input');
+    await act(async () => { fireEvent.click(engiBox); });
+
+    const sseComp = { ...initialComp, configVersion: 'v-server-new', startTime: '10:30' };
+    await updateComp(sseComp);
+    const configChangedErr = new Error('This competition changed, reload it.');
+    configChangedErr.code = 'config_changed';
+    configChangedErr.configVersion = 'v-server-new';
+    configChangedErr.competition = sseComp;
+    onUpdate.mockRejectedValueOnce(configChangedErr);
+    const saveBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Save changes');
+    await act(async () => { fireEvent.click(saveBtn); });
+
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert).not.toBeNull();
+    expect(alert.textContent).toContain('You had changed:');
+    expect(alert.textContent).not.toContain('One competitor per side');
+  });
+
   it('2. an SSE update before any edit is absorbed: then an edit and Save send the NEW version and succeed', async () => {
     const onUpdate = vi.fn().mockResolvedValue({ configVersion: 'v-final' });
     const initialComp = makeSettingsCompetition({

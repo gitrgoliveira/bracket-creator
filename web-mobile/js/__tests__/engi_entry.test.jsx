@@ -19,42 +19,49 @@ describe('engi entry sentences', () => {
 
 describe('engiEntryProblem, pair', () => {
   it('accepts a pair with both members present', () => {
-    expect(engiEntryProblem('Emi Sasaki - Ren Fujita', false)).toBeNull();
+    expect(engiEntryProblem('Emi Sasaki - Ren Fujita', 'pair')).toBeNull();
   });
   it('splits on the FIRST separator so a hyphenated member name still passes', () => {
-    expect(engiEntryProblem('Mary-Jane Smith - Ren Fujita', false)).toBeNull();
+    expect(engiEntryProblem('Mary-Jane Smith - Ren Fujita', 'pair')).toBeNull();
   });
   it('refuses a name with no separator', () => {
-    expect(engiEntryProblem('Emi Sasaki', false)).toBe(ENGI_PAIR_PROBLEM);
+    expect(engiEntryProblem('Emi Sasaki', 'pair')).toBe(ENGI_PAIR_PROBLEM);
   });
   it('refuses an empty half, raw or trimmed', () => {
     for (const name of ['Alice -', '- Bob', '-', 'Alice - ', ' - Bob', ' - ']) {
-      expect(engiEntryProblem(name, false)).toBe(ENGI_PAIR_PROBLEM);
+      expect(engiEntryProblem(name, 'pair')).toBe(ENGI_PAIR_PROBLEM);
     }
   });
   it('refuses a blank name', () => {
     for (const name of ['', '   ', null, undefined]) {
-      expect(engiEntryProblem(name, false)).toBe(ENGI_PAIR_PROBLEM);
+      expect(engiEntryProblem(name, 'pair')).toBe(ENGI_PAIR_PROBLEM);
     }
   });
 });
 
 describe('engiEntryProblem, solo', () => {
   it('accepts one competitor', () => {
-    expect(engiEntryProblem('Akira Tanaka', true)).toBeNull();
+    expect(engiEntryProblem('Akira Tanaka', 'solo')).toBeNull();
   });
   it('accepts a hyphenated name with no spaces around the hyphen', () => {
-    expect(engiEntryProblem('Jean-Paul Martin', true)).toBeNull();
+    expect(engiEntryProblem('Jean-Paul Martin', 'solo')).toBeNull();
   });
   it('refuses a pair typed into a solo competition, raw or trimmed', () => {
     for (const name of ['A - B', 'Emi Sasaki - Ren Fujita', 'Alice -', '- Bob', 'Alice - ', ' - Bob', '-']) {
-      expect(engiEntryProblem(name, true)).toBe(ENGI_SOLO_PROBLEM);
+      expect(engiEntryProblem(name, 'solo')).toBe(ENGI_SOLO_PROBLEM);
     }
   });
   it('refuses a blank name with its own sentence', () => {
     for (const name of ['', '   ', null, undefined]) {
-      expect(engiEntryProblem(name, true)).toBe(ENGI_SOLO_BLANK);
+      expect(engiEntryProblem(name, 'solo')).toBe(ENGI_SOLO_BLANK);
     }
+  });
+});
+
+describe('engiEntryProblem, not engi', () => {
+  it('judges nothing when the shape is null', () => {
+    expect(engiEntryProblem('Emi Sasaki', null)).toBeNull();
+    expect(engiEntryProblem('', null)).toBeNull();
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { act, fireEvent } from '@testing-library/react';
+import { ENGI_SOLO_PROBLEM } from '../../engi_entry.jsx';
 import { installParticipantsHarness, makeParticipantsCompetition, mountParticipants } from './admin_participants_mount_harness.jsx';
 
 // The stored-rows notice: a roster saved under one setting of "One competitor
@@ -87,7 +88,7 @@ describe('AdminParticipants stored-rows notice for an engi competition', () => {
     expect(n.textContent).not.toContain('has started');
   });
 
-  it('a started competition says the rows and the setting can no longer change', async () => {
+  it('a started competition says the setting can no longer change and a pasted list is refused', async () => {
     const { container } = await mountParticipants(makeParticipantsCompetition({
       status: 'pools',
       engi: true,
@@ -97,7 +98,8 @@ describe('AdminParticipants stored-rows notice for an engi competition', () => {
     const n = notice(container);
     expect(n).toBeTruthy();
     expect(n.textContent).toContain('Alice Smith - Bob Jones');
-    expect(n.textContent).toContain('The competition has started, so the "One competitor per side" setting can no longer be changed, and these rows can no longer be edited on this page.');
+    expect(n.textContent).toContain('The competition has started, so the "One competitor per side" setting can no longer be changed. Applying a pasted list with rows like these is refused.');
+    expect(n.textContent).not.toContain('can no longer be edited');
     expect(n.textContent).not.toContain('Edit the rows');
     expect(n.textContent).not.toContain('Settings');
     expect(container.querySelector('button[aria-label="Edit Alice Smith - Bob Jones"]')).toBeNull();
@@ -163,10 +165,64 @@ describe('AdminParticipants stored-rows notice for an engi competition', () => {
       fireEvent.change(document.querySelector('[aria-labelledby="participant-replace-name-label"]'), { target: { value: 'Alice Smith - Bob Smith' } });
       await act(async () => { fireEvent.click(getByText('Save')); });
       expect(replaceParticipant).toHaveBeenCalledTimes(1);
+      const errors = showToast.mock.calls.filter((c) => c[1] === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0][0]).toContain(ENGI_SOLO_PROBLEM);
     } finally {
       window.API = savedAPI;
       window.buildPlayerMetadata = savedMetadata;
     }
+  });
+
+  it('the sample buttons give a pair its zekken as both members\' last names when zekken is on', async () => {
+    const { container, getByText } = await mountParticipants(makeParticipantsCompetition({
+      engi: true,
+      engiSolo: false,
+      withZekkenName: true,
+      players: [],
+    }));
+    fireEvent.click(getByText('Small (8)'));
+    const lines = container.querySelector('textarea').value.split('\n').filter(Boolean);
+    expect(lines).toHaveLength(8);
+    for (const line of lines) {
+      const [name, zekken] = line.split(',').map((x) => x.trim());
+      expect(name).toContain(' - ');
+      const [a, b] = name.split(' - ').map((x) => x.split(' ').pop().toUpperCase());
+      expect(zekken).toBe(`${a} - ${b}`);
+    }
+  });
+
+  it('the Add form and the paste box refuse a pair typed into a solo competition', async () => {
+    const onUpdate = vi.fn();
+    const showToast = vi.fn();
+    const { container, getByText, getAllByText } = await mountParticipants(makeParticipantsCompetition({
+      engi: true, engiSolo: true, players: [SOLO_ROW],
+    }), { onUpdate, showToast });
+    const errors = () => showToast.mock.calls.filter((c) => c[1] === 'error').map((c) => c[0]);
+
+    // The paste box: the row's reason follows the colon.
+    fireEvent.change(container.querySelector('textarea'), { target: { value: 'Emi Sasaki - Ren Fujita, Dojo A' } });
+    await act(async () => { fireEvent.click(getAllByText('Apply changes')[0]); });
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(errors().some((m) => m.includes(ENGI_SOLO_PROBLEM))).toBe(true);
+
+    // The Add form: the one sentence, as a toast.
+    showToast.mockClear();
+    fireEvent.click(getByText('+ Add participant'));
+    fireEvent.change(document.querySelector('[aria-labelledby="participant-add-name-label"]'), { target: { value: 'Emi Sasaki - Ren Fujita' } });
+    fireEvent.change(document.querySelector('[aria-labelledby="participant-add-dojo-label"]'), { target: { value: 'Dojo A' } });
+    await act(async () => { fireEvent.click(getByText('Add', { selector: 'button' })); });
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(errors()).toEqual([ENGI_SOLO_PROBLEM]);
+  });
+
+  it('names a stored row with a blank name as "(no name)", not an empty string', async () => {
+    const { container } = await mountParticipants(makeParticipantsCompetition({
+      engi: true,
+      engiSolo: false,
+      players: [PAIR_ROW, { id: 'p-9', name: '   ', dojo: 'Dojo' }],
+    }));
+    expect(notice(container).textContent).toContain('1 saved row does not fit this competition, which takes pairs: (no name).');
   });
 
   it('lists the first five names and counts the rest', async () => {

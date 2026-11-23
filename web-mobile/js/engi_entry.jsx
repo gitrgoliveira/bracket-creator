@@ -27,8 +27,8 @@ export function engiShape(c) {
 }
 
 // engiEntryProblem returns the sentence that refuses `name` for an engi side
-// of the given shape (`solo` true for one competitor, false for a pair), or
-// null when the name fits. The name is trimmed first, as the paste box and the
+// of the given engiShape ("pair" or "solo"), or null when the name fits or the
+// shape is null (not an engi competition, no engi rule applies). The name is trimmed first, as the paste box and the
 // forms trim, so "Alice - " is judged as "Alice -".
 //   pair: both halves around the FIRST " - " are non-blank (the same split as
 //         window.engiPairParts), so "Alice -", "- Bob", "-" and " - Bob" are
@@ -36,9 +36,10 @@ export function engiShape(c) {
 //   solo: refused when the name holds " - " or begins or ends with "-" (a
 //         pair typed into a solo competition); a hyphenated name with no
 //         spaces around the hyphen ("Jean-Paul Martin") passes.
-export function engiEntryProblem(name, solo) {
+export function engiEntryProblem(name, shape) {
+  if (!shape) return null;
   const s = String(name ?? "").trim();
-  if (solo) {
+  if (shape === "solo") {
     if (s === "") return ENGI_SOLO_BLANK;
     if (s.includes(" - ") || s.startsWith("-") || s.endsWith("-")) return ENGI_SOLO_PROBLEM;
     return null;

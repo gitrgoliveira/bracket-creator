@@ -883,12 +883,7 @@ paths:
 
   /api/register/competitions/{id}:
     parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
-        description: Competition id.
+      - $ref: '#/components/parameters/CompetitionId'
     get:
       tags: [participants]
       summary: Public self-registration form metadata
@@ -931,8 +926,12 @@ paths:
                     description: |
                       With `engi`, true when each side is one competitor rather
                       than a pair.
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           description: Registration is not available for this competition (officiated tournament, unknown or team competition).
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       tags: [participants]
       summary: Register a participant (public self-registration)
@@ -961,12 +960,20 @@ paths:
       responses:
         '200':
           description: Registered; answers the participant as stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Player'
         '400':
-          description: Invalid body, a blank name or dojo, or a field too long.
+          description: Invalid id or body, a blank name or dojo, or a field too long.
         '404':
           description: Registration is not available for this competition.
         '409':
           description: Registration is closed, or this name and dojo are already registered.
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/tournament/import:
     post:

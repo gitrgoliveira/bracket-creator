@@ -758,3 +758,37 @@ describe('AdminCreateCompetition expected participants and draft estimate (p2-cr
     expect(container.querySelector('.alert--error').textContent).toBe('Expected teams must be a whole number from 0 to 1024.');
   });
 });
+
+// bc-solo: "One competitor per side" shows only under a ticked Engi and rides
+// into the create body through createEngiFields.
+describe('AdminCreateCompetition One competitor per side', () => {
+  const SOLO_LABEL = 'One competitor per side';
+  const box = (container, label) => Array.from(container.querySelectorAll('label'))
+    .find((l) => l.textContent.includes(label) && l.querySelector('input[type="checkbox"]'))
+    ?.querySelector('input');
+
+  it('shows under a ticked Engi only, and a ticked box rides into the create body', async () => {
+    const onCreate = vi.fn().mockResolvedValue({ id: 'c1' });
+    const { container } = await mountForm({ onCreate });
+    expect(box(container, SOLO_LABEL), 'hidden while Engi is off').toBeUndefined();
+
+    await act(async () => { fireEvent.click(box(container, 'Engi (kata competition)')); });
+    const solo = box(container, SOLO_LABEL);
+    expect(solo, 'shown under a ticked Engi').toBeDefined();
+    expect(solo.checked).toBe(false);
+    await act(async () => { fireEvent.click(solo); });
+    expect(box(container, SOLO_LABEL).checked).toBe(true);
+
+    await act(async () => { fireEvent.click(submitButton(container)); });
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate.mock.calls[0][0]).toMatchObject({ engi: true, engiSolo: true });
+  });
+
+  it('creates pairs when the box is left unticked', async () => {
+    const onCreate = vi.fn().mockResolvedValue({ id: 'c1' });
+    const { container } = await mountForm({ onCreate });
+    await act(async () => { fireEvent.click(box(container, 'Engi (kata competition)')); });
+    await act(async () => { fireEvent.click(submitButton(container)); });
+    expect(onCreate.mock.calls[0][0]).toMatchObject({ engi: true, engiSolo: false });
+  });
+});

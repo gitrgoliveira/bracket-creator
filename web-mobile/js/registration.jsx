@@ -27,8 +27,7 @@ export const REGISTER_ENGI_SOLO_PROBLEM = "This competition takes one competitor
 // reads for a participant and is kept as it is. The blank name is the form's
 // own "Name is required." and never reaches here.
 export function registrationNameProblem(shape, name) {
-  if (!shape) return null;
-  const problem = engiEntryProblem(name, shape === "solo");
+  const problem = engiEntryProblem(name, shape);
   return problem === ENGI_SOLO_PROBLEM ? REGISTER_ENGI_SOLO_PROBLEM : problem;
 }
 
@@ -264,7 +263,7 @@ function RegistrationForm({ compId, onBack }) {
                 type="text"
                 value={displayName}
                 onChange={(e) => { setDisplayName(e.target.value); setErr(""); }}
-                placeholder="e.g. TANAKA"
+                placeholder={pairForm ? "e.g. TANAKA - FUJITA" : "e.g. TANAKA"}
                 disabled={saving}
               />
               <div className="field__hint">Name as it appears on your zekken (optional).</div>

@@ -226,7 +226,7 @@ function validateRosterRows(parsed, withZekkenName, shape) {
       problems.push({ index: i, name, reason: "missing name" });
       return;
     }
-    const engiProblem = shape ? engiEntryProblem(name, shape === "solo") : null;
+    const engiProblem = engiEntryProblem(name, shape);
     if (engiProblem) {
       problems.push({ index: i, name, reason: engiProblem });
       return;
@@ -267,7 +267,7 @@ function participantTemplateCSV(c) {
 // the error. Exported for tests.
 function participantFormError({ name, dojo, shape }) {
   if (!name || !dojo) return "Name and dojo are required";
-  const engiProblem = shape ? engiEntryProblem(name, shape === "solo") : null;
+  const engiProblem = engiEntryProblem(name, shape);
   if (engiProblem) return engiProblem;
   return null;
 }
@@ -356,7 +356,12 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
     // a partner made from the next block of generated names.
     if (engiSide === "pair") {
       const partners = window.makeCompetitors(count * 2, c.kind, c.id, 0).slice(count);
-      sample.forEach((p, i) => { p.name = `${p.name} - ${partners[i].name}`; });
+      // The pair's zekken is both members' last names, as the roster text reads it.
+      const surname = (n) => n.trim().split(/\s+/).pop().toUpperCase();
+      sample.forEach((p, i) => {
+        p.displayName = `${surname(p.name)} - ${surname(partners[i].name)}`;
+        p.name = `${p.name} - ${partners[i].name}`;
+      });
     }
     setText(generateText(sample));
   };
@@ -1065,9 +1070,9 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   // made, so nothing blocks; the notice below names the rows and the way out. The
   // entry rule (engiEntryProblem) is the one judge, as at every entry door.
   const engiMisfits = engiSide
-    ? (c.players || []).filter((p) => engiEntryProblem(p.name, engiSide === "solo"))
+    ? (c.players || []).filter((p) => engiEntryProblem(p.name, engiSide))
     : [];
-  const engiMisfitNames = engiMisfits.slice(0, 5).map((p) => p.name).join("; ")
+  const engiMisfitNames = engiMisfits.slice(0, 5).map((p) => (p.name || "").trim() || "(no name)").join("; ")
     + (engiMisfits.length > 5 ? `; and ${engiMisfits.length - 5} more` : "");
 
   // Apply appears twice (card head and below the preview) and both buttons are
@@ -1107,7 +1112,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
           {engiMisfits.length === 1 ? "1 saved row does not" : `${engiMisfits.length} saved rows do not`} fit
           {engiSide === "solo" ? " this competition, which takes one competitor per side" : " this competition, which takes pairs"}: {engiMisfitNames}.
           {isStarted
-            ? " The competition has started, so the \"One competitor per side\" setting can no longer be changed, and these rows can no longer be edited on this page."
+            ? " The competition has started, so the \"One competitor per side\" setting can no longer be changed. Applying a pasted list with rows like these is refused."
             : isDrawReady
               ? " Edit the rows, or discard the draw (from the competition header) to change \"One competitor per side\" in Settings."
               : " Edit the rows, or change \"One competitor per side\" back in Settings. Applying a pasted list with rows like these is refused."}
@@ -1497,7 +1502,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={14}
-            placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : engiSide === "pair" ? "Akira Tanaka - Yuki Tanaka, Gyokusen" : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen" : "Akira Tanaka, Gyokusen"}
+            placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : engiSide === "pair" ? (c.withZekkenName ? "Akira Tanaka - Yuki Tanaka, TANAKA - TANAKA, Gyokusen" : "Akira Tanaka - Yuki Tanaka, Gyokusen") : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen" : "Akira Tanaka, Gyokusen"}
           />
           <div className="field__hint" style={{ marginTop: 6 }}>“Apply changes” saves this list as the roster and clears the box. Applying over an existing roster replaces it; names already on the roster keep their id and seed (case-insensitive match).</div>
           {lines.length > 0 && (() => {

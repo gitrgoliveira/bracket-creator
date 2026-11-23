@@ -1083,6 +1083,10 @@ describe('AdminSettings engi/naginata checkboxes locked after start (finding 3/6
     expect(src).toMatch(/checked=\{!!local\.engi\}[\s\S]{0,200}disabled=\{lockedAfterDraw \|\| !engiApplies\(local\.kind\)\}/);
   });
 
+  it('One competitor per side checkbox is locked with Engi (isDrawReady or isStarted)', () => {
+    expect(src).toMatch(/checked=\{!!local\.engiSolo\}[\s\S]{0,200}disabled=\{lockedAfterDraw\}/);
+  });
+
   it('Naginata checkbox is disabled when isStarted (in addition to isDrawReady)', () => {
     // The checkbox input for Naginata must gate on both flags.
     expect(src).toMatch(/checked=\{!!local\.naginata\}[\s\S]{0,200}disabled=\{lockedAfterDraw\}/);

@@ -276,7 +276,7 @@ describe('LeagueStandingsViewer engi header (bc-solo)', () => {
   const realReact = global.React;
   let runtime;
   let LeagueStandingsViewer;
-  const STUBBED = ['Term', 'API', 'LoadingSpinner', 'EmptyState', 'engiPairParts'];
+  const STUBBED = ['Term', 'API', 'LoadingSpinner', 'EmptyState'];
   const saved = {};
   const tweaks = { showDojo: false };
   const base = { id: 'engi-league', format: 'league', kind: 'individual', teamSize: 0, engi: true, status: 'pools' };
@@ -290,10 +290,6 @@ describe('LeagueStandingsViewer engi header (bc-solo)', () => {
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
     global.window.LoadingSpinner = function LoadingSpinner({ text }) { return { type: 'div', props: { className: 'loading' }, children: text }; };
     global.window.EmptyState = function EmptyState({ title }) { return { type: 'div', props: {}, children: title }; };
-    global.window.engiPairParts = (name) => {
-      const i = (name || '').indexOf(' - ');
-      return i < 0 ? [name, ''] : [name.slice(0, i), name.slice(i + 3)];
-    };
     vi.resetModules();
     ({ LeagueStandingsViewer } = await import('../viewer.jsx'));
   });

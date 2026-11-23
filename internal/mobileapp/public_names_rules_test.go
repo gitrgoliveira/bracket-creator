@@ -396,49 +396,55 @@ func TestPublicNames_TournamentDefaultRefusals(t *testing.T) {
 	})
 }
 
-// The mode is chosen once, when the tournament is created, so the one save
-// that makes a tournament self-run is its first; it can find competitions
-// already in the data folder that hide names.
-func TestPublicNames_CreatingASelfRunTournamentOverHidingCompetitionsAsksFirst(t *testing.T) {
+// Self-run tournaments are out of scope: creating one over competitions that
+// hide names asks nothing, refuses nothing and rewrites no competition. The
+// stored setting is left as it is; the public pages show names while the
+// tournament is self-run.
+func TestPublicNames_CreatingASelfRunTournamentOverHidingCompetitionsChangesNothing(t *testing.T) {
 	for _, method := range []string{http.MethodPost, http.MethodPut} {
 		t.Run(method, func(t *testing.T) {
 			f := newPublicNamesFixture(t, "")
 			f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout, PublicNames: state.PublicNamesCompetition, RevealSecret: strings.Repeat("12", 32)})
-			f.saveComp(t, &state.Competition{ID: "c2", Name: "Shiai", Kind: "individual", Format: state.CompFormatKnockout})
 			body := map[string]any{
 				"name": "New", "date": "01-06-2026", "courts": []string{"A"}, "password": publicNamesPassword,
 				"mode": state.TournamentModeSelfRun,
 			}
-
 			if method == http.MethodPut {
 				body = withStoredTournamentVersion(t, f.store, body)
 			}
 			w := f.send(method, "/api/tournament", "", body)
-			require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
-			assert.Equal(t, codePublicNamesSelfRunSwitch, codeOf(t, w))
-			var refusal struct {
-				Competitions []publicNamesTarget `json:"competitions"`
-			}
-			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &refusal))
-			require.Len(t, refusal.Competitions, 1)
-			assert.Equal(t, "c1", refusal.Competitions[0].ID)
-			stored, err := f.store.LoadTournament()
-			require.NoError(t, err)
-			assert.Nil(t, stored, "nothing saved before the confirmation")
-			assert.Equal(t, state.PublicNamesCompetition, f.comp(t, "c1").PublicNames)
-
-			body["confirmShowNames"] = true
-			w = f.send(method, "/api/tournament", "", body)
 			require.Less(t, w.Code, 300, w.Body.String())
-			stored, err = f.store.LoadTournament()
+			stored, err := f.store.LoadTournament()
 			require.NoError(t, err)
 			require.NotNil(t, stored)
 			assert.Equal(t, state.TournamentModeSelfRun, stored.Mode)
 			c1 := f.comp(t, "c1")
-			assert.Equal(t, state.PublicNamesShown, c1.PublicNames, "the competition shows names")
-			assert.Equal(t, strings.Repeat("12", 32), c1.RevealSecret, "its secret is kept (E3)")
+			assert.Equal(t, state.PublicNamesCompetition, c1.PublicNames, "the stored setting is untouched")
+			assert.Equal(t, strings.Repeat("12", 32), c1.RevealSecret)
 		})
 	}
+}
+
+// Self-run tournaments are out of scope: a device holding an old password
+// reads the public pages there as it always did, and the public view shows
+// names whatever a competition's stored setting says. An officiated
+// tournament still refuses the wrong password.
+func TestPublicNames_WrongPasswordOnAPublicReadIsRefusedOnlyWhileOfficiated(t *testing.T) {
+	const path = "/api/viewer/competitions/c1"
+	hiding := &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout, PublicNames: state.PublicNamesHidden}
+
+	selfRun := newPublicNamesFixture(t, state.TournamentModeSelfRun)
+	selfRun.saveComp(t, hiding)
+	require.NoError(t, selfRun.store.SaveParticipants("c1", []domain.Player{{Name: "Zed Selfrun", Dojo: "Dojo One"}}))
+	w := selfRun.send(http.MethodGet, path, "an-old-password", nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "Zed Selfrun")
+	assert.Equal(t, state.PublicNamesHidden, selfRun.comp(t, "c1").PublicNames, "the stored setting is untouched")
+
+	officiated := newPublicNamesFixture(t, state.TournamentModeOfficiated)
+	officiated.saveComp(t, hiding)
+	w = officiated.send(http.MethodGet, path, "an-old-password", nil)
+	assert.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 }
 
 func TestPublicNames_OfficiatedTournamentCreatedOverHidingCompetitionsAsksNothing(t *testing.T) {
@@ -449,30 +455,6 @@ func TestPublicNames_OfficiatedTournamentCreatedOverHidingCompetitionsAsksNothin
 	})
 	require.Less(t, w.Code, 300, w.Body.String())
 	assert.Equal(t, state.PublicNamesHidden, f.comp(t, "c1").PublicNames)
-}
-
-// The refusals that do not depend on the competitions are judged before any
-// competition is touched, so a first save the transform would refuse leaves
-// the competitions hiding names as they were.
-func TestPublicNames_FirstSelfRunSaveRefusedBeforeAnyCompetitionIsTouched(t *testing.T) {
-	f := newPublicNamesFixture(t, "")
-	f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout, PublicNames: state.PublicNamesHidden})
-	body := withStoredTournamentVersion(t, f.store, map[string]any{
-		"name": "New", "date": "01-06-2026", "courts": []string{"A"},
-		"mode": state.TournamentModeSelfRun, "confirmShowNames": true,
-	})
-	w := f.send(http.MethodPut, "/api/tournament", "", body)
-	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), "admin password is required")
-	assert.Equal(t, state.PublicNamesHidden, f.comp(t, "c1").PublicNames, "the competition keeps its option")
-	stored, err := f.store.LoadTournament()
-	require.NoError(t, err)
-	assert.Nil(t, stored)
-
-	body["password"] = publicNamesPassword
-	w = f.send(http.MethodPut, "/api/tournament", "", body)
-	require.Less(t, w.Code, 300, w.Body.String())
-	assert.Equal(t, state.PublicNamesShown, f.comp(t, "c1").PublicNames)
 }
 
 // A hiding default a self-run tournament already holds (hand-edited, or

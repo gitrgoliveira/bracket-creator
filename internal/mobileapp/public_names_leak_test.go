@@ -1056,9 +1056,9 @@ func TestPublicNamesLeak_SwissAndSelfRunRefusals(t *testing.T) {
 	}
 }
 
-// A tournament made self-run over competitions that hide names shows, once
-// the organiser confirms, every name on the public pages again.
-func TestPublicNamesLeak_ConfirmedSelfRunSwitchShowsNames(t *testing.T) {
+// A tournament made self-run over competitions that hide names asks nothing
+// and changes nothing stored, and the public pages show every name.
+func TestPublicNamesLeak_SelfRunOverHidingCompetitionsShowsNames(t *testing.T) {
 	f := newPublicNamesFixture(t, "")
 	names := map[string][]string{}
 	for i, option := range []string{state.PublicNamesPerson, state.PublicNamesCompetition, state.PublicNamesHidden} {
@@ -1077,15 +1077,10 @@ func TestPublicNamesLeak_ConfirmedSelfRunSwitchShowsNames(t *testing.T) {
 		"mode": state.TournamentModeSelfRun,
 	}
 	w := f.send(http.MethodPost, "/api/tournament", "", body)
-	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
-	assert.Equal(t, codePublicNamesSelfRunSwitch, codeOf(t, w))
-
-	body["confirmShowNames"] = true
-	w = f.send(http.MethodPost, "/api/tournament", "", body)
 	require.Less(t, w.Code, 300, w.Body.String())
 
 	for id, ns := range names {
-		assert.Equal(t, state.PublicNamesShown, f.comp(t, id).PublicNames)
+		assert.NotEqual(t, state.PublicNamesShown, f.comp(t, id).PublicNames, "the stored setting is untouched")
 		rec := f.send(http.MethodGet, "/api/viewer/competitions/"+id, "", nil)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		assert.NotContains(t, rec.Body.String(), `"namesHidden":true`)

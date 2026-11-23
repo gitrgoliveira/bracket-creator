@@ -128,16 +128,34 @@ func (a audience) competitionParts() []string {
 	return parts
 }
 
-// judge works out who this read is answered for. Every answer it judges
+// judge works out who a public read is answered for. Every answer it judges
 // varies by audience, so it is marked no-store (and Vary on both
 // credentials) before anything else is written. ok is false when the
 // response has been written: 401 for a password sent but wrong, 500 when the
 // password could not be checked.
 //
+// A self-run tournament hides no names (hides), so a password that is wrong
+// there is not refused: a device still holding an old one reads the public
+// pages as it did before names could be hidden, and is answered the public
+// view. A password that is right is the organiser's in either mode.
+//
 // Reveal keys are judged only for a caller that is not the organiser. An
 // invalid, expired or wrong-kind key is dropped here, before any key is
 // formed from the audience, so it folds into the public.
 func (p *publicNames) judge(c *gin.Context) (audience, bool) {
+	return p.judgeCredentials(c, false)
+}
+
+// judgeTicket judges the credentials of an event-stream ticket request. The
+// ticket exists for the credentials it is asked with, so a wrong password is
+// refused in every mode: the page is told to ask for the password again.
+func (p *publicNames) judgeTicket(c *gin.Context) (audience, bool) {
+	return p.judgeCredentials(c, true)
+}
+
+// judgeCredentials is the judge behind both; refuseSelfRun says whether a
+// wrong password is refused in a self-run tournament too.
+func (p *publicNames) judgeCredentials(c *gin.Context, refuseSelfRun bool) (audience, bool) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Vary", "X-Tournament-Password, "+revealKeyHeader)
 
@@ -147,11 +165,13 @@ func (p *publicNames) judge(c *gin.Context) (audience, bool) {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "auth verification failed"})
 			return audience{}, false
 		}
-		if !valid {
+		if valid {
+			return organiserAudience(), true
+		}
+		if refuseSelfRun || !p.selfRun() {
 			respondInvalidPassword(c)
 			return audience{}, false
 		}
-		return organiserAudience(), true
 	}
 	return p.revealAudience(c.GetHeader(revealKeyHeader)), true
 }

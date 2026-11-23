@@ -814,10 +814,6 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// (public_names_apply_confirm). With it, the save sets every
 			// competition but a Swiss one to the default.
 			ConfirmPublicNames bool `json:"confirmPublicNames"`
-			// ConfirmShowNames is the organiser's yes to a save that creates
-			// the tournament self-run showing names in the competitions it
-			// lists (public_names_self_run_switch, showNamesForSelfRun).
-			ConfirmShowNames bool `json:"confirmShowNames"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1002,14 +998,6 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		if answerPublicNames(c, refusal, err) {
 			return
 		}
-		// A PUT may create the tournament; created self-run, the
-		// competitions already on disk that hide names show them first.
-		switchTargets, refusal, err := judgeSelfRunSwitch(store, stored, &t, req.ConfirmShowNames)
-		if answerPublicNames(c, refusal, err) || answerPublicNames(c, applySelfRunSwitch(hub, store, switchTargets), nil) {
-			return
-		}
-		saved := false
-		defer tellSwitchUnlessSaved(hub, switchTargets, &saved)
 		// Track whether the persisted password actually changed so we
 		// can fire EventPasswordReset (in addition to
 		// EventTournamentUpdated) and other admin sessions log out
@@ -1152,7 +1140,6 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			internalError(c, err)
 			return
 		}
-		saved = true
 		// The default landed; now the competitions it was confirmed for. The
 		// broadcast below tells open pages and streams either way.
 		var publicNamesFailed []string
@@ -1357,7 +1344,6 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 
 		var confirm struct {
 			ConfirmPublicNames bool `json:"confirmPublicNames"`
-			ConfirmShowNames   bool `json:"confirmShowNames"`
 		}
 		if err := c.ShouldBindBodyWith(&confirm, binding.JSON); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1372,20 +1358,11 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		if answerPublicNames(c, refusal, err) {
 			return
 		}
-		// Created self-run, the competitions already on disk that hide
-		// names show them first, once the organiser has seen the list.
-		switchTargets, refusal, err := judgeSelfRunSwitch(store, existingForPost, &t, confirm.ConfirmShowNames)
-		if answerPublicNames(c, refusal, err) || answerPublicNames(c, applySelfRunSwitch(hub, store, switchTargets), nil) {
-			return
-		}
-		saved := false
-		defer tellSwitchUnlessSaved(hub, switchTargets, &saved)
 
 		if _, err := store.SaveTournamentChanged(&t); err != nil {
 			internalError(c, err)
 			return
 		}
-		saved = true
 
 		// The default landed; now the competitions it was confirmed for.
 		var publicNamesFailed []string

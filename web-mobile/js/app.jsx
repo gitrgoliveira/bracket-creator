@@ -22,8 +22,6 @@ import { readAudienceKey, currentReadAudienceKey, CREDENTIAL_REFUSED, onCredenti
 import { setAudienceAndReconnect } from './api_client_events.jsx';
 import { onRevealKeysChange } from './reveal_key.jsx';
 import { RevealPage, takeRevealLink } from './viewer_reveal.jsx';
-import { publicNamesLabel } from './public_names_fields.jsx';
-import { andList } from './list_phrase.jsx';
 
 const { useState, useEffect, useLayoutEffect, useRef, useCallback } = React;
 
@@ -2042,18 +2040,6 @@ export function validateCreateTournament({ name, pass, date, courts, maxCourts }
   return "";
 }
 
-// bc-hnam: the question the first-run form asks when the server answers
-// public_names_self_run_switch: creating the tournament self-run shows the
-// names of the competitions listed, which hide them now.
-export const SELF_RUN_SWITCH_CANCELLED = "The tournament was not created. Those competitions still hide competitor names.";
-export function selfRunSwitchMessage(competitions) {
-  const list = Array.isArray(competitions) ? competitions : [];
-  const n = list.length;
-  const count = n === 1 ? "1 competition" : `${n} competitions`;
-  const names = andList(list.map((c) => `${(c && c.name) || (c && c.id) || "?"} (now: ${publicNamesLabel(c && c.publicNames)})`));
-  return `A self-run tournament always shows competitor names on the public pages. Creating it sets ${count} back to "${publicNamesLabel("")}": ${names}. Their names then show on every public page.`;
-}
-
 function CreateTournament({ onCreated, authConfig }) {
   // In locked mode the server requires X-Tournament-Password on the
   // bootstrap POST and discards the body's `password` field. The form's
@@ -2135,32 +2121,7 @@ function CreateTournament({ onCreated, authConfig }) {
       // X-Tournament-Password. In file mode authPassword is undefined
       // and the header is omitted (the bootstrap branch in middleware
       // lets it through unauthenticated).
-      const send = (confirmShowNames) => window.API.createTournament(
-        confirmShowNames ? { ...config, confirmShowNames: true } : config,
-        locked ? pass : undefined,
-      );
-      let t;
-      try {
-        t = await send(false);
-      } catch (err) {
-        // bc-hnam: a self-run tournament always shows names on the public
-        // pages, so creating one over competitions that hide them (a restored
-        // data folder) asks first, naming them. Cancelling creates nothing.
-        if (!err || err.code !== "public_names_self_run_switch") throw err;
-        const ok = await window.confirmDialog({
-          title: "Show competitor names?",
-          message: selfRunSwitchMessage(err.competitions),
-          confirmLabel: "Show names and create",
-          danger: true,
-        });
-        if (!mountedRef.current) return;
-        if (!ok) {
-          setError(SELF_RUN_SWITCH_CANCELLED);
-          setSaving(false);
-          return;
-        }
-        t = await send(true);
-      }
+      const t = await window.API.createTournament(config, locked ? pass : undefined);
       if (!mountedRef.current) return;
       onCreated(t, pass);
     } catch (err) {

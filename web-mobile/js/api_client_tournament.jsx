@@ -161,16 +161,7 @@ export const tournamentApi = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            const e = new Error(err.error || "Failed to create tournament");
-            // bc-hnam: a 409 the form answers by asking (public_names_self_run_switch:
-            // the competitions that hide names, which creating the tournament
-            // self-run would show) keeps its code and list, so the form can name
-            // them before sending again with confirmShowNames.
-            if (res.status === 409 && err.code) {
-                e.code = err.code;
-                if (Array.isArray(err.competitions)) e.competitions = err.competitions;
-            }
-            throw e;
+            throw new Error(err.error || "Failed to create tournament");
         }
         return res.json();
     },

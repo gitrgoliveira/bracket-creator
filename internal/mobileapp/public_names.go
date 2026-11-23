@@ -83,8 +83,14 @@ func (p *publicNames) hides(comp *state.Competition) bool {
 	if comp == nil || !comp.HidesNames() {
 		return false
 	}
+	return !p.selfRun()
+}
+
+// selfRun reports whether the tournament is self-run. A tournament that cannot
+// be read counts as officiated.
+func (p *publicNames) selfRun() bool {
 	t, err := p.store.LoadTournament()
-	return err != nil || !t.IsSelfRun()
+	return err == nil && t.IsSelfRun()
 }
 
 // view is the mask view for comp and aud. The error is the mask's build

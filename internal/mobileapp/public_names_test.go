@@ -83,6 +83,31 @@ func judgeRequest(t *testing.T, pn *publicNames, headers map[string]string) (aud
 	return aud, ok, w
 }
 
+func TestJudge_SelfRunAnswersAWrongPasswordThePublicViewButTicketsStillRefuseIt(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesCompetition)
+	stored, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	selfRun := *stored
+	selfRun.Mode = state.TournamentModeSelfRun
+	require.NoError(t, f.store.SaveTournament(&selfRun))
+
+	aud, ok, w := judgeRequest(t, f.pn, map[string]string{"X-Tournament-Password": "wrong"})
+	require.True(t, ok, w.Body.String())
+	assert.Equal(t, "public", aud.key())
+
+	aud, ok, _ = judgeRequest(t, f.pn, map[string]string{"X-Tournament-Password": "secret-pw"})
+	require.True(t, ok)
+	assert.True(t, aud.isOrganiser(), "the right password is still the organiser's")
+
+	tw := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(tw)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/events/ticket", nil)
+	c.Request.Header.Set("X-Tournament-Password", "wrong")
+	_, ok = f.pn.judgeTicket(c)
+	assert.False(t, ok)
+	assert.Equal(t, http.StatusUnauthorized, tw.Code)
+}
+
 func TestAudienceKeys(t *testing.T) {
 	assert.Equal(t, "public", audience{}.key())
 	assert.Equal(t, "organiser", organiserAudience().key())

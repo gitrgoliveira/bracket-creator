@@ -189,7 +189,7 @@ func (h *Hub) HandleEventTicket() gin.HandlerFunc {
 		// Read before the password is judged: a change landing between the
 		// two leaves this ticket with the old count, and it is refused.
 		judgedAt := h.tickets.epochNow()
-		aud, ok := names.judge(c)
+		aud, ok := names.judgeTicket(c)
 		if !ok {
 			return
 		}

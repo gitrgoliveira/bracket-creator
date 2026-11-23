@@ -1107,7 +1107,7 @@ function App() {
       return slice.length > 0 ? slice : null;
     }, () => tournamentRef.current, () => compsRef.current);
     return () => setSnapshotProvider(null);
-  }, [mode]);
+  }, [mode, tournamentRef]);
 
   // mp-9h1f: while the shiaijo operator console is active (admin mode + shiaijo
   // view) the SSE handler skips its per-event aggregate refetch: the console
@@ -1206,8 +1206,10 @@ function App() {
   // whose handlers write it.
   const [selectedCompData, setSelectedCompData] = useState(null);
   // The audience now, for a detail read still out when it changes (bc-hnam).
+  // Its own useRef plus layout effect, as latest_ref.jsx says for a ref an
+  // effect with a dependency list reads.
   const audienceRef = useRef(audienceNow);
-  audienceRef.current = audienceNow;
+  useLayoutEffect(() => { audienceRef.current = audienceNow; });
   // The server pushes applied to selectedCompData, for its refetches
   // (push-wins, createPushLedger, patch.jsx).
   const [compPushes] = useState(() => createPushLedger());
@@ -1571,7 +1573,7 @@ function App() {
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('online', onOnline);
     };
-  }, [viewerCompId, mode, loadRef, compPushes]);
+  }, [viewerCompId, mode, loadRef, compPushes, dropStaleCredentialRef]);
 
   useEffect(() => { selectedCompDataRef.current = selectedCompData; }, [selectedCompData]);
 

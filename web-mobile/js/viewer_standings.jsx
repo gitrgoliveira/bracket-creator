@@ -364,6 +364,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
               const tie = tiedPlaceOf(leagueTies, s.player);
               const rank = tie ? tie.place : s.rank || i + 1;
               const isDHWinner = isTeam && dhWinnerNames.has(s.player?.name || "");
+              const [pMember1, pMember2] = isEngi && window.engiPairParts ? window.engiPairParts(s.player?.name || "") : [s.player?.name || "", ""];
               const rowClasses = [
                 isPlayerWatched(s.player, highlightPlayers) ? "pool__row--me" : "",
                 tie ? "pool__row--tied" : "",
@@ -375,9 +376,11 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
                   </td>
                   <td>
                     <div className="pool__player-name">
-                      <NumberedName name={s.player?.name || ""} number={s.player?.number} />
+                      <NumberedName name={pMember1} number={s.player?.number} />
                       {isDHWinner ? <DHBadge /> : null}
                     </div>
+                    {/* Engi pair: member 2 (from the combined name) stacked below member 1; a solo side has no member 2. */}
+                    {isEngi && pMember2 ? <div className="pool__player-name">{pMember2}</div> : null}
                     {tweaks?.showDojo ? <div className="pool__dojo-name">{s.player?.dojo || ""}</div> : null}
                   </td>
                   {isEngi ? (

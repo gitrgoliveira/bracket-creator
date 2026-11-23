@@ -276,7 +276,7 @@ describe('LeagueStandingsViewer engi header (bc-solo)', () => {
   const realReact = global.React;
   let runtime;
   let LeagueStandingsViewer;
-  const STUBBED = ['Term', 'API', 'LoadingSpinner', 'EmptyState'];
+  const STUBBED = ['Term', 'API', 'LoadingSpinner', 'EmptyState', 'engiPairParts'];
   const saved = {};
   const tweaks = { showDojo: false };
   const base = { id: 'engi-league', format: 'league', kind: 'individual', teamSize: 0, engi: true, status: 'pools' };
@@ -290,6 +290,11 @@ describe('LeagueStandingsViewer engi header (bc-solo)', () => {
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
     global.window.LoadingSpinner = function LoadingSpinner({ text }) { return { type: 'div', props: { className: 'loading' }, children: text }; };
     global.window.EmptyState = function EmptyState({ title }) { return { type: 'div', props: {}, children: title }; };
+    // ui.jsx's splitter: the combined name breaks on the first " - ".
+    global.window.engiPairParts = (name) => {
+      const i = name.indexOf(' - ');
+      return i < 0 ? [name, ''] : [name.slice(0, i), name.slice(i + 3)];
+    };
     vi.resetModules();
     ({ LeagueStandingsViewer } = await import('../viewer.jsx'));
   });
@@ -316,6 +321,12 @@ describe('LeagueStandingsViewer engi header (bc-solo)', () => {
   it('heads the name column Pair for a pair competition', async () => {
     const tree = await render(base, [{ player: { name: 'Ann One - Ann Two', dojo: 'D', id: 'a' }, rank: 1, wins: 1, flags: 3 }]);
     expect(head(tree)).toContain('#PairVFlags');
+  });
+
+  it('stacks member 2 below member 1 for a pair side', async () => {
+    const tree = await render(base, [{ player: { name: 'Ann One - Ann Two', dojo: 'D', id: 'a' }, rank: 1, wins: 1, flags: 3 }]);
+    const lines = findAll(tree, n => n.type === 'div' && n.props?.className === 'pool__player-name');
+    expect(lines.map(l => collectText(l, expandNamed('NumberedName')))).toEqual(['Ann One', 'Ann Two']);
   });
 
   it('heads the name column Player for a solo competition and draws one name line', async () => {

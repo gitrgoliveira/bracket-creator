@@ -2196,7 +2196,9 @@ paths:
         (`naginata can only be changed before the competition starts`,
         `engi can only be changed before the competition starts`,
         `one competitor per side can only be changed before the draw is
-        made; discard the draw to change it`,
+        made; discard the draw to change it` for a draw-ready competition,
+        or `one competitor per side cannot be changed once the competition
+        has started` for one that has started,
         `twoThirdPlaces can only be changed before the competition starts`,
         respectively). Every other field in the list above
         (including `poolMatchDurationSeconds` / `knockoutMatchDurationSeconds`,
@@ -10039,7 +10041,8 @@ components:
             result. Locked like `engi` once a draw is generated: a change
             while draw-ready or later is a 400 (`one competitor per side
             can only be changed before the draw is made; discard the draw
-            to change it`). Carried on every competition read, the viewer
+            to change it` while draw-ready, `one competitor per side cannot
+            be changed once the competition has started` after). Carried on every competition read, the viewer
             and public payloads included.
         numberPrefix:
           type: string

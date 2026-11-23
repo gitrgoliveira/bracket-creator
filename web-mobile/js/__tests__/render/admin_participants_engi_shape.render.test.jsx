@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { fireEvent } from '@testing-library/react';
 import { installParticipantsHarness, makeParticipantsCompetition, mountParticipants } from './admin_participants_mount_harness.jsx';
 
-// The stored-rows notice: "One competitor per side" stays editable at every
-// status, so a roster saved under one setting can hold rows the other refuses.
-// The Participants page names those rows (judged by engiEntryProblem) in an
-// inline role="status" notice and says how to fix them; it never blocks.
+// The stored-rows notice: a roster saved under one setting of "One competitor
+// per side" can hold rows the other refuses. The Participants page names those
+// rows (judged by engiEntryProblem) in an inline role="status" notice and says
+// how to fix them with the steps the status still allows (the setting locks
+// once the draw is made); it never blocks.
 
 installParticipantsHarness();
 
@@ -70,7 +72,22 @@ describe('AdminParticipants stored-rows notice for an engi competition', () => {
     expect(notice(container)).toBeNull();
   });
 
-  it('a started competition gets the copy that points at Edit on each row', async () => {
+  it('a draw-ready competition points at Edit and at discarding the draw, never at Settings alone', async () => {
+    const { container } = await mountParticipants(makeParticipantsCompetition({
+      status: 'draw-ready',
+      engi: true,
+      engiSolo: true,
+      players: [PAIR_ROW, SOLO_ROW],
+    }));
+    const n = notice(container);
+    expect(n).toBeTruthy();
+    expect(n.textContent).toContain('Alice Smith - Bob Jones');
+    expect(n.textContent).toContain('Edit the rows, or discard the draw (from the competition header) to change "One competitor per side" in Settings.');
+    expect(n.textContent).not.toContain('back in Settings');
+    expect(n.textContent).not.toContain('has started');
+  });
+
+  it('a started competition says the rows and the setting can no longer change', async () => {
     const { container } = await mountParticipants(makeParticipantsCompetition({
       status: 'pools',
       engi: true,
@@ -80,10 +97,47 @@ describe('AdminParticipants stored-rows notice for an engi competition', () => {
     const n = notice(container);
     expect(n).toBeTruthy();
     expect(n.textContent).toContain('Alice Smith - Bob Jones');
-    expect(n.textContent).toContain('The competition has started, so competitors cannot be added or pasted.');
-    expect(n.textContent).toContain('Fix each row with Edit');
-    expect(n.textContent).toContain('change "One competitor per side" back in Settings');
+    expect(n.textContent).toContain('The competition has started, so these rows and the "One competitor per side" setting can no longer be changed.');
     expect(n.textContent).not.toContain('Edit the rows');
+    expect(n.textContent).not.toContain('Settings');
+    expect(container.querySelector('button[aria-label="Edit Alice Smith - Bob Jones"]')).toBeNull();
+  });
+
+  it('the sample buttons fill a pair competition with pair names the paste box accepts', async () => {
+    const { container, getByText } = await mountParticipants(makeParticipantsCompetition({
+      engi: true,
+      engiSolo: false,
+      players: [],
+    }));
+    fireEvent.click(getByText('Small (8)'));
+    const lines = container.querySelector('textarea').value.split('\n').filter(Boolean);
+    expect(lines).toHaveLength(8);
+    for (const line of lines) expect(line.split(',')[0]).toContain(' - ');
+  });
+
+  it('the sample buttons fill a solo competition with single names', async () => {
+    const { container, getByText } = await mountParticipants(makeParticipantsCompetition({
+      engi: true,
+      engiSolo: true,
+      players: [],
+    }));
+    fireEvent.click(getByText('Small (8)'));
+    const lines = container.querySelector('textarea').value.split('\n').filter(Boolean);
+    expect(lines).toHaveLength(8);
+    for (const line of lines) expect(line.split(',')[0]).not.toContain(' - ');
+  });
+
+  it('the Edit dialog labels the name field like the Add form: pair format for pairs, Name for solo', async () => {
+    const pair = await mountParticipants(makeParticipantsCompetition({ engi: true, engiSolo: false, players: [PAIR_ROW] }));
+    fireEvent.click(pair.container.querySelector('button[aria-label="Edit Alice Smith - Bob Jones"]'));
+    expect(document.getElementById('participant-replace-name-label').textContent).toBe('Pair (Name 1 - Name 2) *');
+    expect(document.querySelector('[aria-labelledby="participant-replace-name-label"]').getAttribute('placeholder')).toBe('Member 1 - Member 2');
+    pair.unmount();
+
+    const solo = await mountParticipants(makeParticipantsCompetition({ engi: true, engiSolo: true, players: [SOLO_ROW] }));
+    fireEvent.click(solo.container.querySelector('button[aria-label="Edit Akira Tanaka"]'));
+    expect(document.getElementById('participant-replace-name-label').textContent).toBe('Name *');
+    expect(document.querySelector('[aria-labelledby="participant-replace-name-label"]').getAttribute('placeholder')).toBe('Replacement name');
   });
 
   it('lists the first five names and counts the rest', async () => {

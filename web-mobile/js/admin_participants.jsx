@@ -352,6 +352,12 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   // generated ids are placeholders; apply() assigns `${compId}-pN` ids.
   const fillSample = (count) => {
     const sample = window.makeCompetitors(count, c.kind, c.id, 0);
+    // A pair competition takes "Name 1 - Name 2": give each sample competitor
+    // a partner made from the next block of generated names.
+    if (engiSide === "pair") {
+      const partners = window.makeCompetitors(count * 2, c.kind, c.id, 0).slice(count);
+      sample.forEach((p, i) => { p.name = `${p.name} - ${partners[i].name}`; });
+    }
     setText(generateText(sample));
   };
 
@@ -1098,8 +1104,10 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
           {engiMisfits.length === 1 ? "1 saved row does not" : `${engiMisfits.length} saved rows do not`} fit
           {engiSide === "solo" ? " this competition, which takes one competitor per side" : " this competition, which takes pairs"}: {engiMisfitNames}.
           {isStarted
-            ? " The competition has started, so competitors cannot be added or pasted. Fix each row with Edit, or change \"One competitor per side\" back in Settings."
-            : " Edit the rows, or change \"One competitor per side\" back in Settings. Applying a pasted list with rows like these is refused."}
+            ? " The competition has started, so these rows and the \"One competitor per side\" setting can no longer be changed."
+            : isDrawReady
+              ? " Edit the rows, or discard the draw (from the competition header) to change \"One competitor per side\" in Settings."
+              : " Edit the rows, or change \"One competitor per side\" back in Settings. Applying a pasted list with rows like these is refused."}
         </div>
       )}
       {isStarted && (
@@ -1259,8 +1267,8 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
                 <div className="card__head"><div id="edit-modal-title" className="card__title">Edit {replaceTarget.name}</div></div>
                 <div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <div>
-                    <div className="field__label" id="participant-replace-name-label">Name *</div>
-                    <input className="input" aria-labelledby="participant-replace-name-label" value={replaceName} onChange={e => setReplaceName(e.target.value)} placeholder="Replacement name" />
+                    <div className="field__label" id="participant-replace-name-label">{`${engiNameFieldLabel(engiSide)} *`}</div>
+                    <input className="input" aria-labelledby="participant-replace-name-label" value={replaceName} onChange={e => setReplaceName(e.target.value)} placeholder={engiSide === "pair" ? "Member 1 - Member 2" : "Replacement name"} />
                   </div>
                   {withZekken && (
                     <div>

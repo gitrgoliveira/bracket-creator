@@ -137,23 +137,26 @@ func eventCompetitionID(data any, payload []byte) string {
 }
 
 // project is what sub's stream is sent for e: the event as broadcast for the
-// organiser, in a self-run tournament (which hides no names, so every stream
-// is sent every event as it always was), for an event that names no one, and
+// organiser, for an event that names no one, in a self-run tournament (which
+// hides no names, so every stream is sent every event as it always was), and
 // for a competition that shows names or whose names sub may see; a masked
 // copy otherwise. Whatever cannot be judged (an unknown event type, a masked
 // event naming no competition, a competition that cannot be read, a copy that
 // cannot be built) is sent with no data, never as broadcast.
 func (h *Hub) project(e *historyEntry, sub *sseSubscriber) string {
 	names := h.names
-	if names == nil || sub == nil || sub.aud.isOrganiser() || names.selfRun() {
+	if names == nil || sub == nil || sub.aud.isOrganiser() {
 		return e.payload
 	}
 	spec, known := sseEventCatalogue[e.typ]
+	if known && spec.class == sseEventPasses {
+		return e.payload
+	}
+	if e.inSelfRun(names) {
+		return e.payload
+	}
 	if !known || spec.class == sseEventOrganiserOnly {
 		return withoutData(e)
-	}
-	if spec.class == sseEventPasses {
-		return e.payload
 	}
 	if e.compID == "" {
 		return withoutData(e)
@@ -178,6 +181,33 @@ func (h *Hub) project(e *historyEntry, sub *sseSubscriber) string {
 		return out
 	}
 	return e.publicCopy(func() (string, bool) { return maskEvent(names, comp, audience{}, e, spec) })
+}
+
+// selfRunJudgement memoises whether the tournament is self-run for one
+// event, so the tournament is read once per event however many streams it
+// is sent to, not once per stream.
+type selfRunJudgement struct {
+	once    sync.Once
+	selfRun bool
+}
+
+// judgedSelfRun is a judgement already taken (a stream's replay, judged when
+// the stream opens).
+func judgedSelfRun(selfRun bool) *selfRunJudgement {
+	j := &selfRunJudgement{selfRun: selfRun}
+	j.once.Do(func() {})
+	return j
+}
+
+// inSelfRun reports whether the tournament is self-run for e: judged by the
+// first stream that sends e and reused by the others (historyEntry.selfRun),
+// read afresh for an entry that carries no judgement.
+func (e *historyEntry) inSelfRun(names *publicNames) bool {
+	if e.selfRun == nil {
+		return names.selfRun()
+	}
+	e.selfRun.once.Do(func() { e.selfRun.selfRun = names.selfRun() })
+	return e.selfRun.selfRun
 }
 
 // judgeCompetition is the competition e names and whether the public pages
@@ -358,6 +388,23 @@ func (h *Hub) endOrganiserStreamsLocked() {
 	}
 }
 
+// holdsReveal reports whether sub is a stream opened with reveal keys, which
+// a tournament_updated judges again (rejudgeRevealStreams).
+func (sub *sseSubscriber) holdsReveal() bool {
+	return sub != nil && sub.reveal != "" && !sub.aud.isOrganiser()
+}
+
+// holdsRevealStreamLocked reports whether any open stream holds reveal keys.
+// Caller holds h.mu.
+func (h *Hub) holdsRevealStreamLocked() bool {
+	for _, sub := range h.clients {
+		if sub.holdsReveal() {
+			return true
+		}
+	}
+	return false
+}
+
 // rejudgeRevealStreams judges every stream opened with reveal keys again,
 // after a tournament_updated (a competition's option, its expiry or its
 // format may have changed), and ends each one whose keys now unlock
@@ -379,7 +426,7 @@ func (h *Hub) rejudgeRevealStreams() {
 	var reveal []held
 	h.mu.RLock()
 	for ch, sub := range h.clients {
-		if sub != nil && sub.reveal != "" && !sub.aud.isOrganiser() {
+		if sub.holdsReveal() {
 			reveal = append(reveal, held{ch, sub})
 		}
 	}

@@ -66,9 +66,9 @@ func (v maskView) sideReading(name, id string) (string, bool) {
 }
 
 // players masks a roster copy in place. An individual's Name and DisplayName
-// (zekken name) read as the number, empty before the draw gives one; a
-// revealed competitor's stay. A team keeps its name and loses Metadata, where
-// a legacy roster held member names.
+// (zekken name) read as the number, "?" (maskedUnknown) before the draw gives
+// one, as a side does; a revealed competitor's stay. A team keeps its name
+// and loses Metadata, where a legacy roster held member names.
 func (v maskView) players(ps []domain.Player) {
 	if v.m == nil {
 		return
@@ -94,6 +94,9 @@ func (v maskView) player(p *domain.Player) {
 	n := v.m.numbers[p.ID]
 	if p.Number != "" {
 		n = p.Number
+	}
+	if n == "" {
+		n = maskedUnknown
 	}
 	p.Name = n
 	p.DisplayName = n

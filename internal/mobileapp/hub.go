@@ -165,6 +165,10 @@ type historyEntry struct {
 	// masked event is marshalled once per audience class rather than once per
 	// subscriber. nil for an event that is never masked.
 	masked *maskedPayload
+	// selfRun is the shared judgement of whether the tournament is self-run,
+	// taken by the first stream not entitled to every name that sends the
+	// event (inSelfRun). nil for an event every stream is sent as broadcast.
+	selfRun *selfRunJudgement
 }
 
 // Hub manages active SSE connections and broadcasts events.
@@ -442,11 +446,16 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 			slog.Warn("mobile-app: a masked event names no competition; it is sent without its data", "type", eventType, "seq", seq)
 		}
 	}
-	if eventType == EventTournamentUpdated && h.names != nil && !h.closed {
+	if h.names != nil && sseEventClassOf(eventType) != sseEventPasses {
+		entry.selfRun = &selfRunJudgement{}
+	}
+	if eventType == EventTournamentUpdated && h.names != nil && !h.closed && h.holdsRevealStreamLocked() {
 		// A competition's option may have changed: judge the reveal streams
 		// again once the event is out (rejudgeRevealStreams takes h.mu, so
 		// it runs only after this fan-out has released it). Added under h.mu
-		// while the hub is open, so Close's wait for it is final.
+		// while the hub is open, so Close's wait for it is final. With no
+		// stream opened with reveal keys (a self-run tournament hands out no
+		// ticket) there is nothing to judge, so none is started.
 		safeGo(&h.rejudges, nil, h.rejudgeRevealStreams)
 	}
 
@@ -581,11 +590,21 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 		}
 		defer h.Unsubscribe(ch)
 
+		// Whether the tournament is self-run, judged once as the stream
+		// opens: its replay is sent on it, and so is the cache header.
+		selfRun := h.names == nil || h.names.selfRun()
+
 		// Set SSE headers
 		c.Header("Content-Type", "text/event-stream")
-		// no-store, not no-cache: what the stream carries depends on who
-		// opened it (bc-hnam), so no copy of it may be kept.
-		c.Header("Cache-Control", "no-store")
+		if selfRun {
+			// A self-run tournament hides no names: the stream is sent as
+			// it always was.
+			c.Header("Cache-Control", "no-cache")
+		} else {
+			// no-store, not no-cache: what the stream carries depends on who
+			// opened it (bc-hnam), so no copy of it may be kept.
+			c.Header("Cache-Control", "no-store")
+		}
 		c.Header("Connection", "keep-alive")
 		// X-Accel-Buffering: no is important for Nginx and other proxies to not buffer the stream
 		c.Header("X-Accel-Buffering", "no")
@@ -653,7 +672,13 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 					c.Writer.Flush()
 				}
 			} else {
+				// A replayed event is judged on the tournament as it stands
+				// now, not as it stood when the event was first sent.
+				replaySelfRun := judgedSelfRun(selfRun)
 				for i := range entries {
+					if entries[i].selfRun != nil {
+						entries[i].selfRun = replaySelfRun
+					}
 					writeSSEEnvelope(c.Writer, entries[i].seq, h.project(&entries[i], sub))
 				}
 				c.Writer.Flush()

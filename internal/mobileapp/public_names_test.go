@@ -286,8 +286,8 @@ func TestMaskView_Individual(t *testing.T) {
 	assert.Equal(t, "K1", players[0].Name)
 	assert.Equal(t, "K1", players[0].DisplayName)
 	assert.Equal(t, "Dojo One", players[0].Dojo, "dojo stays (Q3 b)")
-	assert.Equal(t, "", players[1].Name, "before a number exists the row carries no name")
-	assert.Equal(t, "", players[1].DisplayName)
+	assert.Equal(t, "?", players[1].Name, "before a number exists the row reads as a side does: fails closed")
+	assert.Equal(t, "?", players[1].DisplayName)
 
 	ms := []state.MatchResult{{
 		ID: "Pool A-1", SideA: "Alice Arai", SideAID: pnAlice, SideB: "Bob Baba", SideBID: pnBob,

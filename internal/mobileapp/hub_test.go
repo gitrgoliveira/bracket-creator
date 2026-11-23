@@ -1214,6 +1214,109 @@ func TestHandleEvents_StreamIsProjectedForItsTicket(t *testing.T) {
 	assert.Equal(t, "no-store", pubW.HeaderGet("Cache-Control"))
 }
 
+// setTournamentMode saves the fixture's tournament in mode.
+func setTournamentMode(t *testing.T, f pnFixture, mode string) {
+	t.Helper()
+	tour, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	tour.Mode = mode
+	require.NoError(t, f.store.SaveTournament(tour))
+}
+
+// Whether the tournament is self-run is judged once per event, by the first
+// stream that sends it, and reused by every other stream: a self-run hub
+// reads the tournament once per event, not once per spectator.
+func TestHubProject_SelfRunJudgedOncePerEvent(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	setTournamentMode(t, f, state.TournamentModeSelfRun)
+
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+	require.NotNil(t, e.selfRun, "a masked event carries the shared judgement")
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}))
+
+	// The judgement is the event's: a stream sending it later reuses it.
+	setTournamentMode(t, f, state.TournamentModeOfficiated)
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}), "the event keeps the judgement its first stream took")
+
+	broadcastJuniorsResult(h)
+	e = lastEntry(t, h)
+	assert.NotContains(t, h.project(e, &sseSubscriber{}), "Alice Arai", "a new event is judged on the tournament as it stands")
+
+	h.Broadcast(EventTournamentUpdated, gin.H{})
+	assert.Nil(t, lastEntry(t, h).selfRun, "an event every stream is sent as broadcast needs no judgement")
+}
+
+// A self-run tournament's stream is sent as it always was: Cache-Control
+// no-cache, and a replay judged on the tournament as the stream opens, not
+// on a judgement an earlier stream took. A tournament saved into another
+// mode while a competition is kept in place (a restore does this) moves no
+// competition write token, so an event judged while the tournament was
+// self-run, and so sent with names, is masked again when it is replayed once
+// the tournament is officiated.
+func TestHandleEvents_SelfRunStreamIsSentAsBroadcast(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	r, h := ticketRouter(f)
+	h.Broadcast(EventTournamentUpdated, gin.H{})
+
+	open := func(lastEventID int64) (*mockResponseWriter, context.CancelFunc, chan struct{}) {
+		ctx, cancel := context.WithCancel(context.Background())
+		w := &mockResponseWriter{ResponseRecorder: httptest.NewRecorder(), closeChan: make(chan bool)}
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/events?lastEventId=%d", lastEventID), nil).WithContext(ctx)
+		done := make(chan struct{})
+		go func() {
+			r.ServeHTTP(w, req)
+			close(done)
+		}()
+		return w, cancel, done
+	}
+
+	// Judged officiated by a first stream, replayed once self-run.
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+	assert.NotContains(t, h.project(e, &sseSubscriber{}), "Alice Arai")
+	setTournamentMode(t, f, state.TournamentModeSelfRun)
+	w, cancel, done := open(e.seq - 1)
+	waitForFrame(t, w, "Alice Arai")
+	cancel()
+	<-done
+	assert.Equal(t, "no-cache", w.HeaderGet("Cache-Control"), "a self-run stream keeps the cache header it always had")
+
+	// Judged self-run by a first stream, replayed once officiated.
+	broadcastJuniorsResult(h)
+	e = lastEntry(t, h)
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}))
+	token := f.store.CompetitionWriteToken(f.comp.ID)
+	setTournamentMode(t, f, state.TournamentModeOfficiated)
+	require.Equal(t, token, f.store.CompetitionWriteToken(f.comp.ID), "the competition was not written")
+	w, cancel, done = open(e.seq - 1)
+	waitForFrame(t, w, `"sideA":"K1"`)
+	cancel()
+	<-done
+	assert.NotContains(t, w.BodyString(), "Alice Arai", "a replay is judged as the stream opens")
+	assert.Equal(t, "no-store", w.HeaderGet("Cache-Control"))
+}
+
+// A tournament_updated starts a reveal re-judgement only while a stream
+// holds reveal keys; a self-run tournament hands out no ticket, so it never
+// starts one.
+func TestHub_HoldsRevealStreamLocked(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesCompetition)
+	h := hubWithNames(f)
+	_, _, _, _ = h.subscribeWithReplayFor(0, &sseSubscriber{})
+	_, _, _, _ = h.subscribeWithReplayFor(0, &sseSubscriber{aud: organiserAudience(), reveal: "juniors:x"})
+	h.mu.RLock()
+	assert.False(t, h.holdsRevealStreamLocked(), "the public and the organiser hold no reveal keys")
+	h.mu.RUnlock()
+	_, _, _, _ = h.subscribeWithReplayFor(0, &sseSubscriber{reveal: "juniors:x"})
+	h.mu.RLock()
+	assert.True(t, h.holdsRevealStreamLocked())
+	h.mu.RUnlock()
+}
+
 func TestRejudgeRevealStreams_EndsOnlyChangedStreams(t *testing.T) {
 	f := newPNFixture(t, state.PublicNamesCompetition)
 	warmMask(t, f)
@@ -1452,31 +1555,4 @@ func TestHubProject_JudgesTheCompetitionOncePerWrite(t *testing.T) {
 	h.project(e, &sseSubscriber{})
 	assert.NotSame(t, first, e.masked.judged, "a written competition is judged again")
 	assert.False(t, e.masked.judged.comp.HidesNames())
-}
-
-// A tournament saved into another mode while a competition is kept in place
-// (a restore does this) does not move the competition's write token, so the
-// judgement kept for a replayed event must not carry the mode with it: an
-// event judged while the tournament was self-run, and so sent with names,
-// is masked again once the tournament is officiated.
-func TestHubProject_ReplayedEventFollowsATournamentModeChange(t *testing.T) {
-	f := newPNFixture(t, state.PublicNamesHidden)
-	warmMask(t, f)
-	h := hubWithNames(f)
-	tour, err := f.store.LoadTournament()
-	require.NoError(t, err)
-	tour.Mode = state.TournamentModeSelfRun
-	require.NoError(t, f.store.SaveTournament(tour))
-
-	broadcastJuniorsResult(h)
-	e := lastEntry(t, h)
-	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}), "self-run: the names are shown")
-	token := f.store.CompetitionWriteToken(f.comp.ID)
-
-	tour.Mode = state.TournamentModeOfficiated
-	require.NoError(t, f.store.SaveTournament(tour))
-	require.Equal(t, token, f.store.CompetitionWriteToken(f.comp.ID), "the competition was not written")
-
-	public := h.project(e, &sseSubscriber{})
-	assert.NotContains(t, public, "Alice Arai", "officiated again: the replayed event is masked")
 }

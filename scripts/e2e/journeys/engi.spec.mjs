@@ -12,13 +12,18 @@
 // wins and the same flags), the engine adds their tie-breaker, and the
 // console's evidence is named by the flow (engi-tie-at-1st-console-up-next,
 // -running, -before-finish, -after; engi-tie-at-1st-desk-table and
-// -public-awards).
+// -public-awards). The last test is a SOLO engi competition (the wizard's "One
+// competitor per side" box, for iaido and other solo kata): one-name rows go in
+// through the paste box and the add form, a pair row is refused with the
+// settings sentence at both doors, and a flag bout between two solo competitors
+// is scored on the court console and read on a spectator's phone.
 import { test, expect } from '../fixtures/test.mjs';
 import { OPERATOR_DEVICE, PUBLIC_DEVICE, EXPECT_TIMEOUT_MS } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
 import { createTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
+import { toastText } from '../fixtures/roster.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import { openShiaijo, completedRows, sides, upNextCard } from '../fixtures/shiaijo.mjs';
 import { INLINE_EDITOR } from '../fixtures/scoring.mjs';
@@ -308,6 +313,100 @@ test.describe('engi', () => {
         const podium = await readPodium(phone);
         record({ journey: 'engi', flow, action: 'public Awards', podium, screenshot: await shot(phone, `${flow}-public-awards`, { fullPage: true }) });
         expect(podium.places.slice(0, 3).map((pl) => first(pl.name))).toEqual([ANN, BEN, DEE]);
+      } finally {
+        await spectator.close();
+      }
+    });
+  });
+
+  // A SOLO engi competition on shiaijo B, after the league above has finished
+  // there. The wizard's "One competitor per side" box makes every side one
+  // person: a roster row is a single name ("Name, Dojo"), and a pair row
+  // ("Name 1 - Name 2, Dojo") is refused at every door with the sentence that
+  // sends the organiser to Settings.
+  test('a solo engi competition takes one name per side and scores a flag bout', async ({ page, browser, baseURL }) => {
+    test.setTimeout(240_000);
+    const flow = 'engi-solo';
+    const PAIR_ROW = 'Akira Tanaka - Ben Carter, Gyokusen';
+    const SOLO = [
+      ['Akira Tanaka', 'Gyokusen'],
+      ['Ben Carter', 'Musashi'],
+      ['Chie Mori', 'Seishinkan'],
+    ];
+    const ADDED = ['Dan Evans', 'Thames'];
+    // The sentence a solo competition answers for a pair (engi_entry.jsx).
+    const PAIR_REFUSED = /one competitor per side.*turn off "One competitor per side" in Settings/;
+
+    await login(page);
+    const id = await createCompetition(page, {
+      name: 'Engi Solo', kind: 'individual', format: 'knockout', engi: true, engiSolo: true, courts: ['B'], numberPrefix: 'ES',
+    });
+
+    await test.step('the paste box refuses a pair row, then takes one-name rows', async () => {
+      const box = page.locator('.lined-textarea__area');
+      await box.fill(PAIR_ROW);
+      await page.getByRole('button', { name: 'Apply changes' }).first().tap();
+      const refusal = await toastText(page, PAIR_REFUSED);
+      record({ journey: 'engi', flow, action: 'a pair row pasted into a solo competition', refusal });
+      await shot(page, `${flow}-paste-refused`);
+      await pasteRoster(page, id, SOLO);
+    });
+
+    await test.step('the add form refuses a pair name, then adds one name', async () => {
+      await page.goto(`/admin/competition/${id}/participants`);
+      await page.getByRole('button', { name: '+ Add participant' }).tap();
+      const name = page.getByLabel(/^Name \*/);
+      const dojo = page.getByLabel(/^Dojo \*/);
+      const add = page.getByRole('button', { name: 'Add', exact: true });
+      await name.fill('Dan Evans - Eri Kato');
+      await dojo.fill(ADDED[1]);
+      await add.tap();
+      const refusal = await toastText(page, PAIR_REFUSED);
+      record({ journey: 'engi', flow, action: 'a pair name typed into the add form', refusal });
+      await name.fill(ADDED[0]);
+      await add.tap();
+      await toastText(page, new RegExp(`${ADDED[0]} added`));
+      await expect(page.getByRole('button', { name: `Edit ${ADDED[0]}` })).toBeVisible();
+      await shot(page, `${flow}-roster`);
+    });
+
+    await generateDraw(page, id);
+    await startCompetition(page, id);
+
+    let pair;
+    await test.step('the court console scores a flag bout between two solo competitors', async () => {
+      await openShiaijo(page, 'B');
+      pair = await startUpNextEngi(page);
+      for (const side of ['shiro', 'aka']) {
+        expect(pair[side], `the ${side} side holds one competitor, never a pair`).not.toContain(' - ');
+      }
+      await enterFlags(page, { aka: 2, shiro: 1 });
+      await expect(engiTotal(page)).toHaveText('Total: 3, Aka wins');
+      await engiSettle(page);
+      await shot(page, `${flow}-flags-entered`);
+      const landed = await saveEngiResult(page);
+      record({ journey: 'engi', flow, action: 'Save result', pair, landed: landed.detail });
+      await expect(completedRows(page)).toHaveCount(1);
+      const rowText = (await completedRows(page).first().innerText()).replace(/\s+/g, ' ');
+      expect(rowText, 'Aka, who held the two flags, is marked the winner').toContain(`Aka: Winner: ${pair.aka}`);
+      expect(rowText.match(WINNER_MARK), 'and only Aka').toHaveLength(1);
+      const result = (await completedRows(page).first().locator('.shiaijo-qrow__result').innerText()).trim();
+      expect(result, 'the result reads in flags, Shiro 1 and Aka 2').toBe('Flags1–2');
+      await shot(page, `${flow}-console-after-save`);
+    });
+
+    await test.step('the phone shows the same result', async () => {
+      const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
+      try {
+        const phone = await spectator.newPage();
+        await openViewer(phone, id);
+        const card = phone.locator('button.vsched-item').filter({ hasText: pair.aka }).filter({ hasText: pair.shiro }).first();
+        await expect(card).toBeVisible();
+        const text = (await card.innerText()).replace(/\s+/g, ' ');
+        record({ journey: 'engi', flow, action: 'public viewer row', text });
+        expect(text, 'the phone shows the flags, Shiro 1 and Aka 2').toContain('1–2');
+        expect(text.match(WINNER_MARK), 'and marks only Aka the winner').toHaveLength(1);
+        await shot(phone, `${flow}-viewer-result`, { fullPage: true });
       } finally {
         await spectator.close();
       }

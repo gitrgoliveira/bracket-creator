@@ -132,16 +132,17 @@ export const pairKey = (a, b) => [a, b].sort().join(' | ');
 
 // Create a league through the wizard, paste the roster, draw and start it, and
 // return its id. `entrants` are [name, dojo] pairs (teams for kind 'team',
-// "Name 1 - Name 2" pairs for `engi`). `twoThirdPlaces` is the wizard's
+// "Name 1 - Name 2" pairs for `engi`, single names for `engi` with `engiSolo`).
+// `twoThirdPlaces` is the wizard's
 // checkbox, set before the draw, which locks it. `draw: false` stops after the
 // roster, `start: false` after the draw.
 export async function seedLeague(page, {
   name, kind = 'team', entrants, teamSize = 3, teamMatchType = 'fixed', courts = ['A'], numberPrefix,
-  twoThirdPlaces, engi, draw = true, start = true,
+  twoThirdPlaces, engi, engiSolo, draw = true, start = true,
 } = {}) {
   const team = kind === 'team';
   const id = await createCompetition(page, {
-    name, kind, format: 'league', courts, numberPrefix, twoThirdPlaces, engi,
+    name, kind, format: 'league', courts, numberPrefix, twoThirdPlaces, engi, engiSolo,
     ...(team ? { teamSize, teamMatchType } : {}),
   });
   await pasteRoster(page, id, entrants);

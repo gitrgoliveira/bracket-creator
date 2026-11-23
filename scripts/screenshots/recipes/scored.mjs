@@ -68,9 +68,10 @@ const SWISS_TEAMS = [
   { name: 'Team Daito', dojo: 'Daito Dojo' },
 ];
 
-// An engi competitor is a PAIR but a SINGLE participant: both member names go
-// in Name, joined by " - " (CLAUDE.md, participant CSV schema). The viewer
-// splits them again for display via window.engiPairParts.
+// An engi competitor is a PAIR (or, in a solo competition, one person) but a
+// SINGLE participant: a pair's member names both go in Name, joined by " - "
+// (CLAUDE.md, participant CSV schema). The viewer splits a pair again for
+// display via window.engiPairParts.
 const ENGI_PAIRS = [
   { name: 'Alpha One - Alpha Two', dojo: 'Aoi' },
   { name: 'Bravo One - Bravo Two', dojo: 'Bara' },

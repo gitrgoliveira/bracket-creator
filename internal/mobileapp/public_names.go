@@ -27,7 +27,7 @@ import (
 //
 // What a masked payload keeps: ids, numbers, dojos (Q3 b) and team names
 // (Q-teams); "Winner of ..." and "Pool A-1st" placeholders. What it replaces:
-// an individual's name and zekken name (an engi pair is one participant),
+// an individual's name and zekken name (an engi side, solo or pair, is one participant),
 // match sides and winners, team members' names (with the member's label, the
 // team's number and the member's index, "T10.1"), lineup positions,
 // representative-bout fighters and fighting-spirit recipients.

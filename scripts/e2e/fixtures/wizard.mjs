@@ -73,6 +73,10 @@ async function setNumber(page, label, value) {
 //   format         'knockout' | 'mixed' | 'league' | 'swiss'
 //   engi           boolean: "Engi (kata competition)" (individual only): the
 //                  roster is pairs and a match is scored in flags
+//   engiSolo       boolean: "One competitor per side (solo kata, such as
+//                  iaido)", which the form shows only while Engi is ticked
+//                  (engi only): every side is ONE person, entered as an
+//                  ordinary name, and a pair row is refused
 //   teamSize       number (team only)
 //   teamMatchType  'fixed' | 'kachinuki' (team only)
 //   poolSizeMode   'maximum' | 'minimum' (mixed only)
@@ -99,7 +103,7 @@ async function setNumber(page, label, value) {
 export async function createCompetition(page, opts = {}) {
   const {
     name, kind, format, teamSize, teamMatchType, poolSizeMode, poolSize, poolWinners, extraQualifiers,
-    courts, numberPrefix, twoThirdPlaces, engi, checkIn, startTime, day, expected, publicNames,
+    courts, numberPrefix, twoThirdPlaces, engi, engiSolo, checkIn, startTime, day, expected, publicNames,
   } = opts;
   await page.goto('/admin/create-competition');
   await expect(page.getByRole('heading', { level: 1, name: 'Add competition' })).toBeVisible();
@@ -108,6 +112,8 @@ export async function createCompetition(page, opts = {}) {
   if (kind) await choose(page, 'Competition type', KIND[kind]);
   if (format) await choose(page, 'Format', FORMAT[format]);
   if (engi !== undefined) await page.getByRole('checkbox', { name: /^Engi \(kata competition\)/ }).setChecked(engi);
+  // Ticked after Engi: the box is drawn only while Engi is on.
+  if (engiSolo !== undefined) await page.getByRole('checkbox', { name: /^One competitor per side/ }).setChecked(engiSolo);
   if (teamSize !== undefined) await setNumber(page, 'Team size', teamSize);
   if (teamMatchType) await choose(page, 'Team match format', TEAM_MATCH_TYPE[teamMatchType]);
   if (poolSizeMode) await choose(page, 'Pool size is a', POOL_SIZE_MODE[poolSizeMode]);

@@ -111,9 +111,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 			// Strip displayName when the zekken column is not enabled. A non-empty
 			// DisplayName in a non-zekken comp would cause saveParticipantsNoLock to
-			// write a 3-column row that LoadParticipants mis-parses. Engi pairs store
-			// both member names combined in Player.Name; DisplayName is only relevant
-			// for the zekken column (combined pair zekken when WithZekkenName is set).
+			// write a 3-column row that LoadParticipants mis-parses. An engi side is
+			// one name in Player.Name (a pair's two names combined, or a solo
+			// competitor's one name, chosen by EngiSolo); DisplayName is only relevant
+			// for the zekken column (the side's zekken when WithZekkenName is set).
 			// Store.AddParticipant re-derives via SanitizeName(Name) when empty.
 			displayName := req.DisplayName
 			if !comp.EffectiveWithZekkenName() {
@@ -231,9 +232,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		for i, p := range req.Players {
 			// Mirror the single-add/replace strip: a non-empty DisplayName on a
 			// non-zekken comp produces a 3-column CSV row that
-			// LoadParticipants(_, false) mis-parses. Engi pairs store both
-			// member names combined in Player.Name, so DisplayName is only the
-			// zekken column value when WithZekkenName is set.
+			// LoadParticipants(_, false) mis-parses. An engi side is one name in
+			// Player.Name (pair or solo, chosen by EngiSolo), so DisplayName is
+			// only the zekken column value when WithZekkenName is set.
 			displayName := p.DisplayName
 			if !comp.EffectiveWithZekkenName() {
 				displayName = ""
@@ -457,9 +458,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// Strip displayName unless the zekken column is enabled, same
 			// CSV-corruption guard as the single-add path: a 3-column row
 			// written for a non-zekken comp is mis-parsed on the next
-			// LoadParticipants read. Engi pairs store both member names
-			// combined in Player.Name, so DisplayName is only the zekken
-			// column value. Empty DisplayName triggers SanitizeName
+			// LoadParticipants read. An engi side is one name in Player.Name
+			// (pair or solo, chosen by EngiSolo), so DisplayName is only the
+			// zekken column value. Empty DisplayName triggers SanitizeName
 			// re-derivation in saveParticipantsNoLock.
 			displayName := req.DisplayName
 			if !comp.EffectiveWithZekkenName() {

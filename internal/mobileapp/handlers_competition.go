@@ -1003,9 +1003,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Engi (individual PAIR paradigm) is mutually exclusive with team
-		// competitions: engi is never a team (the score editor skips the team
-		// check for engi and the scoring backend treats engi as non-team). The
+		// Engi is mutually exclusive with team competitions: engi is never a
+		// team, whether each side is one competitor or a pair (the score
+		// editor skips the team check for engi and the scoring backend treats
+		// engi as non-team). The
 		// admin UI hides the Engi toggle unless kind=individual, but reject the
 		// contradictory combination here so a hand-crafted POST can't create a
 		// team comp with engi=true and route its matches to the wrong scorer.
@@ -1013,6 +1014,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": "engi is only valid for individual competitions, not team"})
 			return
 		}
+		// EngiSolo (one competitor per engi side) means something only with
+		// Engi, so a competition created without engi stores it off.
+		comp.EngiSolo = comp.Engi && comp.EngiSolo
 
 		// POST /competitions can land with an embedded roster via
 		// saveCompetitionWithPlayers, same required-field and length
@@ -2331,15 +2335,28 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					validationErr = fmt.Errorf("engi can only be changed before the competition starts")
 					return nil, nil
 				}
-				// Engi (individual PAIR paradigm) is mutually exclusive with team
-				// competitions (engi is never a team). Kind/TeamSize were already
-				// applied above, so reject rather than persist a contradictory
-				// team+engi state that would route matches to the wrong scorer.
+				// Engi is mutually exclusive with team competitions (engi is
+				// never a team, one competitor or a pair per side alike).
+				// Kind/TeamSize were already applied above, so reject rather
+				// than persist a contradictory team+engi state that would route
+				// matches to the wrong scorer.
 				if comp.Engi && comp.IsTeam() {
 					validationErr = fmt.Errorf("engi is only valid for individual competitions, not team")
 					return nil, nil
 				}
+				// EngiSolo (one competitor per engi side) means something only
+				// with Engi: a save that turns engi off clears it, and a PUT that
+				// omits it stores false, which is why the client round-trips it.
+				// Locked after the draw like Engi (operator decision D8): the
+				// draw-ready status counts as started here, so the operator
+				// discards the draw to change it before the start.
+				engiSolo := comp.Engi && comp.EngiSolo
+				if started && engiSolo != current.EngiSolo {
+					validationErr = fmt.Errorf("one competitor per side can only be changed before the draw is made; discard the draw to change it")
+					return nil, nil
+				}
 				current.Engi = comp.Engi
+				current.EngiSolo = engiSolo
 				// Team match format (FR-044) is only settable before the
 				// competition starts (sibling of the Naginata/Engi guards):
 				// flipping fixed <-> kachinuki mid-tournament would desync the

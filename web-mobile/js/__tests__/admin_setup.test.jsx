@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  deriveCompetitionName, validatePoolSettings, validateSwissSettings,
+  deriveCompetitionName, createEngiFields, validatePoolSettings, validateSwissSettings,
   calendarStackEnd,
   previewRowCourts, previewRowShiaijoError, importRowErrorText,
 } from '../admin_setup.jsx';
@@ -257,6 +257,30 @@ describe('calendarStackEnd', () => {
       ],
     };
     expect(calendarStackEnd(cal, '01-07-2026', ['A'], ['A'])).toBe(615);
+  });
+});
+
+// The create body's engi fields (bc-solo): engiSolo reaches the server only
+// on an individual engi competition, whatever the hidden box still holds.
+describe('createEngiFields', () => {
+  it('sends a solo engi competition as engi with engiSolo', () => {
+    expect(createEngiFields('individual', true, true)).toEqual({ engi: true, engiSolo: true });
+  });
+
+  it('sends a pair engi competition with engiSolo off', () => {
+    expect(createEngiFields('individual', true, false)).toEqual({ engi: true, engiSolo: false });
+  });
+
+  it('drops engiSolo when Engi was unticked after the box was ticked', () => {
+    expect(createEngiFields('individual', false, true)).toEqual({ engi: false, engiSolo: false });
+  });
+
+  it('drops both for a team competition, even with state left over from a kind switch', () => {
+    expect(createEngiFields('team', true, true)).toEqual({ engi: false, engiSolo: false });
+  });
+
+  it('reads a stored empty kind as individual, as engiApplies does', () => {
+    expect(createEngiFields('', true, true)).toEqual({ engi: true, engiSolo: true });
   });
 });
 

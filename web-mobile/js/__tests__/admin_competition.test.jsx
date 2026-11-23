@@ -361,6 +361,9 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
     // mp-9k3v: engi qualifies under BOTH (a) and (b): the JSX reads
     // `local.engi` for the Engi checkbox, and finalNext round-trips it.
     'engi',
+    // Solo engi qualifies under both too: the JSX reads `local.engiSolo` for
+    // its checkbox, and finalNext round-trips it.
+    'engiSolo',
   ];
 
   it('useEffect deps include every field rendered via local.*', () => {
@@ -444,6 +447,9 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // backend REJECTS a mismatched engi ("engi can only be changed before the
     // competition starts"), so omitting it broke every settings save outright.
     'engi',
+    // Solo engi (one performer per entry). Same zero-value-clobber hazard:
+    // a PUT that omits engiSolo clears it back to pairs, so finalNext sends it.
+    'engiSolo',
     // mp-6nq: per-competition check-in tracking flag.
     'checkInEnabled',
     // bc-3rdp: joint-3rd-place rule, generalised from leagueTwoThirdPlaces

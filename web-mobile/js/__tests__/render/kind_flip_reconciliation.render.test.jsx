@@ -168,4 +168,64 @@ describe('bc-symm: the Settings kind pills route through normalizeConfigForKind'
       'Either the kind pills stopped routing through updateKind, or teamSize regressed to a >=1-floored serializer.'
     ).toBe(0);
   });
+
+  // bc-solo: One competitor per side describes an engi side, so a flip to
+  // team clears it with engi, and the notice listing what the save clears
+  // names it by its label.
+  it('individual solo engi -> team clears engiSolo with engi and the notice names it', async () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    const { container } = await mountSettings(makeTeamCompetition({
+      kind: 'individual', teamSize: 0, teamMatchType: 'fixed', engi: true, engiSolo: true,
+    }), onUpdate);
+
+    const soloLabel = 'One competitor per side (solo kata, such as iaido)';
+    const soloBox = () => Array.from(container.querySelectorAll('label'))
+      .find((l) => l.textContent.includes(soloLabel) && l.querySelector('input[type="checkbox"]'));
+    expect(soloBox(), 'the box shows under a ticked Engi').toBeDefined();
+    expect(soloBox().querySelector('input').checked).toBe(true);
+
+    const teamPill = byText(container, 'Team');
+    expect(teamPill, 'expected a "Team" kind pill').toBeDefined();
+    expect(teamPill.disabled).toBe(false);
+    await act(async () => { fireEvent.click(teamPill); });
+
+    const notice = Array.from(container.querySelectorAll('li')).map((li) => li.textContent);
+    expect(notice.some((t) => t.startsWith('Engi (kata competition)')), `notice items: ${JSON.stringify(notice)}`).toBe(true);
+    expect(notice.some((t) => t.startsWith(soloLabel)), `notice items: ${JSON.stringify(notice)}`).toBe(true);
+    // The box goes with the kind: it applies to individual engi only.
+    expect(soloBox()).toBeUndefined();
+
+    // A team needs a team size before Save is offered (the individual's 0
+    // is refused for a team).
+    const teamSizeInput = container.querySelector('input[type="number"][max]:not([max="1024"])');
+    expect(teamSizeInput, 'expected the Team size input after the flip to team').not.toBeNull();
+    await act(async () => { fireEvent.input(teamSizeInput, { target: { value: '3' } }); });
+
+    const save = byText(container, 'Save changes');
+    expect(save).toBeDefined();
+    expect(save.disabled).toBe(false);
+    await act(async () => { fireEvent.click(save); });
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalled());
+    const payload = onUpdate.mock.calls[0][0];
+    expect(payload.kind).toBe('team');
+    expect(payload.engi).toBe(false);
+    expect(payload.engiSolo).toBe(false);
+  });
+
+  // bc-solo D8: the box locks with Engi once a draw is made (discarding the
+  // draw unlocks both), and says so.
+  it('locks One competitor per side with Engi after the draw', async () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    const { container } = await mountSettings(makeTeamCompetition({
+      kind: 'individual', teamSize: 0, teamMatchType: 'fixed', engi: true, engiSolo: true, status: 'draw-ready',
+    }), onUpdate);
+    const box = Array.from(container.querySelectorAll('label'))
+      .find((l) => l.textContent.includes('One competitor per side (solo kata, such as iaido)') && l.querySelector('input[type="checkbox"]'));
+    expect(box, 'the box shows under a ticked Engi').toBeDefined();
+    const input = box.querySelector('input');
+    expect(input.checked).toBe(true);
+    expect(input.disabled).toBe(true);
+    expect(box.closest('div').textContent).toContain('Locked after draw.');
+  });
 });

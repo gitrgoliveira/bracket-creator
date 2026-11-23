@@ -41,6 +41,19 @@ function deriveCompetitionName(rawName, kind) {
   return "Individual";
 }
 
+// createEngiFields: the create body's engi and engiSolo, from the form's
+// state. Engi (kata competition) is an individual paradigm, its sides pairs
+// or single competitors; it is never a team competition (ScoreEditorModal
+// skips the team check for engi, and the scoring backend treats engi as
+// non-team), so both are forced off for a non-individual kind even if the
+// state lingered from a kind switch. engiSolo (one competitor per side, bc-solo)
+// means something only with engi: an unticked Engi hides its box but keeps
+// the box's state, which must not reach the server.
+function createEngiFields(kind, engi, engiSolo) {
+  const on = engiApplies(kind) && !!engi;
+  return { engi: on, engiSolo: on && !!engiSolo };
+}
+
 // calendarStackEnd returns the latest window END, in minutes from midnight,
 // among the placements of the calendar that are on the form date, on the chosen
 // shiaijo (courts; when courts is empty or missing, tournamentCourts is used),
@@ -168,7 +181,7 @@ import {
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES, twoThirdPlacesVisible,
   LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
-  LABEL_ZEKKEN, LABEL_ENGI,
+  LABEL_ZEKKEN, LABEL_ENGI, LABEL_ENGI_SOLO, HINT_ENGI_SOLO,
   teamFieldsVisible, zekkenApplies, engiApplies, teamMatchTypeActive, twoThirdPlacesForNaginata,
   MIN_TEAM_SIZE, poolSettingsError, swissSettingsError, teamSizeError,
   MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
@@ -892,6 +905,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // lock); the operator can still override it afterward.
   const [twoThirdPlaces, setTwoThirdPlaces] = useState(COMPETITION_DEFAULTS.twoThirdPlaces);
   const [engi, setEngi] = useState(COMPETITION_DEFAULTS.engi);
+  const [engiSolo, setEngiSolo] = useState(COMPETITION_DEFAULTS.engiSolo);
   const [checkInEnabled, setCheckInEnabled] = useState(COMPETITION_DEFAULTS.checkInEnabled);
   // bc-hnam: starts as the tournament's default (a self-run tournament always
   // shows names, so the picker is not offered there); the expiry only matters
@@ -1268,12 +1282,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       c.knockoutMatchDurationSeconds = knockoutMatchDurationSeconds;
     }
     c.naginata = naginata;
-    // Engi (kata competition) is an individual PAIR paradigm; it is never a
-    // team competition (ScoreEditorModal skips the team check for engi, and the
-    // scoring backend treats engi as non-team). Force it off for non-individual
-    // kinds even if the state lingered from a kind switch, so a team comp can't
-    // be created with engi=true. The checkbox is also hidden unless individual.
-    c.engi = engiApplies(kind) ? engi : false;
+    // Engi and its One competitor per side box: see createEngiFields for why
+    // both are forced off for a team kind and engiSolo off without engi.
+    // Both checkboxes are also hidden unless they apply.
+    Object.assign(c, createEngiFields(kind, engi, engiSolo));
     // FR-044: team match format. Only meaningful for team competitions; sending
     // it for individual comps is harmless but omitting it keeps the payload clean.
     if (teamFieldsVisible(kind)) {
@@ -1585,6 +1597,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           {engiApplies(kind) && (
             <CheckboxField label={LABEL_ENGI} checked={engi} onChange={setEngi} hint={HINT_ENGI} />
+          )}
+
+          {engiApplies(kind) && engi && (
+            <CheckboxField label={LABEL_ENGI_SOLO} checked={engiSolo} onChange={setEngiSolo} hint={HINT_ENGI_SOLO} />
           )}
 
           <CheckboxField label={LABEL_NAGINATA} checked={naginata} onChange={(on) => { setNaginata(on); setTwoThirdPlaces(twoThirdPlacesForNaginata(on)); }} hint={HINT_NAGINATA} />
@@ -1959,7 +1975,7 @@ window.AdminImportPage = AdminImportPage;
 // sendAnnouncementLabel) moved to admin_announcement.jsx alongside the
 // AnnouncementComposer component they drive (mp-djc).
 export {
-  deriveCompetitionName, validatePoolSettings, validateSwissSettings,
+  deriveCompetitionName, createEngiFields, validatePoolSettings, validateSwissSettings,
   calendarStackEnd,
   previewRowCourts, previewRowShiaijoError, importRowErrorText,
 };

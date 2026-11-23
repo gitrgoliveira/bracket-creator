@@ -31,6 +31,7 @@ import {
   LABEL_TEAM_MATCH_TYPE,
   LABEL_ZEKKEN,
   LABEL_ENGI,
+  LABEL_ENGI_SOLO,
   LABEL_POOL_SIZE_MODE,
   LABEL_NAGINATA,
   LABEL_CHECK_IN,
@@ -114,6 +115,7 @@ const SETTINGS_FIELD_LABELS = {
   teamMatchType: LABEL_TEAM_MATCH_TYPE,
   withZekkenName: LABEL_ZEKKEN,
   engi: LABEL_ENGI,
+  engiSolo: LABEL_ENGI_SOLO,
   naginata: LABEL_NAGINATA,
   checkInEnabled: LABEL_CHECK_IN,
   twoThirdPlaces: LABEL_TWO_THIRD_PLACES,
@@ -401,6 +403,15 @@ export function settingsPutBody(base, edits, configVersion) {
     // disabled for team, so the operator cannot clear it themselves), and
     // shaped is where that now runs.
     engi: !!shaped.engi,
+    // engiSolo (bc-solo): whether an engi side is one competitor rather than
+    // a pair. Round-tripped for the same reason as `engi` just above: the
+    // settings transform applies `current.EngiSolo = comp.Engi && comp.EngiSolo`
+    // unconditionally, so omitting it JSON-encodes to false and silently
+    // turns a solo competition back into pairs on any unrelated save. It
+    // means something only with engi, so it is sent false whenever `engi`
+    // is (unticking Engi, or normalizeConfigForKind going team, clears it
+    // too). Reads from `shaped` for the same reason `engi` does.
+    engiSolo: !!shaped.engi && !!shaped.engiSolo,
     checkInEnabled: !!effective.checkInEnabled,
     // twoThirdPlaces (bc-3rdp): round-tripped unconditionally, like
     // naginata above (and teamMatchType below), so an untouched control

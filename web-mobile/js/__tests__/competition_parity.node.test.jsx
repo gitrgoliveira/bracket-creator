@@ -457,6 +457,9 @@ describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)
     { key: 'Player number prefix', pattern: '{LABEL_NUMBER_PREFIX}' },
     { key: 'Zekken (participant CSV column)', pattern: '{LABEL_ZEKKEN}' },
     { key: 'Engi (kata pairs)', pattern: '{LABEL_ENGI}' },
+    // bc-solo: the box under Engi; '{LABEL_ENGI}' above cannot match it,
+    // since the closing brace must follow the name directly.
+    { key: 'One competitor per side (engi solo)', pattern: '{LABEL_ENGI_SOLO}' },
     // Naginata and Check-in DID have no LABEL_* constant, so these two
     // markers used to anchor on the raw label markup and Task 2 above could
     // not check their copy at all. That blind spot was not hypothetical:

@@ -38,7 +38,7 @@ import {
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES,
   LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
-  LABEL_ZEKKEN, LABEL_ENGI,
+  LABEL_ZEKKEN, LABEL_ENGI, LABEL_ENGI_SOLO, HINT_ENGI_SOLO,
   teamFieldsVisible, zekkenApplies, engiApplies, teamSizeError,
   resolveTeamSize, kindChangeBlockedReason,
   FORMAT_LEAGUE, FORMAT_MIXED,
@@ -405,7 +405,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       }
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType, c.expectedParticipants, c.publicNames, c.revealUntil]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.engiSolo, c.checkInEnabled, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType, c.expectedParticipants, c.publicNames, c.revealUntil]);
 
   // bc-obox T1: a save that moves a drawn competition (a new date or start
   // time, whose matches the server re-times in the same save) waits for the
@@ -740,10 +740,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // its own lock, `lockedAfterDraw` below, which the Engi/Naginata comment
   // right after this one describes.)
   const isDrawReady = local.status === "draw-ready";
-  // Engi and Naginata are locked from draw-ready onward (lockedAfterDraw =
-  // isDrawReady || isStarted, both checkboxes below use it directly):
-  // flipping engi mid-tournament changes the scoring paradigm; flipping
-  // naginata affects the bronze match, and both would desync from a draw
+  // Engi (with its One competitor per side box) and Naginata are locked from
+  // draw-ready onward (lockedAfterDraw = isDrawReady || isStarted, the
+  // checkboxes below use it directly): flipping engi mid-tournament changes
+  // the scoring paradigm; flipping naginata affects the bronze match, and
+  // both would desync from a draw
   // already generated on the OLD value, the same reason format/courts/pool
   // sizing lock at draw-ready above.
   const isStarted = !!(local.status && local.status !== "setup" && local.status !== "draw-ready");
@@ -1534,6 +1535,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             remember configuring. */}
         <CheckboxField label={LABEL_ZEKKEN} checked={local.withZekkenName} onChange={(on) => update("withZekkenName", on)} disabled={isDrawReady || !zekkenApplies(local.kind)} hint={!zekkenApplies(local.kind) ? HINT_KIND_ONLY_INDIVIDUAL : HINT_ZEKKEN} />
         <CheckboxField label={LABEL_ENGI} checked={!!local.engi} onChange={(on) => update("engi", on)} disabled={lockedAfterDraw || !engiApplies(local.kind)} hint={!engiApplies(local.kind) ? HINT_KIND_ONLY_INDIVIDUAL : `${HINT_ENGI}${lockedNote}`} />
+        {/* One competitor per side (bc-solo): shown only while Engi applies
+            and is ticked, since it describes an engi side and nothing else
+            (the PUT body sends it false whenever engi is). Locked with Engi
+            from the draw on: discarding the draw unlocks both. */}
+        {engiApplies(local.kind) && !!local.engi && (
+          <CheckboxField label={LABEL_ENGI_SOLO} checked={!!local.engiSolo} onChange={(on) => update("engiSolo", on)} disabled={lockedAfterDraw} hint={`${HINT_ENGI_SOLO}${lockedNote}`} />
+        )}
         {/* Naginata coupling: ticking naginata also RE-DEFAULTS (does not lock)
             the joint-3rd setting to match the create form's behavior --
             twoThirdPlacesForNaginata picks a sane starting point; the

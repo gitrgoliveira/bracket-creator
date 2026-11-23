@@ -2092,8 +2092,10 @@ paths:
         `courts`, `roundRobin`, `withZekkenName`, `teamSize`,
         `numberPrefix`, `format`, `kind`,
         `poolMatchDurationSeconds`, `knockoutMatchDurationSeconds`,
-        `expectedParticipants`, `swissRounds`, `naginata`, `engi`, `teamMatchType`,
-        `checkInEnabled`, `twoThirdPlaces`. The legacy `leagueTwoThirdPlaces`
+        `expectedParticipants`, `swissRounds`, `naginata`, `engi`, `engiSolo`,
+        `teamMatchType`, `checkInEnabled`, `twoThirdPlaces`. `engiSolo` is
+        stored only beside `engi: true` (a save without engi stores false,
+        an omitted key included). The legacy `leagueTwoThirdPlaces`
         is never written here (`twoThirdPlaces` supersedes it).
         String fields are trimmed server-side.
 
@@ -2103,9 +2105,11 @@ paths:
         only a save that actually CHANGES it while started. `format` and
         `kind` (409, see below) and `teamMatchType` (409, see below) are
         refused together with the output-affecting draw-ready gate.
-        `naginata`, `engi` and `twoThirdPlaces` are refused with 400
+        `naginata`, `engi`, `engiSolo` and `twoThirdPlaces` are refused with 400
         (`naginata can only be changed before the competition starts`,
         `engi can only be changed before the competition starts`,
+        `one competitor per side can only be changed before the draw is
+        made; discard the draw to change it`,
         `twoThirdPlaces can only be changed before the competition starts`,
         respectively). Every other field in the list above
         (including `poolMatchDurationSeconds` / `knockoutMatchDurationSeconds`,
@@ -9927,6 +9931,29 @@ components:
           enum: [setup, draw-ready, pools, knockout, completed, invalid, ""]
         withZekkenName:
           type: boolean
+        engi:
+          type: boolean
+          description: |
+            Engi (kata) competition: bouts are decided by referee flags
+            instead of points. Individual competitions only (a team with
+            `engi: true` is a 400). Locked once a draw is generated.
+        engiSolo:
+          type: boolean
+          description: |
+            With `engi`, each side is ONE competitor (solo kata, such as
+            iaido) instead of a pair entered as `Name 1 - Name 2`. False
+            (the default, and what every competition stored before the
+            field reads as) means pairs. Stored only beside `engi: true`:
+            a create or a settings `PUT` without engi stores false, so a
+            save that turns engi off clears it, and a `PUT` that leaves it
+            out stores false (send it back on every save). It changes which
+            names the roster takes and the standings header (`Player` for
+            solo, `Pair` for pairs), never scoring, the draw or a stored
+            result. Locked like `engi` once a draw is generated: a change
+            while draw-ready or later is a 400 (`one competitor per side
+            can only be changed before the draw is made; discard the draw
+            to change it`). Carried on every competition read, the viewer
+            and public payloads included.
         numberPrefix:
           type: string
           description: |

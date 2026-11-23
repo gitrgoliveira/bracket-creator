@@ -22,6 +22,7 @@ import {
   resolvePoolSizeMode, POOL_SIZE_MODE_MAX, POOL_SIZE_MODE_MIN,
   configShapeChangeStaged, shapeConfigForSave,
   pendingConfigClears,
+  LABEL_ENGI_SOLO, HINT_ENGI_SOLO, HINT_ENGI, CLEARED_FIELD_LABELS, COMPETITION_DEFAULTS,
   cutNumberPrefix, MAX_NUMBER_PREFIX_CHARS, HINT_NUMBER_PREFIX, numberPrefixHint,
 } from '../competition_shape.jsx';
 import * as shape from '../competition_shape.jsx';
@@ -32,6 +33,25 @@ import * as shape from '../competition_shape.jsx';
 // than being silently treated as "not visible".
 const ALL_FORMATS = [FORMAT_KNOCKOUT, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS, '', undefined];
 const ALL_KINDS = [KIND_INDIVIDUAL, KIND_TEAM, '', undefined];
+
+// One competitor per side (bc-solo): the copy and the wiring the two forms and
+// the kind-flip notice read.
+describe('engiSolo setting', () => {
+  it('has its label and hint, and HINT_ENGI names both shapes', () => {
+    expect(LABEL_ENGI_SOLO).toBe('One competitor per side (solo kata, such as iaido)');
+    expect(HINT_ENGI_SOLO).toBe('Each side is one competitor instead of a pair. Rows already entered are not changed; the Participants page lists any that do not fit.');
+    expect(HINT_ENGI).toContain('pair');
+    expect(HINT_ENGI).toContain('one competitor');
+  });
+
+  it('defaults off, so a new engi competition takes pairs as before', () => {
+    expect(COMPETITION_DEFAULTS.engiSolo).toBe(false);
+  });
+
+  it('is named in the kind-flip notice by its label', () => {
+    expect(CLEARED_FIELD_LABELS.engiSolo).toBe(LABEL_ENGI_SOLO);
+  });
+});
 
 describe('wire-value constants', () => {
   it('mirror state.Competition Kind/Format values byte-for-byte', () => {
@@ -427,6 +447,18 @@ describe('normalizeConfigForKind', () => {
     expect(normalizeConfigForKind({ kind: KIND_TEAM, engi: true }).engi).toBe(false);
   });
 
+  // engiSolo (bc-solo) describes an engi side, so it goes wherever engi goes.
+  it('clears engiSolo with engi going team', () => {
+    const out = normalizeConfigForKind({ kind: KIND_TEAM, engi: true, engiSolo: true });
+    expect(out.engi).toBe(false);
+    expect(out.engiSolo).toBe(false);
+  });
+
+  it('clears engiSolo going individual when engi is off, and keeps it when engi is on', () => {
+    expect(normalizeConfigForKind({ kind: KIND_INDIVIDUAL, engi: false, engiSolo: true }).engiSolo).toBe(false);
+    expect(normalizeConfigForKind({ kind: KIND_INDIVIDUAL, engi: true, engiSolo: true }).engiSolo).toBe(true);
+  });
+
   it('supplies a usable team size going team, since 0 and 1 are both rejected', () => {
     expect(normalizeConfigForKind({ kind: KIND_TEAM, teamSize: 0 }).teamSize).toBe(DEFAULT_TEAM_SIZE);
     expect(normalizeConfigForKind({ kind: KIND_TEAM, teamSize: 1 }).teamSize).toBe(DEFAULT_TEAM_SIZE);
@@ -594,6 +626,15 @@ describe('pendingConfigClears', () => {
     expect(pendingConfigClears(stored, staged)).toEqual([
       { key: 'engi', from: true },
       { key: 'withZekkenName', from: true },
+    ]);
+  });
+
+  it('individual -> team reports engiSolo beside engi for a solo engi competition', () => {
+    const stored = { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, teamSize: 0, teamMatchType: 'fixed', engi: true, engiSolo: true, withZekkenName: false };
+    const staged = { ...stored, kind: KIND_TEAM };
+    expect(pendingConfigClears(stored, staged)).toEqual([
+      { key: 'engi', from: true },
+      { key: 'engiSolo', from: true },
     ]);
   });
 

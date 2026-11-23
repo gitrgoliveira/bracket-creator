@@ -102,6 +102,47 @@ describe('settingsPutBody', () => {
     expect(res.body.configVersion).toBe('v-updated');
   });
 
+  // engiSolo (bc-solo) is round-tripped on every save like engi: the server
+  // applies `current.EngiSolo = comp.Engi && comp.EngiSolo` unconditionally,
+  // so a body without it would turn a solo engi competition back into pairs.
+  describe('engiSolo', () => {
+    const engiBase = { ...base, engi: true, format: 'knockout', poolSize: 0, poolWinners: 0 };
+
+    it('an untouched solo engi competition keeps engiSolo on an unrelated save', () => {
+      const res = settingsPutBody({ ...engiBase, engiSolo: true }, { startTime: '11:00' }, 'v');
+      expect(res.error).toBeUndefined();
+      expect(res.body.engi).toBe(true);
+      expect(res.body.engiSolo).toBe(true);
+    });
+
+    it('a pair engi competition (no engiSolo key, as every stored one reads) sends false', () => {
+      const res = settingsPutBody(engiBase, {}, 'v');
+      expect(res.body.engiSolo).toBe(false);
+    });
+
+    it('ticking the box sends it on', () => {
+      const res = settingsPutBody(engiBase, { engiSolo: true }, 'v');
+      expect(res.body.engiSolo).toBe(true);
+    });
+
+    it('unticking Engi sends engiSolo false too, whatever the hidden box held', () => {
+      const res = settingsPutBody({ ...engiBase, engiSolo: true }, { engi: false }, 'v');
+      expect(res.body.engi).toBe(false);
+      expect(res.body.engiSolo).toBe(false);
+    });
+
+    it('engiSolo without engi is never sent on', () => {
+      const res = settingsPutBody({ ...base, engi: false, engiSolo: true }, {}, 'v');
+      expect(res.body.engiSolo).toBe(false);
+    });
+
+    it('a flip to team clears engiSolo with engi', () => {
+      const res = settingsPutBody({ ...engiBase, engiSolo: true }, { kind: 'team' }, 'v');
+      expect(res.body.engi).toBe(false);
+      expect(res.body.engiSolo).toBe(false);
+    });
+  });
+
   it('clearing expectedParticipants (empty string / NaN edit) sends 0', () => {
     const resEmpty = settingsPutBody({ ...base, expectedParticipants: 40 }, { expectedParticipants: '' }, 'v-ver');
     expect(resEmpty.body.expectedParticipants).toBe(0);
@@ -146,6 +187,11 @@ describe('describeSettingsEdits', () => {
       .toBe('Use Zekken display name to on.');
     expect(describeSettingsEdits({ naginata: false }))
       .toBe('Naginata competition to off.');
+  });
+
+  it('names the One competitor per side setting by its label, never its wire key', () => {
+    expect(describeSettingsEdits({ engiSolo: true }))
+      .toBe('One competitor per side (solo kata, such as iaido) to on.');
   });
 
   it('formats array fields joined with comma and space', () => {

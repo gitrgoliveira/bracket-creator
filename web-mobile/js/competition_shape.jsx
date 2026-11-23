@@ -366,7 +366,15 @@ export function teamFieldsVisible(kind) {
 export const LABEL_ZEKKEN = "Use Zekken display name";
 export const LABEL_ENGI = "Engi (kata competition)";
 export const HINT_ZEKKEN = "When enabled, participant CSV uses three columns: Name, Zekken, Dojo.";
-export const HINT_ENGI = "Flag-count scoring for Engi-Kyogi pairs. Enter each pair as one participant: Name 1 - Name 2, Dojo.";
+export const HINT_ENGI = "Flag-count scoring for Engi-Kyogi. Each side is a pair, entered as one participant (Name 1 - Name 2, Dojo), or one competitor when \"One competitor per side\" is ticked.";
+
+// LABEL_ENGI_SOLO / HINT_ENGI_SOLO (bc-solo): the box under Engi that makes
+// an engi side one competitor (solo kata, such as iaido) instead of a pair.
+// Both screens render it only while Engi applies and is ticked; it means
+// nothing without engi (normalizeConfigForKind clears it, and the settings
+// PUT body sends it false whenever engi is false).
+export const LABEL_ENGI_SOLO = "One competitor per side (solo kata, such as iaido)";
+export const HINT_ENGI_SOLO = "Each side is one competitor instead of a pair. Rows already entered are not changed; the Participants page lists any that do not fit.";
 
 // --- The remaining shared checkboxes / text fields ----------------------
 //
@@ -490,8 +498,9 @@ export function cutNumberPrefix(v) {
 // disables where create hides).
 export const HINT_KIND_ONLY_INDIVIDUAL = "(Only applicable for individual competitions)";
 
-// zekkenApplies / engiApplies: the RULE (zekken display names and engi
-// pairs are individual-only concepts), NOT a presentation instruction.
+// zekkenApplies / engiApplies: the RULE (zekken display names and engi,
+// whether its sides are pairs or single competitors, are individual-only
+// concepts), NOT a presentation instruction.
 // Both surfaces agree on the rule and DELIBERATELY differ on how they show
 // it, so the rule is what lives here and the presentation stays local:
 //
@@ -791,6 +800,9 @@ export function normalizeConfigForFormat(cfg) {
 //   engi           handlers_competition.go rejects engi on a team
 //                  competition; the checkbox is disabled for team, so the
 //                  operator cannot clear it themselves.
+//   engiSolo       cleared with engi (going team) and whenever engi is off:
+//                  it only says whether an engi side is one competitor or a
+//                  pair, so without engi it has nothing to describe.
 //
 //   withZekkenName it survives no server rejection, which is why this was
 //                  first left alone -- but that reasoning was wrong twice
@@ -898,10 +910,14 @@ export function normalizeConfigForKind(cfg) {
     }
     if (!next.teamMatchType) next.teamMatchType = TEAM_MATCH_TYPE_FIXED;
     next.engi = false;
+    next.engiSolo = false;
     next.withZekkenName = false;
   } else {
     next.teamSize = 0;
     next.teamMatchType = TEAM_MATCH_TYPE_FIXED;
+    // engiSolo means something only with engi (the server stores it as
+    // Engi && EngiSolo), so an engi-off config carries it false.
+    if (!next.engi) next.engiSolo = false;
   }
   return next;
 }
@@ -1108,6 +1124,7 @@ export const CLEARED_FIELD_LABELS = {
   teamSize: LABEL_TEAM_SIZE,
   teamMatchType: LABEL_TEAM_MATCH_TYPE,
   engi: LABEL_ENGI,
+  engiSolo: LABEL_ENGI_SOLO,
   withZekkenName: LABEL_ZEKKEN,
 };
 
@@ -1145,6 +1162,7 @@ export const COMPETITION_DEFAULTS = {
   withZekkenName: false,
   naginata: false,
   engi: false,
+  engiSolo: false,
   checkInEnabled: false,
   // Two joint 3rd places is the standard kendo convention; naginata is the
   // exception and turns it off (twoThirdPlacesForNaginata above). This

@@ -510,13 +510,27 @@ type Competition struct {
 	// engi has no ippons or Sune. Supports all formats (pools, league, knockout,
 	// mixed). Locked after draw like Naginata. Default false = ippon-scored.
 	//
-	// Engi competitors are PAIRS (two member names, one shared dojo). On the Go
-	// side a pair is a single competitor whose Player.Name holds BOTH member
-	// names combined as "Name 1 - Name 2"; Player.Dojo holds the shared dojo.
-	// Engi does not alter the participant CSV layout: when WithZekkenName is
-	// set, Player.DisplayName carries the combined pair zekken
-	// ("ZEKKEN1 - ZEKKEN2") exactly like any other competition.
+	// An engi side is one competitor or a pair, chosen by EngiSolo. A pair
+	// (two member names, one shared dojo) is a single competitor on the Go
+	// side whose Player.Name holds BOTH member names combined as
+	// "Name 1 - Name 2"; Player.Dojo holds the shared dojo. Engi does not
+	// alter the participant CSV layout: when WithZekkenName is set,
+	// Player.DisplayName carries the combined pair zekken
+	// ("ZEKKEN1 - ZEKKEN2") exactly like any other competition. Go never
+	// checks either shape: the name is kept whole.
 	Engi bool `yaml:"engi,omitempty" json:"engi"`
+
+	// EngiSolo makes each engi side ONE competitor (solo kata, such as
+	// iaido) instead of a pair. It means something only with Engi: the
+	// create POST and the settings PUT store it only when Engi is true, so
+	// a save that turns engi off clears it. False (or absent, as in every
+	// config.md written before it existed) means pairs, so no load-time
+	// migration is needed. It changes only which roster rows the app's
+	// entry rule accepts and which header a table shows, never scoring, the
+	// draw or a stored result; it is locked after the draw like Engi (the
+	// settings PUT refuses a change once the competition is draw-ready or
+	// later; discarding the draw makes it editable again).
+	EngiSolo bool `yaml:"engi_solo,omitempty" json:"engiSolo"`
 
 	CheckInEnabled bool `yaml:"check_in_enabled,omitempty" json:"checkInEnabled,omitempty"`
 
@@ -710,8 +724,9 @@ func (c *Competition) ParticipantIDsHint() *bool {
 
 // EffectiveWithZekkenName reports whether the participant CSV reader/writer
 // must use the 4-column [id, Name, DisplayName, Dojo] layout. It is currently
-// identical to WithZekkenName (engi pairs store both member names combined in
-// the Name field, so they no longer force the zekken layout); kept as a method
+// identical to WithZekkenName (an engi side, one competitor or a pair chosen
+// by EngiSolo, is stored in the Name field, a pair's two names combined, so
+// engi does not force the zekken layout); kept as a method
 // so any future layout modifier has a single seam.
 func (c *Competition) EffectiveWithZekkenName() bool {
 	return c.WithZekkenName

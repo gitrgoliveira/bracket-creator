@@ -340,6 +340,7 @@ func TestConfigVersion_FieldCoverage(t *testing.T) {
 		{"swissRounds", func(c *state.Competition) { c.Format = state.CompFormatSwiss; c.SwissRounds = 3 }, map[string]any{"swissRounds": 4}},
 		{"naginata", nil, map[string]any{"naginata": true}},
 		{"engi", nil, map[string]any{"engi": true}},
+		{"engiSolo", func(c *state.Competition) { c.Engi = true }, map[string]any{"engiSolo": true}},
 		{"teamMatchType", func(c *state.Competition) { c.Kind = "team"; c.TeamSize = 3 }, map[string]any{"teamMatchType": string(state.TeamMatchTypeKachinuki)}},
 		{"twoThirdPlaces", nil, map[string]any{"twoThirdPlaces": &no}},
 		{"expectedParticipants", nil, map[string]any{"expectedParticipants": 24}},

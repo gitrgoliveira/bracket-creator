@@ -881,6 +881,93 @@ paths:
                       (default false). When false, the SPA hides the dashboard's
                       "Tournament schedule" entry.
 
+  /api/register/competitions/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        description: Competition id.
+    get:
+      tags: [participants]
+      summary: Public self-registration form metadata
+      description: |
+        Public (no auth header). Answers what the self-registration page needs
+        to draw its form: the competition's name, whether it takes a zekken
+        name, its status (the form is open only in `setup`), and its engi
+        shape. 404 in an officiated tournament, for an unknown competition
+        and for a team competition.
+
+        `engi` and `engiSolo` let the form label its name field and check the
+        name before it sends: an engi competition takes a pair, both member
+        names in the one name field as `Name 1 - Name 2`, unless `engiSolo`
+        is true, when it takes one competitor per side. `engiSolo` means
+        something only when `engi` is true. The server does not check the
+        name's shape.
+      responses:
+        '200':
+          description: Registration form metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, withZekkenName, status, engi, engiSolo]
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  withZekkenName:
+                    type: boolean
+                  status:
+                    type: string
+                    description: The competition's status; registration is open only in `setup` (or empty).
+                  engi:
+                    type: boolean
+                    description: Whether the competition is an engi (kata) competition.
+                  engiSolo:
+                    type: boolean
+                    description: |
+                      With `engi`, true when each side is one competitor rather
+                      than a pair.
+        '404':
+          description: Registration is not available for this competition (officiated tournament, unknown or team competition).
+    post:
+      tags: [participants]
+      summary: Register a participant (public self-registration)
+      description: |
+        Public (no auth header). Adds a participant with source `registered`
+        to a competition still in `setup`. 404 as for the GET; 409 once the
+        competition has left setup, or for a (name, dojo) already registered.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, dojo]
+              properties:
+                name:
+                  type: string
+                  description: The competitor's name; for an engi pair, both names as `Name 1 - Name 2`.
+                dojo:
+                  type: string
+                displayName:
+                  type: string
+                  description: Zekken name, kept only when the competition takes one.
+                danGrade:
+                  type: string
+      responses:
+        '200':
+          description: Registered; answers the participant as stored.
+        '400':
+          description: Invalid body, a blank name or dojo, or a field too long.
+        '404':
+          description: Registration is not available for this competition.
+        '409':
+          description: Registration is closed, or this name and dojo are already registered.
+
   /api/tournament/import:
     post:
       tags: [tournament]

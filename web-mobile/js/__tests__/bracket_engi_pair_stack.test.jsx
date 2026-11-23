@@ -50,6 +50,16 @@ describe('bracket MatchCard engi pair stacking', () => {
     expect(countNameSpans(tree)).toBe(2);
   });
 
+  // bc-solo: a solo engi side holds one name, so engiPairParts returns no
+  // second part and the card draws one line, not an empty second one.
+  it('renders one line for a one-name engi side', () => {
+    const solo = { id: 'p2', name: 'Akira Tanaka', dojo: 'Higashi Dojo' };
+    const tree = runtime.mount(PlayerLine, { player: solo, side: 'a', showDojo: true, score: '2', isEngi: true });
+    const text = collectText(tree, expandNamed('NumberedName'));
+    expect(text).toContain('Akira Tanaka');
+    expect(countNameSpans(tree)).toBe(1);
+  });
+
   it('renders the plain combined name on one line when isEngi is not set', () => {
     const tree = runtime.mount(PlayerLine, { player, side: 'a', showDojo: true, score: '2' });
     const text = collectText(tree, expandNamed('NumberedName'));

@@ -129,7 +129,8 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     teamMatchType: isSupplementary ? "" : (m.teamMatchType || teamMatchTypeFor(comp)),
     // An engi tie-break bout is scored by flags like the bouts it breaks, so it
     // opens in the engi flag editor. Engi is never a team competition, so the
-    // team overrides above never meet it.
+    // team overrides above never meet it (its sides are pairs or, with engiSolo,
+    // single competitors; either way one participant per side).
     compEngi: !!(m.compEngi ?? (comp && comp.engi)),
     phase: m.phase || "pool",
     poolName: m.poolName || derivedPoolName,
@@ -849,7 +850,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // The main way on is another round among the ones still level
   // (group.stillLevel, each run one round); drawing lots is the operator's
   // other choice, and opens the same entry the team chusen uses.
-  const circleSideWord = c && c.engi ? "pairs" : "competitors";
+  const circleSideWord = c && c.engi && !c.engiSolo ? "pairs" : "competitors";
   const circleNotice = !isTeamComp && chusenCandidates && chusenCandidates.length > 0 ? (
     <div
       className="alert alert--warn league-tiebreak"

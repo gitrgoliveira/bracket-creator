@@ -371,6 +371,27 @@ describe('bc-rvfx: engi editor density is the same on both hosts', () => {
   });
 });
 
+// bc-solo: a solo engi side is one competitor, so its name has no second part
+// and each side draws one name line, with no empty second line.
+describe('EngiScoreEditorModal draws one name line for a one-name side (bc-solo)', () => {
+  it('shows a single .engi-side__name per side', () => {
+    render(<EngiScoreEditorModal
+      match={makeMatch({
+        sideA: { id: 'p-aka', name: 'Akira Tanaka', dojo: 'Aka Dojo', number: 'K1' },
+        sideB: { id: 'p-shiro', name: 'Jean-Paul Martin', dojo: 'Shiro Dojo', number: 'K2' },
+      })}
+      onClose={() => {}}
+      onSubmit={() => {}}
+    />);
+    const shiroLines = screen.getByTestId('engi-side-shiro').querySelectorAll('.engi-side__name');
+    const akaLines = screen.getByTestId('engi-side-aka').querySelectorAll('.engi-side__name');
+    expect(shiroLines.length).toBe(1);
+    expect(shiroLines[0].textContent).toContain('Jean-Paul Martin');
+    expect(akaLines.length).toBe(1);
+    expect(akaLines[0].textContent).toContain('Akira Tanaka');
+  });
+});
+
 // bc-sccl: an engi pair is ONE participant with ONE number, so the chip
 // (NumberedName's .num-prefix span) rides the FIRST member's line only,
 // never the second (operator decision 2026-09-20). side_is_carried_by_tint

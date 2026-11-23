@@ -289,11 +289,13 @@ func TestParticipantsDistinctDisplayNameRoundTrip(t *testing.T) {
 	assert.Equal(t, "Dojo C", loaded[0].Dojo)
 }
 
-// An engi pair is stored as ONE participant whose Name field holds both member
-// names combined ("Name 1 - Name 2"). Engi does NOT alter the CSV layout: the
-// zekken/DisplayName column keeps its normal semantics ("ZEKKEN1 - ZEKKEN2"
-// when the competition uses zekken names, absent otherwise), so engi rosters
-// parse byte-identically to any other competition of the same zekken setting.
+// An engi side is stored as ONE participant. In a pair competition its Name
+// field holds both member names combined ("Name 1 - Name 2"); in a solo
+// competition (EngiSolo) it holds the one competitor's name whole. Engi does
+// NOT alter the CSV layout: the zekken/DisplayName column keeps its normal
+// semantics ("ZEKKEN1 - ZEKKEN2" for a pair when the competition uses zekken
+// names, absent otherwise), so engi rosters parse byte-identically to any other
+// competition of the same zekken setting.
 func TestEngiPairStoredAsCombinedName(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)
@@ -333,6 +335,69 @@ func TestEngiPairStoredAsCombinedName(t *testing.T) {
 		require.Len(t, loaded, 1)
 		assert.Equal(t, "Emi Sasaki - Ren Fujita", loaded[0].Name)
 		assert.Equal(t, "SASAKI - FUJITA", loaded[0].DisplayName, "combined pair zekken must round-trip")
+	})
+}
+
+// A solo engi roster (EngiSolo) loads each competitor's name whole, with the
+// zekken column on or off, and a pair roster in the same file shape still loads
+// its combined name whole: the parser never splits a name on " - ".
+func TestEngiSoloRosterLoadsNamesWhole(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	writeRoster := func(t *testing.T, compID string, solo, zekken bool, csv string) {
+		t.Helper()
+		require.NoError(t, store.SaveCompetition(&Competition{
+			ID: compID, Name: compID, Engi: true, EngiSolo: solo, WithZekkenName: zekken,
+		}))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "competitions", compID, "participants.csv"), []byte(csv), 0600))
+	}
+
+	t.Run("solo without zekken", func(t *testing.T) {
+		writeRoster(t, "solo-plain", true, false,
+			"Akira Tanaka, Gyokusen\nMei Kato, Getsurin\n")
+		loaded, err := store.LoadParticipants("solo-plain", false)
+		require.NoError(t, err)
+		require.Len(t, loaded, 2)
+		assert.Equal(t, "Akira Tanaka", loaded[0].Name)
+		assert.Equal(t, "Gyokusen", loaded[0].Dojo)
+		assert.Equal(t, "Mei Kato", loaded[1].Name)
+		assert.Equal(t, "Getsurin", loaded[1].Dojo)
+	})
+
+	t.Run("solo with zekken", func(t *testing.T) {
+		writeRoster(t, "solo-zekken", true, true,
+			"Akira Tanaka, TANAKA, Gyokusen\nMei Kato, KATO, Getsurin\n")
+		loaded, err := store.LoadParticipants("solo-zekken", true)
+		require.NoError(t, err)
+		require.Len(t, loaded, 2)
+		assert.Equal(t, "Akira Tanaka", loaded[0].Name)
+		assert.Equal(t, "TANAKA", loaded[0].DisplayName)
+		assert.Equal(t, "Gyokusen", loaded[0].Dojo)
+		assert.Equal(t, "Mei Kato", loaded[1].Name)
+		assert.Equal(t, "KATO", loaded[1].DisplayName)
+		assert.Equal(t, "Getsurin", loaded[1].Dojo)
+	})
+
+	t.Run("pair still loads whole", func(t *testing.T) {
+		writeRoster(t, "pair-plain", false, false,
+			"Emi Sasaki - Ren Fujita, Getsurin\n")
+		loaded, err := store.LoadParticipants("pair-plain", false)
+		require.NoError(t, err)
+		require.Len(t, loaded, 1)
+		assert.Equal(t, "Emi Sasaki - Ren Fujita", loaded[0].Name)
+		assert.Equal(t, "Getsurin", loaded[0].Dojo)
+
+		writeRoster(t, "pair-zekken", false, true,
+			"Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin\n")
+		loaded, err = store.LoadParticipants("pair-zekken", true)
+		require.NoError(t, err)
+		require.Len(t, loaded, 1)
+		assert.Equal(t, "Emi Sasaki - Ren Fujita", loaded[0].Name)
+		assert.Equal(t, "SASAKI - FUJITA", loaded[0].DisplayName)
+		assert.Equal(t, "Getsurin", loaded[0].Dojo)
 	})
 }
 

@@ -885,6 +885,54 @@ describe('PoolsViewer engi stacked pair names in standings (mp-gy6g)', () => {
     expect(text).toContain('Pair2-Member2');
   });
 
+  // bc-solo: the name column heads "Pair" for a pair competition and "Player"
+  // for a solo one (competition.engiSolo, as the viewer payload carries it), and
+  // a one-name side draws one name line with no empty second line.
+  it('heads the standings name column Pair for a pair competition', () => {
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [engiPool],
+      standings: engiStandings,
+      poolMatches: [],
+      tweaks,
+      competition: engiComp,
+    });
+    const text = collectText(tree, expandAll);
+    expect(text).toContain('#PairVFlags');
+    expect(text).not.toContain('#PlayerVFlags');
+  });
+
+  it('heads the standings name column Player for a solo competition, one name line per row', () => {
+    const soloPool = {
+      poolName: 'Pool A',
+      players: [
+        { name: 'Akira Tanaka', dojo: 'Dojo A' },
+        { name: 'Jean-Paul Martin', dojo: 'Dojo B' },
+      ],
+    };
+    const soloStandings = {
+      'Pool A': [
+        { player: { name: 'Akira Tanaka', dojo: 'Dojo A' }, wins: 1, losses: 0, draws: 0, flags: 7 },
+        { player: { name: 'Jean-Paul Martin', dojo: 'Dojo B' }, wins: 0, losses: 1, draws: 0, flags: 3 },
+      ],
+    };
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [soloPool],
+      standings: soloStandings,
+      poolMatches: [],
+      tweaks,
+      competition: { ...engiComp, engiSolo: true },
+    });
+    const text = collectText(tree, expandAll);
+    expect(text).toContain('#PlayerVFlags');
+    expect(text).not.toContain('#PairVFlags');
+    expect(text).toContain('Akira Tanaka');
+    expect(text).toContain('Jean-Paul Martin');
+    // One row per competitor, one name line in each: no empty second line.
+    const nameLines = findAll(tree, n => n.type === 'div' && n.props?.className === 'pool__player-name');
+    expect(nameLines.map(n => collectText(n, expandAll).trim()).filter(t => t === '')).toEqual([]);
+    expect(nameLines).toHaveLength(2);
+  });
+
   it('does NOT split names in standings when engi=false', () => {
     const pool = {
       poolName: 'Pool A',

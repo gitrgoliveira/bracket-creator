@@ -15,6 +15,7 @@ import { PillButton } from './competition_fields.jsx';
 import { publicNamesApplies, fetchCompetitorRevealLink, revealLinkUrl, RevealCompetitorSheet } from './public_names_fields.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
+import { engiShape, engiEntryProblem, engiNameFieldLabel } from './engi_entry.jsx';
 
 const { useState, useMemo, useEffect, useRef } = React;
 
@@ -200,18 +201,6 @@ function generateRosterText(playersList, withZekkenName) {
   }).join("\n");
 }
 
-// engiPairComplete reports whether a combined engi name ("Name 1 - Name 2")
-// carries BOTH member names: the " - " separator is present AND neither half
-// is empty after trimming. Splits on the FIRST separator to match
-// window.engiPairParts, so " - Bob" (empty member 1) and "Alice - " (empty
-// member 2) are both rejected. Exported for tests.
-function engiPairComplete(name) {
-  const s = String(name || "");
-  const i = s.indexOf(" - ");
-  if (i < 0) return false;
-  return s.slice(0, i).trim() !== "" && s.slice(i + 3).trim() !== "";
-}
-
 // validateRosterRows checks parsed roster rows for the required columns
 // before they are sent to the server. Name and dojo are mandatory for every
 // competition. Note that an EMPTY zekken is NOT enforced here: only name + dojo
@@ -223,8 +212,12 @@ function engiPairComplete(name) {
 // Returns an array of { index, name, reason } for each offending row (empty
 // when the roster is valid). The stored `name` is the TRIMMED value (not the
 // raw input), so whitespace-only names render as the falsy "line N" branch in
-// the apply() toast rather than a literal "   " label.
-function validateRosterRows(parsed, withZekkenName, engi) {
+// the apply() toast rather than a literal "   " label. `shape` is the
+// competition's engiShape ("pair", "solo" or null for a non-engi
+// competition): an engi row is judged by engiEntryProblem (engi_entry.jsx),
+// whose sentence is the row's reason, and only a pair competition's
+// missing-dojo hint names the pair format.
+function validateRosterRows(parsed, withZekkenName, shape) {
   const problems = [];
   (parsed || []).forEach((p, i) => {
     const name = (p.name || "").trim();
@@ -233,15 +226,16 @@ function validateRosterRows(parsed, withZekkenName, engi) {
       problems.push({ index: i, name, reason: "missing name" });
       return;
     }
-    if (engi && !engiPairComplete(name)) {
-      problems.push({ index: i, name, reason: 'engi pairs need both member names as "Name 1 - Name 2"' });
+    const engiProblem = shape ? engiEntryProblem(name, shape === "solo") : null;
+    if (engiProblem) {
+      problems.push({ index: i, name, reason: engiProblem });
       return;
     }
     if (!dojo) {
       let reason = "missing dojo";
       if (withZekkenName) {
-        reason = engi
-          ? "missing dojo (engi zekken competitions use Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo)"
+        reason = shape === "pair"
+          ? "missing dojo (engi pair competitions with zekken use Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo)"
           : "missing dojo (zekken competitions use Name, Zekken, Dojo)";
       }
       problems.push({ index: i, name, reason });
@@ -251,25 +245,30 @@ function validateRosterRows(parsed, withZekkenName, engi) {
 }
 
 // participantTemplateCSV returns the sample CSV bytes a competition's roster
-// template should offer, keyed off kind → engi → zekken. Engi comps are PAIRS
-// ("Name 1 - Name 2" combined in the name field), so engi is checked before
-// the zekken branch only to show pair-shaped examples. Exported for tests.
+// template should offer, keyed off kind → engi shape → zekken. A pair engi
+// competition combines both member names in the name field ("Name 1 - Name 2"),
+// so it is checked before the zekken branch only to show pair-shaped examples;
+// a solo engi competition (one competitor per side) takes the individual
+// template. Exported for tests.
 function participantTemplateCSV(c) {
   if (c.kind === "team") return "Team Name, Dojo\nTora A, Tora Dojo London\n";
-  if (c.engi && c.withZekkenName) return "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo, Dan\nEmi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin Dojo, 3\n";
-  if (c.engi) return "Name 1 - Name 2, Dojo, Dan\nEmi Sasaki - Ren Fujita, Getsurin Dojo, 3\n";
+  const pair = engiShape(c) === "pair";
+  if (pair && c.withZekkenName) return "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo, Dan\nEmi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin Dojo, 3\n";
+  if (pair) return "Name 1 - Name 2, Dojo, Dan\nEmi Sasaki - Ren Fujita, Getsurin Dojo, 3\n";
   if (c.withZekkenName) return "Name, Zekken, Dojo, Dan\nAkira Tanaka, TANAKA, Gyokusen, 3\n";
   return "Name, Dojo, Dan\nAkira Tanaka, Gyokusen, 3\n";
 }
 
 // participantFormError validates the add/replace form inputs, returning a
 // user-facing error string or null when valid. Name + dojo are always
-// required; engi competitions require BOTH member names combined in the name
-// field ("Name 1 - Name 2"), since a pair with a single name is incomplete.
-// Exported for tests.
-function participantFormError({ name, dojo, engi }) {
+// required; an engi competition's name must fit its side's shape (`shape`,
+// engiShape: "pair" needs both member names as "Name 1 - Name 2", "solo" one
+// competitor), judged by engiEntryProblem (engi_entry.jsx), whose sentence is
+// the error. Exported for tests.
+function participantFormError({ name, dojo, shape }) {
   if (!name || !dojo) return "Name and dojo are required";
-  if (engi && !engiPairComplete(name)) return 'Enter both member names as "Name 1 - Name 2"';
+  const engiProblem = shape ? engiEntryProblem(name, shape === "solo") : null;
+  if (engiProblem) return engiProblem;
   return null;
 }
 
@@ -290,13 +289,17 @@ export const ROSTER_KEPT_CHANGING = "Not saved: the competitor list kept changin
 export const ROSTER_CHANGED_BEFORE_APPLY = "Not saved: the competitor list was changed on another device. The list now shown is the current one; your pasted list is still in the box, so tap Apply changes to replace it.";
 
 function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSection, onRefreshCompetition }) {
-  // Zekken-column flag. Engi pairs store both member names combined in the
-  // name field ("Name 1 - Name 2"), so engi does not alter the roster layout.
+  // Zekken-column flag. An engi pair stores both member names combined in the
+  // name field ("Name 1 - Name 2") and a solo engi side one name, so engi does
+  // not alter the roster layout; only the words per shape differ.
   const withZekken = !!c.withZekkenName;
+  // The engi side's shape ("pair", "solo", or null when not engi): every
+  // per-shape word on this page and the entry rule read it.
+  const engiSide = engiShape(c);
   // Roster line format for this competition, shown once, in the participant
   // list card's head (the CSV drop zone under it says only what it does).
   const rosterFormat = c.kind === "team" ? "Team name, Dojo"
-    : c.engi ? (withZekken ? "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]")
+    : engiSide === "pair" ? (withZekken ? "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]")
       : withZekken ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]";
   // Singular noun for one entrant in this competition, for pluralize() (a team
   // competition's roster rows are teams, not people). One owner so the roster
@@ -767,9 +770,9 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   const handleAddParticipant = async () => {
     const name = addName.trim(), dojo = addDojo.trim(), danGrade = addDanGrade.trim();
     const zekken = addZekken.trim();
-    // Name + dojo always required; engi requires both member names combined
-    // in the name field ("Name 1 - Name 2"), see participantFormError.
-    const formErr = participantFormError({ name, dojo, engi: c.engi });
+    // Name + dojo always required; an engi name must fit the side's shape (a
+    // pair as "Name 1 - Name 2", or one competitor), see participantFormError.
+    const formErr = participantFormError({ name, dojo, shape: engiSide });
     if (formErr) { showToast(formErr, "error"); return; }
     setAddLoading(true);
     try {
@@ -795,9 +798,9 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
     if (!replaceTarget) return;
     const name = replaceName.trim(), dojo = replaceDojo.trim(), danGrade = replaceDanGrade.trim();
     const zekken = replaceZekken.trim();
-    // Same validation as add: an engi pair must keep both member names in
-    // the combined name on edit too.
-    const formErr = participantFormError({ name, dojo, engi: c.engi });
+    // Same validation as add: an engi name must fit the side's shape on edit
+    // too (both member names for a pair, one competitor for solo).
+    const formErr = participantFormError({ name, dojo, shape: engiSide });
     if (formErr) { showToast(formErr, "error"); return; }
     // Capture the old name before the await so the success toast is accurate
     // even if replaceTarget has changed by the time the response arrives.
@@ -852,12 +855,14 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
       // misformatted paste (e.g. a two-column "Name, Dojo" line in a zekken
       // competition, parsed as {displayName: dojo, dojo: ""}) up front with an
       // actionable message, instead of relying on the server 400 round-trip.
-      const rowProblems = validateRosterRows(parsed, withZekken, !!c.engi);
+      const rowProblems = validateRosterRows(parsed, withZekken, engiSide);
       if (rowProblems.length > 0) {
         const first = rowProblems[0];
         const label = first.name ? `"${first.name}"` : `line ${first.index + 1}`;
         const more = rowProblems.length > 1 ? ` (and ${rowProblems.length - 1} more)` : "";
-        showToast(`Cannot save: ${label} ${first.reason}${more}`, "error");
+        // The reason follows a colon: an engi row's reason is a whole sentence
+        // (engiEntryProblem), the others a short phrase ("missing dojo").
+        showToast(`Cannot save ${label}${more}: ${first.reason}`, "error");
         return;
       }
 
@@ -1045,6 +1050,17 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   const seedsLocked = isDrawReady || isStarted;
   const seedsLockedTitle = (action) => (isStarted ? "The competition has started; the order and seeds are fixed" : `Discard the draw to ${action}`);
 
+  // Rows already stored that the current "One competitor per side" setting
+  // would refuse today (a pair row after the setting was turned on, a one-name
+  // row after it was turned off). The setting stays editable at every status,
+  // so nothing blocks; the notice below names the rows and the way out. The
+  // entry rule (engiEntryProblem) is the one judge, as at every entry door.
+  const engiMisfits = engiSide
+    ? (c.players || []).filter((p) => engiEntryProblem(p.name, engiSide === "solo"))
+    : [];
+  const engiMisfitNames = engiMisfits.slice(0, 5).map((p) => p.name).join("; ")
+    + (engiMisfits.length > 5 ? `; and ${engiMisfits.length - 5} more` : "");
+
   // Apply appears twice (card head and below the preview) and both buttons are
   // the SAME action, so the enabled rule and its reason live here once. An
   // empty box must not be applicable: Apply replaces the roster, so applying
@@ -1075,6 +1091,15 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
       {isDrawReady && (
         <div className="alert alert--warn" style={{ marginBottom: 12 }}>
           Draw generated: the roster order and seeds are locked. Discard the draw (from the competition header) to change them. A competitor’s details can still be changed with the Edit button; check-in continues at the registration desk.
+        </div>
+      )}
+      {engiMisfits.length > 0 && (
+        <div className="alert alert--warn" role="status" data-testid="engi-shape-notice" style={{ marginBottom: 12 }}>
+          {engiMisfits.length === 1 ? "1 saved row does not" : `${engiMisfits.length} saved rows do not`} fit
+          {engiSide === "solo" ? " this competition, which takes one competitor per side" : " this competition, which takes pairs"}: {engiMisfitNames}.
+          {isStarted
+            ? " The competition has started, so competitors cannot be added or pasted. Fix each row with Edit, or change \"One competitor per side\" back in Settings."
+            : " Edit the rows, or change \"One competitor per side\" back in Settings. Applying a pasted list with rows like these is refused."}
         </div>
       )}
       {isStarted && (
@@ -1199,8 +1224,8 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
               ) : (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
                   <div>
-                    <div className="field__label" id="participant-add-name-label" style={{ fontSize: 11 }}>{c.engi ? "Pair (Name 1 - Name 2) *" : "Name *"}</div>
-                    <input className="input" aria-labelledby="participant-add-name-label" style={{ width: 160 }} value={addName} onChange={e => setAddName(e.target.value)} placeholder={c.engi ? "Member 1 - Member 2" : "Full name"} />
+                    <div className="field__label" id="participant-add-name-label" style={{ fontSize: 11 }}>{`${engiNameFieldLabel(engiSide)} *`}</div>
+                    <input className="input" aria-labelledby="participant-add-name-label" style={{ width: 160 }} value={addName} onChange={e => setAddName(e.target.value)} placeholder={engiSide === "pair" ? "Member 1 - Member 2" : "Full name"} />
                   </div>
                   {withZekken && (
                     <div>
@@ -1379,7 +1404,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
                     a new list and mounts empty, so a count here would read
                     "0" over a competition that has a full saved roster. The
                     roster's own size is on the Ordering & seeding card. */}
-                {lines.length === 0 ? "Empty" : pluralize(lines.length, "line")} · One per line <span className="participants-example">Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen, 3" : "Akira Tanaka, Gyokusen, 3"}</span>
+                {lines.length === 0 ? "Empty" : pluralize(lines.length, "line")} · One per line <span className="participants-example">Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : engiSide === "pair" ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen, 3" : "Akira Tanaka, Gyokusen, 3"}</span>
               </div>
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
                 Format: &ldquo;{rosterFormat}&rdquo;
@@ -1461,13 +1486,13 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={14}
-            placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? "Akira Tanaka - Yuki Tanaka, Gyokusen" : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen" : "Akira Tanaka, Gyokusen"}
+            placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : engiSide === "pair" ? "Akira Tanaka - Yuki Tanaka, Gyokusen" : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen" : "Akira Tanaka, Gyokusen"}
           />
           <div className="field__hint" style={{ marginTop: 6 }}>“Apply changes” saves this list as the roster and clears the box. Applying over an existing roster replaces it; names already on the roster keep their id and seed (case-insensitive match).</div>
           {lines.length > 0 && (() => {
             const previewLimit = showAllPreview ? lines.length : 10;
             const preview = window.parseParticipantLines(lines.slice(0, previewLimit), withZekken);
-            const nameCol = c.engi ? "Name 1 - Name 2" : "Name";
+            const nameCol = engiSide === "pair" ? "Name 1 - Name 2" : "Name";
             const cols = withZekken ? [nameCol, "Zekken", "Dojo", "Dan"] : [nameCol, "Dojo", "Dan"];
             // Raw parsed paste lines may be blank or repeated before validation,
             // so a row is keyed by what it shows and how many rows above show
@@ -1528,4 +1553,4 @@ window.AdminParticipants = AdminParticipants;
 
 // ES export for the vitest suite: pure helpers only. Components remain
 // behind the window.* global pattern to match the rest of admin_*.jsx.
-export { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, generateRosterText, validateRosterRows, participantTemplateCSV, participantFormError, engiPairComplete };
+export { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, generateRosterText, validateRosterRows, participantTemplateCSV, participantFormError };

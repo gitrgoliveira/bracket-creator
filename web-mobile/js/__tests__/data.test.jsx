@@ -203,6 +203,37 @@ describe('parseParticipantLines', () => {
     expect(p.source).toBe('');
     expect(p.danGrade).toBe('vip');
   });
+
+  // A solo engi roster is plain "Name, Dojo" rows: the parser keeps each name
+  // whole, and a pair row's combined "Name 1 - Name 2" stays whole too.
+  it('keeps a solo engi competitor name whole (zekken off)', () => {
+    const [a, b] = parseParticipantLines(['Akira Tanaka, Gyokusen', 'Mei Kato, Getsurin'], false);
+    expect(a.name).toBe('Akira Tanaka');
+    expect(a.dojo).toBe('Gyokusen');
+    expect(b.name).toBe('Mei Kato');
+    expect(b.dojo).toBe('Getsurin');
+  });
+
+  it('keeps a solo engi competitor name whole (zekken on)', () => {
+    const [a, b] = parseParticipantLines(
+      ['Akira Tanaka, TANAKA, Gyokusen', 'Mei Kato, KATO, Getsurin'], true);
+    expect(a.name).toBe('Akira Tanaka');
+    expect(a.displayName).toBe('TANAKA');
+    expect(a.dojo).toBe('Gyokusen');
+    expect(b.name).toBe('Mei Kato');
+    expect(b.displayName).toBe('KATO');
+    expect(b.dojo).toBe('Getsurin');
+  });
+
+  it('still keeps an engi pair name whole', () => {
+    const [p] = parseParticipantLines(['Emi Sasaki - Ren Fujita, Getsurin'], false);
+    expect(p.name).toBe('Emi Sasaki - Ren Fujita');
+    expect(p.dojo).toBe('Getsurin');
+    const [z] = parseParticipantLines(['Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin'], true);
+    expect(z.name).toBe('Emi Sasaki - Ren Fujita');
+    expect(z.displayName).toBe('SASAKI - FUJITA');
+    expect(z.dojo).toBe('Getsurin');
+  });
 });
 
 // checkinPid is the ONE owner of the id-else-"name|dojo" identity rule

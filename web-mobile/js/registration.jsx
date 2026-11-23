@@ -2,18 +2,38 @@
 //
 // Mounted by app.jsx when the URL is /register/:compId.
 // The backing endpoints are:
-//   GET  /api/register/competitions/:id: competition metadata (name, withZekkenName)
+//   GET  /api/register/competitions/:id: competition metadata (name, withZekkenName,
+//        status, engi, engiSolo)
 //   POST /api/register/competitions/:id: register a participant (tag="registered")
 //
 // Both endpoints return 404 in officiated-mode tournaments.
 
 import { useUnsavedInput } from './app_version.jsx';
 import { isNoConnection, REGISTRATION_NOT_CONFIRMED } from './write_result.jsx';
+import { engiShape, engiEntryProblem, engiNameFieldLabel, ENGI_SOLO_PROBLEM } from './engi_entry.jsx';
 
 const { useState, useEffect, useRef } = React;
 
+// The sentence the public form answers for a pair typed into a competition
+// that takes one competitor per side. The operator's sentence
+// (ENGI_SOLO_PROBLEM) points at Settings, which a participant cannot reach, so
+// the form says what the participant can do instead.
+export const REGISTER_ENGI_SOLO_PROBLEM = "This competition takes one competitor per side. Enter one name.";
+
+// registrationNameProblem asks the one engi entry rule (engi_entry.jsx) for a
+// competition of the given engiShape and words its answer for a participant:
+// null when the name fits, or the competition is not engi. A pair
+// competition's sentence ("Enter both names of the pair as ...") already
+// reads for a participant and is kept as it is. The blank name is the form's
+// own "Name is required." and never reaches here.
+export function registrationNameProblem(shape, name) {
+  if (!shape) return null;
+  const problem = engiEntryProblem(name, shape === "solo");
+  return problem === ENGI_SOLO_PROBLEM ? REGISTER_ENGI_SOLO_PROBLEM : problem;
+}
+
 function RegistrationForm({ compId, onBack }) {
-  const [meta, setMeta] = useState(null);       // { id, name, withZekkenName, status }
+  const [meta, setMeta] = useState(null);       // { id, name, withZekkenName, status, engi, engiSolo }
   const [loading, setLoading] = useState(true);
   const [metaErr, setMetaErr] = useState(null);
 
@@ -90,6 +110,10 @@ function RegistrationForm({ compId, onBack }) {
     const trimDojo = dojo.trim();
     if (!trimName) { setErr("Name is required."); return; }
     if (!trimDojo) { setErr("Dojo is required."); return; }
+    // The server keeps no engi shape rule of its own, so the form asks it
+    // before sending.
+    const shapeProblem = registrationNameProblem(engiShape(meta), trimName);
+    if (shapeProblem) { setErr(shapeProblem); return; }
     setSaving(true);
     setErr("");
     try {
@@ -191,6 +215,11 @@ function RegistrationForm({ compId, onBack }) {
     );
   }
 
+  // A pair engi competition takes both names in the one field, so its label
+  // says the format; every other competition (solo engi included) asks for
+  // one full name.
+  const pairForm = engiShape(meta) === "pair";
+
   return (
     <div className="page" style={{ maxWidth: 600, marginTop: 40 }}>
       <div className="card card--pad-lg">
@@ -200,7 +229,7 @@ function RegistrationForm({ compId, onBack }) {
         )}
         <form onSubmit={submit}>
           <div className="field">
-            <label className="field__label" htmlFor="register-name">Full name <span style={{ color: "var(--red)" }}>*</span></label>
+            <label className="field__label" htmlFor="register-name">{pairForm ? engiNameFieldLabel("pair") : "Full name"} <span style={{ color: "var(--red)" }}>*</span></label>
             <input
               id="register-name"
               autoFocus
@@ -208,7 +237,7 @@ function RegistrationForm({ compId, onBack }) {
               type="text"
               value={name}
               onChange={(e) => { setName(e.target.value); setErr(""); }}
-              placeholder="e.g. Alice Tanaka"
+              placeholder={pairForm ? "e.g. Alice Tanaka - Ren Fujita" : "e.g. Alice Tanaka"}
               disabled={saving}
               required
             />

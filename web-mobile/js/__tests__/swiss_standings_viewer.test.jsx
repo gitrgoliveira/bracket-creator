@@ -83,6 +83,34 @@ describe('SwissStandingsViewer (mp-8pba)', () => {
       const tree = runtime.updateProps({ competition: comp, poolMatches: [], tweaks });
       expect(collectText(tree)).toContain('total flags');
     });
+
+    // bc-solo: the name column heads "Pair" for a pair competition and "Player"
+    // when engiSolo says each side is one competitor. The competition is read
+    // as the viewer payload carries it (engiSolo beside engi), not a bare prop.
+    // StandingsTableHead is a component, so expand it by name to reach the th
+    // cells: the header row reads "#", name column, "V", "Flags".
+    const headerRow = (tree) => collectText(tree, (type) => type.name === 'StandingsTableHead');
+
+    it('heads the name column Pair for a pair competition', async () => {
+      runtime.mount(SwissStandingsViewer, { competition: comp, poolMatches: [], tweaks });
+      await Promise.resolve();
+      const tree = runtime.updateProps({ competition: comp, poolMatches: [], tweaks });
+      expect(headerRow(tree)).toContain('#PairVFlags');
+    });
+
+    it('heads the name column Player for a solo competition and draws one line per side', async () => {
+      const solo = { ...comp, engiSolo: true };
+      global.window.API = { swissStandings: vi.fn().mockResolvedValue([
+        { player: { name: 'Akira Tanaka', dojo: 'Chiba', id: 'a' }, rank: 1, wins: 2, flags: 8 },
+      ]) };
+      runtime.mount(SwissStandingsViewer, { competition: solo, poolMatches: [], tweaks });
+      await Promise.resolve();
+      const tree = runtime.updateProps({ competition: solo, poolMatches: [], tweaks });
+      expect(headerRow(tree)).toContain('#PlayerVFlags');
+      // A one-name side draws its name line only: no empty second line.
+      const nameLines = findAll(tree, n => n.props?.className === 'pool__player-name');
+      expect(nameLines.map(collectText)).toEqual(['Akira Tanaka']);
+    });
   });
 
   describe('team swiss', () => {

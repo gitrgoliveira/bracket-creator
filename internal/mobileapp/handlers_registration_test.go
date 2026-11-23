@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -103,6 +104,43 @@ func TestRegistration_GET_SelfRun_ReturnsMetadata(t *testing.T) {
 	assert.Equal(t, "Open Men", meta["name"])
 	assert.Equal(t, true, meta["withZekkenName"])
 	assert.Equal(t, string(state.CompStatusSetup), meta["status"])
+}
+
+
+// The public form labels its name field and asks the engi entry rule from the
+// GET, so it must carry both engi and engiSolo for every shape: a pair, one
+// competitor per side, and a competition that is not engi at all.
+func TestRegistration_GET_CarriesEngiAndEngiSolo(t *testing.T) {
+	cases := []struct {
+		name     string
+		engi     bool
+		engiSolo bool
+	}{
+		{"not engi", false, false},
+		{"engi pairs", true, false},
+		{"engi one competitor per side", true, true},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, store, _, _ := setupRegistrationRouter(t, selfRunTournament())
+			compID := fmt.Sprintf("comp-engi-%d", i)
+			require.NoError(t, store.SaveCompetition(&state.Competition{
+				ID:       compID,
+				Name:     "Kata",
+				Status:   state.CompStatusSetup,
+				Engi:     tc.engi,
+				EngiSolo: tc.engiSolo,
+			}))
+
+			w := doGetMeta(r, compID)
+			require.Equal(t, http.StatusOK, w.Code)
+
+			var meta map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &meta))
+			assert.Equal(t, tc.engi, meta["engi"], "engi is always answered")
+			assert.Equal(t, tc.engiSolo, meta["engiSolo"], "engiSolo is always answered")
+		})
+	}
 }
 
 func TestRegistration_GET_Officiated_Returns404(t *testing.T) {

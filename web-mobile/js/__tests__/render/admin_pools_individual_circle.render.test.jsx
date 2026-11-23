@@ -206,6 +206,12 @@ describe('AdminPools: an individual tie-breaker round that went in a circle', ()
     expect(notice.textContent).toContain('The pairs to fight the tie-breaker withdrew earlier');
   });
 
+  it('speaks of competitors for a solo engi competition', async () => {
+    await mount(leagueComp({ engi: true, engiSolo: true }), makeApi([barred]));
+    const notice = (await screen.findByText('A tie-breaker round left a tie')).closest('.league-tiebreak');
+    expect(notice.textContent).toContain('The competitors to fight the tie-breaker withdrew earlier');
+  });
+
   it('keeps the pool name for a pools competition and drops it for a league', async () => {
     await mount(leagueComp({ format: 'mixed' }));
     expect(await screen.findByText('Pool A, 1st to 3rd place')).toBeTruthy();

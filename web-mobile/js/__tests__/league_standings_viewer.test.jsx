@@ -269,6 +269,68 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
   });
 });
 
+// bc-solo: the engi league table heads its name column "Pair" for a pair
+// competition and "Player" for a solo one (competition.engiSolo, as the viewer
+// payload carries it), and a one-name side draws a single name line.
+describe('LeagueStandingsViewer engi header (bc-solo)', () => {
+  const realReact = global.React;
+  let runtime;
+  let LeagueStandingsViewer;
+  const STUBBED = ['Term', 'API', 'LoadingSpinner', 'EmptyState', 'engiPairParts'];
+  const saved = {};
+  const tweaks = { showDojo: false };
+  const base = { id: 'engi-league', format: 'league', kind: 'individual', teamSize: 0, engi: true, status: 'pools' };
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    STUBBED.forEach(k => {
+      saved[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false };
+    });
+    global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
+    global.window.LoadingSpinner = function LoadingSpinner({ text }) { return { type: 'div', props: { className: 'loading' }, children: text }; };
+    global.window.EmptyState = function EmptyState({ title }) { return { type: 'div', props: {}, children: title }; };
+    global.window.engiPairParts = (name) => {
+      const i = (name || '').indexOf(' - ');
+      return i < 0 ? [name, ''] : [name.slice(0, i), name.slice(i + 3)];
+    };
+    vi.resetModules();
+    ({ LeagueStandingsViewer } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (saved[k]?.had) global.window[k] = saved[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  const render = async (competition, standings) => {
+    global.window.API = { leagueStandings: vi.fn().mockResolvedValue(standings) };
+    runtime.mount(LeagueStandingsViewer, { competition, poolMatches: [], tweaks });
+    await Promise.resolve();
+    return runtime.updateProps({ competition, poolMatches: [], tweaks });
+  };
+  const head = (tree) => collectText(tree, expandNamed('StandingsTableHead'));
+
+  it('heads the name column Pair for a pair competition', async () => {
+    const tree = await render(base, [{ player: { name: 'Ann One - Ann Two', dojo: 'D', id: 'a' }, rank: 1, wins: 1, flags: 3 }]);
+    expect(head(tree)).toContain('#PairVFlags');
+  });
+
+  it('heads the name column Player for a solo competition and draws one name line', async () => {
+    const tree = await render({ ...base, engiSolo: true }, [{ player: { name: 'Akira Tanaka', dojo: 'D', id: 'a' }, rank: 1, wins: 1, flags: 3 }]);
+    expect(head(tree)).toContain('#PlayerVFlags');
+    const lines = findAll(tree, n => n.type === 'div' && n.props?.className === 'pool__player-name');
+    expect(lines).toHaveLength(1);
+    expect(collectText(lines[0], expandNamed('NumberedName'))).toBe('Akira Tanaka');
+  });
+});
+
 describe('poolMatchesSignature: the one key the league table and admin Pools refetch on', () => {
   let poolMatchesSignature;
   beforeEach(async () => {

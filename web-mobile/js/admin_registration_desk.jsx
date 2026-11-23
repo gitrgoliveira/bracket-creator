@@ -39,6 +39,7 @@ import { checkInApplies, tournamentHasCheckIn, SELF_RUN_NO_CHECK_IN } from './co
 import { useUnsavedInput } from './app_version.jsx';
 import { acceptTap } from './tap_guard.jsx';
 import { Icon } from './icon.jsx';
+import { engiShape, engiEntryProblem, engiNameFieldLabel } from './engi_entry.jsx';
 
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
@@ -488,6 +489,27 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
 // Walk-up add: inline panel. Setup-only (the add endpoint rejects started
 // competitions). For team competitions the "name" is the team name.
 // ---------------------------------------------------------------------------
+// rdNameField words the desk's name field for a competition, as the
+// Participants page does: "Team name" for a team, the pair format for a pair
+// engi competition, else "Name" (one competitor per side included).
+function rdNameField(comp) {
+  if (comp.kind === "team") return { label: "Team name", placeholder: "Tora A" };
+  const shape = engiShape(comp);
+  return {
+    label: engiNameFieldLabel(shape),
+    placeholder: shape === "pair" ? "Akira Tanaka - Ren Fujita" : "Akira Tanaka",
+  };
+}
+
+// rdNameProblem asks the one engi entry rule (engi_entry.jsx) for a trimmed
+// name typed on the desk: its sentence when the name does not fit the engi
+// competition's shape, null when it fits or the competition is not engi. The
+// server keeps no such rule, so the desk asks before it writes.
+function rdNameProblem(comp, name) {
+  const shape = engiShape(comp);
+  return shape ? engiEntryProblem(name, shape === "solo") : null;
+}
+
 function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCheckInRefused, onCancel }) {
   const isTeam = comp.kind === "team";
   const [name, setName] = useState(seedName || "");
@@ -497,7 +519,10 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCheckInRefus
   // A walk-up being typed holds a new build's automatic reload (app_version.jsx).
   useUnsavedInput(name !== (seedName || "") || dojo !== "" || zekken !== "" || dan !== "");
   const [busy, setBusy] = useState(false);
+  // The engi entry rule's sentence for the name, shown under the field.
+  const [nameErr, setNameErr] = useState("");
   const nameRef = useRef(null);
+  const nameField = rdNameField(comp);
 
   useEffect(() => { nameRef.current && nameRef.current.focus(); }, []);
 
@@ -505,6 +530,8 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCheckInRefus
     e.preventDefault();
     const n = name.trim(), d = dojo.trim();
     if (!n || !d) { showToast(isTeam ? "Team name and dojo are required" : "Name and dojo are required", "error"); return; }
+    const problem = rdNameProblem(comp, n);
+    if (problem) { setNameErr(problem); return; }
     setBusy(true);
     try {
       const payload = { name: n, dojo: d };
@@ -544,8 +571,9 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCheckInRefus
       </div>
       <div className="rd-walkup__grid">
         <label className="field">
-          <span className="field__label">{isTeam ? "Team name" : "Name"}</span>
-          <input ref={nameRef} className="input" maxLength={100} value={name} onChange={(e) => setName(e.target.value)} placeholder={isTeam ? "Tora A" : "Akira Tanaka"} />
+          <span className="field__label">{nameField.label}</span>
+          <input ref={nameRef} className="input" maxLength={100} value={name} onChange={(e) => { setName(e.target.value); setNameErr(""); }} placeholder={nameField.placeholder} aria-invalid={nameErr ? "true" : undefined} />
+          {nameErr && <span className="field__error" role="alert">{nameErr}</span>}
         </label>
         <label className="field">
           <span className="field__label">Dojo</span>
@@ -589,10 +617,15 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
   const [opened] = useState(() => ({ name, dojo, zekken, dan }));
   useUnsavedInput(name !== opened.name || dojo !== opened.dojo || zekken !== opened.zekken || dan !== opened.dan);
   const [busy, setBusy] = useState(false);
+  // The engi entry rule's sentence for the name, shown under the field.
+  const [nameErr, setNameErr] = useState("");
+  const nameField = rdNameField(comp);
 
   const save = async () => {
     const n = name.trim(), d = dojo.trim();
     if (!n || !d) { showToast(isTeam ? "Team name and dojo are required" : "Name and dojo are required", "error"); return; }
+    const problem = rdNameProblem(comp, n);
+    if (problem) { setNameErr(problem); return; }
     setBusy(true);
     try {
       const metadata = window.buildPlayerMetadata(isTeam ? "" : dan.trim(), player.metadata);
@@ -626,8 +659,9 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
       {idLess && <p className="rd-edit__note">{NO_ID_HINT}</p>}
       <div className="rd-walkup__grid">
         <label className="field">
-          <span className="field__label">{isTeam ? "Team name" : "Name"}</span>
-          <input className="input" maxLength={100} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          <span className="field__label">{nameField.label}</span>
+          <input className="input" maxLength={100} value={name} onChange={(e) => { setName(e.target.value); setNameErr(""); }} placeholder={nameField.placeholder} aria-invalid={nameErr ? "true" : undefined} autoFocus />
+          {nameErr && <span className="field__error" role="alert">{nameErr}</span>}
         </label>
         <label className="field">
           <span className="field__label">Dojo</span>

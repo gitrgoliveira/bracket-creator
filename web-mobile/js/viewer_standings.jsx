@@ -116,13 +116,15 @@ export function poolMatchesSignature(poolMatches) {
   }).join("|");
 }
 
-// Module-private thead shared by LeagueStandingsViewer and PoolsViewer.
+// Module-private thead shared by the Swiss, league and pool standings tables.
 // The three-way branch (isEngi / isTeam / individual) is byte-identical in
-// both consumers; extracted here to keep them in sync automatically.
-function StandingsTableHead({ isEngi, isTeam }) {
+// all consumers; extracted here to keep them in sync automatically.
+// isSolo: an engi side that is one competitor (competition.engiSolo) heads its
+// name column "Player", as an individual table does; a pair side heads "Pair".
+function StandingsTableHead({ isEngi, isTeam, isSolo = false }) {
   if (isEngi) {
     return (
-      <tr><th scope="col">#</th><th scope="col">Pair</th><th className="num" scope="col"><abbr title="Victories (bouts won)">V</abbr></th><th className="num" scope="col"><abbr title="Total flags received">Flags</abbr></th></tr>
+      <tr><th scope="col">#</th><th scope="col">{isSolo ? "Player" : "Pair"}</th><th className="num" scope="col"><abbr title="Victories (bouts won)">V</abbr></th><th className="num" scope="col"><abbr title="Total flags received">Flags</abbr></th></tr>
     );
   }
   if (isTeam) {
@@ -175,6 +177,7 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   // tie-break data the backend now tallies (mp-8pba), instead of the
   // individual W/L/D/PW/PL shape that renders zeros for both.
   const isEngi = !!c.engi;
+  const isSolo = isEngi && !!c.engiSolo;
   const isTeam = !isEngi && (c.teamSize || 0) > 0;
   const emptyColSpan = isEngi ? 4 : isTeam ? 10 : 7;
   const rankedBy = isEngi
@@ -199,9 +202,9 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
         <table className="pool__table">
           <thead>
             {/* Head-to-head is a tiebreaker between equal-wins-and-points */}
-            {/* pairs; surfaced in the caption below. The backend resolves */}
+            {/* sides; surfaced in the caption below. The backend resolves */}
             {/* head-to-head into the stable rank value used for row order. */}
-            <StandingsTableHead isEngi={isEngi} isTeam={isTeam} />
+            <StandingsTableHead isEngi={isEngi} isTeam={isTeam} isSolo={isSolo} />
           </thead>
           <tbody>
             {standings.length > 0 ? standings.map((s, i) => {
@@ -218,7 +221,7 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
                           there are no draw positions to number from). */}
                       {pMember1}
                     </div>
-                    {/* Engi pair: member 2 (from the combined name) stacked below member 1. */}
+                    {/* Engi pair: member 2 (from the combined name) stacked below member 1; a solo side has no member 2. */}
                     {isEngi && pMember2 ? <div className="pool__player-name">{pMember2}</div> : null}
                     {tweaks?.showDojo ? <div className="pool__dojo-name">{s.player?.dojo || ""}</div> : null}
                   </td>
@@ -308,6 +311,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
 
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
   const isEngi = !!(competition && competition.engi);
+  const isSolo = isEngi && !!competition.engiSolo;
   const isCompleted = c.status === "completed";
   const winner = isCompleted && standings.length > 0 ? standings[0] : null;
 
@@ -353,7 +357,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
         <table className={`pool__table${isTeam ? " pool__table--team" : ""}`}>
           <caption className="pool__table-caption">Ranked by standings</caption>
           <thead>
-            <StandingsTableHead isEngi={isEngi} isTeam={isTeam} />
+            <StandingsTableHead isEngi={isEngi} isTeam={isTeam} isSolo={isSolo} />
           </thead>
           <tbody>
             {standings.length > 0 ? standings.map((s, i) => {
@@ -671,8 +675,10 @@ export function rankOrdinal(rank) {
 // sides and the formatted score string (via formatIpponsScore when completed).
 // sideB = Shiro (left), sideA = Aka (right): the SHIRO-left/AKA-right
 // convention shared across every surface (score_display.test.jsx).
-// isEngi: when true, each side is an engi pair (combined "Name 1 - Name 2") —
-// render member1 over member2 stacked, matching the engi score editor layout.
+// isEngi: when true, each side is an engi pair (combined "Name 1 - Name 2") or,
+// in a solo engi competition, one competitor. A pair renders member1 over
+// member2 stacked, matching the engi score editor layout; a one-name side
+// renders one line, since engiPairParts returns no second part for it.
 export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }) => {
   // Competitor numbers ride on the OUTER side of the name: Shiro's before it,
   // Aka's after it.
@@ -682,6 +688,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
   const bNum = m.sideB?.number || "";
   // Engi pair: the name holds both members combined ("Name 1 - Name 2");
   // split so member 2 stacks under member 1 (the number chip stays on line 1).
+  // A solo engi side holds one name and gets no second line.
   const [aName, aDN] = isEngi && window.engiPairParts ? window.engiPairParts(aFull) : [aFull, ""];
   const [bName, bDN] = isEngi && window.engiPairParts ? window.engiPairParts(bFull) : [bFull, ""];
 
@@ -836,6 +843,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
   // Engi-Kyogi (kata competition): flag-count scoring. Standings show
   // Victories (V) and total Flags columns only.
   const isEngi = !!(competition && competition.engi);
+  const isSolo = isEngi && !!competition.engiSolo;
   // FR-050 / FR-051: league competitions render Final standings instead of
   // pool standings, and surface a Winner badge once every match is complete.
   // Format check is value-based so older competitions without a Format
@@ -938,7 +946,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
               {/* Accessible caption whose wording matches the row ordering. */}
               <caption className="pool__table-caption">Listed in draw order; badge shows current rank</caption>
               <thead>
-                <StandingsTableHead isEngi={isEngi} isTeam={isTeam} />
+                <StandingsTableHead isEngi={isEngi} isTeam={isTeam} isSolo={isSolo} />
               </thead>
               <tbody>
                 {drawOrderPlayers.map((p, i) => {
@@ -979,7 +987,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                             </span>
                           ) : null}
                         </div>
-                        {/* Engi pair: member 2 (from the combined name) stacked below member 1. */}
+                        {/* Engi pair: member 2 (from the combined name) stacked below member 1; a solo side has no member 2. */}
                         {isEngi && pMember2 ? <div className="pool__player-name">{pMember2}</div> : null}
                         {tweaks.showDojo ? <div className="pool__dojo-name">{p.dojo}</div> : null}
                       </td>

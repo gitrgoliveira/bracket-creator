@@ -54,11 +54,17 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 			return
 		}
 
+		// engi and engiSolo let the form label its name field and ask the
+		// browser's engi entry rule (engi_entry.jsx) before it sends: a pair
+		// ("Name 1 - Name 2") or one competitor per side. engiSolo means
+		// something only with engi, as on the competition itself.
 		c.JSON(http.StatusOK, gin.H{
 			"id":             comp.ID,
 			"name":           comp.Name,
 			"withZekkenName": comp.WithZekkenName,
 			"status":         comp.Status,
+			"engi":           comp.Engi,
+			"engiSolo":       comp.EngiSolo,
 		})
 	})
 
@@ -118,8 +124,10 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 		}
 
 		// Strip displayName unless the zekken column is enabled, to avoid CSV
-		// mis-parse. Engi pairs store both member names combined in
-		// Player.Name, so DisplayName is only the zekken column value.
+		// mis-parse. An engi side is one participant whatever its shape: a
+		// pair's two member names are combined in Player.Name ("Name 1 -
+		// Name 2") and a solo side holds one name there, so DisplayName is
+		// only the zekken column value either way.
 		displayName := strings.TrimSpace(req.DisplayName)
 		if !comp.EffectiveWithZekkenName() {
 			displayName = ""

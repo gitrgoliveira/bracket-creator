@@ -188,18 +188,11 @@ var viewerLoadCompetition = func(store *state.Store, compID string) (*state.Comp
 // Non-nil payloads are returned in listing order; the returned slice is
 // non-nil even when empty so callers marshal [] rather than null.
 //
-// This form answers as the organiser reads it: no name is masked. The routes
-// call buildViewerCompetitionPayloadsFor with the caller's audience.
-func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]any, error) {
-	return buildViewerCompetitionPayloadsFor(store, courtFilter, nil, organiserAudience())
-}
-
-// buildViewerCompetitionPayloadsFor is buildViewerCompetitionPayloads for one
-// audience: each competition's payload goes through its mask view for aud
-// (names.view), so a competition that hides names answers numbers to the
-// public, its own names to a caller holding its links. names nil masks
-// nothing.
-func buildViewerCompetitionPayloadsFor(store *state.Store, courtFilter string, names *publicNames, aud audience) ([]any, error) {
+// Each competition's payload goes through its mask view for aud (names.view),
+// so a competition that hides names answers numbers to the public, its own
+// names to a caller holding its links. names nil masks nothing; the
+// organiser's audience reads every name.
+func buildViewerCompetitionPayloads(store *state.Store, courtFilter string, names *publicNames, aud audience) ([]any, error) {
 	ids, err := store.ListCompetitions()
 	if err != nil {
 		return nil, err
@@ -926,7 +919,7 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// On panic inside the elected build, sf.Do returns an error and
 		// all waiters receive it; we map that to 500 below.
 		data, err := sf.Do(viewerFlightKey("competitions", aud), func() ([]byte, error) {
-			comps, err := buildViewerCompetitionPayloadsFor(store, "", names, aud)
+			comps, err := buildViewerCompetitionPayloads(store, "", names, aud)
 			if err != nil {
 				return nil, err
 			}

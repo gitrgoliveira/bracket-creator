@@ -96,7 +96,7 @@ func TestViewerPayload_CourtQueueAcrossCompetitions(t *testing.T) {
 	}
 	require.NoError(t, store.SavePoolMatches("b", matchesB))
 
-	payloads, err := buildViewerCompetitionPayloads(store, "")
+	payloads, err := buildViewerCompetitionPayloads(store, "", nil, organiserAudience())
 	require.NoError(t, err)
 
 	bm1 := findPayloadMatch(payloads, "b", "b-m1")
@@ -111,7 +111,7 @@ func TestViewerPayload_CourtQueueAcrossCompetitions(t *testing.T) {
 	require.NotNil(t, am2)
 	assert.Equal(t, 3, am2.QueuePosition)
 
-	courtPayloads, err := buildViewerCompetitionPayloads(store, "A")
+	courtPayloads, err := buildViewerCompetitionPayloads(store, "A", nil, organiserAudience())
 	require.NoError(t, err)
 
 	bm1Feed := findPayloadMatch(courtPayloads, "b", "b-m1")
@@ -188,7 +188,7 @@ func TestViewerPayload_CourtQueueOtherDay(t *testing.T) {
 	}
 	require.NoError(t, store.SavePoolMatches("b", matchesB))
 
-	payloads, err := buildViewerCompetitionPayloads(store, "")
+	payloads, err := buildViewerCompetitionPayloads(store, "", nil, organiserAudience())
 	require.NoError(t, err)
 
 	am1 := findPayloadMatch(payloads, "a", "a-m1")

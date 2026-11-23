@@ -247,7 +247,7 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 			// comps is non-nil even when empty, so zero competitions
 			// marshals as [] not null (the wire shape the SPA and the
 			// regression test pin).
-			comps, err := buildViewerCompetitionPayloadsFor(store, court, names, aud)
+			comps, err := buildViewerCompetitionPayloads(store, court, names, aud)
 			if err != nil {
 				return nil, err
 			}

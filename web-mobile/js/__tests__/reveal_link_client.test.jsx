@@ -322,6 +322,40 @@ describe('api_client_events.jsx: the stream ticket', () => {
     unsub();
   });
 
+  it('a signed-in console asks no ticket before the tournament is read, and opens the public stream once it is self-run', async () => {
+    mods.events.setAudienceAndReconnect('admin', 'pw', false, false);
+    const unsub = mods.API.subscribeToEvents(() => {});
+    await flush();
+    expect(tickets).toHaveLength(0);
+    expect(FakeEventSource.instances).toHaveLength(0);
+    mods.events.setAudienceAndReconnect('admin', 'pw', true, true);
+    await flush();
+    expect(tickets).toHaveLength(0);
+    expect(FakeEventSource.instances.map((s) => s.url)).toEqual(['/api/events']);
+    unsub();
+  });
+
+  it('a signed-in console asks its ticket once the tournament read says it hides names', async () => {
+    mods.events.setAudienceAndReconnect('admin', 'pw', false, false);
+    const unsub = mods.API.subscribeToEvents(() => {});
+    await flush();
+    expect(tickets).toHaveLength(0);
+    mods.events.setAudienceAndReconnect('admin', 'pw', false, true);
+    await flush();
+    expect(tickets).toEqual([{ 'X-Tournament-Password': 'pw' }]);
+    expect(FakeEventSource.instances.map((s) => s.url)).toEqual(['/api/events?ticket=t1']);
+    unsub();
+  });
+
+  it('a public page opens the public stream at once, before the tournament is read', async () => {
+    mods.events.setAudienceAndReconnect('viewer', '', false, false);
+    const unsub = mods.API.subscribeToEvents(() => {});
+    await flush();
+    expect(tickets).toHaveLength(0);
+    expect(FakeEventSource.instances.map((s) => s.url)).toEqual(['/api/events']);
+    unsub();
+  });
+
   it('the organiser asks a ticket with the password, and a new one on every reconnect', async () => {
     mods.events.setAudienceAndReconnect('admin', 'pw');
     const unsub = mods.API.subscribeToEvents(() => {});

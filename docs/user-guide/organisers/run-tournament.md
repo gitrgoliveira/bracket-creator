@@ -67,6 +67,7 @@ Open **Edit details** from the dashboard to fill in the public information your 
 - A website link and an awards note
 - Free-text info notes (rules, transportation, access details)
 - Contact entries
+- In an officiated tournament, **Competitor names on public pages**: what the public sees for a competitor's name, and the starting choice for new competitions. Saving a new choice also sets every competition except a Swiss one, after you confirm the list of competitions it will change. Refer to [Hide competitor names from the public](hide-competitor-names.md).
 
 Set the **Public URL** field to the externally reachable address of your app (for example, `https://my-tournament.example.com`). Setting this field enables QR codes on competitor tags and makes every shareable link work. The public URL also populates the public info page in the viewer and on spectator display screens.
 
@@ -88,6 +89,8 @@ The same **Edit details** page also has branding and sponsor fields, below tourn
 ## Announcements
 
 Click **Announce** from the dashboard to broadcast a short message to every viewer. Choose a duration of 5, 10, 15, or 30 minutes; the message clears itself automatically when the time expires. It appears as an overlay on the viewer and display screens. Spectators who allow browser notifications can receive it in the background.
+
+While any competition hides competitor names, the announcement box carries a short warning: what you type is shown to everyone exactly as typed, and the app does not check it for names. The awards note in the tournament details carries the same warning. Refer to [Hide competitor names from the public](hide-competitor-names.md).
 
 Posting the same text again while it is still showing replaces the banner rather than adding a second one: viewers see one message, and its time starts again from the full duration.
 
@@ -146,6 +149,8 @@ Nothing is cleared while you are still deciding. When you pick a different
 format, a note appears under the control listing each setting the save will
 clear, with its current value, so you can see the cost before you commit.
 Switching back to the original format keeps them.
+
+In an officiated tournament, the **Settings** tab also holds **Competitor names on public pages**, with **Links stop working at** and, for the choices that have one, the **Competition link** to copy or print as a QR code. A Swiss competition does not offer it. Refer to [Hide competitor names from the public](hide-competitor-names.md).
 
 On a drawn competition, a **Date** or **Start time** change moves its matches. Refer to [Moving a competition on the calendar](#moving-a-competition-on-the-calendar) for how it waits for time changes still held on this device.
 
@@ -343,6 +348,8 @@ The lean container image omits LibreOffice and returns a clear message when a PD
 **Export PDFs** prints a competition with no draw yet the same way as the blank template: empty places, sized from the larger of the expected number of participants and everyone registered. A competition with no draw and fewer than two places to print, or whose settings cannot form a draw, is left out of the booklet. The dialog's warning box and the `SKIPPED-COMPETITIONS.txt` file in the download name it with the fix, for example setting the expected number of participants in its Settings. Every other competition still prints.
 
 When the **Public URL** is set and competitors have assigned numbers, each printed tag includes a QR code that opens the viewer and adds that competitor to the scanner's watchlist. Refer to [Hosting](../install/hosting.md) for guidance on setting the public URL.
+
+In a competition whose names are hidden with **a link per person**, a competitor's tag carries that competitor's own link in place of the watchlist link: scanning it follows the competitor and shows their name on that phone. Competitors on a competition with another choice keep the watchlist code. The **Participants** tab also offers **Copy reveal link** next to a name. Refer to [Hide competitor names from the public](hide-competitor-names.md#hand-out-the-links).
 
 ## Data format
 

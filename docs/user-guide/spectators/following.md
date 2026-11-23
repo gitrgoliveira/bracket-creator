@@ -83,6 +83,14 @@ Refer to [QR codes on competitor tags](#qr-codes-on-competitor-tags): if you hav
 
 If someone is entered in more than one competition, they have a separate number in each one, and the filter lists them once per competition. Searching either number finds them, and each result tells you which competition it belongs to.
 
+### When the organiser hides names
+
+An organiser can choose to show competitor numbers instead of names on the public pages. In that competition every competitor reads as their number, such as K12, on the schedule, the standings, the bracket, the court displays and the live updates. Dojo names and team names stay visible, and the members of a team read as a label built from the team's number. The competitor-number search above is then the way to find someone: type the number, prefix included, as printed on their tag. A name typed into the search finds nobody in that competition, though a dojo still matches.
+
+If you hold a link from the organiser, open it to see names. A link on a competitor's tag shows that competitor's name, and a team's link shows the names of that team's members. A competition link, shown at the venue as a QR code, shows every name in the competition. Your phone keeps the link, so the names stay shown on that phone until the link stops working: the organiser sets when that happens, and a link that has stopped says so and offers the competition by numbers. Open the link on a phone you trust, because it shows names to whoever uses that phone. Some competitions give no link at all, and show numbers only.
+
+Refer to [Hide competitor names from the public](../organisers/hide-competitor-names.md) for the organiser's side.
+
 ### Share your watchlist
 
 Your watchlist is kept on the device you built it on. It is not tied to an account, so it does not follow you to a second phone or survive clearing your browser data. To move it, or to hand it to someone else, use **Share** at the top of the watchlist card.
@@ -135,4 +143,4 @@ Scores entered by the operator appear on the viewer immediately, across every co
 When the organiser sets the tournament public URL, each printed competitor tag includes a personal QR code. Scanning it opens the viewer and adds that competitor to your watchlist, so their next match and results appear on the home screen. The code is a shared watchlist link with one competitor in it: it adds to whatever you already watch and never removes anyone. If that competitor's competition is still loading when you scan, they are added as soon as it loads.
 
 !!! tip
-    The code only works once the organiser has configured a public URL for the tournament. If scanning your tag does not open anything, ask the organiser for the tournament URL and add yourself to the watchlist by name or number instead.
+    If the competition hides names and gives a link per person, the code on the tag is that competitor's own link: scanning it follows the competitor and shows their name on your phone. A competition that hides names with no per-person link keeps the watchlist code on its tags. The code only works once the organiser has configured a public URL for the tournament. If scanning your tag does not open anything, ask the organiser for the tournament URL and add yourself to the watchlist by name or number instead.

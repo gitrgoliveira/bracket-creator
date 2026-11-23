@@ -85,6 +85,13 @@ let _ticketPending = false;
 // A ticket was refused for the organiser's password: nothing is retried until
 // the audience changes (setAudienceAndReconnect).
 let _credentialRefused = false;
+// Whether the page knows yet if its tournament shows every name
+// (setAudienceAndReconnect's `settled`). While it does not, a connect that
+// would ask for a ticket waits: asked of a self-run tournament, the ticket is
+// answered 400 event_ticket_not_needed, which the browser logs as an error on
+// every organiser page load. The public stream, which asks no ticket, opens
+// at once either way.
+let _audienceSettled = true;
 const EVENT_TICKET_NOT_NEEDED = 'event_ticket_not_needed';
 
 function _cancelTicket() {
@@ -170,6 +177,10 @@ function _ensureConnected() {
         _openSource(_eventsUrl());
         return;
     }
+    // Whether the tournament shows every name is not known yet (its first
+    // read has not answered): no ticket is asked for until it is, since a
+    // self-run tournament gives none (setAudienceAndReconnect connects then).
+    if (!_audienceSettled) return;
     const gen = ++_ticketGen;
     _ticketPending = true;
     _credentialRefused = false;
@@ -417,8 +428,14 @@ export const eventsApi = {
 // stream is never left masked, or unmasked, for the old audience. True when
 // the credential changed. `everyName`: the tournament shows every name (a
 // self-run one, setReadAudience), where the stream is never reopened.
-export function setAudienceAndReconnect(kind, password, everyName = false) {
+// `settled` false: the page does not know `everyName` yet (its tournament has
+// not been read), so a connect that would ask for a ticket waits, and the
+// first call that settles it connects whoever is subscribed.
+export function setAudienceAndReconnect(kind, password, everyName = false, settled = true) {
+    const wasSettled = _audienceSettled;
+    _audienceSettled = settled !== false;
     const changed = setReadAudience(kind, password, everyName);
     if (changed && (_sharedSource || _ticketPending || _retryTimer || _credentialRefused)) _reconnectEvents();
+    else if (_audienceSettled && !wasSettled) _ensureConnected();
     return changed;
 }

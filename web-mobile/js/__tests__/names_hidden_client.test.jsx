@@ -20,7 +20,7 @@ import {
 import { watchlistTokens, resolveWatchlistTokens } from '../watchlist_link.jsx';
 import { NumberedName } from '../numbered_name.jsx';
 import { sideLabel } from '../display_helpers.jsx';
-import { buildPlayerMap, normalizeMatch } from '../api_serializers.jsx';
+import { buildPlayerMap, normalizeMatch, normalizeCompetitionDetail } from '../api_serializers.jsx';
 import { collectText } from './helpers/vdom.js';
 
 function jsonOnce(body) {
@@ -82,6 +82,20 @@ describe('the aggregate read stamps nameHidden', () => {
     global.fetch = jsonOnce([it0]);
     const comps = await API.fetchCompetitions();
     expect(comps[0].players.some((p) => nameHidden(p))).toBe(false);
+  });
+});
+
+describe('the competition detail carries the marker on its config', () => {
+  // The public competition page renders off `config`, and its names-hidden
+  // note reads `config.namesHidden`: the marker, a sibling of config on the
+  // wire, is copied onto it.
+  it('a marked detail marks its config', () => {
+    expect(normalizeCompetitionDetail(hiddenItem()).config.namesHidden).toBe(true);
+  });
+  it('an unmarked detail leaves its config unmarked', () => {
+    const it0 = hiddenItem();
+    delete it0.namesHidden;
+    expect(normalizeCompetitionDetail(it0).config.namesHidden).toBeUndefined();
   });
 });
 

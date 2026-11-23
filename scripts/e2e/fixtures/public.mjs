@@ -119,6 +119,43 @@ export const nowCard = (page) => page.locator('.match-detail-card').filter({ has
 // The match card (MatchViewerModal): a dialog named "Match: <shiro> vs <aka>".
 export const matchCard = (page) => page.getByRole('dialog', { name: /^Match:/ });
 
+// ------------------------------------------------------- hidden names --
+//
+// A competition can show competitor numbers instead of names on the public
+// pages (public_names_fields.jsx). A name is hidden only when it is nowhere in
+// the page: not in its text, and not in an attribute a screen reader or a
+// tooltip reads (aria-label, title, alt), so these read the body's markup.
+
+// Which of `names` the page holds anywhere in its body, in the order given.
+export async function namesOnPage(page, names) {
+  const html = await page.locator('body').evaluate((b) => b.outerHTML);
+  return names.filter((n) => html.includes(n));
+}
+
+// The competitor numbers with this prefix the page shows, each once, sorted.
+export async function numbersOnPage(page, prefix) {
+  const text = await page.locator('body').innerText();
+  const found = text.match(new RegExp(`\\b${prefix}\\d+\\b`, 'g')) || [];
+  return [...new Set(found)].sort(NATURAL);
+}
+
+// The competition page's line saying its names are hidden.
+export const namesHiddenNote = (page) => page.getByTestId('names-hidden-note');
+
+// The page a reveal link opens when it cannot open the competition: the link
+// lost its key, or it shows no names now (switched off, the other kind, or
+// past its time).
+export const revealPage = (page) => page.getByTestId('reveal-page');
+
+// Open a reveal link (/reveal/<competition>#<key>) and return once the page
+// has moved on to the competition it reveals.
+export async function openRevealLink(page, url) {
+  const compId = decodeURIComponent(new URL(url).pathname.split('/')[2]);
+  await page.goto(url);
+  await expect(page).toHaveURL(new RegExp(`/competition/${compId}$`));
+  await expect(page.locator('.viewer__body')).toBeVisible();
+}
+
 // A card's ippon slots: two per side, each holding a letter once scored and
 // nothing before. Wait for all four before a single read that expects none,
 // since a slot not yet rendered also reads as nothing.

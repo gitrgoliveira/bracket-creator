@@ -603,10 +603,13 @@ function App() {
   // page is trying again (the reload effect below).
   const [audienceReadFailed, setAudienceReadFailed] = useState(false);
   // Set before any effect reads (a layout effect runs first), and the event
-  // stream reopened with a ticket for it when it changed.
+  // stream reopened with a ticket for it when it changed. Until the first read
+  // of the tournament answers (`undefined`), whether it shows every name is not
+  // known, so the stream asks no ticket yet (a self-run one gives none).
+  const audienceSettled = tournament !== undefined;
   useLayoutEffect(() => {
-    setAudienceAndReconnect(readKind, readCredential, everyName);
-  }, [readKind, readCredential, revealVersion, everyName]);
+    setAudienceAndReconnect(readKind, readCredential, everyName, audienceSettled);
+  }, [readKind, readCredential, revealVersion, everyName, audienceSettled]);
   const [reauthPrompt, setReauthPrompt] = useState(false);
   const [viewerCompId, setViewerCompId] = useState(initialRoute.viewerCompId || null);
   // mp-tidg: tab is lifted here (not inside ViewerCompetition) so that

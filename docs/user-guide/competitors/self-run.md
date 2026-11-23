@@ -18,6 +18,10 @@ When the tournament is self-run, a public self-registration page is open for ind
 
 If the form says someone with your name is already registered, your name and dojo are already on the list and you are done. A namesake from another dojo registers normally. If you are a different person with the same name at the same dojo, ask the organiser to add you.
 
+## Names on the public pages
+
+A self-run tournament always shows competitor names on the public pages, because you and the other competitors run the matches from them. An organiser cannot hide names in a self-run tournament, and a competition that was set to hide them shows names for as long as the tournament is self-run. Refer to [Operating modes](../organisers/operating-modes.md).
+
 ## Check-in
 
 Self-run mode has no check-in. There is nothing to mark on the day: the draw includes everyone on the roster, so make sure your name is on it before the organiser generates the draw.

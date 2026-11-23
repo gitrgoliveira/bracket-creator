@@ -550,6 +550,10 @@ function normalizeCompetitionDetail(data) {
         // the same reason, which the awards panel (rendered off config) sends
         // back with its save.
         config.awardsVersion = result.awardsVersion;
+        // The names-hidden marker, a sibling of config for the same reason
+        // again: the public competition page is rendered off config, and its
+        // note ("Names are hidden in this competition") reads it there.
+        if (hidden) config.namesHidden = true;
         result.config = config;
     }
 

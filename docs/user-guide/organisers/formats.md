@@ -63,6 +63,9 @@ Use Swiss for large individual fields where a full round-robin would require too
 !!! note
     Swiss is a format, not a status. A Swiss competition runs through the same lifecycle as mixed and league, but its rounds are generated one at a time rather than all at once.
 
+!!! note
+    A Swiss competition cannot hide competitor names from the public yet, because a Swiss draw gives competitors no numbers to show instead. The **Competitor names on public pages** field is not offered for it, and a tournament-wide choice leaves Swiss competitions as they are. The other three formats can hide names. Refer to [Hide competitor names from the public](hide-competitor-names.md).
+
 ### Swiss round flow
 
 Before play begins, set the number of rounds in the competition settings. You can change this number later, including after rounds have started; the next round you generate uses the updated number. Then follow these steps for each round:
@@ -76,6 +79,10 @@ Before play begins, set the number of rounds in the competition settings. You ca
 4. **Generate the next round.** Once all matches in the current round are complete, use the admin panel to generate the next round's pairings. The app refuses to generate a round while any match in the current round is unfinished, and it stops after the last round you set.
 
 Repeat steps 2 through 4 until all rounds are done.
+
+## Showing numbers instead of names
+
+Knockout, Mixed and League competitions can show competitor numbers instead of names on the public pages, for events that do not want every name read off a phone or a court display. The numbers come from the draw, so each of these formats has them. Refer to [Hide competitor names from the public](hide-competitor-names.md).
 
 ## Competition lifecycle
 

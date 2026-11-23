@@ -14,8 +14,8 @@ package mobileapp
 // kind, of another competition, of a hidden competition or past its expiry
 // reveals nothing. The organiser's answers and stream keep the real names,
 // so a masked label can never be saved back as a fighter's name. The Swiss
-// and self-run refusals hold, and the confirmed switch to self-run shows the
-// names everywhere again.
+// and self-run refusals hold, and a tournament made self-run over hiding
+// competitions asks nothing, changes nothing stored and shows every name.
 //
 // Shapes this test fixes ahead of the code (plan Design 2 and 5):
 //   - X-Reveal-Key: <compId>:<key>[,<compId>:<key>...]

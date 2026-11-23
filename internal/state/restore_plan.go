@@ -531,6 +531,7 @@ func planRestore(req RestoreRequest, ai *restoreArchiveInfo, live *restoreLiveSt
 	if tournament {
 		checkRestoreTournamentSettings(req, inPlace, ai, live, w)
 	}
+
 	checkRestorePrefixCollisions(entries, inPlace, ai, live, w)
 
 	if req.Undo && len(w.targets) == 0 && len(w.removed) == 0 && !tournament {

@@ -18,7 +18,7 @@ import { NOT_SENT_NO_CONNECTION } from './write_result.jsx';
 import { awardsBase } from './document_versions.jsx';
 import {
     normalizeViewerCompItem, parseSkippedCompetitionsHeader, _fetchJson, _directFetch,
-    readHeaders, readFailure, refuseMaskedForOrganiser,
+    readHeaders, readFailure,
 } from './api_client_requests.jsx';
 import { _serverNowMs } from './api_client_clock.jsx';
 import { _poolRanksBase } from './api_client_queue.jsx';
@@ -52,8 +52,7 @@ export const competitionsApi = {
     // aggregate takes, which can be long for a large tournament on a slow link.
     // Every viewer read here goes as the page reads (readHeaders, bc-hnam): the
     // password from an admin route, the reveal keys from a public page, nothing
-    // from a court board; an admin route's read that came back masked is
-    // refused (refuseMaskedForOrganiser).
+    // from a court board.
     async fetchCompetitions({ bounded = false } = {}) {
         if (bounded) {
             const { res, body } = await _fetchJson('/api/viewer/competitions', { headers: readHeaders() });
@@ -61,7 +60,6 @@ export const competitionsApi = {
             // _fetchJson reads an unreadable body as {}: never hand that on as
             // the competitions.
             if (!Array.isArray(body)) throw new Error('Failed to fetch competitions (unreadable answer)');
-            refuseMaskedForOrganiser(body);
             return body.map((c) => _overlayPendingFields(normalizeViewerCompItem(c)));
         }
         const res = await fetch('/api/viewer/competitions', { headers: readHeaders() });
@@ -71,7 +69,6 @@ export const competitionsApi = {
         }
         const comps = await res.json();
         if (!Array.isArray(comps)) return comps;
-        refuseMaskedForOrganiser(comps);
         // A court or time this device still has queued shows (R4).
         return comps.map((c) => _overlayPendingFields(normalizeViewerCompItem(c)));
     },
@@ -92,7 +89,6 @@ export const competitionsApi = {
         }
         const data = await res.json();
         const comps = Array.isArray(data.competitions) ? data.competitions : [];
-        refuseMaskedForOrganiser(comps);
         return comps.map((c) => _overlayPendingFields(normalizeViewerCompItem(c)));
     },
     async fetchCompetitionDetails(id) {
@@ -106,7 +102,6 @@ export const competitionsApi = {
             throw e;
         }
         const data = await res.json();
-        refuseMaskedForOrganiser(data);
         return _overlayPendingFields(normalizeCompetitionDetail(data), id);
     },
     async updateCompetition(id, config, password) {
@@ -559,7 +554,6 @@ export const competitionsApi = {
             const err = await res.json().catch(() => ({}));
             throw readFailure(res.status, err.error || "Failed to load league standings");
         }
-        // A bare array with no namesHidden marker: nothing for refuseMaskedForOrganiser to read.
         return res.json();
     },
     // bc-obox C1/C2: a check-in tap (checkedIn true) or its undo (false), an
@@ -644,7 +638,7 @@ export const competitionsApi = {
     async fetchCompetitorStatuses(compID) {
         const res = await fetch(`/api/competitions/${compID}/competitor-status`, { headers: readHeaders() });
         if (!res.ok) throw readFailure(res.status, "", "competitor statuses");
-        const data = refuseMaskedForOrganiser(await res.json());
+        const data = await res.json();
         return data.statuses || [];
     },
     async reinstateCompetitor(compID, playerID, password, opts = {}) {
@@ -711,7 +705,7 @@ export const competitionsApi = {
             const err = await res.json().catch(() => ({}));
             throw readFailure(res.status, err.error || `Failed to load league tie-breaker candidates (${res.status})`);
         }
-        return refuseMaskedForOrganiser(await res.json());
+        return res.json();
     },
     // chusenCandidates: GET /competitions/:id/chusen-candidates
     // Consequential team-pool ties the daihyosen could not settle; the operator

@@ -294,12 +294,6 @@ function _readMintedMembers({ id, c, t }, password) {
         // not usable yet and is retried (_sendEntry), so it is a failed try
         // below (Z4).
         if (res.status === 401) return MINTED_READ_AUTH_REFUSED;
-        // A list masked for the public (bc-hnam) names members by their labels,
-        // not their names: it proves nothing about a member's name, so it is a
-        // failed read, never compared. The public competition read is masked
-        // only where names are hidden, which a self-run tournament never does,
-        // and the organiser's door is never masked.
-        if (body && body.namesHidden) throw new Error('the member list came back with names hidden');
         const teams = res.ok && body && body.teamMembers;
         if (!teams || typeof teams !== 'object') throw new Error(`no member list (HTTP ${res.status})`);
         return Array.isArray(teams[t]) ? teams[t] : [];

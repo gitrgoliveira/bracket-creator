@@ -15,7 +15,7 @@
 import { NOT_SENT_NO_CONNECTION } from './write_result.jsx';
 import { TOURNAMENT_BASE, tournamentRefusal } from './document_versions.jsx';
 import {
-    _directFetch, _backupRequest, _backupFilename, _restoreForm, readHeaders, readFailure, refuseMaskedForOrganiser,
+    _directFetch, _backupRequest, _backupFilename, _restoreForm, readHeaders, readFailure,
 } from './api_client_requests.jsx';
 import { _serverNowMs } from './api_client_clock.jsx';
 import { _dequeue, _entriesFor } from './api_client_queue.jsx';
@@ -70,7 +70,7 @@ export const tournamentApi = {
             throw readFailure(res.status, err.error, 'tournament');
         }
         // A settings save this device still has queued shows (G4b).
-        return overlayPendingTournament(refuseMaskedForOrganiser(await res.json()));
+        return overlayPendingTournament(await res.json());
     },
     // Public endpoint: returns {mode: "file"|"locked", resetEnabled: bool}.
     // Mounted on App() boot to decide whether to render the "Forgot

@@ -51,8 +51,8 @@ info:
     - **The public**: no credential. Names read as the competitor's number.
 
     A password sent but wrong is `401` (`invalid admin password`), never the masked
-    view. A masked payload carries `namesHidden: true` (absent otherwise), so an
-    organiser surface can refuse to save a masked label as a fighter's name. Every
+    view. A masked payload carries `namesHidden: true` (absent otherwise), so the
+    public pages can tell a number shown in a name's place from a name. Every
     answer of these reads varies by caller and is sent `Cache-Control: no-store`
     with `Vary: X-Tournament-Password, X-Reveal-Key`. `X-Reveal-Key` is in the CORS
     allow-list. Free text (announcements, the awards note) is shown as typed: the
@@ -8223,8 +8223,8 @@ components:
       description: >
         The marker a masked answer carries. A competition that hides names
         answers the public with each name replaced by the competitor's number,
-        and the answer says so, so an organiser surface can refuse to save a
-        masked label as a name.
+        and the answer says so, so the public pages can tell a number shown in
+        a name's place from a name.
       properties:
         namesHidden:
           type: boolean

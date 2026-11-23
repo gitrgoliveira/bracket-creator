@@ -144,27 +144,6 @@ export function readHeaders() {
     return keys ? { 'X-Reveal-Key': keys } : {};
 }
 
-// NAMES_HIDDEN_FOR_ORGANISER: what an organiser's read is refused with when
-// the answer came back masked anyway. The server never masks a valid
-// password's read (a wrong one is 401), so this is a guard, never a flow: an
-// admin surface must not hold numbers where names go, or a save would store a
-// number as a fighter's name.
-export const NAMES_HIDDEN_FOR_ORGANISER = 'This page was sent the public view, with competitor names hidden, so it is not shown here. Reload the page, or sign in again.';
-
-// refuseMaskedForOrganiser throws when a read made as the organiser came back
-// marked `namesHidden` (the whole payload, or any item of a list); otherwise
-// it returns the payload untouched.
-export function refuseMaskedForOrganiser(payload) {
-    if (!readsAsOrganiser() || !payload) return payload;
-    const items = Array.isArray(payload) ? payload : [payload];
-    if (items.some((p) => p && p.namesHidden)) {
-        const e = new Error(NAMES_HIDDEN_FOR_ORGANISER);
-        e.code = 'names_hidden';
-        throw e;
-    }
-    return payload;
-}
-
 // ---------------------------------------------------------------------------
 // F1: fetch with per-request timeout via AbortController
 // ---------------------------------------------------------------------------
@@ -651,11 +630,10 @@ export const LINEUP_NOT_REMOVED = 'The lineup was not removed';
 // editor on "Loading lineup…" until the browser gives up on the connection.
 // `saved: false` reads as null (lineupOrNull). Shared by fetchTeamLineup and
 // fetchLineupInForce. It reads as the page does (readHeaders): an admin route's
-// editor gets the fighters' names, and a masked answer is refused there.
+// editor gets the fighters' names.
 export async function _readLineup(url) {
     const { res, body } = await _fetchJson(url, { headers: readHeaders() });
     if (!res.ok) throw readFailure(res.status, body.error || "Failed to load lineup");
-    refuseMaskedForOrganiser(body);
     // An answer whose body could not be read comes back from _fetchJson as an empty
     // object, which cannot be told from one the server sent. A body with no keys is
     // refused here rather than read as no lineup, since an editor would then show an

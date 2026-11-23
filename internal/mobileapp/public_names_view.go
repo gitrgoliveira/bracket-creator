@@ -23,8 +23,8 @@ type maskView struct {
 func (v maskView) namesHidden() bool { return v.m != nil }
 
 // namesHiddenMark is embedded in a payload struct to carry the namesHidden
-// marker: true on every masked payload, so an organiser surface can refuse to
-// save a masked label as a name.
+// marker: true on every masked payload, so the public pages can tell a number
+// shown in a name's place from a name.
 type namesHiddenMark struct {
 	NamesHidden bool `json:"namesHidden,omitempty"`
 }

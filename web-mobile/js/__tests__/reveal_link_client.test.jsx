@@ -130,15 +130,6 @@ describe('api_client_requests.jsx: which credential a read carries', () => {
     expect(requests.readsEveryName()).toBe(false);
   });
 
-  it('an organiser read that came back masked is refused; a public one is not', async () => {
-    const { requests } = await fresh();
-    requests.setReadAudience('admin', 'pw');
-    expect(() => requests.refuseMaskedForOrganiser([{ id: 'c1' }, { id: 'c2', namesHidden: true }]))
-      .toThrow(requests.NAMES_HIDDEN_FOR_ORGANISER);
-    expect(requests.refuseMaskedForOrganiser({ id: 'c1' })).toEqual({ id: 'c1' });
-    requests.setReadAudience('viewer', '');
-    expect(requests.refuseMaskedForOrganiser({ namesHidden: true })).toEqual({ namesHidden: true });
-  });
 });
 
 describe('viewer_reveal.jsx: the reveal link', () => {

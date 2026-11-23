@@ -651,8 +651,8 @@ func maskStandings(v maskView, standings map[string][]state.PlayerStanding) map[
 }
 
 // stampNamesHidden sets payload["namesHidden"] on a payload built through a
-// masking view, so an organiser surface can refuse to save a masked label as
-// a fighter's name. It also lists, as "revealedCompetitors", the participants
+// masking view, so the public pages can tell a number shown in a name's place
+// from a name. It also lists, as "revealedCompetitors", the participants
 // whose names the caller's own per-person links reveal (a team's link names the
 // team, whose members then read by name), which the reveal page follows: the
 // caller already holds the keys that prove each, so the list tells it nothing

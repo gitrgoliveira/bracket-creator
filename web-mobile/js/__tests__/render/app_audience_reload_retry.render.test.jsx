@@ -81,4 +81,30 @@ describe('a failed read as a new audience is tried again (bc-hnam)', () => {
       logged.mockRestore();
     }
   });
+
+  it('does not report a read the audience moved away from as a failed one', async () => {
+    const api = STUBBED_GLOBALS.API;
+    const normal = api.fetchTournament.getMockImplementation();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // The first read is in flight when the phone takes another reveal key:
+      // its answer is dropped, which is not a network failure. Every read
+      // after it stays pending, so nothing else can clear a notice.
+      let reads = 0;
+      api.fetchTournament.mockImplementation(async () => {
+        reads += 1;
+        if (reads > 1) return new Promise(() => {});
+        rememberRevealKey('c1', 'd'.repeat(64));
+        return { name: 'T', mode: 'file', courts: ['A'] };
+      });
+      await act(async () => { rememberRevealKey('c1', 'c'.repeat(64)); });
+      await settle();
+      expect(reads).toBeGreaterThan(1);
+      expect(shown()).toBe(false);
+      expect(document.body.textContent).not.toContain('Connection interrupted');
+    } finally {
+      api.fetchTournament.mockImplementation(normal);
+      logged.mockRestore();
+    }
+  });
 });

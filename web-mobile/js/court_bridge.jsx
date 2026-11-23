@@ -344,13 +344,19 @@ function maskNode(node, ctx) {
         const name = node[f];
         if (typeof name !== 'string' || !name) continue;
         let found = '';
+        let carriesId = false;
         for (const ik of idKeys) {
-            if (node[ik] != null && node[ik] !== '' && ctx.byId.has(String(node[ik]))) {
+            if (node[ik] == null || node[ik] === '') continue;
+            carriesId = true;
+            if (ctx.byId.has(String(node[ik]))) {
                 found = ctx.byId.get(String(node[ik]));
                 break;
             }
         }
-        if (!found && ctx.byName.has(name)) {
+        // A side that carries an id is resolved by it alone: an id the roster
+        // does not hold reads "?", as the server's mask reads it. The name arm
+        // is for a legacy row with no id.
+        if (!found && !carriesId && ctx.byName.has(name)) {
             found = ctx.clashing.has(name) ? '?' : ctx.byName.get(name);
         }
         if (found) out[f] = found;

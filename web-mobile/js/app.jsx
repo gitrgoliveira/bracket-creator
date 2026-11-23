@@ -37,6 +37,11 @@ const AppRouter = window.AppRouter || null;
 // audience failed (the reload effect in App).
 const AUDIENCE_RETRY_MS = 3000;
 
+// What load() answers for a read the page's audience moved away from while it
+// was in flight: neither an answer to keep nor an outage to report. The change
+// of audience reads again.
+const READ_SUPERSEDED = "superseded";
+
 const THEME = {
   "accentColor": "#1d3557",
   "showDojo": true,
@@ -889,12 +894,14 @@ function App() {
   const load = async () => {
     // bc-hnam: an answer read as another audience than the page reads as by
     // the time it lands (the route changed meanwhile) is dropped: the change
-    // of audience reads again. It answers whether the page now holds an
-    // answer read as that audience (the reload effect below waits for one).
+    // of audience reads again. It answers true when the page now holds an
+    // answer read as that audience, READ_SUPERSEDED for a read dropped as
+    // above, and false for a read that failed (the reload effect below waits
+    // for the first, reports the last and ignores the middle one).
     const readAs = currentReadAudienceKey();
     try {
       const t = await window.API.fetchTournament();
-      if (currentReadAudienceKey() !== readAs) return false;
+      if (currentReadAudienceKey() !== readAs) return READ_SUPERSEDED;
       if (!t || t.error) {
         // null = no tournament configured yet: fetchTournament returns null for
         // the bootstrap state (a 200 with a null body on newer servers, or a 404
@@ -902,7 +909,7 @@ function App() {
         setTournament(null);
       } else {
         const comps = await window.API.fetchCompetitions();
-        if (currentReadAudienceKey() !== readAs) return false;
+        if (currentReadAudienceKey() !== readAs) return READ_SUPERSEDED;
         t.competitions = comps;
         // A display takes the fetch whole: no score editor reads it, and a
         // reload must discard its optimistic broadcast overlay (see below).
@@ -1605,7 +1612,7 @@ function App() {
     setSelectedCompData(null);
     const readAgain = () => {
       Promise.resolve(loadRef.current()).then((read) => {
-        if (cancelled) return;
+        if (cancelled || read === READ_SUPERSEDED) return;
         if (read) {
           setAudienceReadFailed(false);
           setDataAudience(audienceNow);

@@ -350,6 +350,29 @@ func TestPublicNames_TournamentDefaultAppliesAfterConfirmation(t *testing.T) {
 	assert.Equal(t, state.PublicNamesShown, f.comp(t, "c1").PublicNames)
 }
 
+// The competitions a default is applied to are listed once the save has landed,
+// not when it was judged: a competition created in between, which may have read
+// the old default, is set to the new one, and the judgement does not ask for a
+// confirmation it had no list for.
+func TestPublicNames_TheDefaultIsAppliedToACompetitionCreatedAfterItWasJudged(t *testing.T) {
+	f := newPublicNamesFixture(t, state.TournamentModeOfficiated)
+	stored, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	desired := *stored
+	desired.DefaultPublicNames = state.PublicNamesPerson
+
+	apply, refusal, err := judgePublicNamesDefault(f.store, stored, &desired, false)
+	require.NoError(t, err)
+	require.Nil(t, refusal, "no competition yet, so nothing to confirm")
+	require.True(t, apply, "the default has to be applied once it lands")
+
+	f.saveComp(t, &state.Competition{ID: "late", Name: "Late", Kind: "individual", Format: state.CompFormatKnockout})
+	changed, failure := applyPublicNamesDefault(f.store, desired.DefaultPublicNames)
+	assert.Nil(t, failure)
+	assert.True(t, changed)
+	assert.Equal(t, state.PublicNamesPerson, f.comp(t, "late").PublicNames)
+}
+
 // A Swiss competition left hiding names (a hand edit, a restore) is brought
 // back to showing them by a default that shows names, as any other is; only a
 // hiding default leaves Swiss out.

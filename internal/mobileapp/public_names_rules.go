@@ -131,17 +131,26 @@ func publicNamesDefaultTargets(comps []*state.Competition, v string) []publicNam
 	return targets
 }
 
-// applyPublicNamesDefault sets every competition in targets to the
-// public-names option v (the tournament default, or "" to show names), each
-// under its own lock, re-judged there (a competition switched to Swiss
-// meanwhile is not given a hiding option). It answers whether
-// any competition changed and the ids it could not change; a failure on one
-// competition does not stop the others, and a save of the same default with
-// confirmPublicNames again retries the rest.
-func applyPublicNamesDefault(store *state.Store, targets []publicNamesTarget, v string) (bool, []string) {
+// applyPublicNamesDefault lists the competitions the tournament default v
+// would change (v being the default a save has just landed, or "" to show
+// names) and sets each to it, each under its own lock, re-judged there (a
+// competition switched to Swiss meanwhile is not given a hiding option).
+// It lists them once the save has landed, so a competition created while
+// the save was in flight, which may have read the old default, is among them,
+// and one created afterwards takes the new default itself. It answers whether
+// any competition changed and, when it could not change every one, the answer
+// the handler writes; a failure on one competition does not stop the others,
+// and a save of the same default with confirmPublicNames again retries the
+// rest.
+func applyPublicNamesDefault(store *state.Store, v string) (bool, *publicNamesAnswer) {
+	comps, err := loadAllCompetitions(store)
+	if err != nil {
+		log.Printf("mobileapp: tournament default public names: list competitions: %v", err)
+		return false, publicNamesDefaultFailedAnswer(nil)
+	}
 	anyChanged := false
 	var failed []string
-	for _, target := range targets {
+	for _, target := range publicNamesDefaultTargets(comps, v) {
 		changed, err := store.UpdateCompetitionChanged(target.ID, func(current *state.Competition) (*state.Competition, error) {
 			if !publicNamesDefaultChanges(current, v) {
 				return nil, nil
@@ -158,7 +167,10 @@ func applyPublicNamesDefault(store *state.Store, targets []publicNamesTarget, v 
 		}
 		anyChanged = anyChanged || changed
 	}
-	return anyChanged, failed
+	if len(failed) > 0 {
+		return anyChanged, publicNamesDefaultFailedAnswer(failed)
+	}
+	return anyChanged, nil
 }
 
 // publicNamesAnswer is the refusal or failure a judgement hands back: the
@@ -190,8 +202,17 @@ func publicNamesSelfRunAnswer() *publicNamesAnswer {
 }
 
 // publicNamesDefaultFailedAnswer is the 500 for a tournament save that landed
-// while some competitions could not be set to its default.
+// while some competitions could not be set to its default (failed names them,
+// and is empty when the competitions could not be listed at all). Either way
+// `competitions` is a list, which is how the form knows to send the save again
+// confirmed.
 func publicNamesDefaultFailedAnswer(failed []string) *publicNamesAnswer {
+	if len(failed) == 0 {
+		return &publicNamesAnswer{http.StatusInternalServerError, gin.H{
+			"error":        "The tournament settings were saved, but the competitions could not be read to change them to the new default. Save again to retry.",
+			"competitions": []string{},
+		}}
+	}
 	return &publicNamesAnswer{http.StatusInternalServerError, gin.H{
 		"error":        fmt.Sprintf("The tournament settings were saved, but these competitions could not be changed to the new default: %s. Save again to retry.", strings.Join(failed, ", ")),
 		"competitions": failed,
@@ -200,7 +221,8 @@ func publicNamesDefaultFailedAnswer(failed []string) *publicNamesAnswer {
 
 // judgePublicNamesDefault judges a tournament save's default public-names
 // option (stored is the tournament as it stands, nil before the first save)
-// and answers the competitions the save is to set to it once it lands. A
+// and says whether the save is to set the competitions to it once it lands
+// (applyPublicNamesDefault lists them then). A
 // value that is not an option is 400; a hiding default in a self-run
 // tournament is 409 public_names_self_run (judged on a change only, so a
 // stored value the save leaves alone never locks the form, and is never
@@ -209,9 +231,9 @@ func publicNamesDefaultFailedAnswer(failed []string) *publicNamesAnswer {
 // them until confirmed. A first save counts as moving the default from
 // showing names, and takes the mode it chooses, so it too sets the
 // competitions already in the data folder.
-func judgePublicNamesDefault(store *state.Store, stored, t *state.Tournament, confirmed bool) ([]publicNamesTarget, *publicNamesAnswer, error) {
+func judgePublicNamesDefault(store *state.Store, stored, t *state.Tournament, confirmed bool) (bool, *publicNamesAnswer, error) {
 	if msg := validatePublicNamesValue("defaultPublicNames", t.DefaultPublicNames); msg != "" {
-		return nil, &publicNamesAnswer{http.StatusBadRequest, gin.H{"error": msg}}, nil
+		return false, &publicNamesAnswer{http.StatusBadRequest, gin.H{"error": msg}}, nil
 	}
 	// The mode cannot change on a later save (errModeImmutable), so the
 	// stored one is the mode this default lands in.
@@ -222,29 +244,30 @@ func judgePublicNamesDefault(store *state.Store, stored, t *state.Tournament, co
 	hides := state.PublicNamesHidesNames(t.DefaultPublicNames)
 	moved := t.DefaultPublicNames != storedDefault
 	if moved && hides && selfRun {
-		return nil, publicNamesSelfRunAnswer(), nil
+		return false, publicNamesSelfRunAnswer(), nil
 	}
 	if !moved && !confirmed {
-		return nil, nil, nil
+		return false, nil, nil
 	}
 	// A hiding default a self-run tournament already holds (hand-edited, or
 	// brought in by a restore) is left alone, as the refusal above leaves it
 	// on a save that does not move it, and so is never applied to the
 	// competitions: public names are for officiated tournaments only.
 	if hides && selfRun {
-		return nil, nil, nil
+		return false, nil, nil
 	}
-	comps, err := loadAllCompetitions(store)
-	if err != nil {
-		return nil, nil, err
+	if !confirmed {
+		comps, err := loadAllCompetitions(store)
+		if err != nil {
+			return false, nil, err
+		}
+		if targets := publicNamesDefaultTargets(comps, t.DefaultPublicNames); len(targets) > 0 {
+			return false, &publicNamesAnswer{http.StatusConflict, gin.H{
+				"error":        msgPublicNamesApply,
+				"code":         codePublicNamesApplyConfirm,
+				"competitions": targets,
+			}}, nil
+		}
 	}
-	targets := publicNamesDefaultTargets(comps, t.DefaultPublicNames)
-	if len(targets) > 0 && !confirmed {
-		return nil, &publicNamesAnswer{http.StatusConflict, gin.H{
-			"error":        msgPublicNamesApply,
-			"code":         codePublicNamesApplyConfirm,
-			"competitions": targets,
-		}}, nil
-	}
-	return targets, nil, nil
+	return true, nil, nil
 }

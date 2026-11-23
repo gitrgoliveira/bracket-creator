@@ -80,14 +80,20 @@ func setPublicNames(comp *state.Competition, v string) error {
 // (409) and on a Swiss competition (400). changed says whether the write
 // moves the option, formatChanged whether it moves the format: a write
 // answers only for what it introduces, so a stored value it leaves alone is
-// never refused (a hand-edited config.md stays editable). It answers the
-// status, code and sentence, or status 0 when the write may land.
+// never refused (a hand-edited config.md stays editable). A self-run
+// tournament judges nothing else: the option does nothing there (its public
+// pages show every name), so a stored hiding value left by a restore never
+// stands in the way of a format change. It answers the status, code and
+// sentence, or status 0 when the write may land.
 func publicNamesRefusal(publicNames, format string, changed, formatChanged bool, tourn *state.Tournament) (int, string, string) {
 	if !state.PublicNamesHidesNames(publicNames) {
 		return 0, "", ""
 	}
-	if changed && tourn.IsSelfRun() {
-		return http.StatusConflict, codePublicNamesSelfRun, msgPublicNamesSelfRun
+	if tourn.IsSelfRun() {
+		if changed {
+			return http.StatusConflict, codePublicNamesSelfRun, msgPublicNamesSelfRun
+		}
+		return 0, "", ""
 	}
 	if (changed || formatChanged) && format == state.CompFormatSwiss {
 		return http.StatusBadRequest, codePublicNamesSwiss, msgPublicNamesSwiss

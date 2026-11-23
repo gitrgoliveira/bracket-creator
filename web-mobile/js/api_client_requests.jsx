@@ -40,7 +40,7 @@ import { revealKeysHeader } from './reveal_key.jsx';
 // never shown to another. The event stream asks its ticket with the same
 // headers (api_client_events.jsx).
 const READ_KINDS = new Set(['admin', 'viewer', 'display']);
-const _audience = { kind: 'viewer', password: '' };
+const _audience = { kind: 'viewer', password: '', everyName: false };
 let _audienceSignature = '';
 
 function _readKind(kind) {
@@ -50,8 +50,12 @@ function _readKind(kind) {
 // readAudienceKey: which audience a page on `kind` (with `password` when the
 // organiser is signed in) reads as, for keying fetched state: "organiser",
 // "display", "reveal:<the keys held>" or "public". The password itself is not
-// in the key: a changed password reads the same names.
-export function readAudienceKey(kind, password) {
+// in the key: a changed password reads the same names. `everyName` is true in
+// a tournament that shows every name (tournamentShowsEveryName, a self-run
+// one), where every audience reads the same names: the key is then always
+// "public", so nothing fetched is read again as the route changes.
+export function readAudienceKey(kind, password, everyName = false) {
+    if (everyName) return 'public';
     const k = _readKind(kind);
     if (k === 'admin') return password ? 'organiser' : 'public';
     if (k === 'display') return 'display';
@@ -62,22 +66,32 @@ export function readAudienceKey(kind, password) {
 // setReadAudience: the credential every read sends from now on. True when it
 // differs from the one set before (another route, password or set of reveal
 // keys): the caller then reopens the event stream, whose ticket was asked with
-// the old one.
-export function setReadAudience(kind, password) {
+// the old one. Never true in a tournament that shows every name (`everyName`,
+// see readAudienceKey): its stream needs no ticket and carries every name to
+// every audience, so it stays open as it always did. Leaving such a tournament
+// (a restore) is a change.
+export function setReadAudience(kind, password, everyName = false) {
     _audience.kind = _readKind(kind);
     _audience.password = _audience.kind === 'admin' ? (password || '') : '';
+    _audience.everyName = !!everyName;
     const keys = _audience.kind === 'viewer' ? revealKeysHeader() : '';
-    const signature = `${_audience.kind}\n${_audience.password}\n${keys}`;
+    const signature = `${_audience.kind}\n${_audience.password}\n${keys}\n${_audience.everyName}`;
     const changed = signature !== _audienceSignature;
     _audienceSignature = signature;
-    return changed;
+    return changed && !_audience.everyName;
 }
 
 // currentReadAudienceKey: the audience the reads sent now go as
 // (readAudienceKey of the credential last set). A read whose answer lands
 // after it moved is dropped by its caller (app.jsx load).
 export function currentReadAudienceKey() {
-    return readAudienceKey(_audience.kind, _audience.password);
+    return readAudienceKey(_audience.kind, _audience.password, _audience.everyName);
+}
+
+// readsEveryName: whether the tournament shows every name (setReadAudience's
+// everyName), where the event stream needs no ticket for any audience.
+export function readsEveryName() {
+    return _audience.everyName;
 }
 
 // readsAsOrganiser: whether this page's reads carry the organiser's password.

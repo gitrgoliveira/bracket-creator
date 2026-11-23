@@ -507,7 +507,7 @@ func leakHubHolds(h *Hub, want string) bool {
 	}
 	defer h.Unsubscribe(ch)
 	for _, e := range entries {
-		if strings.Contains(string(e.payload), want) {
+		if strings.Contains(e.payload, want) {
 			return true
 		}
 	}

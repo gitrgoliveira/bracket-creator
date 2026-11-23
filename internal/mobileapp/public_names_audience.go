@@ -128,21 +128,26 @@ func (a audience) competitionParts() []string {
 	return parts
 }
 
-// judge works out who a public read is answered for. Every answer it judges
-// varies by audience, so it is marked no-store (and Vary on both
-// credentials) before anything else is written. ok is false when the
+// judge works out who a public read is answered for. ok is false when the
 // response has been written: 401 for a password sent but wrong, 500 when the
 // password could not be checked.
 //
-// A self-run tournament hides no names (hides), so a password that is wrong
-// there is not refused: a device still holding an old one reads the public
-// pages as it did before names could be hidden, and is answered the public
-// view. A password that is right is the organiser's in either mode.
+// A self-run tournament hides no names (hides), so every caller there reads
+// the same answer and none is judged: it is answered as the public, with no
+// password checked and no header added, exactly as before names could be
+// hidden (a device still holding an old password, or a verifier that fails,
+// reads the public pages as it always did). In an officiated tournament every
+// answer varies by audience, so it is marked no-store (and Vary on both
+// credentials) before anything else is written, and a password that is right
+// is the organiser's.
 //
 // Reveal keys are judged only for a caller that is not the organiser. An
 // invalid, expired or wrong-kind key is dropped here, before any key is
 // formed from the audience, so it folds into the public.
 func (p *publicNames) judge(c *gin.Context) (audience, bool) {
+	if p.selfRun() {
+		return audience{}, true
+	}
 	c.Header("Cache-Control", "no-store")
 	c.Header("Vary", "X-Tournament-Password, "+revealKeyHeader)
 
@@ -155,10 +160,8 @@ func (p *publicNames) judge(c *gin.Context) (audience, bool) {
 		if valid {
 			return organiserAudience(), true
 		}
-		if !p.selfRun() {
-			respondInvalidPassword(c)
-			return audience{}, false
-		}
+		respondInvalidPassword(c)
+		return audience{}, false
 	}
 	return p.revealAudience(c.GetHeader(revealKeyHeader)), true
 }

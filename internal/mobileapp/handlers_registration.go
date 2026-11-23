@@ -17,11 +17,10 @@ import (
 //
 // Nothing here is judged for hidden names (bc-hnam, operator decision E5: sign-up
 // is unchanged: sign-up is self-run only, and the organiser always sees every
-// name). Only an officiated tournament may hide names: publicNamesRefusal
-// refuses the option in a self-run one and the switch to self-run shows names
-// again first, so a competition hiding names reaches these routes only through
-// a restore, whose plan warns the organiser to set it back
-// (public_names_self_run).
+// name). Only an officiated tournament may hide names, and a self-run one
+// shows every name whatever a competition's stored setting says
+// (Competition.HidesNamesIn), so a competition a restore left hiding names
+// changes nothing here.
 //
 // Routes:
 //

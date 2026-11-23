@@ -44,6 +44,28 @@ func TestPublicNames_Values(t *testing.T) {
 	assert.True(t, (&Competition{PublicNames: PublicNamesHidden}).HidesNames())
 }
 
+func TestHidesNamesIn(t *testing.T) {
+	hiding := &Competition{PublicNames: PublicNamesPerson}
+	officiated := &Tournament{Mode: TournamentModeOfficiated}
+	selfRun := &Tournament{Mode: TournamentModeSelfRun}
+	assert.True(t, hiding.HidesNamesIn(officiated))
+	assert.True(t, hiding.HidesNamesIn(nil), "a tournament that cannot be read counts as officiated")
+	assert.False(t, hiding.HidesNamesIn(selfRun), "a self-run tournament shows every name")
+	assert.Equal(t, PublicNamesPerson, hiding.PublicNames, "the stored setting is left as it is")
+	assert.False(t, (&Competition{}).HidesNamesIn(officiated))
+	var nilComp *Competition
+	assert.False(t, nilComp.HidesNamesIn(officiated))
+}
+
+func TestNewCompetitionPublicNames(t *testing.T) {
+	officiated := &Tournament{Mode: TournamentModeOfficiated, DefaultPublicNames: PublicNamesHidden}
+	selfRun := &Tournament{Mode: TournamentModeSelfRun, DefaultPublicNames: PublicNamesHidden}
+	assert.Equal(t, PublicNamesHidden, NewCompetitionPublicNames(officiated, CompFormatKnockout))
+	assert.Equal(t, PublicNamesShown, NewCompetitionPublicNames(officiated, CompFormatSwiss), "Swiss is not offered the option yet")
+	assert.Equal(t, PublicNamesShown, NewCompetitionPublicNames(selfRun, CompFormatKnockout), "a self-run tournament takes no hiding default")
+	assert.Equal(t, PublicNamesShown, NewCompetitionPublicNames(nil, CompFormatKnockout))
+}
+
 func TestValidRevealUntil(t *testing.T) {
 	assert.True(t, ValidRevealUntil(""))
 	assert.True(t, ValidRevealUntil("2026-11-22T18:30"))

@@ -71,26 +71,31 @@ func newPublicNames(store *state.Store, verifier PasswordVerifier) *publicNames 
 	}
 }
 
-// hides reports whether the public pages hide comp's names right now: its
-// setting hides them and the tournament is not self-run. A self-run
+// hides reports whether the public pages hide comp's names right now
+// (Competition.HidesNamesIn the tournament as it stands). A self-run
 // tournament always shows names, whatever a competition's setting says (a
-// restore can leave one that hides them), because its competitors score their
-// own matches and need them; the competition keeps its setting, so it hides
-// names again if it is restored into an officiated tournament (the mode of a
-// tournament cannot change once it is made). A tournament that cannot be read
-// counts as officiated, so the names stay hidden.
+// restore can leave one that hides them); the competition keeps its setting,
+// so it hides names again if it is restored into an officiated tournament
+// (the mode of a tournament cannot change once it is made). The tournament is
+// read only for a competition whose setting hides names.
 func (p *publicNames) hides(comp *state.Competition) bool {
-	if comp == nil || !comp.HidesNames() {
-		return false
-	}
-	return !p.selfRun()
+	return comp.HidesNames() && comp.HidesNamesIn(p.tournament())
 }
 
 // selfRun reports whether the tournament is self-run. A tournament that cannot
 // be read counts as officiated.
 func (p *publicNames) selfRun() bool {
+	return p.tournament().IsSelfRun()
+}
+
+// tournament is the tournament names are judged in, nil when it cannot be
+// read (it then counts as officiated, so the names stay hidden).
+func (p *publicNames) tournament() *state.Tournament {
 	t, err := p.store.LoadTournament()
-	return err == nil && t.IsSelfRun()
+	if err != nil {
+		return nil
+	}
+	return t
 }
 
 // view is the mask view for comp and aud. The error is the mask's build

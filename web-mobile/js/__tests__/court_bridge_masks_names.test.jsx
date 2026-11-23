@@ -264,14 +264,31 @@ describe('a patch published on the court channel', () => {
         _resetModuleStateForTests();
     });
 
-    function publishWith(comps, compId, payload) {
+    // slice is the court's slice the provider answers; comps every competition
+    // the tab holds.
+    function publishWith(comps, compId, payload, { mode = 'officiated', slice = comps } = {}) {
         global.BroadcastChannel = Channel;
         _resetModuleStateForTests();
         const b = openBridge();
-        setSnapshotProvider(() => comps, () => ({ mode: 'officiated' }));
+        setSnapshotProvider(() => slice, () => ({ mode }), () => comps);
         b.publish('patch', 'A', compId, payload);
         return Channel.last;
     }
+
+    it('is sent as it is by a self-run tournament, even for a competition the tab does not hold yet', () => {
+        const sent = publishWith(null, 'c1', { result: { id: 'M1', winner: 'Tanaka Kenji' } }, { mode: 'self-run', slice: null });
+        expect(sent.payload.result.winner).toBe('Tanaka Kenji');
+    });
+
+    it('is sent as it is by a competition that shows its names and has no match on the court yet', () => {
+        const sent = publishWith([individual('')], 'c1', { result: { id: 'M1', winner: 'Tanaka Kenji' } }, { slice: null });
+        expect(sent.payload.result.winner).toBe('Tanaka Kenji');
+    });
+
+    it('is masked for a hiding competition the court slice does not place', () => {
+        const sent = publishWith([individual('person')], 'c1', { result: { id: 'M1', winner: 'Tanaka Kenji' } }, { slice: null });
+        expect(sent.payload.result.winner).toBe('K1');
+    });
 
     it('leaves the tab masked for a competition that hides its names', () => {
         const sent = publishWith([individual('competition')], 'c1', { result: { id: 'M1', winner: 'Tanaka Kenji' } });

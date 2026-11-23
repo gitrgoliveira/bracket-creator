@@ -7,7 +7,7 @@
 // ES-imported and never script-tagged, like competition_fields.jsx.
 //
 import { PillGroup } from './competition_fields.jsx';
-import { FORMAT_SWISS, isTeamCompetition } from './competition_shape.jsx';
+import { FORMAT_SWISS, isTeamCompetition, tournamentShowsEveryName } from './competition_shape.jsx';
 import { useStableId } from './stable_id.jsx';
 import { andList } from './list_phrase.jsx';
 
@@ -53,10 +53,10 @@ export function publicNamesHides(v) {
 export function publicNamesHasLinks(v) {
   return v === "person" || v === "competition";
 }
-// Whether the option applies to this tournament at all: a self-run one always
-// shows names, whatever a competition's setting says.
+// Whether the option applies to this tournament at all: not to one that shows
+// every name (a self-run one, tournamentShowsEveryName).
 export function publicNamesApplies(tournament) {
-  return !(tournament && tournament.mode === "self-run");
+  return !tournamentShowsEveryName(tournament);
 }
 export function publicNamesLabel(v) {
   const o = PUBLIC_NAMES_OPTIONS.find((x) => x.value === (v || ""));

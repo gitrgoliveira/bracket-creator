@@ -15,7 +15,7 @@ import {
 import { noteServerBuild } from './app_version.jsx';
 import { _tellTurnedAway } from './api_client_taps.jsx';
 import { _forgetShownMatches, _forgetAllShownMatches } from './api_client_status.jsx';
-import { _fetchJson, readHeaders, setReadAudience, noteRefusedCredential } from './api_client_requests.jsx';
+import { _fetchJson, readHeaders, readsEveryName, setReadAudience, noteRefusedCredential } from './api_client_requests.jsx';
 
 // ---------------------------------------------------------------------------
 // Shared ref-counted SSE singleton
@@ -164,7 +164,9 @@ function _ensureConnected() {
     // and a ticket already asked for is that source on its way.
     if (_sharedSource || _ticketPending) return;
     const headers = readHeaders();
-    if (Object.keys(headers).length === 0) {
+    // A tournament that shows every name (a self-run one) gives no ticket:
+    // every device opens the public stream, as it always did.
+    if (readsEveryName() || Object.keys(headers).length === 0) {
         _openSource(_eventsUrl());
         return;
     }
@@ -413,9 +415,10 @@ export const eventsApi = {
 // (api_client_requests.jsx setReadAudience), and, when it changed while the
 // stream is open or opening, a new connection with a ticket for it, so the
 // stream is never left masked, or unmasked, for the old audience. True when
-// the credential changed.
-export function setAudienceAndReconnect(kind, password) {
-    const changed = setReadAudience(kind, password);
+// the credential changed. `everyName`: the tournament shows every name (a
+// self-run one, setReadAudience), where the stream is never reopened.
+export function setAudienceAndReconnect(kind, password, everyName = false) {
+    const changed = setReadAudience(kind, password, everyName);
     if (changed && (_sharedSource || _ticketPending || _retryTimer || _credentialRefused)) _reconnectEvents();
     return changed;
 }

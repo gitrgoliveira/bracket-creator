@@ -259,6 +259,18 @@ func TestPublicNames_SettingsPutRefusals(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		assert.Equal(t, "Kata Renamed", f.comp(t, "c1").Name)
 	})
+	t.Run("a self-run competition holding a hiding option switches to Swiss", func(t *testing.T) {
+		// The option does nothing in a self-run tournament, and its settings
+		// do not show it, so a value a restore left there never refuses a
+		// format change.
+		f := newPublicNamesFixture(t, state.TournamentModeSelfRun)
+		f.saveComp(t, &state.Competition{ID: "c1", Name: "Kata", Kind: "individual", Format: state.CompFormatKnockout, PublicNames: state.PublicNamesHidden})
+		w := f.admin(http.MethodPut, "/api/competitions/c1", map[string]any{"name": "Kata", "kind": "individual", "format": state.CompFormatSwiss, "swissRounds": 3, "courts": []string{"A"}})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		c1 := f.comp(t, "c1")
+		assert.Equal(t, state.CompFormatSwiss, c1.Format)
+		assert.Equal(t, state.PublicNamesHidden, c1.PublicNames, "the stored setting is left untouched")
+	})
 }
 
 func tournamentPutBody(t *testing.T, f publicNamesFixture, extra map[string]any) map[string]any {

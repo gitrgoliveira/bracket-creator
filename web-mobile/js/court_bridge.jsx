@@ -35,7 +35,7 @@
 // no regression.
 
 import { applyPatchToCompetitions as _applyPatchToCompetitions, matchInComp as _matchInComp } from './patch.jsx';
-import { competitionHidesNames, isTeamCompetition } from './competition_shape.jsx';
+import { competitionHidesNames, isTeamCompetition, tournamentShowsEveryName } from './competition_shape.jsx';
 import { squadMemberLabel } from './squad_member_label.jsx';
 
 // freshnessMs: the amber->red dot threshold.
@@ -557,26 +557,36 @@ export function maskPatchForBridge(payload, comp, tournament = null) {
 // tournamentFn (optional): () => the operator tab's tournament, which the
 //   snapshot's name mask asks whether names are shown (a self-run tournament
 //   always shows them).
+// competitionsFn (optional): () => every competition the tab holds, which an
+//   outgoing patch's name mask looks its competition up in (the court slice
+//   cannot place a competition that has no match on the court yet).
 // -----------------------------------------------------------------------
 let _snapshotProvider = null;
 let _snapshotTournament = null;
+let _snapshotCompetitions = null;
 
 // maskOutgoingPatch: the patch this tab publishes for compId, masked as the
-// snapshot is when the competition hides its names. The competition comes from
-// the registered provider's slice for the court; a tab with no provider holds
-// no tournament, and the patch goes as it is. With a provider, a competition it
-// cannot place gives null: the patch is not sent, since it could carry names,
-// and the display takes the server's copy at its next refresh.
-function maskOutgoingPatch(payload, court, compId) {
+// snapshot is when the competition hides its names. A tab with no provider
+// holds no tournament, and a tournament that shows every name (a self-run one)
+// hides nothing, so in both the patch goes as it is, as it always did. Otherwise
+// the competition is looked up among every competition the tab holds: one that
+// shows its names sends the patch as it is, and one the tab does not hold (yet)
+// gives null: the patch is not sent, since it could carry names, and the
+// display takes the server's copy at its next refresh.
+function maskOutgoingPatch(payload, compId) {
     if (!_snapshotProvider || !payload) return payload;
-    const comp = (_snapshotProvider(court) || []).find((c) => resolveCompId(c) === compId);
+    const tournament = _snapshotTournament ? _snapshotTournament() : null;
+    if (tournamentShowsEveryName(tournament)) return payload;
+    const comps = _snapshotCompetitions ? _snapshotCompetitions() : null;
+    const comp = (Array.isArray(comps) ? comps : []).find((c) => resolveCompId(c) === compId);
     if (!comp) return null;
-    return maskPatchForBridge(payload, comp, _snapshotTournament ? _snapshotTournament() : null);
+    return maskPatchForBridge(payload, comp, tournament);
 }
 
-export function setSnapshotProvider(fn, tournamentFn) {
+export function setSnapshotProvider(fn, tournamentFn, competitionsFn) {
     _snapshotProvider = typeof fn === 'function' ? fn : null;
     _snapshotTournament = typeof tournamentFn === 'function' ? tournamentFn : null;
+    _snapshotCompetitions = typeof competitionsFn === 'function' ? competitionsFn : null;
 }
 
 // Testing only: reset all module-level state so test suites that assert on
@@ -587,6 +597,7 @@ export function _resetModuleStateForTests() {
     _displayCourt = null;
     _snapshotProvider = null;
     _snapshotTournament = null;
+    _snapshotCompetitions = null;
 }
 
 // -----------------------------------------------------------------------
@@ -687,7 +698,7 @@ export function openBridge() {
         //   payload: message body
         publish(type, court, compId, payload) {
             try {
-                const outgoing = type === 'patch' ? maskOutgoingPatch(payload, court, compId) : payload;
+                const outgoing = type === 'patch' ? maskOutgoingPatch(payload, compId) : payload;
                 // A patch about a competition this tab cannot place, when it
                 // holds the tournament, is not sent: it could carry names.
                 if (type === 'patch' && payload && outgoing === null) return;

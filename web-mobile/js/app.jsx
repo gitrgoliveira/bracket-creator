@@ -12,7 +12,7 @@ import { PublicHeldWrites } from './held_writes_panel.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { tapWords } from './match_history_view.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
-import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
+import { SELF_RUN_NO_CHECK_IN, tournamentShowsEveryName } from './competition_shape.jsx';
 import { pushToast } from './toast_queue.jsx';
 import { queueMoveCourts, sharesCourtDay, sharesDay } from './court_queue.jsx';
 import { useCourtPaceLookup, PACE_TICK_MS } from './court_pace.jsx';
@@ -576,19 +576,25 @@ function App() {
   useEffect(() => onRevealKeysChange(() => setRevealVersion((v) => v + 1)), []);
   const readKind = mode === "display" ? "display" : (mode === "admin" && authed && password ? "admin" : "viewer");
   const readCredential = readKind === "admin" ? password : "";
+  // A self-run tournament shows every name to every audience, so none of the
+  // audience keeping below applies there: nothing is read again, no spinner
+  // shows and the event stream is not reopened as the route or the sign-in
+  // changes, exactly as before names could be hidden.
+  const everyName = tournamentShowsEveryName(tournament);
   // The audience the page's data must have been read as (a public page's
   // names the keys held, so a key taken in another tab is a new audience).
-  const audienceNow = readAudienceKey(readKind, readCredential);
+  const audienceNow = readAudienceKey(readKind, readCredential, everyName);
   // The audience the competitions held now were read as: the page shows them
   // only while it is audienceNow (see the reload effect below), so names read
   // on an admin route never show on the public page of the same laptop, nor
   // numbers on the admin route the operator saves from.
   const [dataAudience, setDataAudience] = useState(audienceNow);
+  const dataReadAsNow = everyName || dataAudience === audienceNow;
   // Set before any effect reads (a layout effect runs first), and the event
   // stream reopened with a ticket for it when it changed.
   useLayoutEffect(() => {
-    setAudienceAndReconnect(readKind, readCredential);
-  }, [readKind, readCredential, revealVersion]);
+    setAudienceAndReconnect(readKind, readCredential, everyName);
+  }, [readKind, readCredential, revealVersion, everyName]);
   const [reauthPrompt, setReauthPrompt] = useState(false);
   const [viewerCompId, setViewerCompId] = useState(initialRoute.viewerCompId || null);
   // mp-tidg: tab is lifted here (not inside ViewerCompetition) so that
@@ -1079,7 +1085,7 @@ function App() {
         return false;
       });
       return slice.length > 0 ? slice : null;
-    }, () => tournamentRef.current);
+    }, () => tournamentRef.current, () => compsRef.current);
     return () => setSnapshotProvider(null);
   }, [mode]);
 
@@ -1579,7 +1585,7 @@ function App() {
   // or out, the phone took a reveal key). They are dropped, never shown, and
   // read again; the page shows the spinner meanwhile (the gate below).
   useEffect(() => {
-    if (dataAudience === audienceNow) return undefined;
+    if (dataReadAsNow) return undefined;
     let cancelled = false;
     setTournament((prev) => (prev && Array.isArray(prev.competitions) ? { ...prev, competitions: [] } : prev));
     setSelectedCompData(null);
@@ -1587,7 +1593,7 @@ function App() {
       if (!cancelled) setDataAudience(audienceNow);
     });
     return () => { cancelled = true; };
-  }, [audienceNow, dataAudience, loadRef]);
+  }, [audienceNow, dataAudience, dataReadAsNow, loadRef]);
 
   const requestAdmin = () => {
     if (authed) {
@@ -1663,7 +1669,7 @@ function App() {
   if (loading && !selectedCompData) return <window.LoadingSpinner text="Loading..." />;
   // bc-hnam: data read as another audience is never shown; it is being read
   // again as this one (the reload effect above).
-  if (dataAudience !== audienceNow) return <window.LoadingSpinner text="Loading..." />;
+  if (!dataReadAsNow) return <window.LoadingSpinner text="Loading..." />;
 
   // Gate ALL rendering on the initial data load. The spinner stays visible
   // until both fetchTournament and fetchAuthConfig have resolved (setting

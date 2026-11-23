@@ -17,9 +17,9 @@ import (
 // no secret-derived key is ever printed for any other option. nil otherwise,
 // and the tags keep the watchlist link (a number only). A self-run tournament
 // hides no names on its public pages, whatever a competition's stored setting
-// says, so its tags keep the watchlist link too.
+// says (Competition.HidesNamesIn), so its tags keep the watchlist link too.
 func tagReveal(comp *state.Competition, tourn *state.Tournament) *helper.TagReveal {
-	if comp == nil || tourn.IsSelfRun() || comp.PublicNames != state.PublicNamesPerson {
+	if comp == nil || comp.PublicNames != state.PublicNamesPerson || !comp.HidesNamesIn(tourn) {
 		return nil
 	}
 	return &helper.TagReveal{

@@ -457,53 +457,6 @@ func checkRestorePrefixCollisions(
 	}
 }
 
-// checkRestorePublicNames warns about a competition that hides competitor
-// names under a self-run tournament, which only an officiated one may do. The
-// tournament it judges is the one the restore leaves: the archive's when the
-// whole tournament is restored, the running one when only competitions are
-// (so a competition-scope restore, or one with --only, is warned too). The
-// restore still goes ahead and changes nothing.
-func checkRestorePublicNames(tournament bool, inPlace []string, ai *restoreArchiveInfo, live *restoreLiveState, w *restoreWork) {
-	tourn, who := live.tourn, "the tournament"
-	if tournament {
-		tourn, who = ai.tourn, "the restored tournament"
-	}
-	if tourn == nil {
-		return
-	}
-	resulting := *tourn
-	ApplyTournamentDefaults(&resulting)
-	if !resulting.IsSelfRun() {
-		return
-	}
-	warnHidden := func(id, name string, c *Competition) {
-		if c == nil || !c.HidesNames() {
-			return
-		}
-		w.plan.Warnings = append(w.plan.Warnings, RestoreWarning{
-			Code:          RestoreWarnPublicNamesSelfRun,
-			CompetitionID: id,
-			Message:       fmt.Sprintf("%s hides competitor names, but %s is self-run, and only an officiated tournament may hide names. Set its public names option back to showing names in its settings.", name, who),
-		})
-	}
-	for _, t := range w.targets {
-		name := ai.names[t.srcID]
-		if t.action == RestoreCopy {
-			name = t.name // the copy is what comes back, under its new name
-		}
-		warnHidden(t.dstID, name, ai.comps[t.srcID])
-	}
-	for _, id := range inPlace {
-		warnHidden(id, competitionName(live, id), live.comps[id])
-	}
-	if tournament && PublicNamesHidesNames(resulting.DefaultPublicNames) {
-		w.plan.Warnings = append(w.plan.Warnings, RestoreWarning{
-			Code:    RestoreWarnPublicNamesSelfRun,
-			Message: "The restored tournament is self-run but its default public names option hides competitor names, which only an officiated tournament may do. Set the default back to showing names in the tournament settings.",
-		})
-	}
-}
-
 // planRestore computes the plan from the archive and the folder. It writes
 // nothing and takes no lock.
 func planRestore(req RestoreRequest, ai *restoreArchiveInfo, live *restoreLiveState) (*restoreWork, error) {
@@ -578,8 +531,6 @@ func planRestore(req RestoreRequest, ai *restoreArchiveInfo, live *restoreLiveSt
 	if tournament {
 		checkRestoreTournamentSettings(req, inPlace, ai, live, w)
 	}
-	checkRestorePublicNames(tournament, inPlace, ai, live, w)
-
 	checkRestorePrefixCollisions(entries, inPlace, ai, live, w)
 
 	if req.Undo && len(w.targets) == 0 && len(w.removed) == 0 && !tournament {

@@ -111,6 +111,25 @@ describe('api_client_requests.jsx: which credential a read carries', () => {
     expect(requests.currentReadAudienceKey()).toBe('organiser');
   });
 
+  it('a tournament that shows every name reads as one audience and never asks to reopen the stream', async () => {
+    const { keys, requests } = await fresh();
+    keys.rememberRevealKey('juniors', KEY_A);
+    expect(requests.readAudienceKey('admin', 'pw', true)).toBe('public');
+    expect(requests.readAudienceKey('viewer', '', true)).toBe('public');
+    expect(requests.setReadAudience('admin', 'pw')).toBe(true);
+    expect(requests.setReadAudience('admin', 'pw', true)).toBe(false);
+    expect(requests.setReadAudience('viewer', '', true)).toBe(false);
+    expect(requests.setReadAudience('admin', '', true)).toBe(false);
+    expect(requests.currentReadAudienceKey()).toBe('public');
+    expect(requests.readsEveryName()).toBe(true);
+    // The admin route still sends the password its own writes need.
+    expect(requests.setReadAudience('admin', 'pw', true)).toBe(false);
+    expect(requests.readHeaders()).toEqual({ 'X-Tournament-Password': 'pw' });
+    // Leaving such a tournament (a restore) is a change.
+    expect(requests.setReadAudience('admin', 'pw')).toBe(true);
+    expect(requests.readsEveryName()).toBe(false);
+  });
+
   it('an organiser read that came back masked is refused; a public one is not', async () => {
     const { requests } = await fresh();
     requests.setReadAudience('admin', 'pw');
@@ -280,6 +299,18 @@ describe('api_client_events.jsx: the stream ticket', () => {
     const unsub = mods.API.subscribeToEvents(() => {});
     await flush();
     expect(tickets).toHaveLength(1);
+    expect(FakeEventSource.instances.map((s) => s.url)).toEqual(['/api/events']);
+    unsub();
+  });
+
+  it('a tournament that shows every name opens the public stream with no ticket and keeps it as the route changes', async () => {
+    mods.events.setAudienceAndReconnect('admin', 'pw', true);
+    const unsub = mods.API.subscribeToEvents(() => {});
+    await flush();
+    expect(mods.events.setAudienceAndReconnect('viewer', '', true)).toBe(false);
+    expect(mods.events.setAudienceAndReconnect('admin', 'pw', true)).toBe(false);
+    await flush();
+    expect(tickets).toHaveLength(0);
     expect(FakeEventSource.instances.map((s) => s.url)).toEqual(['/api/events']);
     unsub();
   });

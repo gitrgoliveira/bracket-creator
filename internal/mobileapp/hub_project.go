@@ -137,14 +137,15 @@ func eventCompetitionID(data any, payload []byte) string {
 }
 
 // project is what sub's stream is sent for e: the event as broadcast for the
-// organiser, for an event that names no one, and for a competition that
-// shows names or whose names sub may see; a masked copy otherwise. Whatever
-// cannot be judged (an unknown event type, a masked event naming no
-// competition, a competition that cannot be read, a copy that cannot be
-// built) is sent with no data, never as broadcast.
+// organiser, in a self-run tournament (which hides no names, so every stream
+// is sent every event as it always was), for an event that names no one, and
+// for a competition that shows names or whose names sub may see; a masked
+// copy otherwise. Whatever cannot be judged (an unknown event type, a masked
+// event naming no competition, a competition that cannot be read, a copy that
+// cannot be built) is sent with no data, never as broadcast.
 func (h *Hub) project(e *historyEntry, sub *sseSubscriber) string {
 	names := h.names
-	if names == nil || sub == nil || sub.aud.isOrganiser() {
+	if names == nil || sub == nil || sub.aud.isOrganiser() || names.selfRun() {
 		return e.payload
 	}
 	spec, known := sseEventCatalogue[e.typ]

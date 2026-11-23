@@ -83,7 +83,10 @@ func judgeRequest(t *testing.T, pn *publicNames, headers map[string]string) (aud
 	return aud, ok, w
 }
 
-func TestJudge_SelfRunAnswersAWrongPasswordThePublicView(t *testing.T) {
+// A self-run tournament hides no names, so a public read there is answered as
+// it was before names could be hidden: whatever password is sent, none is
+// checked (a verifier that fails is never reached), and no header is added.
+func TestJudge_SelfRunJudgesNoPassword(t *testing.T) {
 	f := newPNFixture(t, state.PublicNamesCompetition)
 	stored, err := f.store.LoadTournament()
 	require.NoError(t, err)
@@ -91,13 +94,18 @@ func TestJudge_SelfRunAnswersAWrongPasswordThePublicView(t *testing.T) {
 	selfRun.Mode = state.TournamentModeSelfRun
 	require.NoError(t, f.store.SaveTournament(&selfRun))
 
-	aud, ok, w := judgeRequest(t, f.pn, map[string]string{"X-Tournament-Password": "wrong"})
+	for _, password := range []string{"wrong", "secret-pw"} {
+		aud, ok, w := judgeRequest(t, f.pn, map[string]string{"X-Tournament-Password": password})
+		require.True(t, ok, w.Body.String())
+		assert.Equal(t, "public", aud.key(), password)
+		assert.Empty(t, w.Header().Get("Cache-Control"), password)
+		assert.Empty(t, w.Header().Get("Vary"), password)
+	}
+
+	f.pn.verifier = errVerifier{NewFileVerifier(f.store)}
+	aud, ok, w := judgeRequest(t, f.pn, map[string]string{"X-Tournament-Password": "x"})
 	require.True(t, ok, w.Body.String())
 	assert.Equal(t, "public", aud.key())
-
-	aud, ok, _ = judgeRequest(t, f.pn, map[string]string{"X-Tournament-Password": "secret-pw"})
-	require.True(t, ok)
-	assert.True(t, aud.isOrganiser(), "the right password is still the organiser's")
 }
 
 func TestAudienceKeys(t *testing.T) {

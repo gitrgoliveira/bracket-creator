@@ -933,6 +933,16 @@ func TestHubProject_SelfRunStreamKeepsNames(t *testing.T) {
 	broadcastJuniorsResult(h)
 	e := lastEntry(t, h)
 	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}), "a self-run stream carries the names")
+
+	// Nothing fails closed in self-run, where nothing is hidden: an event
+	// naming a competition that cannot be read, and one of a type nobody
+	// classified, are sent as broadcast, as before names could be hidden.
+	h.Broadcast(EventMatchUpdated, gin.H{"competitionId": "ghost", "result": matchPtrForBroadcast(juniorsResult())})
+	e = lastEntry(t, h)
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}))
+	h.Broadcast(EventType("brand_new_event"), gin.H{"competitionId": "juniors", "name": "Alice Arai"})
+	e = lastEntry(t, h)
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}))
 }
 
 func TestHubProject_MasksMatchUpdatedForThePublic(t *testing.T) {
@@ -1461,9 +1471,7 @@ func TestHubProject_ReplayedEventFollowsATournamentModeChange(t *testing.T) {
 	broadcastJuniorsResult(h)
 	e := lastEntry(t, h)
 	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}), "self-run: the names are shown")
-	require.NotNil(t, e.masked.judged)
 	token := f.store.CompetitionWriteToken(f.comp.ID)
-	require.Equal(t, token, e.masked.judged.token)
 
 	tour.Mode = state.TournamentModeOfficiated
 	require.NoError(t, f.store.SaveTournament(tour))

@@ -1095,15 +1095,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		// What the public pages show for this competition's competitors. A
 		// new competition starts with the tournament default when the body
-		// does not choose (E2), except a Swiss one (not offered there yet)
-		// and in a self-run tournament (officiated only), where it starts
-		// with names shown rather than being refused for a choice the
-		// organiser never made here.
-		publicNames := ""
+		// does not choose (E2, state.NewCompetitionPublicNames), except a
+		// Swiss one and in a self-run tournament, where it starts with names
+		// shown rather than being refused for a choice the organiser never
+		// made here.
+		publicNames := state.NewCompetitionPublicNames(createTourn, comp.Format)
 		if req.PublicNames != nil {
 			publicNames = strings.TrimSpace(*req.PublicNames)
-		} else if createTourn != nil && !createTourn.IsSelfRun() && comp.Format != state.CompFormatSwiss {
-			publicNames = createTourn.DefaultPublicNames
 		}
 		comp.RevealUntil = strings.TrimSpace(comp.RevealUntil)
 		if msg := validatePublicNamesValue("publicNames", publicNames); msg != "" {

@@ -9164,7 +9164,7 @@ components:
             properties:
               code:
                 type: string
-                enum: [matches_running, matches_requeued, court_missing, mode_changes, prefix_reassigned, public_names_self_run]
+                enum: [matches_running, matches_requeued, court_missing, mode_changes, prefix_reassigned]
                 description: Warning code.
               competitionId:
                 type: string
@@ -9916,9 +9916,12 @@ components:
             * `hidden`: no reveal link exists; only the signed-in organiser
               sees names.
 
-            Exactly one kind of link per competition. A hiding value is refused
-            while the tournament is self-run (409 `public_names_self_run`) and on
-            a Swiss competition (400 `public_names_swiss`). A new competition
+            Exactly one kind of link per competition. A hiding value a write
+            sets is refused while the tournament is self-run (409
+            `public_names_self_run`), and on a Swiss competition (400
+            `public_names_swiss`, also for a hiding competition switched to
+            Swiss) in an officiated one. A self-run tournament never judges a
+            stored value the write leaves alone. A new competition
             takes the tournament's `defaultPublicNames` when the request leaves
             the field out. The links come from
             `GET /api/competitions/{id}/reveal-links`.

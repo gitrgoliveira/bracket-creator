@@ -403,17 +403,26 @@ export function tournamentHasCheckIn(tournament) {
 export function checkInApplies(tournament, checkInEnabled) {
   return !!checkInEnabled && tournamentHasCheckIn(tournament);
 }
+// Whether a tournament shows every competitor's name on its public pages,
+// whatever a competition's setting says: a self-run one does, because its
+// competitors score their own matches from the public page. Nothing about
+// hidden names applies there (the setting is not offered, nothing is masked
+// and every audience reads the same names). The one client spelling of the
+// self-run arm of the server's publicNames.hides.
+export function tournamentShowsEveryName(tournament) {
+  return !!tournament && tournament.mode === "self-run";
+}
 // Whether the public pages show comp's competitors by number rather than name
 // right now: the client mirror of the server's publicNames.hides (the
-// competition's setting hides them, and the tournament is not self-run, which
-// always shows names). Pinned to the server by the shared table
+// competition's setting hides them, and the tournament does not show every
+// name, tournamentShowsEveryName). Pinned to the server by the shared table
 // internal/mobileapp/testdata/public_names_hides_cases.json. A team
 // competition hides like any other: its team names stay visible and its team
 // members' names are what go, which the court call does not carry (see
 // competitionCallsByNumber).
 export function competitionHidesNames(tournament, comp) {
   const v = comp && comp.publicNames;
-  return ["person", "competition", "hidden"].includes(v) && !(tournament && tournament.mode === "self-run");
+  return ["person", "competition", "hidden"].includes(v) && !tournamentShowsEveryName(tournament);
 }
 // Whether a court call names comp's competitors by number: the competition
 // hides its names and it is not a team one, whose calls name the two teams,

@@ -739,53 +739,16 @@ func TestRestore_ACopyWarnsAboutMatchesRequeued(t *testing.T) {
 	assert.Equal(t, "Men comes back with 1 match that was running in the backup; it returns to the queue with its score.", requeued[0].Message)
 }
 
-func TestRestore_WarnsWhenASelfRunTournamentComesBackHidingNames(t *testing.T) {
+func TestRestore_ASelfRunTournamentHidingNamesIsNotWarned(t *testing.T) {
+	// Self-run tournaments are out of scope for hidden names: a restore that
+	// leaves one holding a competition, or a default, that hides names plans
+	// exactly as it did before the option existed. The public pages show the
+	// names there whatever the stored setting says, and nothing is changed.
 	src, _ := newRestoreTestStore(t)
 	require.NoError(t, src.SaveTournament(&Tournament{
 		Name: "Self Run Taikai", Date: "03-11-2026", Courts: []string{"A", "B"}, Password: "pw",
 		DurationDays: 1, Mode: TournamentModeSelfRun, DefaultPublicNames: PublicNamesHidden,
 	}))
-	addRestoreComp(t, src, "men", "Men", "M", MatchStatusScheduled, "A")
-	addRestoreComp(t, src, "women", "Women", "W", MatchStatusScheduled, "A")
-	hiding, err := src.LoadCompetition("men")
-	require.NoError(t, err)
-	hiding.PublicNames = PublicNamesHidden
-	require.NoError(t, src.SaveCompetition(hiding))
-	a := archiveOf(t, src, ScopeTournament, "")
-
-	dst, _ := newRestoreTestStore(t)
-	restoreTestTournament(t, dst, "pw", "A", "B")
-	addRestoreComp(t, dst, "men", "Men", "M", MatchStatusScheduled, "A")
-	addRestoreComp(t, dst, "women", "Women", "W", MatchStatusScheduled, "A")
-	plan, err := dst.PlanRestore(RestoreRequest{Archive: a, Decisions: map[string]RestoreDecision{
-		"men": {Action: RestoreReplace}, "women": {Action: RestoreReplace},
-	}})
-	require.NoError(t, err)
-
-	warned := warningsWithCode(plan.Warnings, RestoreWarnPublicNamesSelfRun)
-	var ids []string
-	for _, w := range warned {
-		ids = append(ids, w.CompetitionID)
-	}
-	assert.ElementsMatch(t, []string{"men", ""}, ids, "the hiding competition and the default are named; the competition showing names is not")
-
-	// An officiated tournament restored over hiding competitions is not
-	// warned: hiding names is allowed there.
-	src2, _ := newRestoreTestStore(t)
-	restoreTestTournament(t, src2, "pw", "A", "B")
-	addRestoreComp(t, src2, "men", "Men", "M", MatchStatusScheduled, "A")
-	hiding2, err := src2.LoadCompetition("men")
-	require.NoError(t, err)
-	hiding2.PublicNames = PublicNamesHidden
-	require.NoError(t, src2.SaveCompetition(hiding2))
-	plan, err = dst.PlanRestore(RestoreRequest{Archive: archiveOf(t, src2, ScopeTournament, "")})
-	require.NoError(t, err)
-	assert.Empty(t, warningsWithCode(plan.Warnings, RestoreWarnPublicNamesSelfRun))
-}
-
-func TestRestore_WarnsWhenACompetitionThatHidesNamesComesBackIntoASelfRunTournament(t *testing.T) {
-	src, _ := newRestoreTestStore(t)
-	restoreTestTournament(t, src, "pw", "A", "B")
 	addRestoreComp(t, src, "men", "Men", "M", MatchStatusScheduled, "A")
 	hiding, err := src.LoadCompetition("men")
 	require.NoError(t, err)
@@ -800,44 +763,17 @@ func TestRestore_WarnsWhenACompetitionThatHidesNamesComesBackIntoASelfRunTournam
 	addRestoreComp(t, dst, "men", "Men", "M", MatchStatusScheduled, "A")
 	decisions := map[string]RestoreDecision{"men": {Action: RestoreReplace}}
 
-	// A competition backup, and a whole-tournament backup restored with only
-	// one competition, both leave the running self-run tournament in place.
 	for name, req := range map[string]RestoreRequest{
+		"tournament scope":  {Archive: archiveOf(t, src, ScopeTournament, ""), Decisions: decisions},
 		"competition scope": {Archive: archiveOf(t, src, ScopeCompetition, "men"), Decisions: decisions},
-		"only":              {Archive: archiveOf(t, src, ScopeTournament, ""), Only: "men", Decisions: decisions},
+		"copy":              {Archive: archiveOf(t, src, ScopeCompetition, "men"), Decisions: map[string]RestoreDecision{"men": {Action: RestoreCopy, CopyName: "Men Copy"}}},
 	} {
 		plan, err := dst.PlanRestore(req)
 		require.NoError(t, err, name)
-		warned := warningsWithCode(plan.Warnings, RestoreWarnPublicNamesSelfRun)
-		require.Len(t, warned, 1, name)
-		assert.Equal(t, "men", warned[0].CompetitionID, name)
+		for _, w := range plan.Warnings {
+			assert.NotContains(t, w.Message, "hides competitor names", name)
+		}
 	}
-}
-
-func TestRestore_TheWarningNamesTheCopyNotTheArchivedCompetition(t *testing.T) {
-	src, _ := newRestoreTestStore(t)
-	restoreTestTournament(t, src, "pw", "A", "B")
-	addRestoreComp(t, src, "men", "Men", "M", MatchStatusScheduled, "A")
-	hiding, err := src.LoadCompetition("men")
-	require.NoError(t, err)
-	hiding.PublicNames = PublicNamesHidden
-	require.NoError(t, src.SaveCompetition(hiding))
-
-	dst, _ := newRestoreTestStore(t)
-	require.NoError(t, dst.SaveTournament(&Tournament{
-		Name: "Self Run Taikai", Date: "03-11-2026", Courts: []string{"A", "B"}, Password: "pw",
-		DurationDays: 1, Mode: TournamentModeSelfRun,
-	}))
-	addRestoreComp(t, dst, "men", "Men", "M", MatchStatusScheduled, "A")
-
-	plan, err := dst.PlanRestore(RestoreRequest{
-		Archive:   archiveOf(t, src, ScopeCompetition, "men"),
-		Decisions: map[string]RestoreDecision{"men": {Action: RestoreCopy, CopyName: "Men Copy"}},
-	})
-	require.NoError(t, err)
-	warned := warningsWithCode(plan.Warnings, RestoreWarnPublicNamesSelfRun)
-	require.Len(t, warned, 1)
-	assert.Contains(t, warned[0].Message, "Men Copy hides competitor names")
 }
 
 func TestRestore_TournamentRestoreRequeuesRunningPoolAndBracketMatches(t *testing.T) {

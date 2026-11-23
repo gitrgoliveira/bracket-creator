@@ -70,6 +70,30 @@ func (c *Competition) HidesNames() bool {
 	return c != nil && PublicNamesHidesNames(c.PublicNames)
 }
 
+// HidesNamesIn reports whether the public pages of tournament t hide this
+// competition's names: its option hides them (HidesNames) and t is not
+// self-run. A self-run tournament shows every name whatever a competition's
+// stored setting says, because its competitors score their own matches from
+// the public page; the setting itself is left as it is. A nil tournament (one
+// that cannot be read) counts as officiated, so the names stay hidden. The one
+// owner of that rule: the public pages and the event stream
+// (mobileapp's publicNames.hides) and the Tags sheet's reveal links ask it.
+func (c *Competition) HidesNamesIn(t *Tournament) bool {
+	return c.HidesNames() && !t.IsSelfRun()
+}
+
+// NewCompetitionPublicNames is the public-names option a new competition of
+// format starts with in tournament t when its maker does not choose one: the
+// tournament default, except for a Swiss competition (not offered there yet)
+// and in a self-run tournament (officiated only), which start with names
+// shown, as does a competition made before any tournament exists (t nil).
+func NewCompetitionPublicNames(t *Tournament, format string) string {
+	if t == nil || t.IsSelfRun() || format == CompFormatSwiss {
+		return PublicNamesShown
+	}
+	return t.DefaultPublicNames
+}
+
 // ValidRevealUntil reports whether v is a RevealUntil value: "" (the end
 // of the tournament) or a date and time in RevealUntilLayout.
 func ValidRevealUntil(v string) bool {

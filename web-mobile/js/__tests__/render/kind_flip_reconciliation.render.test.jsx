@@ -228,4 +228,33 @@ describe('bc-symm: the Settings kind pills route through normalizeConfigForKind'
     expect(input.disabled).toBe(true);
     expect(box.closest('div').textContent).toContain('Locked after draw.');
   });
+
+  // Unticking Engi hides One competitor per side, so it clears with it: a
+  // later flip to team must not list a setting the operator already took
+  // away, and the save sends it false.
+  it('unticking Engi clears One competitor per side, so a later flip to team does not list it', async () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    const { container } = await mountSettings(makeTeamCompetition({
+      kind: 'individual', teamSize: 0, teamMatchType: 'fixed', engi: true, engiSolo: true,
+    }), onUpdate);
+    const checkbox = (label) => Array.from(container.querySelectorAll('label'))
+      .find((l) => l.textContent.includes(label) && l.querySelector('input[type="checkbox"]'))?.querySelector('input');
+    const engi = checkbox('Engi (kata competition)');
+    expect(engi, 'expected the Engi checkbox').toBeDefined();
+    await act(async () => { fireEvent.click(engi); });
+
+    await act(async () => { fireEvent.click(byText(container, 'Team')); });
+    const notice = Array.from(container.querySelectorAll('li')).map((li) => li.textContent);
+    expect(notice.some((t) => t.startsWith('One competitor per side')), `notice items: ${JSON.stringify(notice)}`).toBe(false);
+
+    const teamSizeInput = container.querySelector('input[type="number"][max]:not([max="1024"])');
+    await act(async () => { fireEvent.input(teamSizeInput, { target: { value: '3' } }); });
+    const save = byText(container, 'Save changes');
+    expect(save.disabled).toBe(false);
+    await act(async () => { fireEvent.click(save); });
+    await waitFor(() => expect(onUpdate).toHaveBeenCalled());
+    const payload = onUpdate.mock.calls[0][0];
+    expect(payload.engi).toBe(false);
+    expect(payload.engiSolo).toBe(false);
+  });
 });

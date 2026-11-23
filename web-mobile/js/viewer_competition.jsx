@@ -87,9 +87,11 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // current members). ALL watched players are highlighted via highlightPlayers
   // (a Set of ids+names); myPlayer (the primary, when it's a single player)
   // still feeds the "your next match" opponent-side logic.
-  const [watchlist, setWatchlist] = useWatchlist();
-  const [primaryKey, setPrimaryKey] = usePrimaryWatch();
   const compRoster = useMemo(() => buildRoster([c], tournament), [c, tournament]);
+  // The roster goes to the hook so a name it already stored for a competitor of
+  // a competition that hides names is dropped (bc-hnam).
+  const [watchlist, setWatchlist] = useWatchlist(compRoster);
+  const [primaryKey, setPrimaryKey] = usePrimaryWatch();
   const rosterById = useMemo(() => new Map(compRoster.map((p) => [p.id, p])), [compRoster]);
   // Restrict the filter bar chips to entries that are relevant to THIS competition:
   // player entries only shown when the player is in compRoster; dojo entries only
@@ -379,8 +381,8 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                 );
               }
               const pRecord = rosterById.get(entry.id);
-              const name = (pRecord && pRecord.name) || entry.name || "(unknown)";
-              const number = pRecord?.number || "";
+              const name = (pRecord && pRecord.name) || entry.name || entry.number || "(unknown)";
+              const number = pRecord?.number || entry.number || "";
               return (
                 <span key={k} className="pmf__chip">
                   <NumberedName name={name} number={number} />
@@ -394,6 +396,11 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
           </div>
         )}
         <div className="viewer__body">
+          {c.namesHidden && (
+            <p className="names-hidden-note" data-testid="names-hidden-note">
+              Names are hidden in this competition. Competitors appear by their number.
+            </p>
+          )}
           {effectiveTab === "overview" && (
             <ViewerOverview
               c={c}

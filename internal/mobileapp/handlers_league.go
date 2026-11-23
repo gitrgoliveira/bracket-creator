@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // RegisterPublicLeagueHandlers registers the public league standings read.
@@ -14,9 +15,28 @@ import (
 // "pools" tab). Mirrors RegisterPublicSwissHandlers (public read, no auth).
 //
 //	GET /competitions/:id/league/standings
+//
+// This form mounts the read with no judge, every caller reading the names as
+// stored (tests mount it alone this way); NewRouterWithHub calls
+// registerPublicLeagueHandlers with the router's shared judge.
 func RegisterPublicLeagueHandlers(r *gin.RouterGroup, eng *engine.Engine) {
+	registerPublicLeagueHandlers(r, eng, nil)
+}
+
+// registerPublicLeagueHandlers wires the league standings read. It judges its
+// caller first (publicReadView: a password sent but wrong is 401, the answer is
+// no-store) and answers for that audience: in a competition that hides names
+// (bc-hnam) the public reads each competitor's number where the name is (a
+// competitor whose own link the caller holds keeps theirs), and a team keeps
+// its name. The answer stays a bare array of rows, so it carries no
+// namesHidden marker: a masked row reads as a number, never as a name to save.
+func registerPublicLeagueHandlers(r *gin.RouterGroup, eng *engine.Engine, names *publicNames) {
 	r.GET("/competitions/:id/league/standings", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		v, ok := publicReadView(c, names, id)
 		if !ok {
 			return
 		}
@@ -24,6 +44,11 @@ func RegisterPublicLeagueHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 		if err != nil {
 			respondEngineError(c, err)
 			return
+		}
+		if v.namesHidden() {
+			// A copy: the engine's rows are left as they were.
+			standings = append([]state.PlayerStanding(nil), standings...)
+			v.standings(standings)
 		}
 		c.JSON(http.StatusOK, standings)
 	})

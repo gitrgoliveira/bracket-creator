@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +18,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // decodeHubEvent unmarshals a subscriber-channel entry's payload into an
@@ -827,4 +833,757 @@ func waitForFrame(t *testing.T, w *mockResponseWriter, want string) {
 	require.Eventually(t, func() bool {
 		return strings.Contains(w.BodyString(), want)
 	}, 2*time.Second, 5*time.Millisecond, "expected SSE frame %q not observed", want)
+}
+
+// --- Per-subscriber streams (bc-hnam) ----------------------------------------
+
+// TestSSEEventCatalogue_ClassifiesEveryEventType holds the catalogue to every
+// EventType constant declared in the package: a new event type must be
+// classified (masked, passes or organiser-only) before it can reach a stream
+// as broadcast.
+func TestSSEEventCatalogue_ClassifiesEveryEventType(t *testing.T) {
+	fset := token.NewFileSet()
+	dir, err := os.ReadDir(".")
+	require.NoError(t, err)
+	declared := map[EventType]bool{}
+	for _, de := range dir {
+		if de.IsDir() || !strings.HasSuffix(de.Name(), ".go") || strings.HasSuffix(de.Name(), "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, de.Name(), nil, 0)
+		require.NoError(t, err)
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs := spec.(*ast.ValueSpec)
+				if id, ok := vs.Type.(*ast.Ident); !ok || id.Name != "EventType" {
+					continue
+				}
+				for _, v := range vs.Values {
+					lit, ok := v.(*ast.BasicLit)
+					require.True(t, ok, "an EventType constant is a string literal")
+					declared[EventType(strings.Trim(lit.Value, `"`))] = true
+				}
+			}
+		}
+	}
+	require.Len(t, declared, 15, "the package declares 15 event types")
+	for et := range declared {
+		spec, ok := sseEventCatalogue[et]
+		if assert.True(t, ok, "event type %q is not classified in sseEventCatalogue", et) {
+			assert.NotZero(t, spec.class, et)
+			if spec.class == sseEventMasked {
+				assert.NotNil(t, spec.mask, "masked event %q has a mask", et)
+			}
+		}
+	}
+	assert.Len(t, sseEventCatalogue, len(declared), "the catalogue names only declared event types")
+}
+
+// hubWithNames is a hub with the fixture's judge and masks attached.
+func hubWithNames(f pnFixture) *Hub {
+	h := NewHub()
+	h.attachPublicNames(f.pn)
+	return h
+}
+
+// lastEntry is the newest event in the hub's history.
+func lastEntry(t *testing.T, h *Hub) *historyEntry {
+	t.Helper()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	seq := h.seq.Load()
+	require.Positive(t, seq)
+	return &h.history[(seq-1)%int64(h.HistorySize)]
+}
+
+func juniorsResult() *state.MatchResult {
+	return &state.MatchResult{
+		ID: "Pool A-0", SideA: "Alice Arai", SideAID: pnAlice, SideB: "Bob Baba", SideBID: pnBob,
+		Winner: "Alice Arai", WinnerID: pnAlice, Status: state.MatchStatusCompleted,
+	}
+}
+
+func broadcastJuniorsResult(h *Hub) {
+	h.Broadcast(EventMatchUpdated, gin.H{"competitionId": "juniors", "matchId": "Pool A-0", "result": matchPtrForBroadcast(juniorsResult())})
+}
+
+// warmMask builds the fixture's mask twice: the first build may run the
+// store's load-time repair, which rewrites the files it was built from.
+func warmMask(t *testing.T, f pnFixture) {
+	t.Helper()
+	for range 2 {
+		_, err := f.pn.view(f.comp, audience{})
+		require.NoError(t, err)
+	}
+}
+
+func TestHubProject_SelfRunStreamKeepsNames(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	tour, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	tour.Mode = state.TournamentModeSelfRun
+	require.NoError(t, f.store.SaveTournament(tour))
+
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}), "a self-run stream carries the names")
+
+	// Nothing fails closed in self-run, where nothing is hidden: an event
+	// naming a competition that cannot be read, and one of a type nobody
+	// classified, are sent as broadcast, as before names could be hidden.
+	h.Broadcast(EventMatchUpdated, gin.H{"competitionId": "ghost", "result": matchPtrForBroadcast(juniorsResult())})
+	e = lastEntry(t, h)
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}))
+	h.Broadcast(EventType("brand_new_event"), gin.H{"competitionId": "juniors", "name": "Alice Arai"})
+	e = lastEntry(t, h)
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}))
+}
+
+func TestHubProject_MasksMatchUpdatedForThePublic(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+	assert.Equal(t, "juniors", e.compID, "a masked event keeps the competition it names")
+	assert.Equal(t, EventMatchUpdated, e.typ)
+
+	public := h.project(e, &sseSubscriber{})
+	assert.NotContains(t, public, "Alice Arai")
+	assert.NotContains(t, public, "Bob Baba")
+	assert.Contains(t, public, `"sideA":"K1"`)
+	assert.Contains(t, public, `"sideB":"K2"`)
+	assert.Contains(t, public, `"namesHidden":true`)
+	assert.Contains(t, public, `"seq":`+fmt.Sprint(e.seq))
+	var env SSEEvent
+	require.NoError(t, json.Unmarshal([]byte(public), &env), "a masked copy is a well-formed envelope")
+	assert.Equal(t, EventMatchUpdated, env.Type)
+
+	require.NotNil(t, e.masked)
+	require.NotNil(t, e.masked.judged)
+	assert.True(t, e.masked.judged.copied, "the public copy is built once and shared")
+	assert.Equal(t, public, h.project(e, &sseSubscriber{}))
+
+	org := h.project(e, &sseSubscriber{aud: organiserAudience()})
+	assert.Equal(t, e.payload, org, "the organiser is sent the event as broadcast")
+	assert.Contains(t, org, "Alice Arai")
+
+	// The option is judged when the event is sent: shown again, the same
+	// stored event goes to the public as broadcast.
+	f.comp.PublicNames = state.PublicNamesShown
+	require.NoError(t, f.store.SaveCompetition(f.comp))
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}))
+}
+
+func TestHubProject_FailsClosed(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	h := hubWithNames(f)
+
+	// A masked event that names no competition.
+	h.Broadcast(EventMatchUpdated, gin.H{"result": matchPtrForBroadcast(juniorsResult())})
+	e := lastEntry(t, h)
+	out := h.project(e, &sseSubscriber{})
+	assert.NotContains(t, out, "Alice Arai")
+	assert.Contains(t, out, `"data":null`)
+	assert.Contains(t, out, `"type":"match_updated"`, "its type and seq still arrive, so no gap is seen")
+
+	// A competition that does not exist.
+	h.Broadcast(EventMatchUpdated, gin.H{"competitionId": "ghost", "result": matchPtrForBroadcast(juniorsResult())})
+	assert.Contains(t, h.project(lastEntry(t, h), &sseSubscriber{}), `"data":null`)
+
+	// An event type nobody classified.
+	h.Broadcast(EventType("brand_new_event"), gin.H{"competitionId": "juniors", "name": "Alice Arai"})
+	e = lastEntry(t, h)
+	assert.Contains(t, h.project(e, &sseSubscriber{}), `"data":null`)
+	assert.Contains(t, h.project(e, &sseSubscriber{aud: organiserAudience()}), "Alice Arai")
+
+	// An event that passes is sent as broadcast.
+	h.Broadcast(EventAnnouncement, []string{"Court A next"})
+	e = lastEntry(t, h)
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}))
+
+	// A bare hub (no judge attached) sends everything as broadcast.
+	bare := NewHub()
+	broadcastJuniorsResult(bare)
+	be := lastEntry(t, bare)
+	assert.Equal(t, be.payload, bare.project(be, &sseSubscriber{}))
+}
+
+func TestHubProject_RevealJudgedOnEveryEvent(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesCompetition)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+
+	link := &sseSubscriber{aud: audience{competitions: map[string]bool{"juniors": true}}}
+	assert.Equal(t, e.payload, h.project(e, link), "the competition link's stream sees the names")
+
+	// Past the links' expiry (an hour after the tournament's last day) the
+	// same stream sees numbers.
+	f.pn.now = func() time.Time { return f.now.Add(72 * time.Hour) }
+	assert.NotContains(t, h.project(e, link), "Alice Arai")
+	f.pn.now = func() time.Time { return f.now }
+
+	// Moved to per-person links: a competition link reveals nothing.
+	f.comp.PublicNames = state.PublicNamesPerson
+	require.NoError(t, f.store.SaveCompetition(f.comp))
+	assert.NotContains(t, h.project(e, link), "Alice Arai")
+
+	// A competitor's own link reveals that competitor alone.
+	own := &sseSubscriber{aud: audience{competitors: map[string]map[string]bool{"juniors": {pnAlice: true}}}}
+	out := h.project(e, own)
+	assert.Contains(t, out, "Alice Arai")
+	assert.NotContains(t, out, "Bob Baba")
+	assert.Contains(t, out, `"namesHidden":true`)
+	assert.NotContains(t, h.project(e, &sseSubscriber{}), "Alice Arai", "the shared public copy is not the overlay")
+}
+
+// ticketRouter mounts the stream and its ticket on a router whose hub has
+// the fixture's judge.
+func ticketRouter(f pnFixture) (*gin.Engine, *Hub) {
+	gin.SetMode(gin.TestMode)
+	h := hubWithNames(f)
+	r := gin.New()
+	r.GET("/api/events", h.HandleEvents())
+	r.POST("/api/events/ticket", h.HandleEventTicket())
+	return r, h
+}
+
+func askTicket(t *testing.T, r *gin.Engine, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/events/ticket", nil)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestEventTicket_SelfRunNeedsNoTicket(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	r, h := ticketRouter(f)
+	tour, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	tour.Mode = state.TournamentModeSelfRun
+	require.NoError(t, f.store.SaveTournament(tour))
+
+	for name, headers := range map[string]map[string]string{
+		"the right password": {"X-Tournament-Password": "secret-pw"},
+		"a stale password":   {"X-Tournament-Password": "wrong"},
+		"no credential":      {},
+	} {
+		w := askTicket(t, r, headers)
+		assert.Equal(t, http.StatusBadRequest, w.Code, name)
+		assert.Contains(t, w.Body.String(), codeEventTicketNotNeeded, name)
+	}
+	assert.Empty(t, h.tickets.m, "no ticket is handed out")
+}
+
+func TestEventTicket_JudgedOnceAndSpent(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	r, h := ticketRouter(f)
+
+	w := askTicket(t, r, map[string]string{"X-Tournament-Password": "wrong"})
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "a password sent but wrong gets no ticket")
+
+	w = askTicket(t, r, map[string]string{"X-Tournament-Password": "secret-pw"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	var body struct {
+		Ticket    string `json:"ticket"`
+		ExpiresAt int64  `json:"expiresAt"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Len(t, body.Ticket, 2*eventTicketBytes)
+	assert.Positive(t, body.ExpiresAt)
+
+	sub, ok := h.redeemTicket(body.Ticket)
+	require.True(t, ok)
+	assert.True(t, sub.aud.isOrganiser(), "the ticket carries the audience it was judged for")
+	_, ok = h.redeemTicket(body.Ticket)
+	assert.False(t, ok, "a ticket is used once")
+	_, ok = h.redeemTicket("not-a-ticket")
+	assert.False(t, ok)
+
+	// Expired before it is used.
+	now := time.Now()
+	h.tickets.now = func() time.Time { return now }
+	tk, _, err := h.issueTicket(0, sseSubscriber{})
+	require.NoError(t, err)
+	h.tickets.now = func() time.Time { return now.Add(eventTicketTTL) }
+	_, ok = h.redeemTicket(tk)
+	assert.False(t, ok, "a ticket past its time is refused")
+
+	// A reveal header is kept for the stream to be judged again.
+	key := "juniors:" + strings.Repeat("ab", 32)
+	w = askTicket(t, r, map[string]string{revealKeyHeader: key})
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	sub, ok = h.redeemTicket(body.Ticket)
+	require.True(t, ok)
+	assert.Equal(t, key, sub.reveal)
+	assert.Equal(t, audiencePublic, sub.aud.key(), "a hidden competition's key reveals nothing")
+}
+
+func TestEventTicket_BoundedAndBareHub(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	h := hubWithNames(f)
+	now := time.Now()
+	h.tickets.now = func() time.Time { return now }
+	h.tickets.m = map[string]eventTicket{}
+	for i := range maxEventTickets {
+		h.tickets.m[fmt.Sprint(i)] = eventTicket{expires: now.Add(time.Second)}
+	}
+	_, _, err := h.issueTicket(0, sseSubscriber{})
+	assert.ErrorIs(t, err, errTooManyEventTickets, "no new ticket while every one waiting is live")
+	h.tickets.now = func() time.Time { return now.Add(2 * time.Second) }
+	_, _, err = h.issueTicket(0, sseSubscriber{})
+	assert.NoError(t, err, "expired tickets make room")
+	assert.Len(t, h.tickets.m, 1)
+
+	gin.SetMode(gin.TestMode)
+	bare := NewHub()
+	r := gin.New()
+	r.POST("/api/events/ticket", bare.HandleEventTicket())
+	w := askTicket(t, r, nil)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestHandleEvents_RefusesAnUnusableTicket(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	r, h := ticketRouter(f)
+	tk, _, err := h.issueTicket(0, sseSubscriber{aud: organiserAudience()})
+	require.NoError(t, err)
+	_, ok := h.redeemTicket(tk)
+	require.True(t, ok)
+
+	for name, query := range map[string]string{"spent": tk, "unknown": "nope", "empty": ""} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/events?ticket="+query, nil))
+		assert.Equal(t, http.StatusUnauthorized, w.Code, name)
+		assert.Contains(t, w.Body.String(), codeEventTicketInvalid, name)
+		assert.NotContains(t, w.Body.String(), ": open", "a %s ticket opens no stream, not even a public one", name)
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	assert.Empty(t, h.clients)
+}
+
+func TestHandleEvents_StreamIsProjectedForItsTicket(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	r, h := ticketRouter(f)
+	broadcastJuniorsResult(h)
+
+	open := func(query string) (*mockResponseWriter, context.CancelFunc, chan struct{}) {
+		ctx, cancel := context.WithCancel(context.Background())
+		w := &mockResponseWriter{ResponseRecorder: httptest.NewRecorder(), closeChan: make(chan bool)}
+		req := httptest.NewRequest(http.MethodGet, "/api/events"+query, nil).WithContext(ctx)
+		done := make(chan struct{})
+		go func() {
+			r.ServeHTTP(w, req)
+			close(done)
+		}()
+		return w, cancel, done
+	}
+	tk, _, err := h.issueTicket(0, sseSubscriber{aud: organiserAudience()})
+	require.NoError(t, err)
+	orgW, orgCancel, orgDone := open("?lastEventId=0&ticket=" + tk)
+	pubW, pubCancel, pubDone := open("")
+	require.Eventually(t, func() bool {
+		h.mu.RLock()
+		defer h.mu.RUnlock()
+		return len(h.clients) == 2
+	}, 2*time.Second, 5*time.Millisecond)
+
+	broadcastJuniorsResult(h)
+	waitForFrame(t, orgW, "Alice Arai")
+	waitForFrame(t, pubW, `"sideA":"K1"`)
+	orgCancel()
+	pubCancel()
+	<-orgDone
+	<-pubDone
+	assert.NotContains(t, pubW.BodyString(), "Alice Arai")
+	assert.Equal(t, "no-store", pubW.HeaderGet("Cache-Control"))
+}
+
+// setTournamentMode saves the fixture's tournament in mode.
+func setTournamentMode(t *testing.T, f pnFixture, mode string) {
+	t.Helper()
+	tour, err := f.store.LoadTournament()
+	require.NoError(t, err)
+	tour.Mode = mode
+	require.NoError(t, f.store.SaveTournament(tour))
+}
+
+// Whether the tournament is self-run is judged once per event, by the first
+// stream that sends it, and reused by every other stream: a self-run hub
+// reads the tournament once per event, not once per spectator.
+func TestHubProject_SelfRunJudgedOncePerEvent(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	setTournamentMode(t, f, state.TournamentModeSelfRun)
+
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+	require.NotNil(t, e.selfRun, "a masked event carries the shared judgement")
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}))
+
+	// The judgement is the event's: a stream sending it later reuses it.
+	setTournamentMode(t, f, state.TournamentModeOfficiated)
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}), "the event keeps the judgement its first stream took")
+
+	broadcastJuniorsResult(h)
+	e = lastEntry(t, h)
+	assert.NotContains(t, h.project(e, &sseSubscriber{}), "Alice Arai", "a new event is judged on the tournament as it stands")
+
+	h.Broadcast(EventTournamentUpdated, gin.H{})
+	assert.Nil(t, lastEntry(t, h).selfRun, "an event every stream is sent as broadcast needs no judgement")
+}
+
+// A self-run tournament's stream is sent as it always was: Cache-Control
+// no-cache, and a replay judged on the tournament as the stream opens, not
+// on a judgement an earlier stream took. A tournament saved into another
+// mode while a competition is kept in place (a restore does this) moves no
+// competition write token, so an event judged while the tournament was
+// self-run, and so sent with names, is masked again when it is replayed once
+// the tournament is officiated.
+func TestHandleEvents_SelfRunStreamIsSentAsBroadcast(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	r, h := ticketRouter(f)
+	h.Broadcast(EventTournamentUpdated, gin.H{})
+
+	open := func(lastEventID int64) (*mockResponseWriter, context.CancelFunc, chan struct{}) {
+		ctx, cancel := context.WithCancel(context.Background())
+		w := &mockResponseWriter{ResponseRecorder: httptest.NewRecorder(), closeChan: make(chan bool)}
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/events?lastEventId=%d", lastEventID), nil).WithContext(ctx)
+		done := make(chan struct{})
+		go func() {
+			r.ServeHTTP(w, req)
+			close(done)
+		}()
+		return w, cancel, done
+	}
+
+	// Judged officiated by a first stream, replayed once self-run.
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+	assert.NotContains(t, h.project(e, &sseSubscriber{}), "Alice Arai")
+	setTournamentMode(t, f, state.TournamentModeSelfRun)
+	w, cancel, done := open(e.seq - 1)
+	waitForFrame(t, w, "Alice Arai")
+	cancel()
+	<-done
+	assert.Equal(t, "no-cache", w.HeaderGet("Cache-Control"), "a self-run stream keeps the cache header it always had")
+
+	// Judged self-run by a first stream, replayed once officiated.
+	broadcastJuniorsResult(h)
+	e = lastEntry(t, h)
+	assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}))
+	token := f.store.CompetitionWriteToken(f.comp.ID)
+	setTournamentMode(t, f, state.TournamentModeOfficiated)
+	require.Equal(t, token, f.store.CompetitionWriteToken(f.comp.ID), "the competition was not written")
+	w, cancel, done = open(e.seq - 1)
+	waitForFrame(t, w, `"sideA":"K1"`)
+	cancel()
+	<-done
+	assert.NotContains(t, w.BodyString(), "Alice Arai", "a replay is judged as the stream opens")
+	assert.Equal(t, "no-store", w.HeaderGet("Cache-Control"))
+}
+
+// A tournament_updated starts a reveal re-judgement only while a stream
+// holds reveal keys; a self-run tournament hands out no ticket, so it never
+// starts one.
+func TestHub_HoldsRevealStreamLocked(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesCompetition)
+	h := hubWithNames(f)
+	_, _, _, _ = h.subscribeWithReplayFor(0, &sseSubscriber{})
+	_, _, _, _ = h.subscribeWithReplayFor(0, &sseSubscriber{aud: organiserAudience(), reveal: "juniors:x"})
+	h.mu.RLock()
+	assert.False(t, h.holdsRevealStreamLocked(), "the public and the organiser hold no reveal keys")
+	h.mu.RUnlock()
+	_, _, _, _ = h.subscribeWithReplayFor(0, &sseSubscriber{reveal: "juniors:x"})
+	h.mu.RLock()
+	assert.True(t, h.holdsRevealStreamLocked())
+	h.mu.RUnlock()
+}
+
+func TestRejudgeRevealStreams_EndsOnlyChangedStreams(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesCompetition)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	header := "juniors:" + state.CompetitionRevealKey(f.comp)
+	judged := f.pn.revealAudience(header)
+	require.True(t, judged.revealsAll("juniors"))
+
+	link, _, _, _ := h.subscribeWithReplayFor(0, &sseSubscriber{aud: judged, reveal: header})
+	public, _, _, _ := h.subscribeWithReplayFor(0, &sseSubscriber{})
+	require.NotNil(t, link)
+	require.NotNil(t, public)
+
+	// Nothing changed: a tournament_updated leaves the reveal stream open.
+	h.Broadcast(EventTournamentUpdated, nil)
+	<-link
+	h.rejudges.Wait()
+	h.mu.RLock()
+	_, stillOpen := h.clients[link]
+	h.mu.RUnlock()
+	assert.True(t, stillOpen, "a reveal stream whose keys unlock the same stays open")
+
+	// The option moves to hidden: the link now unlocks nothing, so its
+	// stream ends after the event that told it.
+	f.comp.PublicNames = state.PublicNamesHidden
+	require.NoError(t, f.store.SaveCompetition(f.comp))
+	h.Broadcast(EventTournamentUpdated, nil)
+	h.rejudges.Wait()
+	msg, ok := <-link
+	require.True(t, ok, "the event is delivered before the stream ends")
+	assert.Equal(t, EventTournamentUpdated, msg.typ)
+	_, ok = <-link
+	assert.False(t, ok, "the reveal stream ended so it asks for a new ticket")
+
+	h.mu.RLock()
+	_, publicOpen := h.clients[public]
+	h.mu.RUnlock()
+	assert.True(t, publicOpen, "a public stream is never ended for an option change")
+	h.Close()
+}
+
+// A caller with no credential is the public, which opens the stream with no
+// ticket, so it is handed none and cannot fill the tickets waiting.
+func TestEventTicket_RefusesACallerWithNoCredential(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	r, h := ticketRouter(f)
+
+	w := askTicket(t, r, nil)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), codeEventTicketNotNeeded)
+	assert.Empty(t, h.tickets.m, "no ticket was kept for the public")
+
+	w = askTicket(t, r, map[string]string{"X-Tournament-Password": "secret-pw"})
+	assert.Equal(t, http.StatusOK, w.Code, "the organiser still gets one")
+	w = askTicket(t, r, map[string]string{revealKeyHeader: "juniors:" + strings.Repeat("ab", 32)})
+	assert.Equal(t, http.StatusOK, w.Code, "so does a caller holding a reveal key")
+	assert.Len(t, h.tickets.m, 2)
+}
+
+// A header with no well-formed reveal key is no credential: it earns no
+// ticket, and a ticket keeps only the well-formed entries of the header.
+func TestEventTicket_RefusesAMalformedRevealKey(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	r, h := ticketRouter(f)
+
+	for _, junk := range []string{"x", "juniors:short", "bad id:" + strings.Repeat("0", 64), ",,"} {
+		w := askTicket(t, r, map[string]string{revealKeyHeader: junk})
+		assert.Equal(t, http.StatusBadRequest, w.Code, junk)
+		assert.Contains(t, w.Body.String(), codeEventTicketNotNeeded, junk)
+	}
+	assert.Empty(t, h.tickets.m, "a malformed header filled no ticket")
+
+	key := "juniors:" + strings.Repeat("ab", 32)
+	w := askTicket(t, r, map[string]string{revealKeyHeader: "junk, " + key + ", " + key})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body struct {
+		Ticket string `json:"ticket"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	sub, ok := h.redeemTicket(body.Ticket)
+	require.True(t, ok)
+	assert.Equal(t, key, sub.reveal, "only the well-formed entry is kept, once")
+}
+
+// Callers holding only a reveal key fill the waiting tickets no further than
+// maxEventTickets less the organiser's reserve, so the organiser's stream can
+// still open.
+func TestEventTicket_KeepsRoomForTheOrganiser(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	h := hubWithNames(f)
+	now := time.Now()
+	h.tickets.now = func() time.Time { return now }
+	h.tickets.m = map[string]eventTicket{}
+	for i := range maxEventTickets - organiserTicketReserve {
+		h.tickets.m[fmt.Sprint(i)] = eventTicket{expires: now.Add(time.Second)}
+	}
+	_, _, err := h.issueTicket(0, sseSubscriber{reveal: "juniors:" + strings.Repeat("0", 64)})
+	assert.ErrorIs(t, err, errTooManyEventTickets, "a reveal-key caller leaves the reserve alone")
+	_, _, err = h.issueTicket(0, sseSubscriber{aud: organiserAudience()})
+	assert.NoError(t, err, "the organiser still gets a ticket")
+}
+
+// A flood of well-formed keys that reveal nothing takes no more than
+// maxIdleEventTickets of the waiting tickets: a phone holding a key that
+// reveals names still gets its ticket, and so does the organiser.
+func TestEventTicket_InventedKeysCannotCrowdOutRealOnes(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	h := hubWithNames(f)
+	invented := sseSubscriber{reveal: "juniors:" + strings.Repeat("0", 64)}
+	for range maxIdleEventTickets {
+		_, _, err := h.issueTicket(0, invented)
+		require.NoError(t, err)
+	}
+	_, _, err := h.issueTicket(0, invented)
+	assert.ErrorIs(t, err, errTooManyEventTickets, "invented keys stop at their own limit")
+
+	real := sseSubscriber{
+		reveal: invented.reveal,
+		aud:    audience{competitions: map[string]bool{"juniors": true}},
+	}
+	_, _, err = h.issueTicket(0, real)
+	assert.NoError(t, err, "a key that reveals names still gets a ticket")
+	_, _, err = h.issueTicket(0, sseSubscriber{aud: organiserAudience()})
+	assert.NoError(t, err, "the organiser still gets a ticket")
+
+	// Spent or expired tickets free their room.
+	now := time.Now()
+	h.tickets.now = func() time.Time { return now.Add(eventTicketTTL) }
+	_, _, err = h.issueTicket(0, invented)
+	assert.NoError(t, err, "expired tickets make room")
+}
+
+// A stream is judged once, when it opens, so a changed admin password ends
+// the organiser's streams (after the event that tells them) and leaves the
+// public's open.
+func TestBroadcast_PasswordResetEndsOrganiserStreams(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	h := hubWithNames(f)
+	organiser, _, _, _ := h.subscribeWithReplayFor(0, &sseSubscriber{aud: organiserAudience()})
+	public, _, _, _ := h.subscribeWithReplayFor(0, &sseSubscriber{})
+	require.NotNil(t, organiser)
+	require.NotNil(t, public)
+
+	h.Broadcast(EventPasswordReset, passwordResetEventData{})
+	msg, ok := <-organiser
+	require.True(t, ok, "the event is delivered before the stream ends")
+	assert.Equal(t, EventPasswordReset, msg.typ)
+	_, ok = <-organiser
+	assert.False(t, ok, "the organiser's stream ended so it asks for a new ticket")
+
+	h.mu.RLock()
+	_, publicOpen := h.clients[public]
+	h.mu.RUnlock()
+	assert.True(t, publicOpen, "a public stream is never ended for a password change")
+	h.Close()
+}
+
+// An organiser's ticket is judged against the password in force when it was
+// asked for, so a password change refuses every organiser ticket judged
+// before it: one still waiting, and one judged before the change but stored
+// after it. A reveal key's ticket does not hang on the password.
+func TestBroadcast_PasswordResetRefusesOrganiserTickets(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	h := hubWithNames(f)
+	defer h.Close()
+
+	judgedAt := h.tickets.epochNow()
+	waiting, _, err := h.issueTicket(judgedAt, sseSubscriber{aud: organiserAudience()})
+	require.NoError(t, err)
+	keyed, _, err := h.issueTicket(judgedAt, sseSubscriber{
+		reveal: "juniors:" + strings.Repeat("0", 64),
+		aud:    audience{competitions: map[string]bool{"juniors": true}},
+	})
+	require.NoError(t, err)
+
+	h.Broadcast(EventPasswordReset, passwordResetEventData{})
+
+	late, _, err := h.issueTicket(judgedAt, sseSubscriber{aud: organiserAudience()})
+	require.NoError(t, err)
+	_, ok := h.redeemTicket(waiting)
+	assert.False(t, ok, "an organiser ticket waiting through a password change opens no stream")
+	_, ok = h.redeemTicket(late)
+	assert.False(t, ok, "a ticket judged before the change is refused though stored after it")
+	_, ok = h.redeemTicket(keyed)
+	assert.True(t, ok, "a reveal key's ticket is not about the password")
+
+	fresh, _, err := h.issueTicket(h.tickets.epochNow(), sseSubscriber{aud: organiserAudience()})
+	require.NoError(t, err)
+	sub, ok := h.redeemTicket(fresh)
+	assert.True(t, ok, "a ticket judged after the change opens the stream")
+	assert.True(t, sub.aud.isOrganiser())
+}
+
+// A masked copy built before the competition was written is built again after
+// it, while the names are still hidden: a changed number reads as the new one.
+func TestHubProject_PublicCopyFollowsAWrittenCompetition(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+	assert.Contains(t, h.project(e, &sseSubscriber{}), `"sideA":"K1"`)
+
+	pools, err := f.store.LoadPools(f.comp.ID)
+	require.NoError(t, err)
+	for i := range pools[0].Players {
+		pools[0].Players[i].Number = "Z" + string(rune('1'+i))
+	}
+	require.NoError(t, f.store.SavePools(f.comp.ID, pools))
+	warmMask(t, f)
+
+	public := h.project(e, &sseSubscriber{})
+	assert.Contains(t, public, `"sideA":"Z1"`, "the copy is built again once the competition was written")
+	assert.NotContains(t, public, "Alice Arai")
+}
+
+// The competition a masked event names is read and judged once for every
+// stream, and again once the competition has been written.
+func TestHubProject_JudgesTheCompetitionOncePerWrite(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+	require.Nil(t, e.masked.judged)
+
+	h.project(e, &sseSubscriber{})
+	first := e.masked.judged
+	require.NotNil(t, first)
+	assert.True(t, first.comp.HidesNames(), "the kept competition hides its names")
+	h.project(e, &sseSubscriber{aud: audience{competitors: map[string]map[string]bool{"juniors": {pnAlice: true}}}})
+	assert.Same(t, first, e.masked.judged, "a second stream reuses the judgement")
+
+	f.comp.PublicNames = state.PublicNamesShown
+	require.NoError(t, f.store.SaveCompetition(f.comp))
+	h.project(e, &sseSubscriber{})
+	assert.NotSame(t, first, e.masked.judged, "a written competition is judged again")
+	assert.False(t, e.masked.judged.comp.HidesNames())
+}
+
+// A stream that judged the competition before a write, and builds its copy
+// only after another stream judged it as written, never keeps its stale copy
+// for the streams after.
+func TestHubProject_StaleJudgementKeepsNoPublicCopy(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+
+	stale, hides := e.judgeCompetition(h.names)
+	require.True(t, hides)
+	pools, err := f.store.LoadPools(f.comp.ID)
+	require.NoError(t, err)
+	for i := range pools[0].Players {
+		pools[0].Players[i].Number = "Z" + string(rune('1'+i))
+	}
+	require.NoError(t, f.store.SavePools(f.comp.ID, pools))
+	warmMask(t, f)
+	current, _ := e.judgeCompetition(h.names)
+	require.NotSame(t, stale, current)
+
+	sent := e.publicCopy(stale, func() (string, bool) { return "stale copy", true })
+	assert.Equal(t, "stale copy", sent, "the stream that judged first is sent its own copy")
+	assert.False(t, e.masked.judged.copied, "a copy built from an older judgement is not kept")
+
+	assert.Contains(t, h.project(e, &sseSubscriber{}), `"sideA":"Z1"`, "the next stream builds from the competition as written")
+	assert.True(t, e.masked.judged.copied)
 }

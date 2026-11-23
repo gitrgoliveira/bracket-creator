@@ -1,4 +1,4 @@
-import { numberOf, prefixOf } from './competitor_identity.jsx';
+import { numberOf, prefixOf, nameHidden } from './competitor_identity.jsx';
 
 // competitor_search.jsx: the owner of the competitor-NUMBER match rule, and
 // with it the answer to "does this row match what the reader typed" for the
@@ -61,7 +61,9 @@ import { numberOf, prefixOf } from './competitor_identity.jsx';
 // first arm still lets "1" find the competitor numbered "1" -- that number's
 // WHOLE value -- and nothing else does.
 //
-// NAME AND DOJO keep substring matching. Only the number is anchored: a
+// NAME AND DOJO keep substring matching, except that a record whose name is
+// hidden (nameHidden, competitor_identity.jsx: the competition hides its names
+// from this reader) is not searched by name at all. Only the number is anchored: a
 // surname is something you type a fragment of, a number is an identifier you
 // read off a sheet.
 //
@@ -103,7 +105,11 @@ export function matchesCompetitorNumber(p, q) {
 export function competitorMatchesQuery(p, q) {
   if (!q) return true;
   if (!p) return false;
-  if ((p.name || "").toLowerCase().includes(q)) return true;
+  // A record whose name is only its number (a competition that hides names,
+  // bc-hnam) is not found by that text: the name arm would let "12" or "k1"
+  // match the printed number as a substring and sidestep the whole-number rule
+  // below, which stays the only way to find it. Dojo stays searchable.
+  if (!nameHidden(p) && (p.name || "").toLowerCase().includes(q)) return true;
   if ((p.dojo || "").toLowerCase().includes(q)) return true;
   return matchesCompetitorNumber(p, q);
 }

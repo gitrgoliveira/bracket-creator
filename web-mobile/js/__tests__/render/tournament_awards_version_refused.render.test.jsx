@@ -133,6 +133,105 @@ describe('AdminApp saves the tournament settings through the outbox', () => {
     expect(app.showToast).toHaveBeenCalledWith('Tournament updated');
   });
 
+  it('sends the public-names confirmation but never keeps it in the settings', async () => {
+    const settled = deferred();
+    window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: settled.promise });
+    const app = await mount();
+    await act(async () => { await probe.props.onSave(patch({ defaultPublicNames: 'person', confirmPublicNames: true })); });
+    // The server is asked to apply the default, as confirmed.
+    expect(window.API.updateTournament.mock.calls[0][0].confirmPublicNames).toBe(true);
+    // Local state holds the settings, so a later save built from it does not
+    // confirm a change nobody was asked about.
+    const shown = app.onUpdate.mock.calls.at(-1)[0];
+    expect(shown.defaultPublicNames).toBe('person');
+    expect('confirmPublicNames' in shown).toBe(false);
+    await act(async () => { settled.resolve({ tournamentVersion: 'v2' }); await settled.promise; });
+    expect('confirmPublicNames' in app.onUpdate.mock.calls.at(-1)[0]).toBe(false);
+  });
+
+  // The server judges the changed default against the competitions it holds,
+  // and its list can differ from the form's. The form is closed by then, so the
+  // app asks about the server's list and sends the same save confirmed.
+  describe('a changed public-names default the server asks to confirm', () => {
+    const applyRefusal = () => Object.assign(new Error('Confirm to change them all.'), {
+      code: 'public_names_apply_confirm',
+      competitions: [{ id: 'c9', name: 'Added elsewhere', publicNames: '' }],
+    });
+
+    it('asks about the server\'s list and resends the save confirmed', async () => {
+      const first = deferred();
+      const second = deferred();
+      window.API.updateTournament
+        .mockResolvedValueOnce({ applied: true, pending: true, settled: first.promise })
+        .mockResolvedValueOnce({ applied: true, pending: true, settled: second.promise });
+      window.confirmDialog.mockResolvedValue(true);
+      const app = await mount();
+      await act(async () => { await probe.props.onSave(patch({ defaultPublicNames: 'hidden' })); });
+      const onRefusal = window.API.updateTournament.mock.calls[0][2].onRefusal;
+      window.API.fetchTournament.mockResolvedValue(tournament());
+
+      const refusal = applyRefusal();
+      let claimed;
+      await act(async () => { claimed = onRefusal(refusal); first.reject(refusal); await first.promise.catch(noop); });
+
+      expect(claimed, 'the outbox does not alert it').toBe(true);
+      expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+      expect(window.confirmDialog.mock.calls[0][0].message).toContain('Added elsewhere');
+      expect(window.API.updateTournament).toHaveBeenCalledTimes(2);
+      const resent = window.API.updateTournament.mock.calls[1][0];
+      expect(resent).toMatchObject({ confirmPublicNames: true, defaultPublicNames: 'hidden', name: 'Autumn Taikai' });
+
+      await act(async () => { second.resolve({ tournamentVersion: 'v2' }); await second.promise; });
+      expect(app.showToast).toHaveBeenCalledWith('Tournament updated');
+      expect('confirmPublicNames' in app.onUpdate.mock.calls.at(-1)[0]).toBe(false);
+    });
+
+    it('sends nothing more when the operator says no', async () => {
+      const first = deferred();
+      window.API.updateTournament.mockResolvedValue({ applied: true, pending: true, settled: first.promise });
+      window.confirmDialog.mockResolvedValue(false);
+      window.API.fetchTournament.mockResolvedValue(tournament());
+      await mount();
+      await act(async () => { await probe.props.onSave(patch({ defaultPublicNames: 'hidden' })); });
+      const onRefusal = window.API.updateTournament.mock.calls[0][2].onRefusal;
+
+      const refusal = applyRefusal();
+      await act(async () => { onRefusal(refusal); first.reject(refusal); await first.promise.catch(noop); });
+
+      expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+      expect(window.API.updateTournament).toHaveBeenCalledTimes(1);
+    });
+
+    it('asks and resends for a save that changes the password too (the direct door)', async () => {
+      window.API.updateTournamentPassword
+        .mockRejectedValueOnce(applyRefusal())
+        .mockResolvedValueOnce({ tournamentVersion: 'v2' });
+      window.confirmDialog.mockResolvedValue(true);
+      const app = await mount();
+      let ok;
+      await act(async () => { ok = await probe.props.onSave(patch({ password: 'new-pw', defaultPublicNames: 'hidden' })); });
+
+      expect(ok).toBe(true);
+      expect(window.confirmDialog.mock.calls[0][0].message).toContain('Added elsewhere');
+      expect(window.API.updateTournamentPassword).toHaveBeenCalledTimes(2);
+      expect(window.API.updateTournamentPassword.mock.calls[1][0].confirmPublicNames).toBe(true);
+      expect(app.onPasswordChange.mock.calls.at(-1)[0]).toBe('new-pw');
+    });
+
+    it('keeps the session on the stored password when the operator says no to a save that changes it', async () => {
+      window.API.updateTournamentPassword.mockRejectedValueOnce(applyRefusal());
+      window.confirmDialog.mockResolvedValue(false);
+      const app = await mount();
+      let ok;
+      await act(async () => { ok = await probe.props.onSave(patch({ password: 'new-pw', defaultPublicNames: 'hidden' })); });
+
+      expect(ok).toBe(false);
+      expect(window.API.updateTournamentPassword).toHaveBeenCalledTimes(1);
+      // The server stored nothing, so the session keeps the password it holds.
+      expect(app.onPasswordChange.mock.calls.at(-1)[0]).toBe('pw');
+    });
+  });
+
   it('tells once when two saves queued behind each other share one answer', async () => {
     // A save that takes the place of a queued one shares its settled promise.
     const settled = deferred();

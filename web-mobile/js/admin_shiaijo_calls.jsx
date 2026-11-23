@@ -15,6 +15,8 @@ import { serverNowMs } from './server_clock.jsx';
 import { acceptTap } from './tap_guard.jsx';
 import { announcementExpiredToast } from './write_result.jsx';
 import { matchKey } from './admin_shiaijo_feed.jsx';
+import { competitionCallsByNumber } from './competition_shape.jsx';
+import { numberOf } from './competitor_identity.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -23,7 +25,7 @@ export const CALL_MINUTES = 5;
 
 export function useCourtCalls({
     court, password, showToast, mountedRef, callIdsRef, withdrawCallRef,
-    courtComps, courtCompetitions, courtMatchesRaw,
+    courtComps, courtCompetitions, courtMatchesRaw, tournament,
 }) {
     // One timer per called match, for the end of the call kept for it
     // (keepCalled): the card reads as called only while that call is showing.
@@ -111,8 +113,13 @@ export function useCourtCalls({
         // true otherwise, stamping the tap as it goes.
         if (!acceptTap(callTapRef, ev, matchKey(m))) return;
         if (!window.API || typeof window.API.sendAnnouncement !== "function") return;
-        const a = (m.sideA && m.sideA.name) || "Aka";
-        const b = (m.sideB && m.sideB.name) || "Shiro";
+        // A competition whose public pages hide names is called by number (the
+        // side colour when a side has none yet): the announcement reaches every
+        // public screen as typed, so a name here would undo the setting.
+        const hides = competitionCallsByNumber(tournament, (courtCompetitions || []).find((c) => c.id === m.compId));
+        const callLabel = (side, colour) => (hides ? numberOf(side) : (side && side.name)) || colour;
+        const a = callLabel(m.sideA, "Aka");
+        const b = callLabel(m.sideB, "Shiro");
         const msg = `Now calling ${b} and ${a} to Shiaijo ${court}.`.slice(0, 200);
         setCallingKey(matchKey(m));
         // The call already up for this match, if any: { id, msg }. It comes down

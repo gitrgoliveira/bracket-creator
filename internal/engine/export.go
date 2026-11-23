@@ -11,6 +11,25 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// tagReveal is what the Tags sheet needs to give each competitor's tag QR
+// their own reveal link: only a competition whose option has per-person links
+// (state.PublicNamesPerson) gets one, keyed by state.CompetitorRevealKey, so
+// no secret-derived key is ever printed for any other option. nil otherwise,
+// and the tags keep the watchlist link (a number only). A self-run tournament
+// hides no names on its public pages, whatever a competition's stored setting
+// says (Competition.HidesNamesIn), so its tags keep the watchlist link too.
+func tagReveal(comp *state.Competition, tourn *state.Tournament) *helper.TagReveal {
+	if comp == nil || comp.PublicNames != state.PublicNamesPerson || !comp.HidesNamesIn(tourn) {
+		return nil
+	}
+	return &helper.TagReveal{
+		CompetitionID: comp.ID,
+		KeyFor: func(participantID string) string {
+			return state.CompetitorRevealKey(comp, participantID)
+		},
+	}
+}
+
 // ExportCompetitionXlsx renders the competition's template with no results: the
 // export behind GET /api/competitions/:id/export (the app's "Download blank
 // template") and the PDF print export (ExportTournamentWorkbooks). It decides
@@ -203,7 +222,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		// never read by this sheet.
 		tagsPools = []helper.Pool{{Players: namesToPrintPlayers}}
 	}
-	if err := helper.CreateTagsSheet(f, tagsPools, publicURL, comp.EffectiveNumberPrefix()); err != nil {
+	if err := helper.CreateTagsSheetWithReveal(f, tagsPools, publicURL, comp.EffectiveNumberPrefix(), tagReveal(comp, tourn)); err != nil {
 		return nil, err
 	}
 	finishTemplate(f, comp, pools, draw, numCourts)

@@ -293,6 +293,13 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		res.Error = "format: " + err.Error()
 		return res
 	}
+	// A new competition starts with the tournament's default public-names
+	// option, as POST /competitions gives it (state.NewCompetitionPublicNames:
+	// not a Swiss one and not in a self-run tournament).
+	if err := setPublicNames(comp, state.NewCompetitionPublicNames(importTourn, comp.Format)); err != nil {
+		res.Error = importRowFailure(entry.ID, "the public names option could not be set", err)
+		return res
+	}
 	if err := validateSwissConfig(comp); err != nil {
 		res.Error = "swissRounds: " + err.Error()
 		return res

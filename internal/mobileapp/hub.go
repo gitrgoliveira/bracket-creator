@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
@@ -52,6 +53,11 @@ const (
 	// (lineupUpdatedPayload builds it for every writer).
 	EventLineupUpdated  EventType = "lineup_updated"
 	EventResyncRequired EventType = "resync_required"
+	// EventSwissRoundGenerated: a new Swiss round's matches were generated.
+	// Clients refresh their match list and competition view (the bumped
+	// swissCurrentRound is in the payload so callers need no separate GET).
+	// FR-050d.
+	EventSwissRoundGenerated EventType = "swiss_round_generated"
 )
 
 // AutoCompleteErrorHeader is set on score/start responses when the
@@ -74,10 +80,11 @@ const DefaultHistorySize = 200
 // Each subscriber allocates one buffered channel (100-element historyEntry
 // buffer) plus one streaming goroutine. Base struct/goroutine overhead per
 // client:
-//   - Channel buffer: 100 entries × 24 B (int64 seq + string header) ≈ 2.4 KB
+//   - Channel buffer: 100 entries × 64 B (int64 seq, two string headers,
+//     the event type and a pointer to the shared public copy) ≈ 6.4 KB
 //   - Channel struct overhead: ~100 B
 //   - Goroutine stack: 2–8 KB (starts small, grows on demand)
-//   - Base total: ~4–10 KB resident per client
+//   - Base total: ~8–15 KB resident per client
 //
 // Note: this is the base overhead only. Each queued (buffered) message also
 // keeps its payload bytes alive on the heap until the client drains it. Under
@@ -87,7 +94,7 @@ const DefaultHistorySize = 200
 // dropped by the non-blocking send (select/default) before the buffer fills
 // in practice, but the extra allocation is real during the drop window.
 //
-// At 5000 active (draining) clients the base cost is ~20–50 MB, comfortably
+// At 5000 active (draining) clients the base cost is ~40–75 MB, comfortably
 // within the RAM budget of a single-core VPS or RPi-class hardware used for
 // large-scale deployments (tens of teams, 1000+ live spectators).
 //
@@ -139,9 +146,29 @@ type SSEEvent struct {
 // guarantees the replayed bytes are exactly what live clients saw.
 // Subscriber channels carry the same pair so the streaming loop can emit
 // the SSE `id:` line without re-parsing the payload.
+//
+// payload is the event as broadcast, with every name in it (bc-hnam): the
+// organiser's stream sends it as it is, and the stream of anyone else is
+// projected from it per subscriber when it is sent (Hub.project), using the
+// competition's option at that moment. typ and compID say what the event is
+// and which competition it is about, so the projection needs no decode to
+// tell whether it has anything to hide. The projection always decodes these
+// stored bytes, never a pointer the broadcaster kept, so a later change to
+// the broadcaster's value can never reach a stream.
 type historyEntry struct {
 	seq     int64
 	payload string
+	typ     EventType
+	compID  string
+	// masked is the shared memo of the event's public projection, computed
+	// by the first stream that needs it and reused by every other one, so a
+	// masked event is marshalled once per audience class rather than once per
+	// subscriber. nil for an event that is never masked.
+	masked *maskedPayload
+	// selfRun is the shared judgement of whether the tournament is self-run,
+	// taken by the first stream not entitled to every name that sends the
+	// event (inSelfRun). nil for an event every stream is sent as broadcast.
+	selfRun *selfRunJudgement
 }
 
 // Hub manages active SSE connections and broadcasts events.
@@ -155,7 +182,10 @@ type historyEntry struct {
 // is observed atomically, without that, a concurrent reconnect could
 // read a partial history slice and replay events out of order.
 type Hub struct {
-	clients map[chan historyEntry]bool
+	// clients maps each subscriber's channel to who it is answered for
+	// (sseSubscriber): the channel carries the event as broadcast, and the
+	// streaming loop projects it for that subscriber when it sends it.
+	clients map[chan historyEntry]*sseSubscriber
 	mu      sync.RWMutex
 
 	// seq is the monotonic envelope counter (atomic so Broadcast can
@@ -198,6 +228,32 @@ type Hub struct {
 	// with (newMatchBroadcastCoalescerWithClock); nil is time.Now. Set
 	// before registration, never after, so no timer reads it as it changes.
 	pushClock func() time.Time
+
+	// names is the audience judge and the name masks the router shares with
+	// the public reads (bc-hnam), attached once before serving
+	// (attachPublicNames). With none attached (a bare hub in a test) every
+	// stream is sent the events as broadcast and no ticket can be had.
+	names *publicNames
+	// tickets holds the event-stream tickets handed out and not yet used.
+	tickets eventTickets
+	// rejudges counts the reveal re-judgements a tournament_updated started
+	// (rejudgeRevealStreams), so Close waits for them.
+	rejudges sync.WaitGroup
+}
+
+// sseSubscriber is who one event stream is answered for: the audience its
+// ticket was judged for (the public without one), and the X-Reveal-Key
+// header a non-organiser's ticket was asked with, kept so a change of a
+// competition's option can be judged again (rejudgeRevealStreams).
+type sseSubscriber struct {
+	aud    audience
+	reveal string
+}
+
+// attachPublicNames gives the hub the router's audience judge and name
+// masks. Called once, before serving.
+func (h *Hub) attachPublicNames(names *publicNames) {
+	h.names = names
 }
 
 // pushMatchNow runs send under the attached coalescer's lock for matchKey
@@ -239,7 +295,7 @@ func NewHubWithLimits(historySize, maxClients int) *Hub {
 		historySize = DefaultHistorySize
 	}
 	return &Hub{
-		clients:           make(map[chan historyEntry]bool),
+		clients:           make(map[chan historyEntry]*sseSubscriber),
 		history:           make([]historyEntry, historySize),
 		HistorySize:       historySize,
 		MaxClients:        maxClients,
@@ -253,14 +309,19 @@ func NewHubWithLimits(historySize, maxClients int) *Hub {
 //
 // HandleEvents converts a nil return into HTTP 503 so the SSE client
 // knows to back off and retry rather than hanging on a stuck connection.
+//
+// The channel carries every event as broadcast, names included: it is the
+// in-process view (tests, internal listeners). A stream is only ever sent
+// what Hub.project gives its subscriber.
 func (h *Hub) Subscribe() chan historyEntry {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.subscribeLocked()
+	return h.subscribeLocked(&sseSubscriber{})
 }
 
-// subscribeLocked registers a new subscriber channel. Caller holds h.mu.
-func (h *Hub) subscribeLocked() chan historyEntry {
+// subscribeLocked registers a new subscriber channel for sub. Caller holds
+// h.mu.
+func (h *Hub) subscribeLocked(sub *sseSubscriber) chan historyEntry {
 	if h.closed {
 		return nil
 	}
@@ -271,7 +332,7 @@ func (h *Hub) subscribeLocked() chan historyEntry {
 	// concurrent SSE clients; truly stalled clients are detected via the
 	// non-blocking send in Broadcast and unsubscribed.
 	ch := make(chan historyEntry, 100)
-	h.clients[ch] = true
+	h.clients[ch] = sub
 	return ch
 }
 
@@ -288,9 +349,14 @@ func (h *Hub) subscribeLocked() chan historyEntry {
 // (for the resync path). A nil ch means the hub is closed or at MaxClients,
 // the same contract as Subscribe.
 func (h *Hub) subscribeWithReplay(since int64) (ch chan historyEntry, entries []historyEntry, complete bool, headSeq int64) {
+	return h.subscribeWithReplayFor(since, &sseSubscriber{})
+}
+
+// subscribeWithReplayFor is subscribeWithReplay for the stream of sub.
+func (h *Hub) subscribeWithReplayFor(since int64, sub *sseSubscriber) (ch chan historyEntry, entries []historyEntry, complete bool, headSeq int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	ch = h.subscribeLocked()
+	ch = h.subscribeLocked(sub)
 	headSeq = h.seq.Load()
 	complete = true
 	if ch != nil && since > 0 {
@@ -314,8 +380,8 @@ func (h *Hub) Close() {
 		h.heldPushes.Close()
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if h.closed {
+		h.mu.Unlock()
 		return
 	}
 	h.closed = true
@@ -323,6 +389,10 @@ func (h *Hub) Close() {
 		delete(h.clients, ch)
 		close(ch)
 	}
+	h.mu.Unlock()
+	// No re-judgement starts once closed is set (Broadcast adds to rejudges
+	// under h.mu, and only while the hub is open), so this wait is final.
+	h.rejudges.Wait()
 }
 
 // Unsubscribe removes a client channel
@@ -365,6 +435,28 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 	entry := historyEntry{
 		seq:     seq,
 		payload: string(payload),
+		typ:     eventType,
+	}
+	if sseEventClassOf(eventType) == sseEventMasked {
+		entry.compID = eventCompetitionID(data, payload)
+		entry.masked = &maskedPayload{}
+		if entry.compID == "" {
+			// Every masked event names its competition; one that does not
+			// is sent to everyone but the organiser with no data at all.
+			slog.Warn("mobile-app: a masked event names no competition; it is sent without its data", "type", eventType, "seq", seq)
+		}
+	}
+	if h.names != nil && sseEventClassOf(eventType) != sseEventPasses {
+		entry.selfRun = &selfRunJudgement{}
+	}
+	if eventType == EventTournamentUpdated && h.names != nil && !h.closed && h.holdsRevealStreamLocked() {
+		// A competition's option may have changed: judge the reveal streams
+		// again once the event is out (rejudgeRevealStreams takes h.mu, so
+		// it runs only after this fan-out has released it). Added under h.mu
+		// while the hub is open, so Close's wait for it is final. With no
+		// stream opened with reveal keys (a self-run tournament hands out no
+		// ticket) there is nothing to judge, so none is started.
+		safeGo(&h.rejudges, nil, h.rejudgeRevealStreams)
 	}
 
 	// Append to ring buffer first so a client that reconnects between the
@@ -387,6 +479,10 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 
 	for _, ch := range dead {
 		h.unsubscribeLocked(ch)
+	}
+	if eventType == EventPasswordReset {
+		h.endOrganiserStreamsLocked()
+		h.tickets.passwordChanged()
 	}
 }
 
@@ -459,12 +555,31 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 			}
 		}
 
+		// Who the stream is answered for (bc-hnam): the audience of the
+		// ticket it was opened with, or the public without one. A ticket
+		// that is spent, expired or unknown is refused, never taken as the
+		// public: a signed-in console must never land silently on a masked
+		// stream, so it asks for a new ticket instead.
+		sub := &sseSubscriber{}
+		if raw, has := c.GetQuery("ticket"); has {
+			judged, ok := h.redeemTicket(raw)
+			if !ok {
+				c.Header("Cache-Control", "no-store")
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"error": "This event-stream ticket has been used or has expired. Ask for a new one.",
+					"code":  codeEventTicketInvalid,
+				})
+				return
+			}
+			sub = &judged
+		}
+
 		// Registration and the replay snapshot happen atomically under one
 		// hub lock, so the merged replay+live stream is both gap-free and
 		// duplicate-free by construction: every event lands in exactly one
 		// of the two (matters for non-deduping SSE consumers; the SPA also
 		// dedups via checkSeqGap, external integrations may not).
-		ch, entries, complete, headSeq := h.subscribeWithReplay(lastEventID)
+		ch, entries, complete, headSeq := h.subscribeWithReplayFor(lastEventID, sub)
 		if ch == nil {
 			// mp-663 Phase 4: subscriber cap reached, or hub shutting down.
 			// 503 + Retry-After tells well-behaved clients (and the
@@ -475,9 +590,21 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 		}
 		defer h.Unsubscribe(ch)
 
+		// Whether the tournament is self-run, judged once as the stream
+		// opens: its replay is sent on it, and so is the cache header.
+		selfRun := h.names == nil || h.names.selfRun()
+
 		// Set SSE headers
 		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
+		if selfRun {
+			// A self-run tournament hides no names: the stream is sent as
+			// it always was.
+			c.Header("Cache-Control", "no-cache")
+		} else {
+			// no-store, not no-cache: what the stream carries depends on who
+			// opened it (bc-hnam), so no copy of it may be kept.
+			c.Header("Cache-Control", "no-store")
+		}
 		c.Header("Connection", "keep-alive")
 		// X-Accel-Buffering: no is important for Nginx and other proxies to not buffer the stream
 		c.Header("X-Accel-Buffering", "no")
@@ -545,8 +672,14 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 					c.Writer.Flush()
 				}
 			} else {
-				for _, entry := range entries {
-					writeSSEEnvelope(c.Writer, entry.seq, entry.payload)
+				// A replayed event is judged on the tournament as it stands
+				// now, not as it stood when the event was first sent.
+				replaySelfRun := judgedSelfRun(selfRun)
+				for i := range entries {
+					if entries[i].selfRun != nil {
+						entries[i].selfRun = replaySelfRun
+					}
+					writeSSEEnvelope(c.Writer, entries[i].seq, h.project(&entries[i], sub))
 				}
 				c.Writer.Flush()
 			}
@@ -563,7 +696,7 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 			select {
 			case msg, ok := <-ch:
 				if ok {
-					writeSSEEnvelope(w, msg.seq, msg.payload)
+					writeSSEEnvelope(w, msg.seq, h.project(&msg, sub))
 					c.Writer.Flush() // Ensure the message is sent immediately
 					return true
 				}

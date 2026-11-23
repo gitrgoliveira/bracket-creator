@@ -21,7 +21,7 @@ import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, teamMatchTypeFor 
 // does not say what the app expects, and for the admin-only gate on showing it.
 import { matchDataUnreadable, unreadableMatches, UnreadableBoutsNote, UnreadablePoolNote } from './data_integrity.jsx';
 import { realIppons } from './result_slot.jsx';
-import { sameCompetitor } from './competitor_identity.jsx';
+import { sameCompetitor, nameBesideBadge } from './competitor_identity.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule
 // (bc-dnst); see that file's header for why this stays an ES import.
 import { NumberedName } from './numbered_name.jsx';
@@ -533,7 +533,7 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
             <tr key={pkey(rowPlayer)} className={isHighlighted(rowPlayer) ? "league-matrix__row--me" : ""}>
               <td className="league-matrix__row-head" title={playerLabel(rowPlayer)} aria-label={playerLabel(rowPlayer)}>
                 <span className="league-matrix__num">{rowPlayer.number || ""}</span>
-                <span className="league-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
+                <span className="league-matrix__pname">{nameBesideBadge(tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer), rowPlayer.number)}</span>
               </td>
               {players.map((colPlayer, ci) => {
                 const colMe = isHighlighted(colPlayer) ? " league-matrix__col--me" : "";

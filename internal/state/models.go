@@ -99,6 +99,13 @@ type Tournament struct {
 	// files (Mode == "") normalise to "officiated" via ApplyTournamentDefaults.
 	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 
+	// DefaultPublicNames is the tournament-wide choice of what the public
+	// pages show for a competitor (one of the PublicNames* values, see
+	// Competition.PublicNames). New competitions start with it, and saving it
+	// sets every competition but a Swiss one after the organiser confirms the
+	// list. "" (and an absent key, so no load-time migration) shows names.
+	DefaultPublicNames string `yaml:"default_public_names,omitempty" json:"defaultPublicNames,omitempty"`
+
 	// Public tournament info fields (mp-ef3). All optional (omitempty).
 	// Rendered read-only on the viewer home page; editable in the admin setup form.
 	// PublicURL is the externally-shareable base URL for this tournament (mp-s1gl).
@@ -324,6 +331,14 @@ func ApplyTournamentDefaults(t *Tournament) {
 	}
 }
 
+// IsSelfRun reports whether the tournament runs in self-run mode. A nil
+// tournament (none created yet) is not self-run. This is the one Go spelling
+// of the question for engine code; the HTTP layer compares t.Mode against
+// TournamentModeSelfRun directly where it already holds the tournament.
+func (t *Tournament) IsSelfRun() bool {
+	return t != nil && t.Mode == TournamentModeSelfRun
+}
+
 // Days returns the ordered list of DD-MM-YYYY calendar day strings
 // covered by the tournament, derived from Date + DurationDays. The list
 // has exactly DurationDays entries (Day 1 = Date, Day 2 = Date+1, …).
@@ -334,14 +349,6 @@ func ApplyTournamentDefaults(t *Tournament) {
 //
 // Consumers should call ApplyTournamentDefaults before Days() to ensure
 // DurationDays has its correct minimum of 1.
-// IsSelfRun reports whether the tournament runs in self-run mode. A nil
-// tournament (none created yet) is not self-run. This is the one Go spelling
-// of the question for engine code; the HTTP layer compares t.Mode against
-// TournamentModeSelfRun directly where it already holds the tournament.
-func (t *Tournament) IsSelfRun() bool {
-	return t != nil && t.Mode == TournamentModeSelfRun
-}
-
 func (t *Tournament) Days() []string {
 	if t == nil || t.DurationDays < 1 || t.Date == "" {
 		return nil
@@ -572,6 +579,36 @@ type Competition struct {
 	// migration: no earlier release writes the key, so an older config.md
 	// loads as "not set" and estimates exactly as before.
 	ExpectedParticipants int `yaml:"expected_participants,omitempty" json:"expectedParticipants,omitempty"`
+
+	// PublicNames is what the public pages (viewer, court boards, overlay,
+	// event stream) show for this competition's competitors: "" names
+	// (PublicNamesShown), or their numbers with one kind of reveal link at a
+	// time: PublicNamesPerson (each competitor's own link reveals their own
+	// name, a team's reveals its members' names), PublicNamesCompetition (one
+	// link reveals every name in the competition) or PublicNamesHidden (no
+	// link; only the signed-in organiser sees names). Organiser screens,
+	// exports and the stored data never change. A setting, so ConfigVersion
+	// hashes it. Additive: an absent key reads as "", so no migration.
+	PublicNames string `yaml:"public_names,omitempty" json:"publicNames,omitempty"`
+
+	// RevealUntil is when this competition's reveal links stop revealing:
+	// a local date and time "YYYY-MM-DDTHH:MM" (RevealUntilLayout) read in
+	// the server's time zone, or "" for the end of the tournament (one hour
+	// after the tournament's Closing time on its last day, or 01:00 the
+	// morning after it with no Closing time). RevealOpen judges it on every
+	// read, so moving it later makes the same links work again. A setting,
+	// so ConfigVersion hashes it.
+	RevealUntil string `yaml:"reveal_until,omitempty" json:"revealUntil,omitempty"`
+
+	// RevealSecret is the key the reveal links are derived from
+	// (CompetitionRevealKey, CompetitorRevealKey): 32 random bytes as
+	// lowercase hex (NewRevealSecret), minted the first time PublicNames
+	// moves to a kind with links and kept for the competition's whole life,
+	// so switching links off and on again gives back the same links. Never
+	// on the wire (`json:"-"`), not in ConfigVersion, and not in the
+	// settings PUT's field set, so a PUT keeps it and nothing a client sends
+	// can set it.
+	RevealSecret string `yaml:"reveal_secret,omitempty" json:"-"`
 
 	// KachinukiEncounterEnchoCleared records that the one-time load repair
 	// (upgradeKachinukiEncounterEnchoLocked, legacy_upgrade.go) has cleared the
@@ -1758,6 +1795,13 @@ type MatchResult struct {
 	// incoming result only, read by the history writer and the handlers'
 	// heldGroups; never persisted.
 	Merge *MergeReport `json:"-" yaml:"-"`
+	// HeldTeamResult is the team-match summary the caller fixed before it
+	// rewrote the bout rows (TeamResultHeld says it is set): the public name
+	// mask rewrites fighter names, and a summary recomputed from the masked
+	// names would count differently from the organiser's. Set on the copy a
+	// viewer read serves only, through HoldTeamResult; never persisted.
+	HeldTeamResult TeamResultLine `json:"-" yaml:"-"`
+	TeamResultHeld bool           `json:"-" yaml:"-"`
 	// LineupWarning is what the write's door tells the operator when a
 	// kachinuki start kept the match's own lineup at the start and a later
 	// match's carried lineup could not follow it (engine.DerivedLineupError,
@@ -2210,6 +2254,11 @@ type BracketMatch struct {
 	HansokuB      int      `json:"hansokuB,omitempty"`
 	IsOverridden  bool     `json:"isOverridden"`
 	QueuePosition int      `json:"queuePosition,omitempty"`
+	// HeldTeamResult mirrors MatchResult.HeldTeamResult for a bracket match:
+	// set on the copy a viewer read serves only (HoldTeamResult), never
+	// persisted (json:"-" keeps it out of bracket.json).
+	HeldTeamResult TeamResultLine `json:"-" yaml:"-"`
+	TeamResultHeld bool           `json:"-" yaml:"-"`
 	// IneligibleSides mirrors MatchResult.IneligibleSides for a bracket
 	// match (bc-cse): a request-time-only annotation, stamped by
 	// mobileapp.annotateEligibility on the copy a viewer endpoint

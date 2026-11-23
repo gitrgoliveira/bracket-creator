@@ -367,6 +367,14 @@ type competitionUpdateRequest struct {
 	// expected count and shrink every estimate built on it.
 	ExpectedParticipants *int `json:"expectedParticipants"`
 
+	// PublicNames and RevealUntil carry the key's presence the same way: ""
+	// is a real value for both (names shown; the end of the tournament), so
+	// a body that omits them (a partial body, a page from before the
+	// setting) keeps the stored values rather than showing every name again
+	// or moving the links' expiry.
+	PublicNames *string `json:"publicNames"`
+	RevealUntil *string `json:"revealUntil"`
+
 	// RestoreMatchTimes is the exact Undo of a re-time (DR3): the previousTimes
 	// the move answered with, sent back with the configVersion that answer
 	// carried. A PRESENT list, even an empty one, means "write these times and
@@ -928,11 +936,22 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	})
 
 	r.POST("/competitions", func(c *gin.Context) {
-		var comp state.Competition
-		if err := c.ShouldBindJSON(&comp); err != nil {
+		// publicNames carries the key's presence, as the settings PUT's
+		// extraQualifiers does: "" is a real value (names shown), and an
+		// omitted key means "start with the tournament default" (E2).
+		var req struct {
+			state.Competition
+			PublicNames *string `json:"publicNames"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		comp := req.Competition
+		// The reveal secret is the server's to mint (json:"-" keeps it off
+		// the wire both ways); zeroed here so no path into this record can
+		// carry one in.
+		comp.RevealSecret = ""
 		// A new competition's list was never shuffled, whatever the body says:
 		// only a roster PUT records a shuffle (markRosterShuffled).
 		comp.RosterShuffled = false
@@ -1071,6 +1090,34 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		if err := validateNewCompetition(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// What the public pages show for this competition's competitors. A
+		// new competition starts with the tournament default when the body
+		// does not choose (E2, state.NewCompetitionPublicNames), except a
+		// Swiss one and in a self-run tournament, where it starts with names
+		// shown rather than being refused for a choice the organiser never
+		// made here.
+		publicNames := state.NewCompetitionPublicNames(createTourn, comp.Format)
+		if req.PublicNames != nil {
+			publicNames = strings.TrimSpace(*req.PublicNames)
+		}
+		comp.RevealUntil = strings.TrimSpace(comp.RevealUntil)
+		if msg := validatePublicNamesValue("publicNames", publicNames); msg != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
+		if msg := validateRevealUntilValue(comp.RevealUntil); msg != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
+		if status, code, msg := publicNamesRefusal(publicNames, comp.Format, true, true, createTourn); status != 0 {
+			c.JSON(status, gin.H{"error": msg, "code": code})
+			return
+		}
+		if err := setPublicNames(&comp, publicNames); err != nil {
+			internalError(c, err)
 			return
 		}
 
@@ -1333,6 +1380,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if req.ExpectedParticipants != nil {
 			comp.ExpectedParticipants = *req.ExpectedParticipants
 		}
+		if req.PublicNames != nil {
+			trimmed := strings.TrimSpace(*req.PublicNames)
+			req.PublicNames = &trimmed
+		}
+		if req.RevealUntil != nil {
+			trimmed := strings.TrimSpace(*req.RevealUntil)
+			req.RevealUntil = &trimmed
+		}
 		// Refuse the pre-rename duration key rather than letting the decoder
 		// drop it and the transform zero the stored value. See the field's
 		// comment on competitionUpdateRequest.
@@ -1527,6 +1582,22 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
+
+			// The public-names option and the reveal links' expiry, as
+			// sent. Whether the option may land (self-run, Swiss) is judged
+			// in the transform, against the stored option and format.
+			if req.PublicNames != nil {
+				if msg := validatePublicNamesValue("publicNames", *req.PublicNames); msg != "" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+					return
+				}
+			}
+			if req.RevealUntil != nil {
+				if msg := validateRevealUntilValue(*req.RevealUntil); msg != "" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+					return
+				}
+			}
 		}
 
 		// Atomic uniqueness-check + 404-on-missing + settings-only merge
@@ -1587,6 +1658,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// shape its draw was made with (see drawShapeChanged below) or its
 		// shiaijo.
 		var drawShapeStartedFlag bool
+		// A public-names refusal judged in the transform (publicNamesRefusal):
+		// its status, code and sentence; status 0 when there is none.
+		var publicNamesStatus int
+		var publicNamesCode, publicNamesMsg string
 		var changed bool
 		// numberPrefixMoved records whether THIS PUT actually changed the
 		// stored NumberPrefix (computed inside the transform below, comparing
@@ -2092,6 +2167,21 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 						return nil, nil
 					}
 				}
+				// The public-names option and its expiry: an omitted key keeps
+				// the stored value. Judged against the stored option and the
+				// format this save lands on, so switching a hiding competition
+				// to Swiss is refused like choosing a hiding option on one, and
+				// a stored option the save leaves alone is never refused. Any
+				// status: the option changes what the public pages show, never
+				// the draw.
+				publicNames := current.PublicNames
+				if req.PublicNames != nil {
+					publicNames = *req.PublicNames
+				}
+				revealUntil := current.RevealUntil
+				if req.RevealUntil != nil {
+					revealUntil = *req.RevealUntil
+				}
 				// Settings-only merge. Status, Players, and
 				// HasParticipantIDs are deliberately not copied from
 				// the body. Status is managed via dedicated endpoints
@@ -2159,6 +2249,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// the competition happens to be started.
 				if started && (formatChanged || kindChanged) {
 					formatOrKindStartedFlag = true
+					return nil, nil
+				}
+				// Judged after the started format and kind refusal above, so a
+				// save that breaks both is told the started one first and not
+				// one refusal after another.
+				if status, code, msg := publicNamesRefusal(publicNames, comp.Format, publicNames != current.PublicNames, formatChanged, putTourn); status != 0 {
+					publicNamesStatus, publicNamesCode, publicNamesMsg = status, code, msg
 					return nil, nil
 				}
 				// bc-symm: reject an illegal Kind ("banana"), but ONLY when
@@ -2257,6 +2354,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 				current.TeamMatchType = comp.TeamMatchType
 				current.CheckInEnabled = comp.CheckInEnabled
+				// The reveal secret is minted here the first time the option
+				// gives links and kept from then on (setPublicNames); the
+				// body never carries one (json:"-"), and the merge copies
+				// fields one by one, so a save keeps the stored one.
+				if err := setPublicNames(current, publicNames); err != nil {
+					return nil, err
+				}
+				current.RevealUntil = revealUntil
 				// LeagueTwoThirdPlaces is NOT compared or written here (bc-3rdp):
 				// it is legacy read-only (see its doc comment on
 				// state.Competition), superseded by TwoThirdPlaces below, which
@@ -2349,6 +2454,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		if formatOrKindStartedFlag {
 			c.JSON(http.StatusConflict, gin.H{"error": "format and kind can only be changed before the competition starts"})
+			return
+		}
+		if publicNamesStatus != 0 {
+			c.JSON(publicNamesStatus, gin.H{"error": publicNamesMsg, "code": publicNamesCode})
 			return
 		}
 		if validationErr != nil {

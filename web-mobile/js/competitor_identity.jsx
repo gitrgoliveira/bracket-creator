@@ -78,6 +78,53 @@ export function prefixOf(x) {
   return (x && typeof x === "object" && x.numberPrefix) ? String(x.numberPrefix).trim() : "";
 }
 
+// nameHidden: true when this record's NAME is not a name at all because the
+// competition hides its names from this reader (bc-hnam): the server sent the
+// competitor's number where the name goes (or nothing, before the draw has
+// numbered anyone). A field accessor beside numberOf, and nothing more: the
+// builders that make records stamp it (isMaskedName below, called by
+// normalizeCompetitionDetail and buildRoster), so a surface asks THIS and never
+// re-derives it from the competition.
+//
+// It is NOT identity: a hidden record still compares by id (competitorKey and
+// sameCompetitor below are unchanged). What it changes is what a record may be
+// FOUND by and what may be STORED about it: competitor_search.jsx skips its name
+// arm for one (the number rule stays the only way to find it), and the watchlist
+// keeps no name for one.
+export function nameHidden(x) {
+  return !!(x && typeof x === "object" && x.nameHidden);
+}
+
+// The label the server prints where it could not name a side at all, so it
+// fails closed rather than leaking (bc-hnam). A real name is never this.
+const MASKED_UNKNOWN = "?";
+
+// isMaskedName: the ONE rule for stamping nameHidden on a record.
+// `payloadHidden` is the payload's `namesHidden` marker (the whole payload was
+// built for a reader who may not see names). Within such a payload a record is
+// hidden when its name is empty, is its own number, or is the fail-closed "?":
+// a competitor revealed to this reader (their own link) carries a real name
+// beside the same number and so is NOT hidden, and a team keeps its name
+// (hiding covers team MEMBERS only), so a team is not hidden either.
+export function isMaskedName(payloadHidden, name, number) {
+  if (!payloadHidden) return false;
+  const n = String(name == null ? "" : name).trim();
+  if (n === "" || n === MASKED_UNKNOWN) return true;
+  const num = String(number == null ? "" : number).trim();
+  return !!num && n === num;
+}
+
+// nameBesideBadge: the name to print beside the number badge. When the name IS
+// the number (a hiding competition) the badge alone says it, so the name text
+// goes and the number is printed ONCE, as the badge; anywhere else the name is
+// returned untouched. Every surface that renders <NumberedName> or builds a
+// {name, number} pair asks this, so no row reads "K12 K12".
+export function nameBesideBadge(name, number) {
+  const n = String(name == null ? "" : name).trim();
+  const num = String(number == null ? "" : number).trim();
+  return num && n === num ? "" : name;
+}
+
 // competitorKey: id-decides-else-name as a single string, so THE RULE above
 // falls out of comparing two keys rather than being restated at every call
 // site. "id:"+id when x carries one; else "nm:"+normalizeName(name) when x

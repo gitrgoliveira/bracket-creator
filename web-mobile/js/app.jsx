@@ -12,13 +12,18 @@ import { PublicHeldWrites } from './held_writes_panel.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { tapWords } from './match_history_view.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
-import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
+import { SELF_RUN_NO_CHECK_IN, tournamentShowsEveryName } from './competition_shape.jsx';
 import { pushToast } from './toast_queue.jsx';
 import { queueMoveCourts, sharesCourtDay, sharesDay } from './court_queue.jsx';
 import { useCourtPaceLookup, PACE_TICK_MS } from './court_pace.jsx';
 import { useLatestRef } from './latest_ref.jsx';
+// bc-hnam: which credential the page reads with, keyed by the route.
+import { readAudienceKey, currentReadAudienceKey, CREDENTIAL_REFUSED, onCredentialRefused } from './api_client_requests.jsx';
+import { setAudienceAndReconnect } from './api_client_events.jsx';
+import { onRevealKeysChange } from './reveal_key.jsx';
+import { RevealPage, takeRevealLink } from './viewer_reveal.jsx';
 
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useLayoutEffect, useRef, useCallback } = React;
 
 // preact-router wrapper from router.jsx (T005). Used for URL → state
 // synchronisation. The render path itself still drives off
@@ -27,6 +32,15 @@ const { useState, useEffect, useRef, useCallback } = React;
 // admin section sub-tab); the Router only hydrates and updates that
 // state from the URL.
 const AppRouter = window.AppRouter || null;
+
+// bc-hnam: how long the page waits before reading again when a read as a new
+// audience failed (the reload effect in App).
+const AUDIENCE_RETRY_MS = 3000;
+
+// What load() answers for a read the page's audience moved away from while it
+// was in flight: neither an answer to keep nor an outage to report. The change
+// of audience reads again.
+const READ_SUPERSEDED = "superseded";
 
 const THEME = {
   "accentColor": "#1d3557",
@@ -197,6 +211,12 @@ function parsePath(path) {
       const compId = path.split("/")[2] || "";
       if (compId) return { mode: "viewer", viewerScreen: "register", viewerCompId: compId };
     }
+    // bc-hnam: /reveal/<competition>, a reveal link (its key, in the
+    // fragment, is taken before the first render: viewer_reveal.jsx).
+    if (path.startsWith("/reveal/")) {
+      const compId = safeDecode(path.split("/")[2] || "");
+      if (compId) return { mode: "viewer", viewerScreen: "reveal", viewerCompId: compId };
+    }
     return { mode: "viewer", viewerScreen: "home" };
 }
 
@@ -223,6 +243,7 @@ function pathFromState(m, vs, vcid, av, vt) {
       return "/admin";
     }
     if (vs === "register" && vcid) return `/register/${vcid}`;
+    if (vs === "reveal" && vcid) return `/reveal/${encodeURIComponent(vcid)}`;
     if (vcid) {
       // Omit the tab segment for overview (default) so the canonical URL
       // stays clean and parsePath(pathFromState(…)) round-trips correctly.
@@ -517,6 +538,10 @@ function App() {
   // but its result is only meaningful once. If this ever becomes a
   // performance concern, convert to the lazy-initializer function form:
   // useState(() => parsePath(window.location.pathname))
+  //
+  // bc-hnam: a reveal link's key is taken first, before anything reads: the
+  // first reads then carry it, and the fragment leaves the address bar.
+  const [revealLanding] = useState(() => takeRevealLink());
   const initialRoute = (() => {
     try {
       return parsePath(window.location.pathname);
@@ -550,6 +575,41 @@ function App() {
   });
   // A deep link to /admin without a sign-in opens the AuthModal at once.
   const [authPrompt, setAuthPrompt] = useState(() => initialRoute.mode === "admin" && !authed);
+  // bc-hnam: who this page reads as. An admin route signed in reads with the
+  // password (every admin read gets the real names); the court boards and the
+  // overlay read with nothing, whatever this device holds; every other page
+  // reads with the reveal keys the phone holds (api_client_requests.jsx
+  // readHeaders). The keys held can change in another tab: revealVersion
+  // re-asks.
+  const [revealVersion, setRevealVersion] = useState(0);
+  useEffect(() => onRevealKeysChange(() => setRevealVersion((v) => v + 1)), []);
+  const readKind = mode === "display" ? "display" : (mode === "admin" && authed && password ? "admin" : "viewer");
+  const readCredential = readKind === "admin" ? password : "";
+  // A self-run tournament shows every name to every audience, so none of the
+  // audience keeping below applies there: nothing is read again, no spinner
+  // shows and the event stream is not reopened as the route or the sign-in
+  // changes, exactly as before names could be hidden.
+  const everyName = tournamentShowsEveryName(tournament);
+  // The audience the page's data must have been read as (a public page's
+  // names the keys held, so a key taken in another tab is a new audience).
+  const audienceNow = readAudienceKey(readKind, readCredential, everyName);
+  // The audience the competitions held now were read as: the page shows them
+  // only while it is audienceNow (see the reload effect below), so names read
+  // on an admin route never show on the public page of the same laptop, nor
+  // numbers on the admin route the operator saves from.
+  const [dataAudience, setDataAudience] = useState(audienceNow);
+  const dataReadAsNow = everyName || dataAudience === audienceNow;
+  // Whether the last read as audienceNow failed: the spinner then says the
+  // page is trying again (the reload effect below).
+  const [audienceReadFailed, setAudienceReadFailed] = useState(false);
+  // Set before any effect reads (a layout effect runs first), and the event
+  // stream reopened with a ticket for it when it changed. Until the first read
+  // of the tournament answers (`undefined`), whether it shows every name is not
+  // known, so the stream asks no ticket yet (a self-run one gives none).
+  const audienceSettled = tournament !== undefined;
+  useLayoutEffect(() => {
+    setAudienceAndReconnect(readKind, readCredential, everyName, audienceSettled);
+  }, [readKind, readCredential, revealVersion, everyName, audienceSettled]);
   const [reauthPrompt, setReauthPrompt] = useState(false);
   const [viewerCompId, setViewerCompId] = useState(initialRoute.viewerCompId || null);
   // mp-tidg: tab is lifted here (not inside ViewerCompetition) so that
@@ -797,6 +857,37 @@ function App() {
     return () => { delete window.requestReauth; };
   }, []);
 
+  // dropStaleCredential: the organiser's saved password is no longer the
+  // server's (another admin reset it, or a read just answered 401 with it).
+  // The credential is cleared so the next request does not 401 again, the page
+  // leaves the admin audience, and the AuthModal opens so the operator notices
+  // at once. bc-qttl: the queued writes are scrubbed of it and PARKED, never
+  // destroyed: nobody here chose to discard anything, and the password was the
+  // secret, not the results; they resume when the operator signs in again.
+  // Asked by the password_reset push and, through onCredentialRefused, by
+  // a read or an event-stream ticket the server refused (api_client_requests.jsx
+  // noteRefusedCredential), so a stale password is never shown as "no tournament".
+  const dropStaleCredential = () => {
+    if (!authedRef.current) return;
+    setAuthed(false);
+    setPassword("");
+    if (window.API && window.API.parkQueueForReauth) window.API.parkQueueForReauth();
+    try {
+      localStorage.removeItem("bc_authed");
+      localStorage.removeItem("bc_password");
+    } catch {
+      // private-browsing modes can throw; the in-memory state above is the
+      // load-bearing fix anyway.
+    }
+    if (mode === "admin") {
+      setMode("viewer");
+      setAuthPrompt(true);
+      authPromptRef.current = true;
+    }
+  };
+  const dropStaleCredentialRef = useLatestRef(dropStaleCredential);
+  useEffect(() => onCredentialRefused(() => dropStaleCredentialRef.current()), [dropStaleCredentialRef]);
+
   // A refreshed tournament never puts a live score back to an older state
   // under a score editor (keepNewerTournament, patch.jsx): the admin's
   // refreshes and this load both feed the Scores tab, and two of them can be
@@ -804,8 +895,16 @@ function App() {
   const updateTournament = useCallback((next) => setTournament((prev) => keepNewerTournament(prev, next)), []);
 
   const load = async () => {
+    // bc-hnam: an answer read as another audience than the page reads as by
+    // the time it lands (the route changed meanwhile) is dropped: the change
+    // of audience reads again. It answers true when the page now holds an
+    // answer read as that audience, READ_SUPERSEDED for a read dropped as
+    // above, and false for a read that failed (the reload effect below waits
+    // for the first, reports the last and ignores the middle one).
+    const readAs = currentReadAudienceKey();
     try {
       const t = await window.API.fetchTournament();
+      if (currentReadAudienceKey() !== readAs) return READ_SUPERSEDED;
       if (!t || t.error) {
         // null = no tournament configured yet: fetchTournament returns null for
         // the bootstrap state (a 200 with a null body on newer servers, or a 404
@@ -813,6 +912,7 @@ function App() {
         setTournament(null);
       } else {
         const comps = await window.API.fetchCompetitions();
+        if (currentReadAudienceKey() !== readAs) return READ_SUPERSEDED;
         t.competitions = comps;
         // A display takes the fetch whole: no score editor reads it, and a
         // reload must discard its optimistic broadcast overlay (see below).
@@ -820,6 +920,7 @@ function App() {
         else updateTournament(t);
         applyTheme(t.theme); // mp-scf: apply custom colors
       }
+      return true;
     } catch (e) {
       // A failed fetch (network, 5xx) says nothing about whether a tournament
       // exists, so it never opens the create-tournament gate over one already
@@ -829,7 +930,11 @@ function App() {
       // undefined to null here, so the gate opens instead of spinning; only
       // the server's own "no tournament" answer (above) replaces a loaded one.
       console.error("Failed to load tournament", e);
-      setTournament((prev) => (prev === undefined ? null : prev));
+      // A refused password says nothing about whether a tournament exists
+      // either: dropStaleCredential has taken the page off the admin audience,
+      // and that change of audience reads again.
+      if (!(e && e.code === CREDENTIAL_REFUSED)) setTournament((prev) => (prev === undefined ? null : prev));
+      return false;
     } finally {
       setLoading(false);
     }
@@ -962,6 +1067,8 @@ function App() {
   // Keep compsRef in sync with the latest competitions so the snapshot
   // provider (registered once below) always answers with current data.
   useEffect(() => { compsRef.current = (tournament && tournament.competitions) || null; }, [tournament]);
+  // The tournament the snapshot's name mask asks about self-run (court_bridge.jsx).
+  const tournamentRef = useLatestRef(tournament);
 
   // mp-9ukk Phase 2: operator-tab snapshot provider.
   //
@@ -998,9 +1105,9 @@ function App() {
         return false;
       });
       return slice.length > 0 ? slice : null;
-    });
+    }, () => tournamentRef.current, () => compsRef.current);
     return () => setSnapshotProvider(null);
-  }, [mode]);
+  }, [mode, tournamentRef]);
 
   // mp-9h1f: while the shiaijo operator console is active (admin mode + shiaijo
   // view) the SSE handler skips its per-event aggregate refetch: the console
@@ -1098,6 +1205,11 @@ function App() {
   // The open competition's detail. Declared ahead of the SSE effect below,
   // whose handlers write it.
   const [selectedCompData, setSelectedCompData] = useState(null);
+  // The audience now, for a detail read still out when it changes (bc-hnam).
+  // Its own useRef plus layout effect, as latest_ref.jsx says for a ref an
+  // effect with a dependency list reads.
+  const audienceRef = useRef(audienceNow);
+  useLayoutEffect(() => { audienceRef.current = audienceNow; });
   // The server pushes applied to selectedCompData, for its refetches
   // (push-wins, createPushLedger, patch.jsx).
   const [compPushes] = useState(() => createPushLedger());
@@ -1117,10 +1229,15 @@ function App() {
     // older state (keepNewerDetail, patch.jsx), nor behind a push applied
     // after they were sent (push-wins): a self-run score editor reads this
     // data. The display reads `tournament`, never this. Called as the fetch
-    // is sent; it answers what takes the fetch's answer.
+    // is sent; it answers what takes the fetch's answer. An answer read as
+    // another audience than the page's now (the organiser signed out while it
+    // was out) is dropped, never shown: its names were not the public's.
     const takeCompDetail = () => {
         const keep = compPushes.detail();
-        return (data) => setSelectedCompData((prev) => keep(prev, data));
+        const sentAs = audienceRef.current;
+        return (data) => {
+            if (audienceRef.current === sentAs) setSelectedCompData((prev) => keep(prev, data));
+        };
     };
 
     // maybeLoad gates the full-aggregate refetch. While the shiaijo operator
@@ -1282,30 +1399,7 @@ function App() {
             // where the user signs in without mode changing would
             // otherwise leave the handler holding `authed=false` and
             // miss the reset event entirely.
-            if (authedRef.current) {
-                setAuthed(false);
-                setPassword("");
-                // Security: the old plaintext password must not linger in
-                // localStorage past the reset. bc-qttl: scrub it from the queued
-                // writes and PARK them rather than destroying them. Nobody at this
-                // tablet chose to discard anything (another admin reset the
-                // password), and the operator's queued results were never the
-                // secret; the password was, and parking removes it. They resume
-                // automatically once this operator signs in again.
-                if (window.API && window.API.parkQueueForReauth) window.API.parkQueueForReauth();
-                try {
-                    localStorage.removeItem("bc_authed");
-                    localStorage.removeItem("bc_password");
-                } catch {
-                    // private-browsing modes can throw; the in-memory
-                    // state above is the load-bearing fix anyway.
-                }
-                if (mode === "admin") {
-                    setMode("viewer");
-                    setAuthPrompt(true);
-                    authPromptRef.current = true;
-                }
-            }
+            dropStaleCredentialRef.current();
         } else if (event.type === "competitor_status_updated") {
             // T099: viewer doesn't need to mutate selectedCompData itself: 
             // the eligibility change feeds back through the full
@@ -1479,7 +1573,7 @@ function App() {
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('online', onOnline);
     };
-  }, [viewerCompId, mode, loadRef, compPushes]);
+  }, [viewerCompId, mode, loadRef, compPushes, dropStaleCredentialRef]);
 
   useEffect(() => { selectedCompDataRef.current = selectedCompData; }, [selectedCompData]);
 
@@ -1504,7 +1598,38 @@ function App() {
       setSelectedCompData(null);
       setLoading(false);
     }
-  }, [viewerCompId, viewerScreen, compPushes]);
+    // audienceNow: a read made as another audience is read again as this one
+    // (bc-hnam).
+  }, [viewerCompId, viewerScreen, compPushes, audienceNow]);
+
+  // bc-hnam: the competitions held were read as another audience (the page
+  // moved between an admin route and a public one, the organiser signed in
+  // or out, the phone took a reveal key). They are dropped, never shown, and
+  // read again; the page shows the spinner meanwhile (the gate below). A read
+  // that fails (the venue Wi-Fi drops) keeps the spinner, says so, and reads
+  // again every AUDIENCE_RETRY_MS, so the page never shows the emptied
+  // tournament as if its competitions were gone.
+  useEffect(() => {
+    if (dataReadAsNow) return undefined;
+    let cancelled = false;
+    let retry = null;
+    setTournament((prev) => (prev && Array.isArray(prev.competitions) ? { ...prev, competitions: [] } : prev));
+    setSelectedCompData(null);
+    const readAgain = () => {
+      Promise.resolve(loadRef.current()).then((read) => {
+        if (cancelled || read === READ_SUPERSEDED) return;
+        if (read) {
+          setAudienceReadFailed(false);
+          setDataAudience(audienceNow);
+          return;
+        }
+        setAudienceReadFailed(true);
+        retry = setTimeout(readAgain, AUDIENCE_RETRY_MS);
+      });
+    };
+    readAgain();
+    return () => { cancelled = true; clearTimeout(retry); };
+  }, [audienceNow, dataAudience, dataReadAsNow, loadRef]);
 
   const requestAdmin = () => {
     if (authed) {
@@ -1578,6 +1703,11 @@ function App() {
   }, []);
 
   if (loading && !selectedCompData) return <window.LoadingSpinner text="Loading..." />;
+  // bc-hnam: data read as another audience is never shown; it is being read
+  // again as this one (the reload effect above).
+  if (!dataReadAsNow) {
+    return <window.LoadingSpinner text={audienceReadFailed ? "Connection interrupted. Trying again…" : "Loading..."} />;
+  }
 
   // Gate ALL rendering on the initial data load. The spinner stays visible
   // until both fetchTournament and fetchAuthConfig have resolved (setting
@@ -1683,7 +1813,29 @@ function App() {
           onDismiss={handleDismissAnnouncement}
         />
       )}
-      {selectedCompData && viewerScreen !== "register" ? (
+      {viewerScreen === "reveal" && viewerCompId ? (
+        // bc-hnam: a reveal link. The key was taken before the first render
+        // (takeRevealLink); the page reads the competition with it, follows a
+        // per-person link's competitor, and opens the competition in place of
+        // the link (a replace, so Back does not land on the link again).
+        <RevealPage
+          compId={viewerCompId}
+          landing={revealLanding}
+          competition={selectedCompData}
+          onOpen={(compId) => {
+            replaceNextUrlSyncRef.current = true;
+            setViewerCompId(compId);
+            setViewerTab(null);
+            setViewerScreen("home");
+          }}
+          onHome={() => {
+            replaceNextUrlSyncRef.current = true;
+            setViewerCompId(null);
+            setViewerTab(null);
+            setViewerScreen("home");
+          }}
+        />
+      ) : selectedCompData && viewerScreen !== "register" ? (
         <window.ViewerCompetition
           // key on the competition id so switching comps remounts the
           // component and resets its internal per-comp UI state (open match

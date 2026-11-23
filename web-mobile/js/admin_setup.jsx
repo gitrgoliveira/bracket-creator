@@ -172,7 +172,7 @@ import {
   teamFieldsVisible, zekkenApplies, engiApplies, teamMatchTypeActive, twoThirdPlacesForNaginata,
   MIN_TEAM_SIZE, poolSettingsError, swissSettingsError, teamSizeError,
   MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
-  FORMAT_MIXED, POOL_SIZE_MODE_MAX,
+  FORMAT_MIXED, FORMAT_SWISS, POOL_SIZE_MODE_MAX,
   LABEL_POOL_SIZE_MODE, POOL_SIZE_MODE_OPTIONS,
   HINT_ZEKKEN, HINT_ENGI, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
@@ -186,6 +186,11 @@ import { useLatestRef } from './latest_ref.jsx';
 import { PauseList, pauseStopsMatches } from './pause_list.jsx';
 import { MAX_EXPECTED_PARTICIPANTS } from './competition_put_body.jsx';
 import { useDraftEstimate, DraftEstimatePanel } from './draft_estimate.jsx';
+import {
+  PublicNamesFields, publicNamesApplies, publicNamesHides, publicNamesHasLinks,
+  anyCompetitionHidesNames, publicNamesApplyTargets, confirmPublicNamesApply, PUBLIC_NAMES_APPLY_FAILED,
+  HINT_PUBLIC_NAMES_APPLY, WARN_PUBLIC_NAMES_FREE_TEXT,
+} from './public_names_fields.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant: auth comes
@@ -229,6 +234,9 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
   const [closingTime, setClosingTime] = useState(tournament.closingTime || "");
   const [websiteURL, setWebsiteURL] = useState(tournament.websiteURL || "");
   const [awardsNote, setAwardsNote] = useState(tournament.awardsNote || "");
+  // bc-hnam: what the public pages show for a competition that does not say
+  // otherwise. Saving a change sets every competition (see handleSave).
+  const [defaultPublicNames, setDefaultPublicNames] = useState(tournament.defaultPublicNames || "");
   const [infoNotes, setInfoNotes] = useState(tournament.infoNotes || "");
   const [contacts, setContacts] = useState((tournament.contacts || []).map((ct, i) => ({ ...ct, _key: i })));
   const nextKeyRef = useRef((tournament.contacts || []).length);
@@ -279,6 +287,10 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
   // re-render flips it and fire duplicate PUTs. The ref is mutated and read
   // synchronously within the same tick, so the second call sees it.
   const savingRef = useRef(false);
+  // A save whose new default landed but did not reach every competition: the
+  // default now equals the stored one, so the next Save asks about the
+  // competitions still to follow and sends the yes by itself.
+  const applyUnfinishedRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
 
@@ -314,7 +326,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
     const snap = JSON.stringify({
       name, venue, date, durationDays, courts, pauses: normalizePauses(pauses),
       publicURL, venueAddress, venueMapURL, openingTime, closingTime, websiteURL,
-      awardsNote, infoNotes, pass,
+      awardsNote, infoNotes, pass, defaultPublicNames,
       contacts: contacts.map(c => ({ label: c.label || "", value: c.value || "" })),
       theme: normalizeTheme(theme),
       logoOnLobby,
@@ -323,7 +335,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
     setDirty(snap !== initialSnapRef.current);
   }, [name, venue, date, durationDays, courts, pauses,
     publicURL, venueAddress, venueMapURL, openingTime, closingTime, websiteURL,
-    awardsNote, infoNotes, pass, contacts, theme, logoOnLobby]);
+    awardsNote, infoNotes, pass, defaultPublicNames, contacts, theme, logoOnLobby]);
 
   // mp-sspn: set a field-scoped error, then focus + scroll its input so the
   // message is visible at its cause. Returns false so callers can `return
@@ -365,6 +377,17 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
     savingRef.current = true; // latch set synchronously, before the first await
     setSaving(true);
     try {
+      // A changed default sets every competition that is not Swiss, so the
+      // operator is shown which ones first (the server asks for the same yes:
+      // confirmPublicNames). Cancelling sends nothing.
+      let confirmPublicNames = false;
+      if (tournamentMode !== "self-run" && (applyUnfinishedRef.current || defaultPublicNames !== (tournament.defaultPublicNames || ""))) {
+        const targets = publicNamesApplyTargets(tournament.competitions, defaultPublicNames);
+        if (targets.length > 0) {
+          if (!(await confirmPublicNamesApply(targets, defaultPublicNames))) return;
+          confirmPublicNames = true;
+        }
+      }
       await onSave({
         tournamentVersion: openedVersionRef.current,
         name: trimmedName,
@@ -386,14 +409,20 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
         websiteURL: websiteURL.trim(),
         awardsNote: awardsNote.trim(),
         infoNotes: infoNotes.trim(),
+        // Always sent: a save that left it out would read as the default
+        // being cleared.
+        defaultPublicNames,
+        ...(confirmPublicNames ? { confirmPublicNames: true } : {}),
         contacts: contacts.filter(c => (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
         theme: { ...theme, logoOnLobby: !!logoOnLobby },
       });
+      applyUnfinishedRef.current = false;
     } catch (e) {
       if (e && e.code === "tournament_changed") {
         if (mountedRef.current) setConflict(true);
         return;
       }
+      if (e && e.code === PUBLIC_NAMES_APPLY_FAILED) applyUnfinishedRef.current = true;
       // Server rejection (orphaned shiaijo, immutable mode, duplicate court
       // label, ...). Report it in the form's own banner, not only in the
       // toast that AdminApp already fired and that expires in 8s. errorField
@@ -575,6 +604,23 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
             changed={JSON.stringify(normalizePauses(pauses)) !== JSON.stringify(normalizePauses(tournament.pauses))}
           />
         </div>
+        {/* bc-hnam: the tournament default for competitor names on public pages */}
+        {publicNamesApplies(tournament) && (
+          <div className="card card--pad-lg">
+            <div className="card__head">
+              <div>
+                <div className="card__title">Competitor names</div>
+                <div className="card__sub">What the public pages show for each competition. New competitions start with this choice.</div>
+              </div>
+            </div>
+            <PublicNamesFields
+              tournament={tournament}
+              value={defaultPublicNames}
+              onChange={setDefaultPublicNames}
+              applyNote={HINT_PUBLIC_NAMES_APPLY}
+            />
+          </div>
+        )}
         {/* mp-ef3: Tournament Information (Public) */}
         {/* mp-sspn: collapsible: all fields here are optional, so the section */}
         {/* is a disclosure that opens by default only when data already exists. */}
@@ -656,6 +702,9 @@ function AdminEditTournament({ tournament, onCancel, onSave, onReload, refusal, 
             <div className="field">
               <label className="field__label" htmlFor="edit-awards">Awards</label>
               <textarea id="edit-awards" className="input" rows={2} value={awardsNote} onChange={(e) => setAwardsNote(e.target.value)} placeholder="Gold, Silver, Bronze per competition" />
+              {(publicNamesHides(defaultPublicNames) || anyCompetitionHidesNames(tournament)) && publicNamesApplies(tournament) && (
+                <div className="field__hint field__hint--warn" role="note" data-testid="awards-free-text-warning">{WARN_PUBLIC_NAMES_FREE_TEXT}</div>
+              )}
             </div>
             <div className="field">
               <label className="field__label" htmlFor="edit-notes">Notes</label>
@@ -844,6 +893,11 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [twoThirdPlaces, setTwoThirdPlaces] = useState(COMPETITION_DEFAULTS.twoThirdPlaces);
   const [engi, setEngi] = useState(COMPETITION_DEFAULTS.engi);
   const [checkInEnabled, setCheckInEnabled] = useState(COMPETITION_DEFAULTS.checkInEnabled);
+  // bc-hnam: starts as the tournament's default (a self-run tournament always
+  // shows names, so the picker is not offered there); the expiry only matters
+  // while the choice has links.
+  const [publicNames, setPublicNames] = useState(publicNamesApplies(tournament) ? (tournament.defaultPublicNames || "") : "");
+  const [revealUntil, setRevealUntil] = useState("");
   const safeCourts = window.normalizeCourts(tournament.courts);
   const [selectedCourts, setSelectedCourts] = useState(safeCourts.slice(0, Math.min(2, safeCourts.length)));
   const prevCourtsRef = useRef(tournament.courts);
@@ -1154,6 +1208,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       // (data.jsx) defaults it to true when omitted anyway.
       roundRobin,
     });
+    // bc-hnam: buildCompetition takes neither field, so they are set here.
+    // publicNames is sent as chosen, "" included, so the server never fills
+    // in the tournament default behind a Swiss or self-run competition, which
+    // cannot take a hiding option.
+    const namesApply = publicNamesApplies(tournament) && format !== FORMAT_SWISS;
+    c.publicNames = namesApply ? publicNames : "";
+    if (namesApply && publicNamesHasLinks(publicNames) && revealUntil) c.revealUntil = revealUntil;
     // Knockout qualifiers (bc-qual LP-5a). Set after construction:
     // buildCompetition (data.jsx) takes no such argument. Only meaningful
     // for "mixed" (pools + knockout); the radio itself only renders under
@@ -1529,6 +1590,17 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           <CheckboxField label={LABEL_NAGINATA} checked={naginata} onChange={(on) => { setNaginata(on); setTwoThirdPlaces(twoThirdPlacesForNaginata(on)); }} hint={HINT_NAGINATA} />
 
           {tournamentHasCheckIn(tournament) && <CheckboxField label={LABEL_CHECK_IN} checked={checkInEnabled} onChange={setCheckInEnabled} hint={HINT_CHECK_IN} />}
+
+          <PublicNamesFields
+            tournament={tournament}
+            format={format}
+            kind={kind}
+            teamSize={effectiveTeamSize}
+            value={publicNames}
+            onChange={setPublicNames}
+            revealUntil={revealUntil}
+            onRevealUntilChange={setRevealUntil}
+          />
 
           <NumberField
             label={isTeam ? "Expected teams" : "Expected participants"}

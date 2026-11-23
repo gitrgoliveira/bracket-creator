@@ -129,7 +129,7 @@ export async function mountCourt(initial, opts = {}) {
     sub: window.API.subscribeToEvents,
     revert: window.API.revertMatchToQueue,
   };
-  window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+  window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve(opts.comps || [{ id: 'c1', name: 'Cup' }]));
   window.API.subscribeToEvents = () => () => {};
   window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
   const showToast = vi.fn();
@@ -138,7 +138,7 @@ export async function mountCourt(initial, opts = {}) {
   let utils;
   await act(async () => {
     utils = render(h(AdminShiaijoPage, {
-      tournament: makeMinimalTournament(),
+      tournament: makeMinimalTournament(opts.tournament),
       court: 'A',
       onBack: exits.onBack,
       onEditScore: opts.onEditScore || vi.fn(),

@@ -1,9 +1,14 @@
 package mobileapp
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"golang.org/x/crypto/bcrypt"
@@ -202,3 +207,152 @@ func (v *bcryptPasswordVerifier) EnforceEmptyStoredGuard() bool { return false }
 // operator who later switches back to file mode can recover,
 // documented in docs/user-guide/mobile-app.md.
 func (v *bcryptPasswordVerifier) RedactStoredPassword() bool { return true }
+
+// wrongPasswordCacheTTL is how long a wrong password stays known to be wrong
+// in locked mode, so a flood of one wrong password on the public reads costs
+// one bcrypt comparison a minute (the per-IP limiter bounds the rest).
+const wrongPasswordCacheTTL = 60 * time.Second
+
+// wrongPasswordCacheMax bounds the wrong-password cache. Past it, expired
+// entries are dropped; while every entry is still live a new wrong password
+// is simply not remembered.
+const wrongPasswordCacheMax = 4096
+
+// cacheableVerifier reports whether a verifier's answer for a password can
+// never change while the process runs, so it may be cached: the bcrypt
+// (locked-mode) verifier, whose hash is read once at start. The file
+// verifier is not: its password changes with tournament.md, and its plain
+// compare is cheap anyway.
+func cacheableVerifier(v PasswordVerifier) bool {
+	_, ok := v.(*bcryptPasswordVerifier)
+	return ok
+}
+
+// cachedVerifier wraps a locked-mode verifier with a digest cache: the
+// correct password, once seen, skips bcrypt; a wrong one is remembered for
+// wrongPasswordCacheTTL. Concurrent checks of one password share one
+// comparison. Digests are HMACs under a key minted per process, so the
+// memory holds no plain hash of a password.
+type cachedVerifier struct {
+	PasswordVerifier
+	now func() time.Time
+
+	salt [32]byte
+
+	mu       sync.Mutex
+	good     [sha256.Size]byte
+	haveGood bool
+	bad      map[[sha256.Size]byte]time.Time
+	inflight map[[sha256.Size]byte]*verifyCall
+}
+
+// errVerifierPanicked is what a caller that waited on a check sees when the
+// check it waited on panicked.
+var errVerifierPanicked = errors.New("password check did not finish")
+
+type verifyCall struct {
+	done  chan struct{}
+	valid bool
+	err   error
+}
+
+func newCachedVerifier(inner PasswordVerifier, now func() time.Time) *cachedVerifier {
+	v := &cachedVerifier{
+		PasswordVerifier: inner,
+		now:              now,
+		bad:              map[[sha256.Size]byte]time.Time{},
+		inflight:         map[[sha256.Size]byte]*verifyCall{},
+	}
+	if _, err := rand.Read(v.salt[:]); err != nil {
+		// crypto/rand does not fail on supported platforms; a zero salt
+		// still keys the digests, only less privately.
+		v.salt = [32]byte{}
+	}
+	return v
+}
+
+func (v *cachedVerifier) digest(presented string) [sha256.Size]byte {
+	mac := hmac.New(sha256.New, v.salt[:])
+	mac.Write([]byte(presented)) // hash.Hash.Write never returns an error
+	var d [sha256.Size]byte
+	copy(d[:], mac.Sum(nil))
+	return d
+}
+
+// Verify answers from the cache when it can, and otherwise asks the wrapped
+// verifier once for every concurrent caller presenting the same password. An
+// error is passed on and never cached.
+func (v *cachedVerifier) Verify(presented string) (bool, error) {
+	if presented == "" {
+		return v.PasswordVerifier.Verify(presented)
+	}
+	d := v.digest(presented)
+	now := v.now()
+
+	v.mu.Lock()
+	if v.haveGood && subtle.ConstantTimeCompare(d[:], v.good[:]) == 1 {
+		v.mu.Unlock()
+		return true, nil
+	}
+	if exp, ok := v.bad[d]; ok {
+		if now.Before(exp) {
+			v.mu.Unlock()
+			return false, nil
+		}
+		delete(v.bad, d)
+	}
+	if call, ok := v.inflight[d]; ok {
+		v.mu.Unlock()
+		<-call.done
+		return call.valid, call.err
+	}
+	call := &verifyCall{done: make(chan struct{})}
+	v.inflight[d] = call
+	v.mu.Unlock()
+
+	// A panic in the wrapped verifier must still release the callers waiting
+	// on this password, or every later check of it would block forever. They
+	// get an error (never a remembered answer) and the panic carries on.
+	finished := false
+	defer func() {
+		if finished {
+			return
+		}
+		call.err = errVerifierPanicked
+		v.mu.Lock()
+		delete(v.inflight, d)
+		v.mu.Unlock()
+		close(call.done)
+	}()
+	call.valid, call.err = v.PasswordVerifier.Verify(presented)
+	finished = true
+
+	v.mu.Lock()
+	delete(v.inflight, d)
+	if call.err == nil {
+		if call.valid {
+			v.good, v.haveGood = d, true
+		} else {
+			v.rememberWrongLocked(d, now)
+		}
+	}
+	v.mu.Unlock()
+	close(call.done)
+	return call.valid, call.err
+}
+
+// rememberWrongLocked records a wrong password's digest until
+// wrongPasswordCacheTTL from now. Caller holds v.mu.
+func (v *cachedVerifier) rememberWrongLocked(d [sha256.Size]byte, now time.Time) {
+	if len(v.bad) >= wrongPasswordCacheMax {
+		for k, exp := range v.bad {
+			if !now.Before(exp) {
+				delete(v.bad, k)
+			}
+		}
+		if len(v.bad) >= wrongPasswordCacheMax {
+			return
+		}
+	}
+	v.bad[d] = now.Add(wrongPasswordCacheTTL)
+}

@@ -191,19 +191,31 @@ func requireExistingCompetition(c *gin.Context, comps CompetitionStore, compID s
 	return ok
 }
 
+// competitionLoader is the one store method loadExistingCompetition needs, so a
+// handler family whose own store interface is narrower can ask it too.
+type competitionLoader interface {
+	LoadCompetition(id string) (*state.Competition, error)
+}
+
 // loadExistingCompetition is requireExistingCompetition for a caller that
 // also needs the competition it found.
-func loadExistingCompetition(c *gin.Context, comps CompetitionStore, compID string) (*state.Competition, bool) {
+func loadExistingCompetition(c *gin.Context, comps competitionLoader, compID string) (*state.Competition, bool) {
 	comp, err := comps.LoadCompetition(compID)
 	if err != nil {
 		internalError(c, err)
 		return nil, false
 	}
 	if comp == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+		respondCompetitionNotFound(c)
 		return nil, false
 	}
 	return comp, true
+}
+
+// respondCompetitionNotFound answers the 404 for a competition id that names
+// no competition.
+func respondCompetitionNotFound(c *gin.Context) {
+	c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 }
 
 // isSelfRunMainGatedConfigRoute reports whether the given (method, route)
@@ -257,6 +269,8 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodPost + " /api/competitions/:id/bracket/quarantine",                      // bc-cmpw: setting aside a damaged bracket file, organiser repair
 		http.MethodDelete + " /api/competitions/:id/overrides",                             // bc-cmpw: resetting manual ranking overrides, organiser correction
 		http.MethodPut + " /api/competitions/:id/awards",                                   // bc-cmpw: fighting-spirit awards, organiser
+		http.MethodGet + " /api/competitions/:id/reveal-links",                             // the reveal keys unlock competitor names on the public pages, organiser only
+		http.MethodGet + " /api/competitions/:id/reveal-links/:participantId",              // a competitor's own reveal key, organiser only, logged
 		http.MethodPost + " /api/tournament/import",                                        // bc-cmpw: importing a tournament replaces its data, organiser, destructive
 		http.MethodPost + " /api/competitions/:id/matches/:mid/reopen",                     // mp-gmcg: reopen a finalized kachinuki result, an organiser correction
 		http.MethodPost + " /api/competitions/:id/matches/:mid/requeue-blocker-and-reopen", // mp-gmcg A4: destructive (requeues a blocker) organiser correction; same class as reopen

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -1073,4 +1074,78 @@ func TestViewerCourtFeed_TeamCompetitionCarriesSquads(t *testing.T) {
 	require.Len(t, body.Competitions, 1)
 	require.Contains(t, body.Competitions[0].Squads, redID)
 	require.Equal(t, member.ID, body.Competitions[0].Squads[redID][0].ID)
+}
+
+// TestViewerReadsByAudience (bc-hnam): the viewer reads judge their caller.
+// For a competition that hides names the public gets the numbers, marked
+// namesHidden, with no hash of the names (the roster's and the awards'
+// versions, which only the organiser's saves send back) and no data-issue
+// detail; the organiser, sending the password, gets the real names and both
+// versions; a password sent but wrong is refused, never answered masked; and
+// every answer is no-store.
+func TestViewerReadsByAudience(t *testing.T) {
+	f := newPublicNamesFixture(t, state.TournamentModeOfficiated)
+	names := []string{"Akira Hidden", "Botan Hidden", "Chiyo Hidden", "Daiki Hidden"}
+	var players []map[string]any
+	for i, n := range names {
+		players = append(players, map[string]any{"name": n, "dojo": fmt.Sprintf("Dojo %d", i+1)})
+	}
+	id := createdID(t, f.admin(http.MethodPost, "/api/competitions", createBody("Juniors", state.CompFormatKnockout, map[string]any{
+		"publicNames": state.PublicNamesHidden, "players": players,
+	})))
+	start := f.admin(http.MethodPost, "/api/competitions/"+id+"/start", nil)
+	require.Equal(t, http.StatusOK, start.Code, start.Body.String())
+	comp := f.comp(t, id)
+	comp.FightingSpiritAwards = []state.FightingSpiritAward{{Title: "Fighting spirit", RecipientName: names[2], RecipientDojo: "Dojo 3"}}
+	require.NoError(t, f.store.SaveCompetition(comp))
+
+	read := func(path, password string) *httptest.ResponseRecorder {
+		w := f.send(http.MethodGet, path, password, nil)
+		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"), "%s answers vary by audience", path)
+		return w
+	}
+	for _, path := range []string{"/api/viewer/competitions/" + id, "/api/viewer/competitions", "/api/viewer/court/A/matches"} {
+		public := read(path, "")
+		require.Equal(t, http.StatusOK, public.Code, public.Body.String())
+		body := public.Body.String()
+		for _, n := range names {
+			assert.NotContains(t, body, n, "%s shows the public no name", path)
+		}
+		assert.Contains(t, body, `"namesHidden":true`, path)
+		assert.NotContains(t, body, `"rosterVersion"`, path)
+		assert.NotContains(t, body, `"awardsVersion"`, path)
+		assert.Contains(t, body, `"dojo":"Dojo 3"`, "%s keeps the dojo", path)
+
+		organiser := read(path, publicNamesPassword)
+		require.Equal(t, http.StatusOK, organiser.Code, organiser.Body.String())
+		for _, n := range names {
+			assert.Contains(t, organiser.Body.String(), n, "%s shows the organiser every name", path)
+		}
+		assert.NotContains(t, organiser.Body.String(), `"namesHidden"`, path)
+		assert.Contains(t, organiser.Body.String(), `"rosterVersion"`, path)
+
+		stale := read(path, "stale-pw")
+		assert.Equal(t, http.StatusUnauthorized, stale.Code, "%s refuses a wrong password", path)
+		for _, n := range names {
+			assert.NotContains(t, stale.Body.String(), n, path)
+		}
+	}
+	assert.Contains(t, read("/api/viewer/competitions/"+id, publicNamesPassword).Body.String(), `"awardsVersion"`)
+
+	tour := read("/api/viewer/tournament", "")
+	assert.Equal(t, http.StatusOK, tour.Code, tour.Body.String())
+	assert.Equal(t, http.StatusUnauthorized, read("/api/viewer/tournament", "stale-pw").Code)
+}
+
+// TestMaskDataIssuesDropsTheDetail (bc-hnam): a masked view's dataIssues keep
+// the kind, the file and the position, never the detail, which can quote a
+// roster row; the zero view keeps it, and the list it was given is unchanged.
+func TestMaskDataIssuesDropsTheDetail(t *testing.T) {
+	issues := []gin.H{{"kind": "missing-ids", "file": "participants.csv", "detail": "Akira Hidden has no id"}}
+	assert.Equal(t, issues, maskDataIssues(maskView{}, issues))
+	masked := maskDataIssues(maskView{m: &nameMask{}}, issues)
+	require.Len(t, masked, 1)
+	assert.NotContains(t, masked[0], "detail")
+	assert.Equal(t, "participants.csv", masked[0]["file"])
+	assert.Equal(t, "Akira Hidden has no id", issues[0]["detail"], "the caller's list is left as it was")
 }

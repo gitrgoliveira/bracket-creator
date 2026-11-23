@@ -12,7 +12,8 @@
 // numbers align in one column. Either way the number renders before the
 // name, same as Shiro.
 //
-// This is a leaf with no imports and no window.* dependency, so every
+// This is a leaf with no window.* dependency, importing only the identity
+// leaf (competitor_identity.jsx, itself importless), so every
 // Shiro/Aka layout that shows a numbered side ES-imports it directly instead
 // of restating the before/after ternary pair inline, per this repo's rule
 // that a display contract lives in one primitive. withNumber in
@@ -41,6 +42,8 @@
 // `number` may be empty (pre-draw, or a competitor excluded from the draw):
 // then only the name renders. `name` is rendered as given; the caller owns
 // any "TBD"/"-" fallback, since surfaces differ on it.
+import { nameBesideBadge } from './competitor_identity.jsx';
+
 // numberFollowsName: THE operator ruling, as one predicate. Aka sits in the
 // right column, so its number goes AFTER the name; everything else (Shiro, and
 // every sideless or vertically-stacked surface) puts it before.
@@ -55,12 +58,17 @@ export function numberFollowsName(side) {
   return side === "aka";
 }
 
+// A competition that hides names sends each competitor's number where the name
+// goes (bc-hnam), so `name` can BE `number`: the chip then prints it once and
+// the name text is left empty (nameBesideBadge, competitor_identity.jsx, the
+// one owner of that rule; styles.css lets the empty text take no room), so no
+// row reads "K12 K12". A caller passes the name as it has it and never asks.
 export function NumberedName({ side, name, number, clip }) {
   const after = numberFollowsName(side);
   return (
     <span className={clip ? "numbered-name numbered-name--clip" : "numbered-name"}>
       {!after && number ? <span className="num-prefix">{number}</span> : null}
-      <span className="numbered-name__text">{name}</span>
+      <span className="numbered-name__text">{nameBesideBadge(name, number)}</span>
       {after && number ? <span className="num-prefix num-prefix--after">{number}</span> : null}
     </span>
   );

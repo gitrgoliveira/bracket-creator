@@ -92,10 +92,10 @@ func TestViewerPayload_SlotMinutesPerCompetition(t *testing.T) {
 	require.NoError(t, err)
 
 	// 1. Check aggregate and court-scoped feeds for comp "a" and comp "b"
-	payloadsAll, err := buildViewerCompetitionPayloads(store, "")
+	payloadsAll, err := buildViewerCompetitionPayloads(store, "", nil, organiserAudience())
 	require.NoError(t, err)
 
-	payloadsCourtA, err := buildViewerCompetitionPayloads(store, "A")
+	payloadsCourtA, err := buildViewerCompetitionPayloads(store, "A", nil, organiserAudience())
 	require.NoError(t, err)
 
 	for _, payloads := range [][]any{payloadsAll, payloadsCourtA} {
@@ -151,7 +151,7 @@ func TestViewerPayload_SlotMinutesPerCompetition(t *testing.T) {
 	}
 	require.NoError(t, store.SavePoolMatches("ko", matchesKO))
 
-	payloadsAfterKO, err := buildViewerCompetitionPayloads(store, "")
+	payloadsAfterKO, err := buildViewerCompetitionPayloads(store, "", nil, organiserAudience())
 	require.NoError(t, err)
 	pKO := findViewerPayloadComp(payloadsAfterKO, "ko")
 	require.NotNil(t, pKO)
@@ -187,7 +187,7 @@ func TestViewerPayload_SlotMinutesPerCompetition(t *testing.T) {
 	}
 	require.NoError(t, store.SaveCompetition(&compTeam))
 	require.NoError(t, store.SaveParticipants("team", nil))
-	payloadsWithTeam, err := buildViewerCompetitionPayloads(store, "")
+	payloadsWithTeam, err := buildViewerCompetitionPayloads(store, "", nil, organiserAudience())
 	require.NoError(t, err)
 	pTeam := findViewerPayloadComp(payloadsWithTeam, "team")
 	require.NotNil(t, pTeam)

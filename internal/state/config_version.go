@@ -8,7 +8,9 @@ package state
 // Runtime fields written outside Settings are NEVER included: Status,
 // HasParticipantIDs, RosterShuffled, SwissCurrentRound, FightingSpiritAwards,
 // KachinukiEncounterEnchoCleared, RoundLineupsConverted, RoundLineupsGiven,
-// RoundLineupsLegacy, Players, RosterVersion, ConfigVersion.
+// RoundLineupsLegacy, RevealSecret, Players, RosterVersion, ConfigVersion.
+// RevealSecret is server-managed (minted by the server, never on the wire),
+// so it stays out of this set and out of the settings merge alike.
 type configVersionPayload struct {
 	Name                         string        `json:"name"`
 	Date                         string        `json:"date"`
@@ -33,6 +35,11 @@ type configVersionPayload struct {
 	TwoThirdPlaces               *bool         `json:"twoThirdPlaces"`
 	ExpectedParticipants         int           `json:"expectedParticipants"`
 	CheckInEnabled               bool          `json:"checkInEnabled"`
+	// omitempty on the fields added since v2.5 keeps an untouched record's
+	// version as it was before the upgrade, so a save opened before it is
+	// not refused for a change nobody made.
+	PublicNames string `json:"publicNames,omitempty"`
+	RevealUntil string `json:"revealUntil,omitempty"`
 }
 
 // ConfigVersion computes a content-hash config version for a competition's
@@ -69,6 +76,8 @@ func ConfigVersion(c *Competition) string {
 		TwoThirdPlaces:               c.TwoThirdPlaces,
 		ExpectedParticipants:         c.ExpectedParticipants,
 		CheckInEnabled:               c.CheckInEnabled,
+		PublicNames:                  c.PublicNames,
+		RevealUntil:                  c.RevealUntil,
 	}
 	return versionHash(p)
 }

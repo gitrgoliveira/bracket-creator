@@ -342,8 +342,28 @@ func (m *MatchResult) TeamResult() *TeamResultLine {
 	if m == nil {
 		return nil
 	}
+	if m.TeamResultHeld {
+		held := m.HeldTeamResult
+		return &held
+	}
 	credit := DefaultWinCreditSide(m.Status, m.Decision, m.DecisionBy, m.Attribution())
 	return TeamResultFrom(m.SubResults, m.SideA, m.SideB, credit)
+}
+
+// HoldTeamResult fixes the summary as the bout rows read now, so rewriting the
+// rows afterwards (the public name mask) leaves the summary alone. An
+// individual match, with no summary, holds nothing.
+func (m *MatchResult) HoldTeamResult() {
+	if tr := m.TeamResult(); tr != nil {
+		m.HeldTeamResult, m.TeamResultHeld = *tr, true
+	}
+}
+
+// HoldTeamResult is MatchResult.HoldTeamResult for a bracket match.
+func (m *BracketMatch) HoldTeamResult() {
+	if tr := m.TeamResult(); tr != nil {
+		m.HeldTeamResult, m.TeamResultHeld = *tr, true
+	}
 }
 
 // MarshalJSON augments the wire form of a MatchResult with the computed
@@ -367,6 +387,10 @@ func (m MatchResult) MarshalJSON() ([]byte, error) {
 func (m *BracketMatch) TeamResult() *TeamResultLine {
 	if m == nil {
 		return nil
+	}
+	if m.TeamResultHeld {
+		held := m.HeldTeamResult
+		return &held
 	}
 	credit := DefaultWinCreditSide(m.Status, m.Decision, m.DecisionBy, m.Attribution())
 	return TeamResultFrom(m.SubResults, m.SideA, m.SideB, credit)

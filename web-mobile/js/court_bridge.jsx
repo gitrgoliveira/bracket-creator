@@ -35,6 +35,8 @@
 // no regression.
 
 import { applyPatchToCompetitions as _applyPatchToCompetitions, matchInComp as _matchInComp } from './patch.jsx';
+import { competitionHidesNames, isTeamCompetition, tournamentShowsEveryName } from './competition_shape.jsx';
+import { squadMemberLabel } from './squad_member_label.jsx';
 
 // freshnessMs: the amber->red dot threshold.
 // 20 s sits below the 35 s SSE silence watchdog and above the 15 s SSE
@@ -257,6 +259,297 @@ export function getLastBroadcastAt() {
 }
 
 // -----------------------------------------------------------------------
+// maskSnapshotForBridge: the competitions slice an operator tab hands to a
+// display tab, with every competitor of a competition whose public pages hide
+// names (competitionHidesNames) carried by number and id alone (bc-hnam).
+//
+// The operator tab holds the organiser's copy, names and all; the display tab
+// is a PUBLIC surface, so a same-origin snapshot must not carry what the
+// server's masked payload would not. A competitor record (an object carrying a
+// number, an id the roster maps to one, or a name and a dojo) gets its name, display name and
+// zekken name set to its number and is stamped `nameHidden`; a match side, a
+// winner or a representative named by a bare string is replaced by the number
+// of the competitor its id names (else of the one roster name that is unique),
+// never by a name. A name no roster entry can place reads "?", as the server's
+// maskView.sideReading reads it; only an empty side and the draw's placeholders
+// ("Winner of ...", "Pool A-1st") stay as they are. The competition is
+// stamped `namesHidden`, as a server payload built for a hidden reader is.
+// A team competition keeps its team names and carries its team members the
+// way the server does (see maskTeamNode). A competition that shows names, or
+// any competition of a self-run tournament, passes through untouched. A match
+// PATCH is masked the same way before it is published (maskPatchForBridge).
+//
+// Pure and exported so vitest can pin it.
+// -----------------------------------------------------------------------
+const MASK_STRING_SIDES = [
+    ['sideA', ['sideAId', 'sideAID']],
+    ['sideB', ['sideBId', 'sideBID']],
+    ['winner', ['winnerId', 'winnerID']],
+    ['repPlayerA', []],
+    ['repPlayerB', []],
+];
+const MASK_NAME_FIELDS = ['displayName', 'zekkenName', 'zekken'];
+// The draw's two placeholder shapes, which are not competitors (helper.
+// IsWinnerOfPlaceholder and IsPoolFinalistPlaceholder). The shared table
+// public_names_side_cases.json pins this reading to the server's.
+const DRAW_PLACEHOLDER_RE = /^(Winner of r\d+-m\d+|Pool .+-\d+(st|nd|rd|th))$/;
+
+function hasCompetitorNumber(node) {
+    return node.number != null && String(node.number).trim() !== '';
+}
+
+// A roster record is a node with a name and a number. In an individual
+// competition (failClosed) a record with a name, a dojo and NO number is one
+// too, and reads "?" as the server's mask does for a competitor it cannot
+// place, so a competitor the draw has not numbered is never carried by name.
+function collectNumbers(node, ctx, failClosed) {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+        node.forEach((n) => collectNumbers(n, ctx, failClosed));
+        return;
+    }
+    const numbered = hasCompetitorNumber(node);
+    if (typeof node.name === 'string' && (numbered || (failClosed && 'dojo' in node))) {
+        const num = numbered ? String(node.number).trim() : '?';
+        if (node.id != null && node.id !== '') {
+            ctx.byId.set(String(node.id), num);
+            ctx.nameById.set(String(node.id), node.name);
+        }
+        if (ctx.byName.has(node.name) && ctx.byName.get(node.name) !== num) ctx.clashing.add(node.name);
+        ctx.byName.set(node.name, num);
+    }
+    for (const v of Object.values(node)) collectNumbers(v, ctx, failClosed);
+}
+
+function maskNode(node, ctx) {
+    if (Array.isArray(node)) return node.map((n) => maskNode(n, ctx));
+    if (!node || typeof node !== 'object') return node;
+    const out = {};
+    for (const [k, v] of Object.entries(node)) out[k] = maskNode(v, ctx);
+    const own = hasCompetitorNumber(node) ? String(node.number).trim() : '';
+    const mapped = node.id != null && node.id !== '' ? ctx.byId.get(String(node.id)) : undefined;
+    // A competitor record (a name and a dojo) the roster cannot place, a
+    // legacy row with no id and no number among them, reads "?", as
+    // collectNumbers reads it: never its name.
+    const record = typeof node.name === 'string' && 'dojo' in node;
+    const num = own || mapped || (record ? '?' : '');
+    if (num && typeof node.name === 'string') {
+        out.name = num;
+        out.nameHidden = true;
+        for (const f of MASK_NAME_FIELDS) {
+            if (typeof node[f] === 'string' && node[f]) out[f] = num;
+        }
+    }
+    for (const [f, idKeys] of MASK_STRING_SIDES) {
+        const name = node[f];
+        if (typeof name !== 'string' || !name) continue;
+        let found = '';
+        let carriesId = false;
+        for (const ik of idKeys) {
+            if (node[ik] == null || node[ik] === '') continue;
+            carriesId = true;
+            if (ctx.byId.has(String(node[ik]))) {
+                found = ctx.byId.get(String(node[ik]));
+                break;
+            }
+        }
+        // A side that carries an id is resolved by it alone: an id the roster
+        // does not hold reads "?", as the server's mask reads it. The name arm
+        // is for a legacy row with no id.
+        if (!found && !carriesId && ctx.byName.has(name)) {
+            found = ctx.clashing.has(name) ? '?' : ctx.byName.get(name);
+        }
+        if (found) out[f] = found;
+        else if (!DRAW_PLACEHOLDER_RE.test(name)) out[f] = '?';
+    }
+    return out;
+}
+
+// A team competition keeps its team names (the teams are the competitors) and
+// hides its team MEMBERS, as the server's masked payload does (maskView.bouts,
+// memberByName, squads): a member reads as their label ("T10.1"), or "?" when
+// no label can be made. A team record loses its metadata, and the dan grade
+// read from it, as maskView.player clears Metadata: a legacy roster held the
+// members' names there. The members come from the competition's own
+// teamMembers/squads map (team id to its members); a bout row names its
+// fighters by member id, a representative bout by name.
+const MEMBER_MAPS = ['teamMembers', 'squads'];
+
+function isPlainObject(v) {
+    return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function collectMembers(node, ctx) {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+        node.forEach((n) => collectMembers(n, ctx));
+        return;
+    }
+    for (const [k, v] of Object.entries(node)) {
+        if (MEMBER_MAPS.includes(k) && isPlainObject(v)) {
+            for (const [teamId, members] of Object.entries(v)) {
+                if (!Array.isArray(members)) continue;
+                const names = ctx.namesByTeam.get(teamId) || new Map();
+                for (const m of members) {
+                    if (!m || m.id == null || m.id === '') continue;
+                    ctx.memberTeam.set(String(m.id), teamId);
+                    ctx.memberLabel.set(String(m.id), squadMemberLabel(ctx.byId.get(teamId), m.index) || '?');
+                    if (typeof m.name === 'string' && m.name) names.set(m.name, names.has(m.name) ? null : String(m.id));
+                }
+                ctx.namesByTeam.set(teamId, names);
+            }
+        } else {
+            collectMembers(v, ctx);
+        }
+    }
+}
+
+// maskMember: what a team member's name reads as. A team's own name stays
+// (a quick-score row names the two teams).
+function maskMember(ctx, memberId, name, teamName) {
+    if (!name) return name;
+    if (teamName && name === teamName) return name;
+    if (memberId == null || memberId === '') return '?';
+    return ctx.memberLabel.get(String(memberId)) || '?';
+}
+
+// A patch names its sides by id only, so the team's name comes from the roster.
+function sideIdentity(side, id, ctx) {
+    const own = id != null && id !== '' ? id : (side && typeof side === 'object' ? side.id : '');
+    const ownId = own == null ? '' : String(own);
+    const name = typeof side === 'string' ? side : (side && side.name) || ctx.nameById.get(ownId) || '';
+    return { name, id: ownId };
+}
+
+function maskTeamMatch(node, out, ctx) {
+    const A = sideIdentity(node.sideA, node.sideAId ?? node.sideAID, ctx);
+    const B = sideIdentity(node.sideB, node.sideBId ?? node.sideBID, ctx);
+    out.subResults = node.subResults.map((row) => {
+        if (!row || typeof row !== 'object') return row;
+        const masked = { ...row };
+        masked.sideA = maskMember(ctx, row.sideAMemberId, row.sideA, A.name);
+        masked.sideB = maskMember(ctx, row.sideBMemberId, row.sideB, B.name);
+        const w = row.winner;
+        if (w && w !== A.name && w !== B.name) {
+            if (row.winnerMemberId) masked.winner = maskMember(ctx, row.winnerMemberId, w, '');
+            else if (w === row.sideA) masked.winner = masked.sideA;
+            else if (w === row.sideB) masked.winner = masked.sideB;
+            else masked.winner = '?';
+        }
+        return masked;
+    });
+    // A representative bout's fighter is recorded by name alone: it reads as
+    // the one member of that team the name names, else "?".
+    const rep = (name, teamId) => {
+        if (typeof name !== 'string' || !name) return name;
+        const id = (ctx.namesByTeam.get(teamId) || new Map()).get(name);
+        return maskMember(ctx, id, name, '');
+    };
+    if (node.repPlayerA) out.repPlayerA = rep(node.repPlayerA, A.id);
+    if (node.repPlayerB) out.repPlayerB = rep(node.repPlayerB, B.id);
+}
+
+function maskTeamNode(node, ctx) {
+    if (Array.isArray(node)) return node.map((n) => maskTeamNode(n, ctx));
+    if (!node || typeof node !== 'object') return node;
+    const out = {};
+    for (const [k, v] of Object.entries(node)) {
+        if (MEMBER_MAPS.includes(k) && isPlainObject(v)) {
+            const masked = {};
+            for (const [teamId, members] of Object.entries(v)) {
+                masked[teamId] = Array.isArray(members)
+                    ? members.map((m) => (m && typeof m === 'object' ? { ...m, name: maskMember(ctx, m.id, m.name, '') } : m))
+                    : members;
+            }
+            out[k] = masked;
+        } else {
+            out[k] = maskTeamNode(v, ctx);
+        }
+    }
+    if (typeof node.name === 'string') {
+        if ('metadata' in node) out.metadata = [];
+        if ('danGrade' in node) out.danGrade = '';
+    }
+    if (Array.isArray(node.subResults)) maskTeamMatch(node, out, ctx);
+    return out;
+}
+
+// maskAwards: a fighting spirit award names its recipient by name and dojo, and
+// the server reads it as the number or team member label of the competitor it
+// finds (maskView.awardRecipient), "?" when none. The bridge reads the one
+// competitor or member holding that name, "?" when none or several do.
+function maskAwards(comp, ctx, team) {
+    if (!Array.isArray(comp.fightingSpiritAwards)) return comp;
+    const reading = (name) => {
+        if (!name) return name;
+        if (!team) return ctx.byName.has(name) && !ctx.clashing.has(name) ? ctx.byName.get(name) : '?';
+        const ids = [];
+        for (const names of ctx.namesByTeam.values()) if (names.has(name)) ids.push(names.get(name));
+        return ids.length === 1 && ids[0] ? ctx.memberLabel.get(String(ids[0])) || '?' : '?';
+    };
+    return {
+        ...comp,
+        fightingSpiritAwards: comp.fightingSpiritAwards.map((a) => (
+            a && typeof a === 'object' && typeof a.recipientName === 'string'
+                ? { ...a, recipientName: reading(a.recipientName) }
+                : a)),
+    };
+}
+
+// `tournament` is the operator tab's tournament: a self-run one shows names
+// whatever a competition's setting says (competitionHidesNames), as the server
+// does. Without it the tournament is read as an officiated one.
+export function maskSnapshotForBridge(comps, tournament = null) {
+    if (!Array.isArray(comps)) return comps;
+    const hides = (comp) => !!comp && typeof comp === 'object' && competitionHidesNames(tournament, comp);
+    // The slice itself comes back when no competition in it hides its names.
+    if (!comps.some(hides)) return comps;
+    return comps.map((comp) => {
+        if (!hides(comp)) return comp;
+        const ctx = maskContext(comp);
+        const team = isTeamCompetition(comp);
+        const masked = team ? maskTeamNode(comp, ctx) : maskNode(comp, ctx);
+        return { ...maskAwards(masked, ctx, team), namesHidden: true };
+    });
+}
+
+function maskContext(comp) {
+    const team = isTeamCompetition(comp);
+    const ctx = {
+        byId: new Map(), byName: new Map(), clashing: new Set(), nameById: new Map(),
+        memberTeam: new Map(), memberLabel: new Map(), namesByTeam: new Map(),
+    };
+    collectNumbers(comp, ctx, !team);
+    if (team) collectMembers(comp, ctx);
+    return ctx;
+}
+
+// maskPatchForBridge: a match patch (`payload.result`, or `payload.results`)
+// about competition `comp`, with its competitors carried as maskSnapshotForBridge
+// carries them: a winner or a representative named by a bare string, and a team
+// bout's fighters, read as the number or label the roster gives them, "?" when
+// no roster entry can place them. A competition that shows its names, or one of a self-run tournament, passes
+// through by reference. Pure and exported so vitest can pin it.
+export function maskPatchForBridge(payload, comp, tournament = null) {
+    if (!payload || !comp || !competitionHidesNames(tournament, comp)) return payload;
+    const ctx = maskContext(comp);
+    const team = isTeamCompetition(comp);
+    const maskResult = (r) => {
+        if (!r || typeof r !== 'object') return r;
+        if (team) {
+            const hasRows = Array.isArray(r.subResults);
+            const out = maskTeamNode(hasRows ? r : { ...r, subResults: [] }, ctx);
+            if (!hasRows) delete out.subResults;
+            return out;
+        }
+        return maskNode(r, ctx);
+    };
+    const out = { ...payload };
+    if (payload.result) out.result = maskResult(payload.result);
+    if (Array.isArray(payload.results)) out.results = payload.results.map(maskResult);
+    return out;
+}
+
 // Module-level snapshot provider registry.
 //
 // The operator tab calls setSnapshotProvider(fn) after loading its
@@ -267,11 +560,39 @@ export function getLastBroadcastAt() {
 //
 // fn signature: (court: string) => competitions[] | null
 //   Return null when the tab has no data for the requested court.
+// tournamentFn (optional): () => the operator tab's tournament, which the
+//   snapshot's name mask asks whether names are shown (a self-run tournament
+//   always shows them).
+// competitionsFn (optional): () => every competition the tab holds, which an
+//   outgoing patch's name mask looks its competition up in (the court slice
+//   cannot place a competition that has no match on the court yet).
 // -----------------------------------------------------------------------
 let _snapshotProvider = null;
+let _snapshotTournament = null;
+let _snapshotCompetitions = null;
 
-export function setSnapshotProvider(fn) {
+// maskOutgoingPatch: the patch this tab publishes for compId, masked as the
+// snapshot is when the competition hides its names. A tab with no provider
+// holds no tournament, and a tournament that shows every name (a self-run one)
+// hides nothing, so in both the patch goes as it is, as it always did. Otherwise
+// the competition is looked up among every competition the tab holds: one that
+// shows its names sends the patch as it is, and one the tab does not hold (yet)
+// gives null: the patch is not sent, since it could carry names, and the
+// display takes the server's copy at its next refresh.
+function maskOutgoingPatch(payload, compId) {
+    if (!_snapshotProvider || !payload) return payload;
+    const tournament = _snapshotTournament ? _snapshotTournament() : null;
+    if (tournamentShowsEveryName(tournament)) return payload;
+    const comps = _snapshotCompetitions ? _snapshotCompetitions() : null;
+    const comp = (Array.isArray(comps) ? comps : []).find((c) => resolveCompId(c) === compId);
+    if (!comp) return null;
+    return maskPatchForBridge(payload, comp, tournament);
+}
+
+export function setSnapshotProvider(fn, tournamentFn, competitionsFn) {
     _snapshotProvider = typeof fn === 'function' ? fn : null;
+    _snapshotTournament = typeof tournamentFn === 'function' ? tournamentFn : null;
+    _snapshotCompetitions = typeof competitionsFn === 'function' ? competitionsFn : null;
 }
 
 // Testing only: reset all module-level state so test suites that assert on
@@ -281,6 +602,8 @@ export function _resetModuleStateForTests() {
     _lastBroadcastAt = null;
     _displayCourt = null;
     _snapshotProvider = null;
+    _snapshotTournament = null;
+    _snapshotCompetitions = null;
 }
 
 // -----------------------------------------------------------------------
@@ -351,7 +674,7 @@ export function openBridge() {
                             origin: _tabId,
                             court,
                             compId: '',
-                            payload: slice,
+                            payload: maskSnapshotForBridge(slice, _snapshotTournament ? _snapshotTournament() : null),
                         });
                         _lastBroadcastAt = Date.now();
                     }
@@ -381,13 +704,17 @@ export function openBridge() {
         //   payload: message body
         publish(type, court, compId, payload) {
             try {
+                const outgoing = type === 'patch' ? maskOutgoingPatch(payload, compId) : payload;
+                // A patch about a competition this tab cannot place, when it
+                // holds the tournament, is not sent: it could carry names.
+                if (type === 'patch' && payload && outgoing === null) return;
                 channel.postMessage({
                     v: 1,
                     type,
                     origin: _tabId,
                     court: court || '',
                     compId: compId || '',
-                    payload: payload || null,
+                    payload: outgoing || null,
                 });
                 if (type === 'patch' || type === 'snapshot') {
                     _lastBroadcastAt = Date.now();

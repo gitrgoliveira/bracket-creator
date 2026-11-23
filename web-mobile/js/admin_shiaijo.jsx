@@ -743,7 +743,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // which binds withdrawCallRef for the court feed's handler.
     const { callingKey, isCalled, callToCourt, withdrawCall } = useCourtCalls({
         court, password, showToast, mountedRef, callIdsRef, withdrawCallRef,
-        courtComps, courtCompetitions, courtMatchesRaw,
+        courtComps, courtCompetitions, courtMatchesRaw, tournament,
     });
 
     // For pool daihyosen/tiebreaker bouts, enrich the selected match with

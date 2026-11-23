@@ -240,3 +240,46 @@ func TestViewerSingleFlight_PanicRecoveredToError(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []byte("recovered"), data, "key should be usable after panic")
 }
+
+// TestViewerFlightKeySeparatesAudiences (bc-hnam): two callers share a viewer
+// build only when they are answered the same bytes, so the organiser, the
+// public and each reveal scope get keys of their own.
+func TestViewerFlightKeySeparatesAudiences(t *testing.T) {
+	public := viewerFlightKey("competitions", audience{})
+	organiser := viewerFlightKey("competitions", organiserAudience())
+	link := viewerFlightKey("competitions", audience{competitions: map[string]bool{"k": true}})
+	person := viewerFlightKey("competitions", audience{competitors: map[string]map[string]bool{"k": {"p1": true}}})
+	other := viewerFlightKey("competitions", audience{competitors: map[string]map[string]bool{"k": {"p2": true}}})
+	keys := map[string]bool{public: true, organiser: true, link: true, person: true, other: true}
+	if len(keys) != 5 {
+		t.Fatalf("audiences share a key: %q %q %q %q %q", public, organiser, link, person, other)
+	}
+	if viewerFlightKey("competitions", audience{}) != public {
+		t.Fatal("one audience must keep one key")
+	}
+}
+
+// A read of one competition keys the audience as that competition's answer
+// sees it: a link or a per-person link to ANOTHER competition shares the
+// public's build, while this competition's own links and the organiser keep
+// keys of their own.
+func TestViewerFlightKeyFor_CountsOnlyTheCompetitionsOwnReveals(t *testing.T) {
+	const base = "competition:k@1"
+	public := viewerFlightKeyFor(base, "k", audience{})
+	elsewhere := audience{
+		competitions: map[string]bool{"other": true},
+		competitors:  map[string]map[string]bool{"other": {"p1": true}},
+	}
+	if viewerFlightKeyFor(base, "k", elsewhere) != public {
+		t.Fatal("a link to another competition must share the public's build")
+	}
+	link := viewerFlightKeyFor(base, "k", audience{competitions: map[string]bool{"k": true}})
+	person := viewerFlightKeyFor(base, "k", audience{competitors: map[string]map[string]bool{"k": {"p1": true}}})
+	other := viewerFlightKeyFor(base, "k", audience{competitors: map[string]map[string]bool{"k": {"p2": true}}})
+	both := viewerFlightKeyFor(base, "k", audience{competitors: map[string]map[string]bool{"k": {"p2": true, "p1": true}}})
+	organiser := viewerFlightKeyFor(base, "k", organiserAudience())
+	keys := map[string]bool{public: true, link: true, person: true, other: true, both: true, organiser: true}
+	if len(keys) != 6 {
+		t.Fatalf("audiences that read different bytes share a key: %v", keys)
+	}
+}

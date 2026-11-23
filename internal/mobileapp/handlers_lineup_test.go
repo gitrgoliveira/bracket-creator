@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -837,4 +838,163 @@ func TestPublicLineupInForceGET_ReadFailureIs500(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+}
+
+// pnLineupFixture is an officiated tournament with a team competition that
+// hides names behind per-person links, its teams numbered T1 and T2 by the
+// draw, team T1 holding two named members and a starting lineup that seats
+// one of them by id. Its router mounts the public lineup reads with a judge.
+type pnLineupFixture struct {
+	store  *state.Store
+	r      *gin.Engine
+	comp   *state.Competition
+	member domain.TeamMember
+}
+
+func newPNLineupFixture(t *testing.T) pnLineupFixture {
+	t.Helper()
+	store := newTempStore(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Cup", Date: "01-06-2030", Password: "secret-pw", Courts: []string{"A"},
+		Mode: state.TournamentModeOfficiated,
+	}))
+	secret, err := state.NewRevealSecret()
+	require.NoError(t, err)
+	comp := &state.Competition{
+		ID: "teams", Name: "Teams", Kind: "team", TeamSize: 5, Format: state.CompFormatMixed,
+		Status: state.CompStatusPools, NumberPrefix: "T", PoolSize: 2, PoolWinners: 1,
+		PublicNames: state.PublicNamesPerson, RevealSecret: secret,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	teams := []domain.Player{
+		{ID: pnTeamA, Name: "Tigers", Dojo: "Dojo One"},
+		{ID: pnTeamB, Name: "Lions", Dojo: "Dojo Two"},
+	}
+	require.NoError(t, store.SaveParticipants(comp.ID, teams))
+	numbered := append([]domain.Player(nil), teams...)
+	numbered[0].Number, numbered[1].Number = "T1", "T2"
+	require.NoError(t, store.SavePools(comp.ID, []helper.Pool{{PoolName: "A", Players: numbered}}))
+	ken, err := store.AddTeamMember(comp.ID, pnTeamA, "Ken Kato")
+	require.NoError(t, err)
+	_, err = store.AddTeamMember(comp.ID, pnTeamA, "Ryo Mori")
+	require.NoError(t, err)
+	require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
+		TeamID: pnTeamA, CompetitionID: comp.ID,
+		Positions: map[domain.Position]string{domain.PosTaisho: "Ken Kato"},
+		MemberIDs: map[domain.Position]string{domain.PosTaisho: ken.ID},
+	}, comp.TeamSize))
+	loaded, err := store.LoadCompetition(comp.ID)
+	require.NoError(t, err)
+
+	r := gin.New()
+	registerPublicLineupHandlers(r.Group("/api"), store, store, engine.New(store), newPublicNames(store, NewFileVerifier(store)))
+	return pnLineupFixture{store: store, r: r, comp: loaded, member: ken}
+}
+
+func (f pnLineupFixture) get(t *testing.T, path string, headers map[string]string) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	w := httptest.NewRecorder()
+	f.r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		return w, nil
+	}
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
+	return w, body
+}
+
+// A team competition that hides names (bc-hnam) answers its public lineup
+// reads with each seated member's label, marked namesHidden and never cached;
+// the team's own link reveals that team's members (E7); the organiser reads
+// the names; a stale password is 401.
+func TestPublicLineupReads_HideMemberNames(t *testing.T) {
+	f := newPNLineupFixture(t)
+	path := "/api/competitions/teams/teams/" + pnTeamA + "/lineups/0"
+
+	w, body := f.get(t, path, nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	assert.NotContains(t, w.Body.String(), "Ken Kato")
+	assert.Equal(t, "T1.1", body["positions"].(map[string]any)["taisho"], "the member's label stands where the name was")
+	assert.Equal(t, f.member.ID, body["memberIds"].(map[string]any)["taisho"], "member ids stay")
+	assert.Equal(t, true, body["namesHidden"])
+	assert.Equal(t, pnTeamA, body["teamId"])
+
+	teamKey := f.comp.ID + ":" + state.CompetitorRevealKey(f.comp, pnTeamA)
+	_, body = f.get(t, path, map[string]string{revealKeyHeader: teamKey})
+	assert.Equal(t, "Ken Kato", body["positions"].(map[string]any)["taisho"], "the team's own link reveals its members")
+
+	otherKey := f.comp.ID + ":" + state.CompetitorRevealKey(f.comp, pnTeamB)
+	_, body = f.get(t, path, map[string]string{revealKeyHeader: otherKey})
+	assert.Equal(t, "T1.1", body["positions"].(map[string]any)["taisho"], "another team's link reveals nothing here")
+
+	w, body = f.get(t, path, map[string]string{"X-Tournament-Password": "secret-pw"})
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "Ken Kato", body["positions"].(map[string]any)["taisho"])
+	_, marked := body["namesHidden"]
+	assert.False(t, marked, "an unmasked read carries no marker")
+
+	w, _ = f.get(t, path, map[string]string{"X-Tournament-Password": "stale"})
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	// The match-scoped read and the lineup in force answer the same way.
+	w, _ = f.get(t, "/api/competitions/teams/teams/"+pnTeamA+"/lineup-in-force/Pool%20A-0", nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	assert.NotContains(t, w.Body.String(), "Ken Kato")
+	w, _ = f.get(t, "/api/competitions/teams/teams/"+pnTeamA+"/match-lineups/Pool%20A-0", nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+
+	// A competition that does not exist is still a 404 for the public.
+	w, _ = f.get(t, "/api/competitions/ghost/teams/"+pnTeamA+"/lineups/0", nil)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// The fielded-lineup read answers ids only, but is judged like every public
+// read of a competition's data: no-store, and a stale password is 401.
+func TestFieldedLineupRead_Judged(t *testing.T) {
+	f := newPNLineupFixture(t)
+	post := func(headers map[string]string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/competitions/teams/teams/"+pnTeamA+"/fielded-lineup/Pool%20A-0", bytes.NewBufferString(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		f.r.ServeHTTP(w, req)
+		return w
+	}
+	w := post(nil)
+	assert.Equal(t, "no-store", w.Header().Get("Cache-Control"), w.Body.String())
+	assert.Equal(t, http.StatusUnauthorized, post(map[string]string{"X-Tournament-Password": "stale"}).Code)
+}
+
+// The kachinuki roster's fighters read as member labels through a masking
+// view: by member id, or by name among the side's own team for a fighter
+// with no id, "?" for a name the team does not hold. The team's own link
+// keeps its names, and the zero view changes nothing.
+func TestMaskKachinukiSide(t *testing.T) {
+	side := engine.KachinukiRosterSide{
+		LineupFound: true,
+		On:          &engine.KachinukiRosterFighter{Name: "Ken Kato", MemberID: pnMemA1},
+		Remaining:   []engine.KachinukiRosterFighter{{Name: "Ryo Mori"}, {Name: "Stranger"}, {Name: ""}},
+	}
+	masked := maskKachinukiSide(maskView{m: teamMask()}, pnTeamA, side)
+	assert.Equal(t, "T1.1", masked.On.Name)
+	assert.Equal(t, pnMemA1, masked.On.MemberID)
+	assert.Equal(t, []engine.KachinukiRosterFighter{{Name: "T1.2"}, {Name: "?"}, {Name: ""}}, masked.Remaining)
+	assert.Equal(t, "Ken Kato", side.On.Name, "the engine's roster is not written through")
+	assert.Equal(t, "Ryo Mori", side.Remaining[0].Name)
+
+	revealed := maskKachinukiSide(maskView{m: teamMask(), reveal: map[string]bool{pnTeamA: true}}, pnTeamA, side)
+	assert.Equal(t, "Ken Kato", revealed.On.Name)
+	assert.Equal(t, "Ryo Mori", revealed.Remaining[0].Name)
+
+	roster := engine.KachinukiRoster{SideA: side}
+	assert.Equal(t, roster, maskKachinukiRoster(maskView{}, nil, "teams", "m1", roster), "the zero view changes nothing")
 }

@@ -359,6 +359,27 @@ describe('the tournament settings (G4b)', () => {
         expect(entries[0][1].payload).toMatchObject({ venue: 'B', tournamentVersion: 'v0' });
     });
 
+    it('a save that takes the place of one carrying confirmPublicNames keeps the confirmation', async () => {
+        await API.updateTournament(settings({ venue: 'A', defaultPublicNames: 'person', confirmPublicNames: true }), 'pw');
+        await tick(0);
+        const second = await API.updateTournament(settings({ venue: 'B', defaultPublicNames: 'person', tournamentVersion: 'v9' }), 'pw');
+        const entries = stored();
+        expect(entries).toHaveLength(1);
+        expect(entries[0][0]).toBe(second.key);
+        expect(entries[0][1].payload).toMatchObject({ venue: 'B', confirmPublicNames: true });
+    });
+
+    it('a save that takes the place of a confirmed one with another default does not keep the confirmation', async () => {
+        await API.updateTournament(settings({ venue: 'A', defaultPublicNames: 'hidden', confirmPublicNames: true }), 'pw');
+        await tick(0);
+        const second = await API.updateTournament(settings({ venue: 'B', defaultPublicNames: 'person', tournamentVersion: 'v9' }), 'pw');
+        const entries = stored();
+        expect(entries).toHaveLength(1);
+        expect(entries[0][0]).toBe(second.key);
+        expect(entries[0][1].payload).toMatchObject({ venue: 'B', defaultPublicNames: 'person' });
+        expect('confirmPublicNames' in entries[0][1].payload).toBe(false);
+    });
+
     it('a document that returns to content it had before is saved from that version, not along the old moves', async () => {
         // v0 -> v1 -> v2 -> v0: the third save put the settings back as they were.
         const answers = ['v1', 'v2', 'v0'];
@@ -410,6 +431,15 @@ describe('the tournament settings (G4b)', () => {
         expect(rejected).toHaveLength(1);
         expect(rejected[0].code).toBe('tournament_changed');
         expect(stored()).toEqual([]);
+    });
+
+    it('a refusal asking to confirm a public-names change keeps the code and the server\'s list', async () => {
+        const list = [{ id: 'c9', name: 'Added elsewhere', publicNames: '' }];
+        server(() => [409, { code: 'public_names_apply_confirm', error: 'Confirm to change them all.', competitions: list }]);
+        const res = await API.updateTournament(settings({ defaultPublicNames: 'hidden' }), 'pw');
+        const err = await res.settled.catch((e) => e);
+        expect(err.code).toBe('public_names_apply_confirm');
+        expect(err.competitions).toEqual(list);
     });
 
     it('a save that leaves with a stale one shares the refusal for the other tabs, like the one sent', async () => {

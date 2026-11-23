@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -186,7 +187,12 @@ var viewerLoadCompetition = func(store *state.Store, compID string) (*state.Comp
 // /competitions (courtFilter "") and the court feed GET /court/:court/matches.
 // Non-nil payloads are returned in listing order; the returned slice is
 // non-nil even when empty so callers marshal [] rather than null.
-func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]any, error) {
+//
+// Each competition's payload goes through its mask view for aud (names.view),
+// so a competition that hides names answers numbers to the public, its own
+// names to a caller holding its links. names nil masks nothing; the
+// organiser's audience reads every name.
+func buildViewerCompetitionPayloads(store *state.Store, courtFilter string, names *publicNames, aud audience) ([]any, error) {
 	ids, err := store.ListCompetitions()
 	if err != nil {
 		return nil, err
@@ -240,7 +246,7 @@ func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]a
 	comps := make([]any, 0, len(ids))
 	for _, l := range loaded {
 		if l != nil && l.inFeed {
-			comps = append(comps, l.payload(tournament))
+			comps = append(comps, l.payload(tournament, viewerMaskView(names, l.comp, aud)))
 		}
 	}
 	return comps, nil
@@ -484,8 +490,11 @@ func stampSlotMinutes(payload gin.H, comp *state.Competition, tournament *state.
 
 // payload numbers the competition's matches on the court-wide queue, redacts
 // operator-only audit fields and builds the public per-competition viewer
-// payload ({config, poolMatches, bracket}).
-func (l *viewerCompetition) payload(tournament *state.Tournament) gin.H {
+// payload ({config, poolMatches, bracket}), masked through v: the roster, the
+// fighting-spirit awards, the matches, the bracket, the team members and the
+// dataIssues details of a competition that hides names (bc-hnam). The zero
+// view masks nothing.
+func (l *viewerCompetition) payload(tournament *state.Tournament, v maskView) gin.H {
 	comp, poolMatches, bracket := l.comp, l.poolMatches, l.bracket
 	isTeamComp, squads := l.isTeamComp, l.squads
 	players, plErr := l.players, l.plErr
@@ -499,6 +508,13 @@ func (l *viewerCompetition) payload(tournament *state.Tournament) gin.H {
 	// Redact operator-only audit fields before this PUBLIC payload.
 	stripMatchesAudit(poolMatches)
 	stripBracketAudit(bracket)
+
+	// The issues are read from the real roster and rows, before the mask
+	// below rewrites them; maskDataIssues then drops the details a masked
+	// view may not read.
+	issues := viewerDataIssues(comp, players, pools, poolMatches, plErr, pmErr, brErr, poolsErr)
+	maskViewerCompetition(v, comp, poolMatches, bracket)
+	squads = v.squads(squads)
 
 	payload := gin.H{
 		"config":      comp,
@@ -554,12 +570,108 @@ func (l *viewerCompetition) payload(tournament *state.Tournament) gin.H {
 	// competitor (D21, which dataIssues names by line; any other failure
 	// it names with no position) -- narrow, but previously invisible.
 	payload["rosterAvailable"] = plErr == nil
-	issues := viewerDataIssues(comp, players, pools, poolMatches, plErr, pmErr, brErr, poolsErr)
 	if len(issues) > 0 {
-		payload["dataIssues"] = issues
+		payload["dataIssues"] = maskDataIssues(v, issues)
 	}
 	stampSlotMinutes(payload, comp, tournament)
+	stampNamesHidden(payload, v)
 	return payload
+}
+
+// viewerMaskView is names' mask view of comp for aud, the zero view (nothing
+// masked) when names is nil. A mask that could not be built is logged and
+// served anyway: it fails closed, every hidden name reading "?".
+func viewerMaskView(names *publicNames, comp *state.Competition, aud audience) maskView {
+	if names == nil {
+		return maskView{}
+	}
+	v, err := names.view(comp, aud)
+	if err != nil {
+		log.Printf("mobileapp: viewer payload %s: name mask: %v", comp.ID, err)
+	}
+	return v
+}
+
+// maskViewerCompetition masks, in place, what a competition payload carries
+// besides its team members, pools and standings: the roster on the config
+// (comp.Players, already numbered from the draw), the fighting-spirit awards,
+// the pool or league matches and the bracket. Every one is the caller's own
+// copy (the store's loads give copies), so nothing cached is changed.
+//
+// The roster's version goes too: it is an unsalted hash of every name, which
+// only the organiser's roster save sends back, and a hash of names lets a
+// guess be checked against it.
+func maskViewerCompetition(v maskView, comp *state.Competition, poolMatches []state.MatchResult, bracket *state.Bracket) {
+	if !v.namesHidden() {
+		return
+	}
+	comp.RosterVersion = ""
+	v.players(comp.Players)
+	comp.FightingSpiritAwards = v.awards(comp.FightingSpiritAwards)
+	v.matches(poolMatches)
+	v.bracket(bracket)
+}
+
+// maskDataIssues is the dataIssues list a masked view may read: each entry
+// without its detail, which can quote a roster row or name the competitors a
+// file leaves without an id. The kind, the file and the position stay, so the
+// public page can still say which file is damaged. The zero view keeps every
+// detail.
+func maskDataIssues(v maskView, issues []gin.H) []gin.H {
+	if !v.namesHidden() {
+		return issues
+	}
+	out := make([]gin.H, len(issues))
+	for i, issue := range issues {
+		entry := make(gin.H, len(issue))
+		for k, val := range issue {
+			if k != "detail" {
+				entry[k] = val
+			}
+		}
+		out[i] = entry
+	}
+	return out
+}
+
+// maskStandings is a masked copy of a competition's standings, by pool: each
+// row's player as the roster reads it through v. The rows are copied, so the
+// engine's own result is left as it was.
+func maskStandings(v maskView, standings map[string][]state.PlayerStanding) map[string][]state.PlayerStanding {
+	if !v.namesHidden() || standings == nil {
+		return standings
+	}
+	out := make(map[string][]state.PlayerStanding, len(standings))
+	for pool, rows := range standings {
+		cp := append([]state.PlayerStanding(nil), rows...)
+		v.standings(cp)
+		out[pool] = cp
+	}
+	return out
+}
+
+// stampNamesHidden sets payload["namesHidden"] on a payload built through a
+// masking view, so the public pages can tell a number shown in a name's place
+// from a name. It also lists, as "revealedCompetitors", the participants
+// whose names the caller's own per-person links reveal (a team's link names the
+// team, whose members then read by name), which the reveal page follows: the
+// caller already holds the keys that prove each, so the list tells it nothing
+// more, and a team with no named members is still told apart.
+func stampNamesHidden(payload gin.H, v maskView) {
+	if payload == nil || !v.namesHidden() {
+		return
+	}
+	payload["namesHidden"] = true
+	if len(v.reveal) > 0 {
+		ids := make([]string, 0, len(v.reveal))
+		for id, ok := range v.reveal {
+			if ok {
+				ids = append(ids, id)
+			}
+		}
+		sort.Strings(ids)
+		payload["revealedCompetitors"] = ids
+	}
 }
 
 // dataIssuesFrom collects the located file failures among errs, dropping
@@ -738,7 +850,20 @@ func readCompetitionConsistently(store *state.Store, compID string, build func()
 	}
 }
 
+// RegisterViewerHandlers wires the public viewer reads with a judge of their
+// own over the file-mode password (tests mount the viewer alone this way).
+// NewRouterWithHub calls registerViewerHandlers with the router's shared
+// judge instead, which checks the password the server was started with.
 func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine) {
+	registerViewerHandlers(r, store, eng, newPublicNames(store, nil))
+}
+
+// registerViewerHandlers wires the public viewer reads. Each judges its caller
+// first (names.judge: the organiser, a reveal scope or the public; a password
+// sent but wrong is 401, and every answer is no-store) and answers for that
+// audience, so a competition that hides names (bc-hnam) answers numbers to
+// the public.
+func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, names *publicNames) {
 	// P2 (mp-9afd): singleflight group for the two expensive viewer read
 	// endpoints. Created once per router setup and shared by all requests
 	// via closure capture. Collapses concurrent identical builds (e.g. the
@@ -749,6 +874,15 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 	sf := newViewerSingleFlight()
 
 	r.GET("/tournament", func(c *gin.Context) {
+		// Judged like every viewer read (a stale password is 401, the answer
+		// is no-store), though it is the same for every audience: the
+		// tournament carries no competitor's name of its own. Its free text
+		// (the awards note, the information notes) is shown as the organiser
+		// typed it (E6): the settings page warns while a competition hides
+		// names, and nothing here filters it.
+		if _, ok := names.judge(c); !ok {
+			return
+		}
 		t, err := store.LoadTournament()
 		if err != nil {
 			// Logged (not returned to the caller) so the root cause is still
@@ -775,12 +909,17 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 	})
 
 	r.GET("/competitions", func(c *gin.Context) {
+		aud, ok := names.judge(c)
+		if !ok {
+			return
+		}
 		// P2 (mp-9afd): collapse concurrent builds to O(1) per in-flight
-		// window. The key is constant, all callers want the same payload.
+		// window. Every caller of one audience wants the same payload, so
+		// the key is the audience's (viewerFlightKey).
 		// On panic inside the elected build, sf.Do returns an error and
 		// all waiters receive it; we map that to 500 below.
-		data, err := sf.Do("competitions", func() ([]byte, error) {
-			comps, err := buildViewerCompetitionPayloads(store, "")
+		data, err := sf.Do(viewerFlightKey("competitions", aud), func() ([]byte, error) {
+			comps, err := buildViewerCompetitionPayloads(store, "", names, aud)
 			if err != nil {
 				return nil, err
 			}
@@ -798,6 +937,10 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// documents 400 for invalid IDs. Aligning to 400 makes the
 		// spec accurate and matches the path-traversal-defense
 		// rationale documented in the spec.
+		aud, ok := names.judge(c)
+		if !ok {
+			return
+		}
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -817,6 +960,9 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				// Signal not-found so the handler can return 404.
 				return nil, errNotFound
 			}
+			// What this audience may read of the competition's names
+			// (bc-hnam), applied below once every real row is in hand.
+			v := viewerMaskView(names, comp, aud)
 
 			// bc-pnum: "make a team member's label available to the public
 			// surfaces". Gated on the same team-competition discriminator the
@@ -832,7 +978,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			var (
 				pools       []helper.Pool
 				poolMatches []state.MatchResult
-				standings   any
+				standings   map[string][]state.PlayerStanding
 				bracket     *state.Bracket
 
 				playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr error
@@ -1044,23 +1190,38 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// up for the "pools" payload field and the number merge) does not
 			// need its own gated copy just to keep the two callers' dataIssues
 			// output agreeing.
+			// Everything that reads the real rows runs before the mask: the
+			// data issues (from the roster and the rows) and the pool
+			// qualifier cuts (from the pools).
+			issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, playersErr, poolMatchesErr, bracketErr, poolsErr)
+			var poolQualifiers map[string]int
+			if len(pools) > 0 {
+				poolQualifiers = engine.PoolQualifierCuts(comp, pools, bracket)
+			}
+			maskViewerCompetition(v, comp, poolMatches, bracket)
+			v.pools(pools)
+			squads = v.squads(squads)
+
 			payload := gin.H{
 				"config":      comp,
 				"pools":       pools,
 				"poolMatches": poolMatches,
-				"standings":   standings,
+				"standings":   maskStandings(v, standings),
 				"bracket":     bracket,
-				// The version an awards save sends back (PUT .../awards),
-				// beside "config" as dataIssues is, since state.Competition
-				// carries no field for it.
-				"awardsVersion": state.AwardsVersion(comp),
+			}
+			// The version an awards save sends back (PUT .../awards), beside
+			// "config" as dataIssues is, since state.Competition carries no
+			// field for it. Only an unmasked answer carries it: it hashes the
+			// recipients' names, and only the organiser saves awards.
+			if !v.namesHidden() {
+				payload["awardsVersion"] = state.AwardsVersion(comp)
 			}
 			// How many of each pool's places send a qualifier, by pool name,
 			// from the same owner the tie-break bouts are held to
 			// (engine.PoolQualifierCuts). Absent before a draw, when there are
 			// no pools to count.
 			if len(pools) > 0 {
-				payload["poolQualifiers"] = engine.PoolQualifierCuts(comp, pools, bracket)
+				payload["poolQualifiers"] = poolQualifiers
 			}
 			// "teamMembers" is present only for a team competition (isTeamComp,
 			// above) and omitted entirely for an individual one, rather than
@@ -1081,10 +1242,11 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// reads the flag from the aggregate (normalizeViewerCompItem,
 			// api_client_requests.jsx) as well.
 			payload["rosterAvailable"] = playersErr == nil
-			if issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, playersErr, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
-				payload["dataIssues"] = issues
+			if len(issues) > 0 {
+				payload["dataIssues"] = maskDataIssues(v, issues)
 			}
 			stampSlotMinutes(payload, comp, loadTournamentForSlots(store))
+			stampNamesHidden(payload, v)
 			return json.Marshal(payload)
 		}
 
@@ -1093,8 +1255,9 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// comp id, so parallel requests for different competitions are
 		// independent, and the competition's write token as this request
 		// found it, so a request that arrives after a write never joins a
-		// build begun before it.
-		key := fmt.Sprintf("competition:%s@%d", id, store.CompetitionWriteToken(id))
+		// build begun before it, and the audience (viewerFlightKey), so a
+		// masked build is never shared with a caller who may read the names.
+		key := viewerFlightKeyFor(fmt.Sprintf("competition:%s@%d", id, store.CompetitionWriteToken(id)), id, aud)
 		data, err := sf.Do(key, func() ([]byte, error) {
 			return readCompetitionConsistently(store, id, build)
 		})

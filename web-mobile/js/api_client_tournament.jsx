@@ -14,7 +14,9 @@
 
 import { NOT_SENT_NO_CONNECTION } from './write_result.jsx';
 import { TOURNAMENT_BASE, tournamentRefusal } from './document_versions.jsx';
-import { _directFetch, _backupRequest, _backupFilename, _restoreForm } from './api_client_requests.jsx';
+import {
+    _directFetch, _backupRequest, _backupFilename, _restoreForm, readHeaders, readFailure,
+} from './api_client_requests.jsx';
 import { _serverNowMs } from './api_client_clock.jsx';
 import { _dequeue, _entriesFor } from './api_client_queue.jsx';
 import {
@@ -50,8 +52,10 @@ async function updateTournamentPassword(config, password) {
 }
 
 export const tournamentApi = {
+    // Read as the page reads (readHeaders, bc-hnam): the organiser's password
+    // from an admin route, the reveal keys from a public page.
     async fetchTournament() {
-        const res = await fetch('/api/viewer/tournament');
+        const res = await fetch('/api/viewer/tournament', { headers: readHeaders() });
         // "No tournament configured yet" is a normal bootstrap state, not an
         // error: return null so callers open the create-tournament gate quietly
         // instead of logging a console error. Newer servers signal it with a 200
@@ -63,7 +67,7 @@ export const tournamentApi = {
         }
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Failed to fetch tournament (Status ${res.status})`);
+            throw readFailure(res.status, err.error, 'tournament');
         }
         // A settings save this device still has queued shows (G4b).
         return overlayPendingTournament(await res.json());

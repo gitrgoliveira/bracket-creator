@@ -1,0 +1,15 @@
+{
+  "_about": "Whether the public pages hide a competition's names. Read by publicNames.hides (public_names_hides_cases_test.go) and by competitionHidesNames (web-mobile/js/__tests__/competition_hides_names.test.jsx): the client mirror and the server judge the same cases. A team competition hides like any other here (its team names stay visible, which is the court call's own rule, competitionCallsByNumber).",
+  "cases": [
+    { "name": "names shown", "publicNames": "", "mode": "officiated", "hides": false },
+    { "name": "per person", "publicNames": "person", "mode": "officiated", "hides": true },
+    { "name": "per competition", "publicNames": "competition", "mode": "officiated", "hides": true },
+    { "name": "hidden", "publicNames": "hidden", "mode": "officiated", "hides": true },
+    { "name": "a value no setting has fails closed", "publicNames": "bogus", "mode": "officiated", "hides": true },
+    { "name": "self-run shows names whatever the setting says", "publicNames": "hidden", "mode": "self-run", "hides": false },
+    { "name": "self-run per person", "publicNames": "person", "mode": "self-run", "hides": false },
+    { "name": "a team competition hides its members", "publicNames": "person", "mode": "officiated", "kind": "team", "teamSize": 3, "hides": true },
+    { "name": "a team competition that shows names", "publicNames": "", "mode": "officiated", "kind": "team", "teamSize": 3, "hides": false },
+    { "name": "a self-run team competition", "publicNames": "hidden", "mode": "self-run", "kind": "team", "teamSize": 3, "hides": false }
+  ]
+}

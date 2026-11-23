@@ -34,6 +34,7 @@ type tournamentVersionPayload struct {
 	ClockToElapsedMultiplier float64                `json:"clockToElapsedMultiplier"`
 	SlowestCourtBufferPct    int                    `json:"slowestCourtBufferPct"`
 	Mode                     string                 `json:"mode"`
+	DefaultPublicNames       string                 `json:"defaultPublicNames,omitempty"` // omitempty: an untouched record keeps its pre-upgrade version
 	PublicURL                string                 `json:"publicURL"`
 	VenueAddress             string                 `json:"venueAddress"`
 	VenueMapURL              string                 `json:"venueMapURL"`
@@ -82,6 +83,7 @@ func TournamentVersion(t *Tournament) string {
 		ClockToElapsedMultiplier: cp.ClockToElapsedMultiplier,
 		SlowestCourtBufferPct:    cp.SlowestCourtBufferPct,
 		Mode:                     cp.Mode,
+		DefaultPublicNames:       cp.DefaultPublicNames,
 		PublicURL:                cp.PublicURL,
 		VenueAddress:             cp.VenueAddress,
 		VenueMapURL:              cp.VenueMapURL,

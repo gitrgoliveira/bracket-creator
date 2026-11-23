@@ -19,6 +19,16 @@ const POOL_SIZE_MODE = { maximum: 'maximum', minimum: 'minimum' };
 // The "Knockout qualifiers" pills (competition_shape.jsx extraQualifiersLabel),
 // which only a minimum pool size offers.
 const EXTRA_QUALIFIERS = { standard: 'Standard', 'larger-pools': 'Oversized send +1', 'fill-bracket': 'Fit the knockout' };
+// The "Competitor names on public pages" pills (public_names_fields.jsx
+// PUBLIC_NAMES_OPTIONS), keyed by the stored value. The competition settings
+// page draws the same pills, so a journey on that page reads them from here.
+export const LABEL_PUBLIC_NAMES = 'Competitor names on public pages';
+export const PUBLIC_NAMES = {
+  '': 'Show names',
+  person: 'Numbers, a link per person',
+  competition: 'Numbers, one competition link',
+  hidden: 'Numbers only',
+};
 
 // The wizard's controls by their accessible names (competition_fields.jsx): a
 // NumberField or TextField input is named by its label through htmlFor, and a
@@ -35,6 +45,18 @@ async function choose(page, groupLabel, optionLabel) {
   await btn.tap();
   await expect(btn).toHaveAttribute('aria-pressed', 'true');
 }
+
+// Pick the public-names option on whichever form shows it (the wizard or the
+// competition settings), by its stored value.
+export async function choosePublicNames(page, value) {
+  const label = PUBLIC_NAMES[value];
+  if (!label) throw new Error(`choosePublicNames: no option for "${value}"`);
+  await choose(page, LABEL_PUBLIC_NAMES, label);
+}
+
+// The public-names pills of the form on screen: absent where the tournament
+// shows every name (a self-run one) or the format has none to hide (Swiss).
+export const publicNamesGroup = (page) => group(page, LABEL_PUBLIC_NAMES);
 
 async function setNumber(page, label, value) {
   const box = input(page, label);
@@ -71,10 +93,13 @@ async function setNumber(page, label, value) {
 //                  tournament, chosen in the "Day" select
 //   expected       number: "Expected participants" (or "Expected teams"),
 //                  which sizes the estimate until a roster is pasted
+//   publicNames    '' | 'person' | 'competition' | 'hidden': "Competitor
+//                  names on public pages" (officiated tournaments only; the
+//                  wizard starts from the tournament's default)
 export async function createCompetition(page, opts = {}) {
   const {
     name, kind, format, teamSize, teamMatchType, poolSizeMode, poolSize, poolWinners, extraQualifiers,
-    courts, numberPrefix, twoThirdPlaces, engi, checkIn, startTime, day, expected,
+    courts, numberPrefix, twoThirdPlaces, engi, checkIn, startTime, day, expected, publicNames,
   } = opts;
   await page.goto('/admin/create-competition');
   await expect(page.getByRole('heading', { level: 1, name: 'Add competition' })).toBeVisible();
@@ -127,6 +152,7 @@ export async function createCompetition(page, opts = {}) {
     await sel.selectOption({ label });
   }
   if (expected !== undefined) await setNumber(page, 'Expected', expected);
+  if (publicNames !== undefined) await choosePublicNames(page, publicNames);
   if (startTime !== undefined) {
     const box = page.locator('#create-start-time');
     await box.fill(startTime);

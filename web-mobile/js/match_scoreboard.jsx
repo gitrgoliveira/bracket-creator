@@ -20,7 +20,7 @@
 import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, boutSideView, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution, defaultWinMaru } from './result_slot.jsx';
-import { sideLookupKey } from './competitor_identity.jsx';
+import { sideLookupKey, nameBesideBadge } from './competitor_identity.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 import { creditedBoutSide, subBoutHasResult } from './team_default_credit.jsx';
 import { barredNameMark } from './barred_chip.jsx';
@@ -454,6 +454,8 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     lineupMemberId: lineupHidden ? "" : pickMemberIdFromLineup(lineupA, index, teamSize),
     squad: squadA, name: akaName, teamNumber: numberA,
   });
+  // A hidden team member's name IS its label (the server masks it to the label):
+  // the name text goes and the label prints once (nameBesideBadge).
   // TV sizing comes from the parent `.msb--tv .msb-row` selector, so no
   // per-row --tv modifier is needed here.
   const cls = "msb-row"
@@ -464,7 +466,7 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     <div className={cls} data-testid={isDH ? "sub-row-dh" : `sub-row-${index}`}>
       <span className="msb-name msb-name--labelled">
         {shiroLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid="sub-member-label-b">{shiroLabel}</span>}
-        <span className="msb-name__text" data-testid="sub-shiro-name">{shiroDisplayName}</span>
+        <span className="msb-name__text" data-testid="sub-shiro-name">{nameBesideBadge(shiroDisplayName, shiroLabel)}</span>
       </span>
       {centreMarks(sub, matchSideA, matchSideB)}
       {/* The member label sits on the OUTER side of the name like the
@@ -476,7 +478,7 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
           cell's text run, which on Aka is the LABEL, so a long name used to
           eat Aka's label while Shiro's (leading) survived (bc-rvfx). */}
       <span className="msb-name msb-name--aka msb-name--labelled">
-        <span className="msb-name__text" data-testid="sub-aka-name">{akaDisplayName}</span>
+        <span className="msb-name__text" data-testid="sub-aka-name">{nameBesideBadge(akaDisplayName, akaLabel)}</span>
         {akaLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE_AFTER} data-testid="sub-member-label-a">{akaLabel}</span>}
       </span>
     </div>
@@ -564,6 +566,9 @@ export function numberedParts(side, withZekkenName) {
 export function withNumber(side, withZekkenName, color) {
   const { name, number } = numberedParts(side, withZekkenName);
   if (!number) return name;
+  // A competition that hides names sends the number where the name goes
+  // (bc-hnam): print it once, never "K12 K12" (nameBesideBadge owns the rule).
+  if (nameBesideBadge(name, number) === "") return number;
   // numberFollowsName, not a second `=== "aka"` here: the placement rule has
   // ONE owner (numbered_name.jsx) and this is its string form, so the two
   // cannot drift about which side the number trails on.

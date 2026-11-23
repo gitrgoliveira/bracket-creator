@@ -48,6 +48,20 @@ describe('BoutSubRow: squad member label on public surfaces', () => {
   const shiroName = (tree) => collectText(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-shiro-name'));
   const akaName = (tree) => collectText(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-aka-name'));
 
+  it('prints a hidden member once: the masked name IS the label, so the name text goes', () => {
+    const squadB = [{ id: 'mem-1', index: 1, name: 'T10.1' }];
+    const squadA = [{ id: 'mem-2', index: 1, name: 'T11.1' }];
+    const sub = { position: 1, sideB: 'T10.1', sideBMemberId: 'mem-1', sideA: 'T11.1', sideAMemberId: 'mem-2', ipponsB: ['M'], ipponsA: [] };
+    const tree = runtime.mount(BoutSubRow, {
+      sub, index: 0, lineupA: null, lineupB: null, teamSize: 5,
+      squadA, squadB, numberA: 'T11', numberB: 'T10',
+    });
+    expect(collectText(shiroLabel(tree))).toBe('T10.1');
+    expect(shiroName(tree)).toBe('');
+    expect(collectText(akaLabel(tree))).toBe('T11.1');
+    expect(akaName(tree)).toBe('');
+  });
+
   it('resolves by member id: shows that member\'s label beside the name', () => {
     const squadB = [{ id: 'mem-1', index: 1, name: 'Suzuki' }];
     const sub = { position: 1, sideB: 'Suzuki', sideBMemberId: 'mem-1', ipponsB: ['M'], ipponsA: [] };

@@ -76,6 +76,11 @@ var notPersistedInPoolCSV = map[string]string{
 		"kept on the baseline it leaves in the score event log.",
 	"Merge": "the merge's report on THIS write (bc-mrgc), read by the history " +
 		"writer and the handlers' heldGroups; the history file keeps it.",
+	"HeldTeamResult": "a served copy's held summary (MatchResult.HoldTeamResult): " +
+		"the public name mask fixes it before rewriting the bout rows, on the " +
+		"copy a viewer read serves; every marshal of a stored match recomputes " +
+		"it from the stored rows, so a stored copy would only go stale.",
+	"TeamResultHeld": "says HeldTeamResult is set; served copies only, never stored.",
 	"LineupWarning": "request-only (bc-evts stage 6 review 9, G1): what the " +
 		"write's door tells the operator when a kachinuki start's kept lineup " +
 		"could not be followed by a later match's carried lineup; answered as " +

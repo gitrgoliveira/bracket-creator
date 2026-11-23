@@ -16,6 +16,33 @@ import (
 // The handler maps it to HTTP 404; all other non-nil errors become 500.
 var errNotFound = errors.New("not found")
 
+// viewerFlightKey is a single-flight key for one audience's answer: the
+// build's own key (what it reads) plus the audience's whole key
+// (audience.key: the organiser, the public, or the reveal scopes held, sorted),
+// so two callers share a build only when they are answered the same bytes. A
+// masked payload can never reach the organiser, nor a revealed name a
+// caller whose links do not reveal it. The audience is judged (and any
+// invalid, expired or wrong-kind key dropped) before the key is formed.
+//
+// Trade-off, set against the plan's "build once per audience class, overlay the
+// per-competitor reveals": a build here is one answer per audience, not one
+// masked copy with overlays laid on it, because the mask rewrites the loaded
+// payload in place and a shared copy cannot be handed to two audiences. The
+// herd is still collapsed, since the public and the holders of the same links
+// share a key, and only holders of per-person links in a hiding competition
+// pay a build of their own; viewerFlightKeyFor narrows the key to one
+// competition for the read that is about one.
+func viewerFlightKey(base string, aud audience) string {
+	return base + "#" + aud.key()
+}
+
+// viewerFlightKeyFor is viewerFlightKey for a read of one competition: the
+// audience counts only as that competition's answer sees it (audience.keyFor),
+// so a caller holding a link to another competition shares the public's build.
+func viewerFlightKeyFor(base, compID string, aud audience) string {
+	return base + "#" + aud.keyFor(compID)
+}
+
 // viewerSingleFlight collapses concurrent identical builds of the expensive
 // polled viewer endpoints (GET /api/viewer/competitions, its /:id variant, and
 // the court feed GET /api/viewer/court/:court/matches) to a single in-flight

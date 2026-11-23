@@ -420,7 +420,11 @@ function buildPlayerMap(comp) {
         // only its number, so a surface asks nameHidden(x) and a side resolved
         // from this map carries it like it carries the number.
         if (norm.nameHidden || isMaskedName(comp?.namesHidden, norm.name, norm.number)) entry.nameHidden = true;
-        map[norm.name] = entry;
+        // A masked name that is not the number ("?", every unnumbered competitor
+        // in a hiding competition) names nobody: keyed by it, the last one
+        // written would hand its id, dojo and number to any side printed "?"
+        // (bc-pnum). Such a record is reached by its id only.
+        if (!isMaskedName(comp?.namesHidden, norm.name, "")) map[norm.name] = entry;
         // ALSO key by participant id. The name key collapses same-name
         // participants (two "Tanaka Kenji" from different dojos) onto whichever
         // was added last, so a name-only lookup can attach the WRONG dojo/number

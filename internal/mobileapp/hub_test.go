@@ -966,7 +966,8 @@ func TestHubProject_MasksMatchUpdatedForThePublic(t *testing.T) {
 	assert.Equal(t, EventMatchUpdated, env.Type)
 
 	require.NotNil(t, e.masked)
-	assert.True(t, e.masked.done, "the public copy is built once and shared")
+	require.NotNil(t, e.masked.judged)
+	assert.True(t, e.masked.judged.copied, "the public copy is built once and shared")
 	assert.Equal(t, public, h.project(e, &sseSubscriber{}))
 
 	org := h.project(e, &sseSubscriber{aud: organiserAudience()})
@@ -1555,4 +1556,34 @@ func TestHubProject_JudgesTheCompetitionOncePerWrite(t *testing.T) {
 	h.project(e, &sseSubscriber{})
 	assert.NotSame(t, first, e.masked.judged, "a written competition is judged again")
 	assert.False(t, e.masked.judged.comp.HidesNames())
+}
+
+// A stream that judged the competition before a write, and builds its copy
+// only after another stream judged it as written, never keeps its stale copy
+// for the streams after.
+func TestHubProject_StaleJudgementKeepsNoPublicCopy(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	warmMask(t, f)
+	h := hubWithNames(f)
+	broadcastJuniorsResult(h)
+	e := lastEntry(t, h)
+
+	stale, hides := e.judgeCompetition(h.names)
+	require.True(t, hides)
+	pools, err := f.store.LoadPools(f.comp.ID)
+	require.NoError(t, err)
+	for i := range pools[0].Players {
+		pools[0].Players[i].Number = "Z" + string(rune('1'+i))
+	}
+	require.NoError(t, f.store.SavePools(f.comp.ID, pools))
+	warmMask(t, f)
+	current, _ := e.judgeCompetition(h.names)
+	require.NotSame(t, stale, current)
+
+	sent := e.publicCopy(stale, func() (string, bool) { return "stale copy", true })
+	assert.Equal(t, "stale copy", sent, "the stream that judged first is sent its own copy")
+	assert.False(t, e.masked.judged.copied, "a copy built from an older judgement is not kept")
+
+	assert.Contains(t, h.project(e, &sseSubscriber{}), `"sideA":"Z1"`, "the next stream builds from the competition as written")
+	assert.True(t, e.masked.judged.copied)
 }

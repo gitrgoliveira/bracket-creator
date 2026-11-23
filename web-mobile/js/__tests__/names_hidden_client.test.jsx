@@ -20,6 +20,7 @@ import {
 import { watchlistTokens, resolveWatchlistTokens } from '../watchlist_link.jsx';
 import { NumberedName } from '../numbered_name.jsx';
 import { sideLabel } from '../display_helpers.jsx';
+import { buildPlayerMap, normalizeMatch } from '../api_serializers.jsx';
 import { collectText } from './helpers/vdom.js';
 
 function jsonOnce(body) {
@@ -81,6 +82,33 @@ describe('the aggregate read stamps nameHidden', () => {
     global.fetch = jsonOnce([it0]);
     const comps = await API.fetchCompetitions();
     expect(comps[0].players.some((p) => nameHidden(p))).toBe(false);
+  });
+});
+
+describe('a side printed "?" takes no one else\'s identity', () => {
+  // Two unnumbered competitors in a hiding competition both read "?": neither
+  // may be found by that name, or a side the server printed "?" with no id
+  // would take the last one's id, dojo and number.
+  const comp = {
+    namesHidden: true,
+    players: [
+      { id: 'p1', name: '?', dojo: 'Dojo A' },
+      { id: 'p2', name: '?', dojo: 'Dojo B' },
+    ],
+  };
+
+  it('a "?" side with no id stays id-less and hidden', () => {
+    const m = normalizeMatch({ id: 'm1', sideA: '?', sideB: '?', status: 'scheduled' }, buildPlayerMap(comp), true);
+    expect(m.sideA.id).toBe('');
+    expect(m.sideA.dojo).toBeUndefined();
+    expect(nameHidden(m.sideA)).toBe(true);
+  });
+
+  it('a "?" side with an id resolves by that id', () => {
+    const m = normalizeMatch({ id: 'm1', sideA: '?', sideAId: 'p1', sideB: '?', sideBId: 'p2', status: 'scheduled' }, buildPlayerMap(comp), true);
+    expect(m.sideA.dojo).toBe('Dojo A');
+    expect(m.sideB.dojo).toBe('Dojo B');
+    expect(nameHidden(m.sideA)).toBe(true);
   });
 });
 

@@ -207,7 +207,7 @@ describe('AdminApp saves the tournament settings through the outbox', () => {
         .mockRejectedValueOnce(applyRefusal())
         .mockResolvedValueOnce({ tournamentVersion: 'v2' });
       window.confirmDialog.mockResolvedValue(true);
-      await mount();
+      const app = await mount();
       let ok;
       await act(async () => { ok = await probe.props.onSave(patch({ password: 'new-pw', defaultPublicNames: 'hidden' })); });
 
@@ -215,6 +215,20 @@ describe('AdminApp saves the tournament settings through the outbox', () => {
       expect(window.confirmDialog.mock.calls[0][0].message).toContain('Added elsewhere');
       expect(window.API.updateTournamentPassword).toHaveBeenCalledTimes(2);
       expect(window.API.updateTournamentPassword.mock.calls[1][0].confirmPublicNames).toBe(true);
+      expect(app.onPasswordChange.mock.calls.at(-1)[0]).toBe('new-pw');
+    });
+
+    it('keeps the session on the stored password when the operator says no to a save that changes it', async () => {
+      window.API.updateTournamentPassword.mockRejectedValueOnce(applyRefusal());
+      window.confirmDialog.mockResolvedValue(false);
+      const app = await mount();
+      let ok;
+      await act(async () => { ok = await probe.props.onSave(patch({ password: 'new-pw', defaultPublicNames: 'hidden' })); });
+
+      expect(ok).toBe(false);
+      expect(window.API.updateTournamentPassword).toHaveBeenCalledTimes(1);
+      // The server stored nothing, so the session keeps the password it holds.
+      expect(app.onPasswordChange.mock.calls.at(-1)[0]).toBe('pw');
     });
   });
 

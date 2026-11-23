@@ -29,13 +29,11 @@ import (
 // (historyEntry.masked); only a stream holding competitors' own links has a
 // copy built for it alone.
 
-// maskedPayload memoises what every stream asks of a masked event: its
-// public projection (no names revealed), and the judgement of the
-// competition it names.
+// maskedPayload memoises what every stream asks of a masked event: the
+// judgement of the competition it names, and with it the public projection (no
+// names revealed) built from that competition.
 type maskedPayload struct {
-	mu      sync.Mutex
-	done    bool
-	payload string
+	mu sync.Mutex
 	// judged is the competition's judgement, taken by the first stream that
 	// needs it and reused by the others while the competition is not written
 	// again (judgeCompetition).
@@ -43,11 +41,16 @@ type maskedPayload struct {
 }
 
 // competitionJudgement is a masked event's competition as read, valid for the
-// write token it was taken at. Whether the public pages hide its names is not
-// kept: it reads the tournament's mode too, which no competition token moves.
+// write token it was taken at, and the public copy built from it. Whether the
+// public pages hide its names is not kept: it reads the tournament's mode too,
+// which no competition token moves. The copy lives on the judgement so it goes
+// with it: a stream still holding an older judgement can never keep its copy
+// for the streams judged after a write (publicCopy).
 type competitionJudgement struct {
-	token uint64
-	comp  *state.Competition
+	token   uint64
+	comp    *state.Competition
+	copied  bool
+	payload string
 }
 
 // sseEventClass is what a stream not entitled to every name is sent for an
@@ -180,7 +183,7 @@ func (h *Hub) project(e *historyEntry, sub *sseSubscriber) string {
 		}
 		return out
 	}
-	return e.publicCopy(func() (string, bool) { return maskEvent(names, comp, audience{}, e, spec) })
+	return e.publicCopy(comp, func() (string, bool) { return maskEvent(names, comp, audience{}, e, spec) })
 }
 
 // selfRunJudgement memoises whether the tournament is self-run for one
@@ -233,10 +236,11 @@ func (e *historyEntry) judgeCompetition(names *publicNames) (*state.Competition,
 	if j := e.masked.judged; j != nil && j.token == token {
 		return j.comp, names.hides(j.comp)
 	}
-	// The competition was written since the public copy was built (a number
-	// prefix or a team roster changed), so that copy is stale: build it again.
-	e.masked.done, e.masked.payload = false, ""
+	// The competition was written since it was judged (a number prefix or a
+	// team roster changed), so the judgement and the public copy built from it
+	// are stale: a new judgement starts with no copy.
 	comp := loadJudgedCompetition(names, e.compID)
+	e.masked.judged = nil
 	if comp != nil {
 		e.masked.judged = &competitionJudgement{token: token, comp: comp}
 	}
@@ -253,11 +257,15 @@ func loadJudgedCompetition(names *publicNames, compID string) *state.Competition
 	return comp
 }
 
-// publicCopy is e's public projection, built by build the first time a
-// stream needs it and shared after. A copy build could not finish (a file
+// publicCopy is e's public projection of comp (the competition the stream
+// judged), built by build the first time a stream needs it and shared after.
+// It is kept only on the judgement comp came from while that judgement is
+// still the current one: a stream that judged before the competition was
+// written is sent the copy it built, but the streams judged after build their
+// own from the competition as written. A copy build could not finish (a file
 // that could not be read: the mask failed closed) is sent but not kept, so
 // the next stream builds it again.
-func (e *historyEntry) publicCopy(build func() (string, bool)) string {
+func (e *historyEntry) publicCopy(comp *state.Competition, build func() (string, bool)) string {
 	if e.masked == nil {
 		if out, ok := build(); ok {
 			return out
@@ -266,14 +274,18 @@ func (e *historyEntry) publicCopy(build func() (string, bool)) string {
 	}
 	e.masked.mu.Lock()
 	defer e.masked.mu.Unlock()
-	if e.masked.done {
-		return e.masked.payload
+	j := e.masked.judged
+	current := j != nil && j.comp == comp
+	if current && j.copied {
+		return j.payload
 	}
 	out, ok := build()
 	if !ok {
 		return withoutData(e)
 	}
-	e.masked.payload, e.masked.done = out, true
+	if current {
+		j.payload, j.copied = out, true
+	}
 	return out
 }
 

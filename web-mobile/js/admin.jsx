@@ -746,7 +746,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           // The server's own list of competitions the changed default would set
           // differs from the form's: ask about it, then send the save confirmed.
           if (!e || e.code !== PUBLIC_NAMES_APPLY_CONFIRM) throw e;
+          // Refused before anything was stored: the session goes back to the
+          // password the server still holds while the question is open, so a No
+          // leaves it signed in, and takes the new one again for the resend.
+          if (onPasswordChange) onPasswordChange(password);
           if (!(await confirmPublicNamesApply(e.competitions, sendBody.defaultPublicNames))) return false;
+          if (onPasswordChange) onPasswordChange(patch.password);
           saved = await window.API.updateTournamentPassword({ ...sendBody, confirmPublicNames: true }, password);
         }
         // Bail if the admin navigated away during the in-flight PUT.

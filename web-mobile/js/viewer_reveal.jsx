@@ -19,7 +19,7 @@
 // The server judges the key on every read; nothing here decides what a key
 // may reveal.
 
-import { rememberRevealKey, revealKeysFor } from './reveal_key.jsx';
+import { isRevealCompetitionId, rememberRevealKey, revealKeysFor } from './reveal_key.jsx';
 import { addPlayerToWatchlist, useWatchlist } from './viewer_watchlist_core.jsx';
 
 const { useEffect, useRef } = React;
@@ -70,6 +70,7 @@ export function revealedRecords(detail) {
 // of the competition (null when there is none), `landing` takeRevealLink's
 // answer when the page was opened on the link.
 export function revealVerdict(compId, landing, detail) {
+  if (!isRevealCompetitionId(compId)) return { kind: "missing" };
   const held = revealKeysFor(compId).length > 0;
   if (landing && landing.compId === compId && !landing.stored && !held) return { kind: "incomplete" };
   if (!detail) return { kind: "missing" };

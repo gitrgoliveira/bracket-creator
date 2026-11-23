@@ -218,6 +218,13 @@ describe('viewer_reveal.jsx: the reveal link', () => {
     const landing = { compId: 'juniors', stored: false };
     expect(reveal.revealVerdict('juniors', landing, { namesHidden: true, config: {} }).kind).toBe('incomplete');
   });
+
+  it('a link naming a malformed competition id is a competition that could not be opened, not an incomplete link', async () => {
+    const { reveal } = await fresh();
+    const landing = { compId: 'not a/comp', stored: false };
+    expect(reveal.revealVerdict('not a/comp', landing, null).kind).toBe('missing');
+    expect(reveal.revealVerdict('not a/comp', landing, { namesHidden: true, config: {} }).kind).toBe('missing');
+  });
 });
 
 describe('app.jsx: the /reveal route', () => {

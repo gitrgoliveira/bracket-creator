@@ -607,6 +607,8 @@
       
         
       
+        
+      
     
     
     
@@ -799,6 +801,33 @@
     
   
   Tournament formats
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/organisers/hide-competitor-names/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Hide competitor names
 
     
   </span>
@@ -2642,6 +2671,7 @@ different competitions cannot both claim the same court.</p>
         +string[] Courts
         +string Password
         +string Mode
+        +string DefaultPublicNames
         +int DurationDays
         +Pause[] Pauses
         +float ClockToElapsedMultiplier
@@ -2683,6 +2713,9 @@ different competitions cannot both claim the same court.</p>
         +bool Engi
         +bool WithZekkenName
         +int ExpectedParticipants
+        +string PublicNames
+        +string RevealUntil
+        +string RevealSecret
     }
 
     Tournament "1" o-- "0..*" Competition
@@ -3297,8 +3330,9 @@ by their team member ids.</p>
 </tr>
 </tbody>
 </table>
-<p>In <code>tournament.md</code>, YAML front matter stores the tournament settings, among them <code>name</code>, <code>date</code>, <code>venue</code>, <code>courts</code>, <code>mode</code>, <code>duration_days</code>, <code>pauses</code>, <code>clock_to_elapsed_multiplier</code>, <code>slowest_court_buffer_pct</code>, <code>sponsors</code>, and <code>theme</code>. A file that still carries <code>lunch_block</code>, <code>opening_block</code> or <code>closing_block</code> is converted to <code>pauses</code> at startup. The optional <code>theme</code> block holds the accent colours, the window title, <code>logo_path</code>, and <code>logo_on_lobby</code> (a bool; absent reads false). When <code>logo_on_lobby</code> is true and a logo is uploaded in <code>branding/</code>, the lobby display shows the logo.</p>
+<p>In <code>tournament.md</code>, YAML front matter stores the tournament settings, among them <code>name</code>, <code>date</code>, <code>venue</code>, <code>courts</code>, <code>mode</code>, <code>default_public_names</code>, <code>duration_days</code>, <code>pauses</code>, <code>clock_to_elapsed_multiplier</code>, <code>slowest_court_buffer_pct</code>, <code>sponsors</code>, and <code>theme</code>. A file that still carries <code>lunch_block</code>, <code>opening_block</code> or <code>closing_block</code> is converted to <code>pauses</code> at startup. The optional <code>theme</code> block holds the accent colours, the window title, <code>logo_path</code>, and <code>logo_on_lobby</code> (a bool; absent reads false). When <code>logo_on_lobby</code> is true and a logo is uploaded in <code>branding/</code>, the lobby display shows the logo. The <code>default_public_names</code> field is the tournament-wide choice of what the public pages show for a competitor, taking the same values as a competition's <code>public_names</code> (below): new competitions start with it, saving it in the settings sets every competition except a Swiss one after the organiser confirms the list of competitions it will change, and each competition can still be changed on its own afterwards. An absent key means names are shown, and the field is part of <code>tournamentVersion</code>.</p>
 <p>In <code>competitions/&lt;id&gt;/config.md</code>, YAML front matter stores competition configuration: <code>name</code>, <code>date</code>, <code>start_time</code>, <code>courts</code>, <code>kind</code>, <code>format</code>, <code>status</code>, rules and match durations, <code>expected_participants</code>, and format-specific options. The <code>expected_participants</code> field is an optional integer (0 to 1024, absent means 0) representing the organiser's expected entry count (expected teams in team competitions) for setup schedule estimation. It needs no migration because no earlier release wrote the key.</p>
+<p>Three optional fields in <code>config.md</code> control competitor name visibility on the public pages (<code>public_names</code>, <code>reveal_until</code>, and <code>reveal_secret</code>), and none of them needs a migration because no earlier release wrote the keys. The <code>public_names</code> field selects what the public pages (viewer, court boards, overlay, and live event stream) show for the competition's competitors: when empty or absent, names are shown; <code>person</code> shows competitor numbers, and each competitor's own reveal link reveals only that competitor's own name (a team's link reveals that team's members' names); <code>competition</code> shows numbers, and one competition link reveals every name in the competition; <code>hidden</code> shows numbers with no link, so only the signed-in organiser sees names. Exactly one kind of link is active at a time (there is no combined option), team names and dojos always stay visible, and organiser screens, exports, and the stored files never change, only what the public sees. The setting is not available in self-run tournaments (officiated only) or for Swiss competitions: the app refuses a save that sets it there. A self-run tournament that holds a competition, or a default, that hides names (a restore can bring one in) is restored, edited and saved exactly as any other self-run tournament, with no warning and no change to the stored setting, and a value a save leaves alone is never judged there, so it never refuses a change of format. A self-run tournament always shows names on its public pages whatever a competition's setting says (<code>publicNames.hides</code> is the one rule, used by the viewer payloads and the event stream), and the competition keeps its setting. Because it is a setting it is part of the competition's <code>configVersion</code>. The <code>reveal_until</code> field sets when the reveal links stop revealing, written as a local date and time <code>YYYY-MM-DDTHH:MM</code> and read in the server's time zone like every schedule time; when absent, links expire at the end of the tournament, which is one hour after the tournament's closing time on its last day, or 01:00 the morning after the last day when no closing time is set; with no <code>reveal_until</code> and no readable tournament date there is no expiry to work out, and the links reveal nothing (the names stay hidden). Expiry is judged on every read, so moving <code>reveal_until</code> later makes the same links work again, and the field is part of <code>configVersion</code>. The <code>reveal_secret</code> field holds 32 random bytes as lowercase hex, minted by the server the first time <code>public_names</code> moves to <code>person</code> or <code>competition</code> and kept for the competition's whole life, so switching links off and on again gives back the same links. Keys are never stored: a competition key is the hex HMAC-SHA256 of the secret over the label <code>competition</code>, and a competitor key is the hex HMAC-SHA256 of the secret over <code>competitor:</code> followed by the participant id (a malformed secret fails closed and yields no keys). The secret is never sent to a browser (it is not in any JSON), is not part of <code>configVersion</code>, and a settings save cannot set or change it. Anyone holding a copy of <code>config.md</code> can derive the links, so treat a backup archive like the tournament password. A plain restore and a <code>--replace</code> restore keep the archive's secret so the same links keep working, whereas a <code>--copy</code> restore and the in-app competition copy mint a new secret; minting a secret changes the competition's backup fingerprint, so one extra scheduled backup copy is taken that day.</p>
 <p>The <code>roster_shuffled</code> field is an optional boolean (absent means false) recording that the competitor list was shuffled at least once with <strong>Shuffle unseeded</strong> on the Participants tab. The Export &amp; print tab reads it to warn that a draw places competitors in list order while the list was never shuffled. The server sets it only when a competition save carries <code>rosterShuffled: true</code> and a roster, and only after that roster has been saved: a refused roster records nothing, creating a competition never sets it, and a settings save neither sets nor clears it. Once set it stays set, through a discarded draw and later roster edits. It is not a setting, so it is left out of the competition's <code>configVersion</code> and a shuffle never makes an open Settings page stale. It needs no migration: an absent key reads as "not recorded as shuffled", which is all that can be said of a file an earlier release wrote, since nothing recorded a shuffle before. A backup or a restore carries <code>config.md</code> as it is, and a shuffle counts as a change to it for the scheduled backup's fingerprint.</p>
 <p>The settings versions are not stored. <code>tournamentVersion</code> (over the fields a tournament save writes, never the password) and <code>awardsVersion</code> (over a competition's fighting-spirit awards list) are content hashes computed when they are served, like a competition's <code>configVersion</code> (the version its settings save sends back), so nothing is added to <code>tournament.md</code> or <code>config.md</code>. A save sends back the version it was made from, and a stale one is refused with the current copy.</p>
 <p>A <code>participants.csv</code> row ends with an optional check-in marker, and the marker carries the

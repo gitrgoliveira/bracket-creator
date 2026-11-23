@@ -616,6 +616,8 @@
       
         
       
+        
+      
     
     
     
@@ -1034,6 +1036,33 @@
     
   
   Tournament formats
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hide-competitor-names/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Hide competitor names
 
     
   </span>
@@ -2599,6 +2628,7 @@
 <h2 id="privacy-of-backup-files">Privacy of backup files</h2>
 <p>A backup archive does not contain the admin password, so a tournament restore keeps the admin password you already have. In file mode, a whole-tournament restore into a data folder that has no tournament or no admin password yet needs one: on the command line you pass <code>--password</code>.</p>
 <p>A backup file does contain every competitor's full name, dojo, match record, and tournament results. Keep your backup files private and do not share them on public channels.</p>
+<p>A competition that has links to reveal hidden names also carries, in its backup, the secret those links are worked out from. Anyone who holds the archive can work out the links and so read every name, even when the public pages show numbers, so keep the archive as private as the admin password. Refer to <a href="../hide-competitor-names/">Hide competitor names from the public</a>.</p>
 <h2 id="how-to-create-a-backup">How to create a backup</h2>
 <ol>
 <li>In the admin console, click <strong>Backup and restore</strong> on the dashboard.</li>
@@ -2652,6 +2682,8 @@
 </ul>
 </li>
 <li><strong>Tournament mode change warning</strong>: If a tournament restore changes the operating mode (for example, from officiated mode to self-run mode), the plan displays a warning because the mode changes what the public page can do, such as whether anyone can enter scores.</li>
+<li><strong>Hidden names in a self-run tournament</strong>: Only an officiated tournament may hide competitor names. A competition restored into a self-run tournament with its names hidden is restored like any other, with no warning, and its public pages show the names, because the competitors score their own matches there. The competition keeps its option, which applies again if you restore that competition into an officiated tournament.</li>
+<li><strong>Reveal links after a restore</strong>: A restore keeps the links that <a href="../hide-competitor-names/">reveal hidden names</a> as the backup held them. A competition you restore in place (a plain restore, or <strong>Replace it</strong>) comes back with its own secret, so a link or tag you printed before the backup still works, as long as the backup was made after the competition's links were first switched on; a backup made before that holds no secret, and the competition's earlier links stop working. The expiry time, <strong>Links stop working at</strong>, comes back with the competition too. A competition restored <strong>as a copy</strong> gets new links of its own: the original's printed links never reveal the copy's names, and the copy's links, once shown in its <strong>Settings</strong> or printed on its tags, are different from the original's. After a restore that changes a competition's links, print the tags and the competition QR code again.</li>
 <li><strong>Missing shiaijo warning</strong>: If a competition, restored or staying in place, uses a shiaijo that the restored tournament settings do not have, the plan warns you. Its matches there cannot be called until you add the shiaijo back in the tournament settings or move those matches to another shiaijo.</li>
 <li><strong>Matches that were running in the backup</strong>: A match the backup holds as running comes back in the queue with its score, as if you had sent it back to the queue, and the plan lists how many for each competition before you choose. Start it again from the court when its shiaijo is free. If the app cannot finish this step, or the number prefix check (refer to <strong>Number prefix collisions</strong>), the restore card says so: restart the app and it finishes them as it starts.</li>
 <li><strong>Number prefix collisions</strong>: If a restored competition uses a competitor number prefix that a competition staying in place, or another competition in the same restore, already uses, the app assigns a new prefix automatically. A warning tells you to reprint tags for that competition.</li>

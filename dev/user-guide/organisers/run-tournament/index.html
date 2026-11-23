@@ -616,6 +616,8 @@
       
         
       
+        
+      
     
     
     
@@ -1284,6 +1286,33 @@
     
   
   Tournament formats
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hide-competitor-names/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Hide competitor names
 
     
   </span>
@@ -3166,6 +3195,7 @@
 <li>A website link and an awards note</li>
 <li>Free-text info notes (rules, transportation, access details)</li>
 <li>Contact entries</li>
+<li>In an officiated tournament, <strong>Competitor names on public pages</strong>: what the public sees for a competitor's name, and the starting choice for new competitions. Saving a new choice also sets every competition except a Swiss one, after you confirm the list of competitions it will change. Refer to <a href="../hide-competitor-names/">Hide competitor names from the public</a>.</li>
 </ul>
 <p>Set the <strong>Public URL</strong> field to the externally reachable address of your app (for example, <code>https://my-tournament.example.com</code>). Setting this field enables QR codes on competitor tags and makes every shareable link work. The public URL also populates the public info page in the viewer and on spectator display screens.</p>
 <p>Save closes the form at once. If the details were saved on another device after you opened them, the save is refused when it reaches the server, and an alert says "Tournament settings were not saved: they were changed on another device. Open them and save again." The app then shows the current details. If you have opened <strong>Edit details</strong> again by then, the form says "Not saved: the tournament details changed somewhere else after you opened this page (another screen or device). Reload to see the current details, then make your change again.", keeps what you typed, and <strong>Reload</strong> shows the current details.</p>
@@ -3183,6 +3213,7 @@
 </ul>
 <h2 id="announcements">Announcements</h2>
 <p>Click <strong>Announce</strong> from the dashboard to broadcast a short message to every viewer. Choose a duration of 5, 10, 15, or 30 minutes; the message clears itself automatically when the time expires. It appears as an overlay on the viewer and display screens. Spectators who allow browser notifications can receive it in the background.</p>
+<p>While any competition hides competitor names, the announcement box carries a short warning: what you type is shown to everyone exactly as typed, and the app does not check it for names. The awards note in the tournament details carries the same warning. Refer to <a href="../hide-competitor-names/">Hide competitor names from the public</a>.</p>
 <p>Posting the same text again while it is still showing replaces the banner rather than adding a second one: viewers see one message, and its time starts again from the full duration.</p>
 <p>A court call, made with <strong>Call to court</strong> on the court console, is announced the same way. It disappears once the match starts, or is closed with a decision such as a fusensho, from any device, as long as the court console that made the call is still open, even if another console called the same match again meanwhile. If that console was closed or reloaded meanwhile, the call stays up until its five minutes run out.</p>
 <p>An announcement, a court call, a dismissal (the × beside an active announcement) or <strong>Clear all</strong> made while the connection is down is held on the device and sent when the connection returns, so there is no need to click <strong>Send announcement</strong> or <strong>Call to court</strong> again. If a held announcement or call is over by the time it arrives, the page that made it, if still open, says "That announcement did not go out: its N minutes ran out before it reached the server." ("court call" for a court call, whose time is always 5 minutes), and you can send it again. A held call counts its time from the moment it was made; one with a little time left when it arrives shows for at least a minute so players can read it. A call you withdrew while it was still held is never shown. Calling the same match twice while offline still shows one banner.</p>
@@ -3230,6 +3261,7 @@ qualifiers</strong>, because a league has no pool phase to size.</p>
 format, a note appears under the control listing each setting the save will
 clear, with its current value, so you can see the cost before you commit.
 Switching back to the original format keeps them.</p>
+<p>In an officiated tournament, the <strong>Settings</strong> tab also holds <strong>Competitor names on public pages</strong>, with <strong>Links stop working at</strong> and, for the choices that have one, the <strong>Competition link</strong> to copy or print as a QR code. A Swiss competition does not offer it. Refer to <a href="../hide-competitor-names/">Hide competitor names from the public</a>.</p>
 <p>On a drawn competition, a <strong>Date</strong> or <strong>Start time</strong> change moves its matches. Refer to <a href="#moving-a-competition-on-the-calendar">Moving a competition on the calendar</a> for how it waits for time changes still held on this device.</p>
 <h3 id="assigning-shiai-jo">Assigning shiai-jo</h3>
 <p>The competition <strong>Settings</strong> page has an <strong>Assigned shiaijo (courts)</strong> field listing every shiai-jo in the venue. Pick the ones this competition runs on; the number you pick is how many of its matches can run at the same time.</p>
@@ -3356,6 +3388,7 @@ Switching back to the original format keeps them.</p>
 <p>The lean container image omits LibreOffice and returns a clear message when a PDF is requested.</p>
 <p><strong>Export PDFs</strong> prints a competition with no draw yet the same way as the blank template: empty places, sized from the larger of the expected number of participants and everyone registered. A competition with no draw and fewer than two places to print, or whose settings cannot form a draw, is left out of the booklet. The dialog's warning box and the <code>SKIPPED-COMPETITIONS.txt</code> file in the download name it with the fix, for example setting the expected number of participants in its Settings. Every other competition still prints.</p>
 <p>When the <strong>Public URL</strong> is set and competitors have assigned numbers, each printed tag includes a QR code that opens the viewer and adds that competitor to the scanner's watchlist. Refer to <a href="../../install/hosting/">Hosting</a> for guidance on setting the public URL.</p>
+<p>In a competition whose names are hidden with <strong>a link per person</strong>, a competitor's tag carries that competitor's own link in place of the watchlist link: scanning it follows the competitor and shows their name on that phone. Competitors on a competition with another choice keep the watchlist code. The <strong>Participants</strong> tab also offers <strong>Reveal link</strong> next to a name, which shows that competitor's link as a QR code on screen for them to scan. Refer to <a href="../hide-competitor-names/#hand-out-the-links">Hide competitor names from the public</a>.</p>
 <h2 id="data-format">Data format</h2>
 <p>Tournament state is stored as plain files inside the data folder you specified with <code>--folder</code>. You can hand-edit these files between rounds when a correction is needed. Take a <a href="#backup-and-restore">backup</a> first, so a wrong edit can be restored:</p>
 <ul>

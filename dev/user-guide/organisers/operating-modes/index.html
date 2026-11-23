@@ -616,6 +616,8 @@
       
         
       
+        
+      
     
     
     
@@ -963,6 +965,33 @@
     
   
   Tournament formats
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hide-competitor-names/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Hide competitor names
 
     
   </span>
@@ -2439,10 +2468,12 @@
 <p>Tournament mode controls who can score matches and manage competitions. You choose the mode once when you create a tournament; it cannot be changed afterwards.</p>
 <h3 id="officiated-mode">Officiated mode</h3>
 <p>Officiated mode is the default. Every action (scoring, check-in, starting, and completing competitions) requires the admin password. Once you are signed in, one action asks for the password again: <strong>Delete competition</strong> (in the competition's Settings) opens a dialog that names the competition and asks you to type the admin password. A wrong password leaves the dialog open with "Wrong password. The competition was not deleted." and you stay signed in. The server checks the password typed in the dialog, so a request that does not carry it is refused too. Every other action, discarding a draw and marking a competition invalid included, needs no second password. All recorded results carry the label "admin" to show they were entered by an operator.</p>
+<p>Only an officiated tournament can hide competitor names from the public pages, because only there are the public pages read-only. In the tournament details and in a competition's <strong>Settings</strong>, the <strong>Competitor names on public pages</strong> field is offered here and replaces each name with the competitor's number for spectators, the court displays and the stream overlay, while you see every name once signed in. Refer to <a href="../hide-competitor-names/">Hide competitor names from the public</a>.</p>
 <h3 id="self-run-mode">Self-run mode</h3>
 <p>In self-run mode, scoring and starting a competition are open to anyone without a password, so competitors or table helpers can run and score their own matches. Completing a competition needs no password either: in self-run mode the server accepts it from anyone. The <strong>Complete competition</strong> button is on the organiser's competition page, which you reach by signing in. A public self-registration page also becomes available for competitors to sign themselves up, for individual competitions only and only while the competition is still in setup, before the draw is generated.</p>
 <p>Organiser actions stay behind the admin password in self-run mode: creating and editing competitions, tournament settings, the tournament logo and sponsor images, seeds, scheduling, the <strong>Lineups</strong> page, match decisions such as kiken, result corrections (reopening a match, setting a winner by hand, overriding a pool rank), announcements, tie-breaker decisions (adding or removing league tie-breaker matches, and running another tie-breaker round), exports, fighting-spirit awards, and every action that destroys data (deleting or invalidating a competition, discarding a draw, resetting manual overrides, and importing competitions). Take a backup before any action that destroys data: restoring it brings back what the action removed. Refer to <a href="../backup-and-restore/">Backup and restore</a>.</p>
 <p>The roster is open to anyone in self-run mode: anyone can add and edit a competition's participants, without the password, before the competition starts.</p>
+<p>Self-run mode does not hide competitor names. The competitors run their own matches from the public pages, so a self-run tournament always shows names there: the <strong>Competitor names on public pages</strong> field is not offered, and a competition that was set to hide names shows them for as long as the tournament is self-run.</p>
 <p>Self-run mode has no check-in. The <strong>Check-in tracking</strong> setting is not offered, the <strong>Registration desk</strong> is not offered, the server refuses every check-in request, and the draw includes every participant on the roster. A competition keeps the check-in setting it was saved with, but a self-run tournament ignores it.</p>
 <p>Competitors can name the fighters in a team match from its score sheet, without the password. A team member picked for a bout, or a typed name, is saved with that match, and a typed name fills in a team member who has no name yet or adds a new one. Two changes stay with the organiser: the lineup of a match that has finished, and the name of a team member who already has one.</p>
 <p>Competitors also run the representative bout (daihyosen) of a tied knockout team match from its score sheet while the match is in progress: they add it, score it like any other bout, and remove one added by mistake while it is still unscored. Once the match has finished, adding or removing its representative bout stays with you. A kachinuki match has no representative bout: a tied pairing that must produce a result is settled by encho on that same bout (refer to <a href="../team-tournaments/#scoring-a-kachinuki-encounter">Scoring a kachinuki encounter</a>). A judges' decision (hantei) stays with the organiser, on the representative bout as on every other bout, so the public score sheet does not offer one. Once you record one, the public score sheet shows that bout as decided, and a competitor can finish the match on it but cannot change or clear it.</p>

@@ -43,9 +43,9 @@ convention.
 
 ## Add Engi pairs
 
-With **One competitor per side** unticked (the default), an Engi competitor is a pair: two people from the same dojo or team, scored
-together as one unit. There are no individual bouts inside a pair. Enter each
-pair as a single participant row with both member names combined in the name
+With **One competitor per side** unticked (the default), an Engi competitor
+is a pair: two people from the same dojo or team, scored together as one unit.
+There are no individual bouts inside a pair. Enter each pair as a single participant row with both member names combined in the name
 field, joined by a dash with a space on each side (` - `), and the shared dojo.
 A row without both names is refused:
 
@@ -125,8 +125,9 @@ A side that loses by three flags to two still keeps its two flags.
 ## Ties between competitors
 
 Engi pools and leagues follow the same tie rule as ippon-scored pools and leagues. Two
-competitors (pairs, or single competitors with **One competitor per side**) that are level on wins and on flags are
-tied, and the tie rule says which ties get a tie-break bout:
+competitors (pairs, or single competitors with **One competitor per side**)
+that are level on wins and on flags are tied, and the tie rule says which ties
+get a tie-break bout:
 
 - **League**: a tie for 1st or 2nd place always gets a tie-break bout. A tie for
   3rd place gets one only when **Award two joint 3rd places** is off; with it on

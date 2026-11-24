@@ -3,7 +3,7 @@ ARG GO_VERSION=1.27.4
 
 # Build stage
 # The digest pins the golang:${GO_VERSION} image as tested; bump both together.
-FROM golang:${GO_VERSION}@sha256:08bcb99a38f85a265f9a93d1d3323e2440eec333380f3ea26ee0dec9264bb41c AS builder
+FROM golang:${GO_VERSION}@sha256:87f49b77a7b6a99ad7dc656be010ae453322459dd2ed902ac177649a302bc101 AS builder
 
 
 ARG GIT_COMMIT

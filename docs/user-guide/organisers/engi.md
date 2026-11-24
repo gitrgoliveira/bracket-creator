@@ -45,8 +45,9 @@ convention.
 
 With **One competitor per side** unticked (the default), an Engi competitor
 is a pair: two people from the same dojo or team, scored together as one unit.
-There are no individual bouts inside a pair. Enter each pair as a single participant row with both member names combined in the name
-field, joined by a dash with a space on each side (` - `), and the shared dojo.
+There are no individual bouts inside a pair. Enter each pair as a single
+participant row with both member names combined in the name field, joined by a
+dash with a space on each side (` - `), and the shared dojo.
 A row without both names is refused:
 
 ```
@@ -60,9 +61,8 @@ combined zekken the same way:
 Name 1 - Name 2, ZEKKEN1 - ZEKKEN2, Dojo
 ```
 
-The two names display stacked on one side of the match (a solo competitor shows
-one name). The pair counts as one entry in the draw and one line in the
-standings.
+The two names display stacked on one side of the match. The pair counts as
+one entry in the draw and one line in the standings.
 
 ## Add one competitor per side
 
@@ -84,10 +84,10 @@ only one name. A hyphen inside a name, such as `Jean-Paul Martin`, is fine. A
 row you edit and leave with its name unchanged is saved without this check, so a
 row that no longer fits can still have its dojo or grade corrected.
 
-Everything else works as it does for pairs: flag scoring, the standings columns
-and the tie rules. On screen, the name column of the standings tables is headed
-**Player** instead of **Pair**, and each side shows one name instead of two.
-The standings, tie, Swiss and Excel rules apply unchanged.
+Everything else works as it does for pairs: flag scoring, the standings, the
+tie rules, Swiss and the Excel workbooks. On screen, the name column of the
+standings tables is headed **Player** instead of **Pair**, and each side shows
+one name instead of two.
 
 ## Score with flags
 

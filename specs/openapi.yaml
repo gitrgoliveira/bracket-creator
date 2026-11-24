@@ -2199,11 +2199,12 @@ paths:
         only a save that actually CHANGES it while started. `format` and
         `kind` (409, see below) and `teamMatchType` (409, see below) are
         refused together with the output-affecting draw-ready gate.
-        `naginata`, `engi`, `engiSolo` and `twoThirdPlaces` are refused with 400
+        `naginata`, `engi` and `twoThirdPlaces` are refused with 400
         (`naginata can only be changed before the competition starts`,
         `engi can only be changed before the competition starts`,
         `twoThirdPlaces can only be changed before the competition starts`,
-        respectively). `engiSolo` has two messages of its own: `one
+        respectively). `engiSolo` is refused with 400 too, with two
+        messages of its own: `one
         competitor per side can only be changed before the draw is made;
         discard the draw to change it` for a draw-ready competition, and
         `one competitor per side cannot be changed once the competition has

@@ -913,6 +913,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     if (on) {
       const shape = c.engi ? !!c.engiSolo : null;
       if (local.engiSolo !== shape) update("engiSolo", shape);
+      // Back to the stored shape: no edit, so a conflict notice must not list it.
+      if (c.engi) editedFieldsRef.current.delete("engiSolo");
     } else if (c.engi) {
       // A stored engi competition: the cleared pick is a real change.
       if (local.engiSolo) update("engiSolo", false);

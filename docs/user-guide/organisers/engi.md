@@ -25,9 +25,11 @@ the draw is generated; to change it before the competition starts, discard the
 draw first. Once the competition has started it cannot be changed.
 
 Rows you have already entered are not changed when you change the choice. The
-**Participants** page lists any row that no longer fits, so you can edit it.
-Such rows do not stop the draw, but applying a pasted list that contains any is
-refused.
+**Participants** page lists any row that does not fit it, so you can edit it.
+This includes one-name rows that a pair competition created before this choice
+existed took at the registration desk or on the public sign-up form, which did
+not check names then. Such rows do not stop the draw, but applying a pasted list
+that contains any is refused.
 
 Engi is its own setting, independent of **Naginata competition**. Ticking
 **Naginata competition** does two things: it adds the Sune ippon button, which

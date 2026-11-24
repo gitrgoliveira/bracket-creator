@@ -31,7 +31,7 @@ describe('AdminParticipants stored-rows notice for an engi competition', () => {
     expect(n.textContent).toContain('Alice Smith - Bob Jones');
     expect(n.textContent).not.toContain('Akira Tanaka');
     // Before the start: edit the rows or change the setting back.
-    expect(n.textContent).toContain('Edit the rows, or change "Competitors per side" back in Settings.');
+    expect(n.textContent).toContain('Edit the rows, or change "Competitors per side" in Settings.');
     expect(n.textContent).not.toContain('has started');
   });
 
@@ -84,7 +84,7 @@ describe('AdminParticipants stored-rows notice for an engi competition', () => {
     expect(n).toBeTruthy();
     expect(n.textContent).toContain('Alice Smith - Bob Jones');
     expect(n.textContent).toContain('Edit the rows, or discard the draw (from the competition header) to change "Competitors per side" in Settings.');
-    expect(n.textContent).not.toContain('back in Settings');
+    expect(n.textContent).not.toContain('Edit the rows, or change');
     expect(n.textContent).not.toContain('has started');
   });
 

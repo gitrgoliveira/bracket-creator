@@ -1118,7 +1118,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
             ? " The competition has started, so \"Competitors per side\" can no longer be changed. Applying a pasted list with rows like these is refused."
             : isDrawReady
               ? " Edit the rows, or discard the draw (from the competition header) to change \"Competitors per side\" in Settings."
-              : " Edit the rows, or change \"Competitors per side\" back in Settings. Applying a pasted list with rows like these is refused."}
+              : " Edit the rows, or change \"Competitors per side\" in Settings. Applying a pasted list with rows like these is refused."}
         </div>
       )}
       {isStarted && (

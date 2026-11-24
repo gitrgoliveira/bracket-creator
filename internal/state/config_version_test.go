@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/json"
 	"regexp"
 	"testing"
 
@@ -162,6 +163,31 @@ func TestConfigVersion_ChangesWhenAllowlistedFieldChanges(t *testing.T) {
 			assert.NotEqual(t, baseVer, mutatedVer, "version must change when %s changes", tc.name)
 		})
 	}
+}
+
+// EngiSolo is judged on its own, against an engi competition that already holds
+// Engi, so the version change cannot come from Engi.
+func TestConfigVersion_ChangesWhenEngiSoloChanges(t *testing.T) {
+	c := &Competition{ID: "engi", Name: "Engi", Kind: "individual", Format: CompFormatKnockout, Engi: true}
+	pairs := ConfigVersion(c)
+	c.EngiSolo = true
+	assert.NotEqual(t, pairs, ConfigVersion(c), "version must change when EngiSolo changes")
+}
+
+// An engi competition stored before EngiSolo existed (pairs, the key absent)
+// must keep the version it had: the hashed bytes carry no engiSolo key while
+// it is false, so a save opened before the upgrade is not refused for a
+// change nobody made. Turning it on adds the key, and only then.
+func TestConfigVersion_EngiSoloOffKeepsTheVersionAnUntouchedCompetitionHad(t *testing.T) {
+	c := &Competition{ID: "engi-pairs", Name: "Engi Pairs", Kind: "individual", Format: CompFormatKnockout, Engi: true}
+	raw, err := json.Marshal(configVersionPayloadOf(c))
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "engiSolo", "pairs (EngiSolo false) must hash exactly the bytes they did before the field")
+
+	c.EngiSolo = true
+	raw, err = json.Marshal(configVersionPayloadOf(c))
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), `"engiSolo":true`)
 }
 
 func TestConfigVersion_DoesNotChangeForRuntimeFields(t *testing.T) {

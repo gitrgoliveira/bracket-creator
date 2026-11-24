@@ -293,7 +293,7 @@ For how to enter scores and navigate between matches, refer to [Score a match](.
 
 For kiken, fusenpai, daihyosen, and other special decisions, refer to [Recording decisions](../court-operators/recording-decisions.md).
 
-For naginata divisions, refer to [Naginata](naginata.md); for a pair kata competition in any art, refer to [Engi](engi.md).
+For naginata divisions, refer to [Naginata](naginata.md); for a kata competition in any art, refer to [Engi](engi.md).
 
 ## Results and awards
 
@@ -309,7 +309,7 @@ The **Award two joint 3rd places** setting, on the competition's Settings tab, c
 
 Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards is an organiser action, so it needs the admin password in self-run mode too; refer to [Operating modes](operating-modes.md#self-run-mode). If the awards were saved on another device after you opened them, your save is refused: the list says "Not saved: the awards changed somewhere else after you opened this list (another screen or device). Reload to see the current awards, then make your change again.", keeps what you typed, and **Reload** shows the current awards. If the list is closed by the time a held save is refused, an alert says "The fighting-spirit awards were not saved: they were changed on another device. Open them and save again."
 
-**League competitions** derive the podium from final standings, and of the podium places only 3rd can be shared: a tie for 1st or 2nd place is always settled by a tie-breaker with a winner, and a tie for 3rd place follows **Award two joint 3rd places**. In an individual league the app schedules the ippon-shobu tie-breaker itself; in a team league you run it from the League tab. Refer to [Ties in a league](team-tournaments.md#ties-in-a-league) for the full rule and for lots, and to [Ties between pairs](engi.md#ties-between-pairs) for Engi.
+**League competitions** derive the podium from final standings, and of the podium places only 3rd can be shared: a tie for 1st or 2nd place is always settled by a tie-breaker with a winner, and a tie for 3rd place follows **Award two joint 3rd places**. In an individual league the app schedules the ippon-shobu tie-breaker itself; in a team league you run it from the League tab. Refer to [Ties in a league](team-tournaments.md#ties-in-a-league) for the full rule and for lots, and to [Ties between competitors](engi.md#ties-between-competitors) for Engi.
 
 Set the **Award two joint 3rd places** option during setup, before you generate the draw. Once the draw exists, the option is locked; discard the draw to change it.
 

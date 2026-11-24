@@ -1601,8 +1601,10 @@ func TestPutParticipant_DrawReady_DojoConflictWarning(t *testing.T) {
 }
 
 // TestEngiParticipantAddRoundTripsCombinedName pins the combined-name engi
-// model: a pair is ONE participant with both member names combined in Name
-// ("Name 1 - Name 2") and the shared dojo in Dojo. Engi no longer forces the
+// model for a pair competition (EngiSolo off): a pair is ONE participant with
+// both member names combined in Name ("Name 1 - Name 2") and the shared dojo in
+// Dojo; the server keeps a name whole whatever the shape, and the entry rule
+// (one name or two) is the browser's engiEntryProblem. Engi no longer forces the
 // zekken layout (EffectiveWithZekkenName == WithZekkenName), so a non-zekken
 // engi comp stores the pair with the identical column layout as any other
 // non-zekken competition. The add handler must round-trip the combined name

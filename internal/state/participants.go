@@ -94,11 +94,11 @@ func (e *duplicateTeamNameError) Is(target error) bool { return target == ErrDup
 // only ever runs for a team competition (Kind=="team" or TeamSize>0, the same
 // discriminator checkNewTeamNameCollisions already uses); scanning an
 // individual's Metadata as a member list would misfire on unrelated trailing
-// columns. Engi pairs are excluded structurally, not by a special case:
+// columns. Engi sides are excluded structurally, not by a special case:
 // Engi is mutually exclusive with a team competition (handlers_competition.go
-// refuses the combination outright), so an engi pair's combined
-// "Name 1 - Name 2" lives in Player.Name and never reaches here as a team's
-// Metadata.
+// refuses the combination outright), so an engi side (a solo competitor's
+// name, or a pair's combined "Name 1 - Name 2", chosen by EngiSolo) lives in
+// Player.Name and never reaches here as a team's Metadata.
 //
 // Operator ruling 2026-09-09 (bc-tmdup): two members of ONE team sharing a
 // name must be impossible. It is not cosmetic: kachinuki retirement
@@ -637,8 +637,10 @@ func (s *Store) SaveParticipantsRestored(compID string, players []domain.Player)
 // withZekkenNameLocked returns the effective zekken-column flag for compID and
 // the competition record it read that flag from. Caller MUST hold the per-comp
 // lock. Returns (false, nil) when the record is missing (matching the default
-// zero value SaveParticipants would otherwise observe). Engi pairs store both
-// member names combined in Player.Name, so engi does not modify the layout.
+// zero value SaveParticipants would otherwise observe). An engi side is one
+// name in Player.Name (a pair's two member names combined, or a solo
+// competitor's one name, chosen by EngiSolo), so engi does not modify the
+// layout.
 //
 // The record is returned rather than discarded because loadCompetitionLocked
 // deliberately bypasses the fileCache, so a caller that needs it again (the

@@ -59,6 +59,7 @@ import { useStableId } from './stable_id.jsx';
 import {
   LABEL_POOL_SHAPE, POOL_SHAPE_ALL, POOL_SHAPE_RING, POOL_SHAPE_OPTIONS,
   poolShapeOf, roundRobinOf, poolShapeHint,
+  LABEL_ENGI_SHAPE, ENGI_SHAPE_OPTIONS, HINT_ENGI_SHAPE, engiShapeOf, engiSoloOf,
 } from './competition_shape.jsx';
 
 // PillButton: one radio pill. The ONE owner of "a pill says whether it is
@@ -105,13 +106,13 @@ export function PillButton({ active, onClick, disabled, children, className, ...
 // which works on any element. Each pill's aria-pressed reads the SAME `active`
 // predicate as its class, never plain equality, so the team-match-format row's
 // stored "" still announces Regular as pressed.
-export function PillGroup({ label, options, value, isActive, onChange, disabled, hint }) {
+export function PillGroup({ label, options, value, isActive, onChange, disabled, hint, describedBy }) {
   const active = isActive || ((v) => v === value);
   const labelId = useStableId('pill-group');
   return (
     <div className="field">
       <label className="field__label" id={labelId}>{label}</label>
-      <div className="radio-group" role="group" aria-labelledby={labelId}>
+      <div className="radio-group" role="group" aria-labelledby={labelId} aria-describedby={describedBy || undefined}>
         {options.map((o) => (
           <PillButton
             key={o.value}
@@ -159,6 +160,24 @@ export function PoolShapeField({ roundRobin, onChange, disabled, hintSuffix = ""
     <PillGroup label={LABEL_POOL_SHAPE} options={options} value={shape}
       onChange={(v) => onChange(roundRobinOf(v))} disabled={disabled}
       hint={`${poolShapeHint(shape)}${hintSuffix}`} />
+  );
+}
+
+// EngiShapeField: the "Competitors per side" pill row both screens render
+// under a ticked Engi (bc-solo, operator decision S1). It reads the picked
+// pill from engiSolo and hands back the engiSolo a pick stores
+// (competition_shape.jsx owns both directions); a null engiSolo picks
+// neither. `hintSuffix` carries the settings screen's own notes, `error` the
+// refusal the screen shows while neither pill is picked.
+export function EngiShapeField({ engiSolo, onChange, disabled, hintSuffix = "", error }) {
+  const errorId = useStableId('engi-shape-error');
+  return (
+    <>
+      <PillGroup label={LABEL_ENGI_SHAPE} describedBy={error ? errorId : undefined} options={ENGI_SHAPE_OPTIONS} value={engiShapeOf(engiSolo)}
+        onChange={(v) => onChange(engiSoloOf(v))} disabled={disabled}
+        hint={`${HINT_ENGI_SHAPE}${hintSuffix}`} />
+      {error ? <div className="field" id={errorId}><window.FieldError testId="engi-shape-error">{error}</window.FieldError></div> : null}
+    </>
   );
 }
 

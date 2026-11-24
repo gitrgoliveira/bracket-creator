@@ -3,8 +3,9 @@
 // derivation, as it stood before settingsPutBody existed, over this fixture
 // grid. They are literal on purpose: the builder must reproduce today's body
 // exactly, so a change to this file's expectations is a change to what
-// Settings sends, and needs its own reason (the only planned one is the
-// expectedParticipants key).
+// Settings sends, and needs its own reason (the planned ones are the
+// expectedParticipants key and engiSolo: bc-solo added the One competitor per
+// side setting, which the body round-trips like engi, false wherever engi is).
 //
 // The builder also carries the configVersion it is given; that key is checked
 // on its own below, and stripped before the comparison, because it did not
@@ -74,6 +75,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "",
@@ -105,6 +107,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "",
@@ -136,6 +139,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "",
@@ -167,6 +171,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "",
@@ -198,6 +203,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "",
@@ -229,6 +235,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "",
@@ -260,6 +267,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "fixed",
@@ -291,6 +299,7 @@ const EXPECTED = {
       "swissRounds": 5,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "",
@@ -322,6 +331,7 @@ const EXPECTED = {
       "swissRounds": 6,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "",
@@ -353,6 +363,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "",
@@ -384,6 +395,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": true,
+      "engiSolo": false,
       "checkInEnabled": true,
       "twoThirdPlaces": true,
       "teamMatchType": "",
@@ -415,6 +427,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": false,
       "teamMatchType": "kachinuki",
@@ -446,6 +459,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "fixed",
@@ -477,6 +491,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "fixed",
@@ -507,6 +522,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": true,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": false,
       "teamMatchType": "",
@@ -538,6 +554,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "",
@@ -569,6 +586,7 @@ const EXPECTED = {
       "swissRounds": 0,
       "naginata": false,
       "engi": false,
+      "engiSolo": false,
       "checkInEnabled": false,
       "twoThirdPlaces": true,
       "teamMatchType": "",

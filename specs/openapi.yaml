@@ -881,6 +881,100 @@ paths:
                       (default false). When false, the SPA hides the dashboard's
                       "Tournament schedule" entry.
 
+  /api/register/competitions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    get:
+      tags: [participants]
+      summary: Public self-registration form metadata
+      description: |
+        Public (no auth header). Answers what the self-registration page needs
+        to draw its form: the competition's name, whether it takes a zekken
+        name, its status (the form is open only in `setup`), and its engi
+        shape. 404 in an officiated tournament, for an unknown competition
+        and for a team competition.
+
+        `engi` and `engiSolo` let the form label its name field and check the
+        name before it sends: an engi competition takes a pair, both member
+        names in the one name field as `Name 1 - Name 2`, unless `engiSolo`
+        is true, when it takes single competitors. `engiSolo` means
+        something only when `engi` is true. The server does not check the
+        name's shape.
+      responses:
+        '200':
+          description: Registration form metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, withZekkenName, status, engi, engiSolo]
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  withZekkenName:
+                    type: boolean
+                  status:
+                    type: string
+                    description: The competition's status; registration is open only in `setup` (or empty).
+                  engi:
+                    type: boolean
+                    description: Whether the competition is an engi (kata) competition.
+                  engiSolo:
+                    type: boolean
+                    description: |
+                      With `engi`, true when each side is one competitor rather
+                      than a pair.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Registration is not available for this competition (officiated tournament, unknown or team competition).
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [participants]
+      summary: Register a participant (public self-registration)
+      description: |
+        Public (no auth header). Adds a participant with source `registered`
+        to a competition still in `setup`. 404 as for the GET; 409 once the
+        competition has left setup, or for a (name, dojo) already registered.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, dojo]
+              properties:
+                name:
+                  type: string
+                  description: The competitor's name; for an engi pair, both names as `Name 1 - Name 2`.
+                dojo:
+                  type: string
+                displayName:
+                  type: string
+                  description: Zekken name, kept only when the competition takes one.
+                danGrade:
+                  type: string
+      responses:
+        '200':
+          description: Registered; answers the participant as stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Player'
+        '400':
+          description: Invalid id or body, a blank name or dojo, or a field too long.
+        '404':
+          description: Registration is not available for this competition.
+        '409':
+          description: Registration is closed, or this name and dojo are already registered.
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/tournament/import:
     post:
       tags: [tournament]
@@ -1955,6 +2049,9 @@ paths:
         - A hiding `publicNames` (anything but `""`) on a Swiss competition is
           refused with 400 `public_names_swiss`; the Swiss format does not
           support hidden names yet.
+        - An `engi: true` create must send `engiSolo` (true for single
+          competitors, false for pairs); without it the create is refused
+          with 400 `Choose single competitors or two competitors (pairs).`
 
         A hiding `publicNames` while the tournament is self-run is refused with
         409 `public_names_self_run` (see the 409 below): the public page is the
@@ -2092,8 +2189,11 @@ paths:
         `courts`, `roundRobin`, `withZekkenName`, `teamSize`,
         `numberPrefix`, `format`, `kind`,
         `poolMatchDurationSeconds`, `knockoutMatchDurationSeconds`,
-        `expectedParticipants`, `swissRounds`, `naginata`, `engi`, `teamMatchType`,
-        `checkInEnabled`, `twoThirdPlaces`. The legacy `leagueTwoThirdPlaces`
+        `expectedParticipants`, `swissRounds`, `naginata`, `engi`, `engiSolo`,
+        `teamMatchType`, `checkInEnabled`, `twoThirdPlaces`. `engiSolo` is
+        stored only beside `engi: true` (a save without engi stores false);
+        an omitted key keeps the stored value on a competition already engi,
+        and is a 400 on a save that turns engi on. The legacy `leagueTwoThirdPlaces`
         is never written here (`twoThirdPlaces` supersedes it).
         String fields are trimmed server-side.
 
@@ -2107,7 +2207,14 @@ paths:
         (`naginata can only be changed before the competition starts`,
         `engi can only be changed before the competition starts`,
         `twoThirdPlaces can only be changed before the competition starts`,
-        respectively). Every other field in the list above
+        respectively). `engiSolo` is refused with 400 too, with two messages
+        of its own: `competitors per side can only be changed before the
+        draw is made; discard the draw to change it` for a draw-ready
+        competition, and
+        `competitors per side cannot be changed once the competition has
+        started` for one that has started. A `PUT` that turns `engi` on
+        without `engiSolo` is a 400 (`Choose single competitors or two
+        competitors (pairs).`). Every other field in the list above
         (including `poolMatchDurationSeconds` / `knockoutMatchDurationSeconds`,
         `checkInEnabled`, `swissRounds` and `numberPrefix`) is editable
         regardless of status through this endpoint; `poolSize`, `poolWinners`,
@@ -9927,6 +10034,34 @@ components:
           enum: [setup, draw-ready, pools, knockout, completed, invalid, ""]
         withZekkenName:
           type: boolean
+        engi:
+          type: boolean
+          description: |
+            Engi (kata) competition: bouts are decided by referee flags
+            instead of points. Individual competitions only (a team with
+            `engi: true` is a 400). Locked once a draw is generated.
+        engiSolo:
+          type: boolean
+          description: |
+            With `engi`, true means each side is ONE competitor (solo kata,
+            such as iaido; the forms' "Single competitors") and false means
+            a pair entered as `Name 1 - Name 2` ("Two competitors (pairs)").
+            Neither is the default: a create with `engi: true` must send it,
+            and so must a settings `PUT` that turns engi on; without it
+            either is a 400 (`Choose single competitors or two competitors
+            (pairs).`). A `PUT` that leaves it out on a competition that is
+            already engi keeps the stored value. Every competition stored
+            before the field reads as false (pairs). Stored only beside
+            `engi: true`: a create or a settings `PUT` without engi stores
+            false, so a save that turns engi off clears it. It changes which
+            names the roster takes and the standings header (`Player` for
+            solo, `Pair` for pairs), never scoring, the draw or a stored
+            result. Locked like `engi` once a draw is generated: a change
+            while draw-ready or later is a 400 (`competitors per side can
+            only be changed before the draw is made; discard the draw to
+            change it` while draw-ready, `competitors per side cannot be
+            changed once the competition has started` after). Carried on
+            every competition read, the viewer and public payloads included.
         numberPrefix:
           type: string
           description: |

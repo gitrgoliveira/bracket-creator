@@ -40,6 +40,7 @@ type configVersionPayload struct {
 	// not refused for a change nobody made.
 	PublicNames string `json:"publicNames,omitempty"`
 	RevealUntil string `json:"revealUntil,omitempty"`
+	EngiSolo    bool   `json:"engiSolo,omitempty"`
 }
 
 // ConfigVersion computes a content-hash config version for a competition's
@@ -48,11 +49,16 @@ func ConfigVersion(c *Competition) string {
 	if c == nil {
 		return ""
 	}
+	return versionHash(configVersionPayloadOf(c))
+}
+
+// configVersionPayloadOf is the allowlisted projection ConfigVersion hashes.
+func configVersionPayloadOf(c *Competition) configVersionPayload {
 	courts := c.Courts
 	if courts == nil {
 		courts = []string{}
 	}
-	p := configVersionPayload{
+	return configVersionPayload{
 		Name:                         c.Name,
 		Date:                         c.Date,
 		StartTime:                    c.StartTime,
@@ -72,6 +78,7 @@ func ConfigVersion(c *Competition) string {
 		SwissRounds:                  c.SwissRounds,
 		Naginata:                     c.Naginata,
 		Engi:                         c.Engi,
+		EngiSolo:                     c.EngiSolo,
 		TeamMatchType:                c.TeamMatchType,
 		TwoThirdPlaces:               c.TwoThirdPlaces,
 		ExpectedParticipants:         c.ExpectedParticipants,
@@ -79,5 +86,4 @@ func ConfigVersion(c *Competition) string {
 		PublicNames:                  c.PublicNames,
 		RevealUntil:                  c.RevealUntil,
 	}
-	return versionHash(p)
 }

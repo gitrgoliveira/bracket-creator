@@ -5,7 +5,7 @@
 
 <p align="center"><b>Your tournament, live on every screen</b></p>
 
-<p align="center">Score each bout at the court on a laptop or tablet. The court display and every phone in the hall show the score as it is entered. Made for kendo and naginata tournaments; <a href="https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/organisers/engi/">engi</a> pairs also suit kendo kata and jodo.</p>
+<p align="center">Score each bout at the court on a laptop or tablet. The court display and every phone in the hall show the score as it is entered. Made for kendo and naginata tournaments; <a href="https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/organisers/engi/">engi</a>, in pairs or solo, also suits kendo kata, jodo and iaido.</p>
 
 <p align="center">
   <a href="https://gitrgoliveira.github.io/bracket-creator/">
@@ -75,7 +75,7 @@ What the tournament app does:
 * **Admin console** (password-protected): competitions, participants, seeding, draws, scheduling, and scoring.
 * **Court console**: one laptop or tablet per court scores that court's bouts (points, fouls, encho and decisions) and starts its next match.
 * **Public viewer and court displays**: real-time schedule, standings, and brackets for spectators, plus big-screen court displays and a transparent overlay for streaming.
-* **Formats**: Knockout, Pools + Knockout, and League, for individuals and teams (including kachinuki), plus naginata and [engi](https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/organisers/engi/) pair kata competitions for any art.
+* **Formats**: Knockout, Pools + Knockout, and League, for individuals and teams (including kachinuki), plus naginata and [engi](https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/organisers/engi/) kata competitions (pairs or solo) for any art.
 * **Excel export**: download a blank template before the draw, and the results as a workbook once a result is recorded.
 * **Backup and restore**: download a backup of the tournament or one competition, restore it with a preview first, and undo a restore. The server also keeps a daily copy in its data folder when the data changed.
 
@@ -88,7 +88,7 @@ Start with these guides on the documentation site:
 * [Host the tournament app](https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/install/hosting/)
 * [mobile-app command reference](https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/commands/mobile-app/)
 
-The kendo tournament guidelines this application is based on are in [running_a_kendo_tournament.md](running_a_kendo_tournament.md). Naginata specifics are covered in the [Naginata competitions guide](https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/organisers/naginata/), and pair kata in the [Engi guide](https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/organisers/engi/).
+The kendo tournament guidelines this application is based on are in [running_a_kendo_tournament.md](running_a_kendo_tournament.md). Naginata specifics are covered in the [Naginata competitions guide](https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/organisers/naginata/), and kata competitions in the [Engi guide](https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/organisers/engi/).
 
 ## Other ways to work
 

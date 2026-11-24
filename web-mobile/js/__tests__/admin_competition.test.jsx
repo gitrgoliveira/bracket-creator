@@ -361,6 +361,9 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
     // mp-9k3v: engi qualifies under BOTH (a) and (b): the JSX reads
     // `local.engi` for the Engi checkbox, and finalNext round-trips it.
     'engi',
+    // Solo engi qualifies under both too: the JSX reads `local.engiSolo` for
+    // its checkbox, and finalNext round-trips it.
+    'engiSolo',
   ];
 
   it('useEffect deps include every field rendered via local.*', () => {
@@ -444,6 +447,9 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // backend REJECTS a mismatched engi ("engi can only be changed before the
     // competition starts"), so omitting it broke every settings save outright.
     'engi',
+    // Solo engi (one performer per entry). Same zero-value-clobber hazard:
+    // a PUT that omits engiSolo clears it back to pairs, so finalNext sends it.
+    'engiSolo',
     // mp-6nq: per-competition check-in tracking flag.
     'checkInEnabled',
     // bc-3rdp: joint-3rd-place rule, generalised from leagueTwoThirdPlaces
@@ -1075,6 +1081,10 @@ describe('AdminSettings engi/naginata checkboxes locked after start (finding 3/6
     // rule, expressed once so the create form and this screen can't drift),
     // so the regex now matches its negation, !engiApplies(local.kind).
     expect(src).toMatch(/checked=\{!!local\.engi\}[\s\S]{0,200}disabled=\{lockedAfterDraw \|\| !engiApplies\(local\.kind\)\}/);
+  });
+
+  it('Competitors per side pills are locked with Engi (isDrawReady or isStarted)', () => {
+    expect(src).toMatch(/<EngiShapeField engiSolo=\{local\.engiSolo\}[\s\S]{0,200}disabled=\{lockedAfterDraw\}/);
   });
 
   it('Naginata checkbox is disabled when isStarted (in addition to isDrawReady)', () => {

@@ -29,7 +29,7 @@ type poolOptions struct {
 	withZekkenName  bool
 	singleTree      bool
 	determined      bool
-	engi            bool // engi (kata) competition: pair rosters + engi standings formulas. Set ONLY by the web /create handler (mobile-app blank-template download); deliberately NOT a CLI flag (owner decision: no new CLI options).
+	engi            bool // engi (kata) competition: engi standings formulas over rosters of pairs or solo competitors (a side's name is kept whole). Set ONLY by the web /create handler (mobile-app blank-template download); deliberately NOT a CLI flag (owner decision: no new CLI options).
 	thirdPlaceMatch bool // thirdPlaceMatch: adds a 3rd-place (bronze) match after elimination matches, deciding a single 3rd place instead of kendo's default of two joint 3rd places. CLI flag --third-place-match (owner decision, bc-3rdp: the "no new CLI options" ban is lifted for this one); also settable by the web /create handler, which still accepts the legacy "naginata" form field as an alias (see create_handler.go).
 	titlePrefix     string
 	numberPrefix    string

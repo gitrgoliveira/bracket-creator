@@ -372,7 +372,7 @@ func (w *leakWorld) createLeakComp(t *testing.T, c *leakComp, tag string) {
 			players = append(players, map[string]any{"name": fmt.Sprintf("Team %s %d", lower, i), "dojo": fmt.Sprintf("Dojo %s %d", lower, i)})
 		}
 	case "engi":
-		body["kind"], body["format"], body["engi"] = "individual", state.CompFormatKnockout, true
+		body["kind"], body["format"], body["engi"], body["engiSolo"] = "individual", state.CompFormatKnockout, true, false
 		for i := 1; i <= 4; i++ {
 			players = append(players, map[string]any{
 				"name": leakToken(tag, i, "aname") + " - " + leakToken(tag, i, "bname"),

@@ -771,7 +771,9 @@ if (typeof window !== "undefined") {
   // member2 is "" when the name carries no pair separator. Splits on the FIRST
   // " - " so a member name containing a plain hyphen is unaffected. Each half is
   // trimmed so incidental whitespace around the separator ("Alice -  Bob") does
-  // not leak into display, matching engiPairComplete's whitespace-insensitivity.
+  // not leak into display, matching engiEntryProblem's (engi_entry.jsx)
+  // whitespace-insensitivity. A solo engi side carries no separator, so it
+  // returns one part there.
   window.engiPairParts = (name) => {
     const s = String(name || "");
     const i = s.indexOf(" - ");

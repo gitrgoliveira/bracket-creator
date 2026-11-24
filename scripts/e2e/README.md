@@ -628,8 +628,9 @@ league journeys name their defects by the finding ids of the league review
 
 `smoke.spec.mjs` is the smallest complete example. `engi.spec.mjs` is the one
 journey on an engi (kata pairs) competition: it seeds four pairs through the
-wizard's "Engi (kata competition)" box (`engi: true` in `createCompetition`) and
-the roster paste box (`Name 1 - Name 2, Dojo`), scores a match in flags on the
+wizard's "Engi (kata competition)" box (`engi: true` in `createCompetition`,
+which also picks "Two competitors (pairs)" unless `engiSolo` is true) and the
+roster paste box (`Name 1 - Name 2, Dojo`), scores a match in flags on the
 court console and checks the result on a spectator's phone, guards the engi
 editor's tap-back race, and plays an engi league whose tie at 1st the console
 decides in flags.

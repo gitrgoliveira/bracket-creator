@@ -195,6 +195,7 @@ const CHECK_MODULES = [
   'draft_estimate.jsx',
   'draft_taps.jsx',
   'duration.jsx',
+  'engi_entry.jsx',
   'held_writes_panel.jsx',
   'icon.jsx',
   'ineligible_match.jsx',

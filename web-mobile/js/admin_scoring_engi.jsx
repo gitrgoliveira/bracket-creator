@@ -298,8 +298,9 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
   const goNext = () => leaveEditor(onNext);
 
   // Pair names: the side's name holds both members combined ("Name 1 - Name 2");
-  // split so member 2 renders under member 1. Both sides of an engi match are
-  // pairs (one entry each).
+  // split so member 2 renders under member 1. Each side of an engi match is one
+  // entry: a pair, or one competitor in a solo engi competition, whose name has
+  // no second part, so no empty second line is drawn.
   const nameOf = (side) => side && typeof side === "object" ? side.name || "" : side || "";
   const dojoOf = (side) => side && typeof side === "object" ? side.dojo || "" : "";
 

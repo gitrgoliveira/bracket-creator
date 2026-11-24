@@ -14,6 +14,7 @@ import { isBarredMatch } from './ineligible_match.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 import { Icon } from './icon.jsx';
 import { andList } from './list_phrase.jsx';
+import { engiShape } from './engi_entry.jsx';
 
 const { useState, useMemo, useRef } = React;
 const StatusBadge = window.StatusBadge;
@@ -516,6 +517,9 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   const isLeague = c.format === "league";
   const isTeam = c.kind === "team" || c.teamSize > 0;
   const isEngi = !!(c && c.engi);
+  // A solo engi competition (single competitors) heads its name column
+  // "Player", as an individual table does; a pair competition heads "Pair".
+  const isSolo = engiShape(c) === "solo";
   const leaguePoolName = isLeague && pools && pools[0] ? pools[0].poolName : null;
   const leagueStandings = leaguePoolName && standings ? (standings[leaguePoolName] || []) : [];
   // A league is decided when the competition is completed, never merely when
@@ -631,7 +635,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           <table className="pool__table">
             <thead>
               {isEngi ? (
-                <tr><th>#</th><th>Pair</th><th className="num"><abbr title="Victories (bouts won)">V</abbr></th><th className="num"><abbr title="Total flags received">Flags</abbr></th></tr>
+                <tr><th>#</th><th>{isSolo ? "Player" : "Pair"}</th><th className="num"><abbr title="Victories (bouts won)">V</abbr></th><th className="num"><abbr title="Total flags received">Flags</abbr></th></tr>
               ) : isTeam ? (
                 <tr><th>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">T</th><th className="num">IV</th><th className="num">IL</th><th className="num">PW</th><th className="num">PL</th></tr>
               ) : (

@@ -10,7 +10,7 @@ Naginata has two competition forms:
   [Third-place match](#third-place-match) for how that is set.
 - **Engi-kyogi**: the kata form, in which a pair perform choreographed forms
   scored by referee flags rather than ippon. The app runs it as an
-  [Engi (pair kata) competition](engi.md), the same setting any other kata
+  [Engi (kata) competition](engi.md), the same setting any other kata
   competition uses.
 
 You pick the form with two checkboxes, on the **Add competition** form or a
@@ -20,7 +20,7 @@ locked once the draw is generated:
 | Checkbox | What it does | Available for |
 |--------|--------------|---------------|
 | **Naginata competition** | Turns on the combat rules: the Sune ippon button | Individual and team |
-| **Engi (kata competition)** | Flag-count scoring for pair kata in any art; refer to [Engi](engi.md) | Individual only |
+| **Engi (kata competition)** | Flag-count scoring for kata in any art, pairs or solo; refer to [Engi](engi.md) | Individual only |
 
 The 3rd-place rule (joint vs. single) is a separate setting, shared with kendo
 competitions; refer to [Third-place match](#third-place-match).

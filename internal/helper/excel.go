@@ -565,8 +565,9 @@ type poolResultsCtx struct {
 }
 
 // playerNameFormulaFor returns the name-cell formula for a results-table row.
-// Engi pair names need no special handling: both member names live combined in
-// Player.Name ("Name 1 - Name 2"), so the plain reference shows the full pair.
+// Engi side names need no special handling: a pair's member names live combined
+// in Player.Name ("Name 1 - Name 2") and a solo competitor's one name is the
+// whole Name, so the plain reference shows the full side either way.
 func (ctx poolResultsCtx) playerNameFormulaFor(player Player) string {
 	return playerRef(player.Name, ctx.pCoords[playerCoordKey(player)])
 }

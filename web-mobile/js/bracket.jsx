@@ -460,7 +460,8 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
   // guarantees no raw id escapes — it degrades to "TBD".
   const shownName = slotLabel ? slotLabel(player.name, feederId) : slotDisplayName(player.name);
   // Engi pair: split the combined name so member 2 stacks under member 1
-  // instead of truncating on narrow bracket cards.
+  // instead of truncating on narrow bracket cards. A solo engi side has one
+  // name, so m2 is empty and only one line is drawn.
   const [m1, m2] = isEngi && window.engiPairParts ? window.engiPairParts(shownName) : [shownName, ""];
   // The bracket card stacks its two sides vertically (no left/right pairing),
   // so the side is carried by the leading colour bar and tint alone (DESIGN.md

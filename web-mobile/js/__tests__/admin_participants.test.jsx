@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, generateRosterText, validateRosterRows, participantTemplateCSV, participantFormError, engiPairComplete } from '../admin_participants.jsx';
+import { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, generateRosterText, validateRosterRows, participantTemplateCSV, participantFormError } from '../admin_participants.jsx';
+import { ENGI_PAIR_PROBLEM } from '../engi_entry.jsx';
 
 // Helper: parsed rows arrive from parseParticipantLines as
 // { name, displayName, dojo, danGrade, tag } objects. Test rows omit the
@@ -420,9 +421,15 @@ describe('validateRosterRows', () => {
     // Copilot (PR #351): the zekken hint said "Name, Zekken, Dojo" even for
     // engi comps, whose roster is "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo".
     const parsed = [{ name: 'Emi Sasaki - Ren Fujita', displayName: 'SASAKI - FUJITA', dojo: '' }];
-    const problems = validateRosterRows(parsed, true, true);
+    const problems = validateRosterRows(parsed, true, 'pair');
     expect(problems[0].reason).toMatch(/missing dojo/);
     expect(problems[0].reason).toMatch(/Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo/);
+  });
+
+  it('solo engi+zekken dojo-missing hint names the individual format, not the pair one', () => {
+    const parsed = [{ name: 'Akira Tanaka', displayName: 'TANAKA', dojo: '' }];
+    const problems = validateRosterRows(parsed, true, 'solo');
+    expect(problems[0].reason).toBe('missing dojo (zekken competitions use Name, Zekken, Dojo)');
   });
 
   it('handles null/empty input defensively', () => {
@@ -432,40 +439,82 @@ describe('validateRosterRows', () => {
 
   it('accepts a complete engi pair', () => {
     const parsed = [row('Emi Sasaki - Ren Fujita', 'Getsurin')];
-    expect(validateRosterRows(parsed, false, true)).toEqual([]);
+    expect(validateRosterRows(parsed, false, 'pair')).toEqual([]);
   });
 
   it('flags an engi row with no separator', () => {
     const parsed = [row('Emi Sasaki', 'Getsurin')];
-    const problems = validateRosterRows(parsed, false, true);
+    const problems = validateRosterRows(parsed, false, 'pair');
     expect(problems).toHaveLength(1);
-    expect(problems[0].reason).toMatch(/Name 1 - Name 2/);
+    expect(problems[0].reason).toBe(ENGI_PAIR_PROBLEM);
+    expect(problems[0].reason).toBe('Enter both names of the pair as "Name 1 - Name 2".');
   });
 
   it('flags an engi row with an empty half (Copilot: " - Bob" / "Alice - " passed before)', () => {
     // Both halves must be non-empty, not just the " - " separator present.
-    const parsed = [row(' - Ren Fujita', 'Getsurin'), row('Emi Sasaki - ', 'Getsurin')];
-    const problems = validateRosterRows(parsed, false, true);
-    expect(problems).toHaveLength(2);
-    expect(problems[0].reason).toMatch(/Name 1 - Name 2/);
-    expect(problems[1].reason).toMatch(/Name 1 - Name 2/);
+    // The paste box trims each name before the rule sees it, so the raw
+    // " - Ren Fujita" and "Emi Sasaki - " arrive as "- Ren Fujita" and
+    // "Emi Sasaki -"; both shapes are refused.
+    const parsed = [
+      row(' - Ren Fujita', 'Getsurin'), row('Emi Sasaki - ', 'Getsurin'),
+      row('- Ren Fujita', 'Getsurin'), row('Emi Sasaki -', 'Getsurin'), row('-', 'Getsurin'),
+    ];
+    const problems = validateRosterRows(parsed, false, 'pair');
+    expect(problems).toHaveLength(5);
+    for (const pr of problems) expect(pr.reason).toBe(ENGI_PAIR_PROBLEM);
+  });
+
+  it('solo engi accepts one competitor per row, hyphenated names included', () => {
+    const parsed = [row('Akira Tanaka', 'Gyokusen'), row('Jean-Paul Martin', 'Getsurin')];
+    expect(validateRosterRows(parsed, false, 'solo')).toEqual([]);
+  });
+
+  it('solo engi refuses a pair-shaped row with the Settings sentence', () => {
+    const parsed = [
+      row('Emi Sasaki - Ren Fujita', 'Getsurin'), row('Emi Sasaki - ', 'Getsurin'),
+      row(' - Ren Fujita', 'Getsurin'), row('Emi Sasaki -', 'Getsurin'), row('- Ren Fujita', 'Getsurin'),
+    ];
+    const problems = validateRosterRows(parsed, false, 'solo');
+    expect(problems.map(pr => pr.index)).toEqual([0, 1, 2, 3, 4]);
+    for (const pr of problems) {
+      expect(pr.reason).toBe('This competition takes single competitors. To enter pairs, pick "Two competitors (pairs)" in Settings.');
+    }
+  });
+
+  it('solo engi still reports a blank name as missing', () => {
+    const problems = validateRosterRows([row('   ', 'Getsurin')], false, 'solo');
+    expect(problems).toEqual([{ index: 0, name: '', reason: 'missing name' }]);
+  });
+
+  it('a non-engi competition (shape null) accepts both shapes of name', () => {
+    const parsed = [row('Akira Tanaka', 'Gyokusen'), row('Emi Sasaki - Ren Fujita', 'Getsurin')];
+    expect(validateRosterRows(parsed, false, null)).toEqual([]);
   });
 });
 
-// Engi pairs are entered with both member names combined in the name field
+// A pair engi competition enters both member names combined in the name field
 // ("Name 1 - Name 2"), so template selection shows pair-shaped examples while
 // the column layout stays identical to a non-engi competition of the same
-// zekken setting.
+// zekken setting. A solo engi competition takes the individual template.
 describe('participantTemplateCSV', () => {
   it('offers the combined pair template for engi without zekken', () => {
     const csv = participantTemplateCSV({ kind: 'individual', engi: true, withZekkenName: false });
-    expect(csv).toContain('Name 1 - Name 2, Dojo');
-    expect(csv).toContain('Emi Sasaki - Ren Fujita, Getsurin Dojo');
+    expect(csv).toBe('Name 1 - Name 2, Dojo, Dan\nEmi Sasaki - Ren Fujita, Getsurin Dojo, 3\n');
   });
   it('offers the combined pair + zekken template for engi with zekken', () => {
     const csv = participantTemplateCSV({ kind: 'individual', engi: true, withZekkenName: true });
-    expect(csv).toContain('Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo');
-    expect(csv).toContain('Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin Dojo');
+    expect(csv).toBe('Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo, Dan\nEmi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin Dojo, 3\n');
+  });
+  it('offers the one-competitor template for solo engi without zekken', () => {
+    const csv = participantTemplateCSV({ kind: 'individual', engi: true, engiSolo: true, withZekkenName: false });
+    expect(csv).toBe('Name, Dojo, Dan\nAkira Tanaka, Gyokusen, 3\n');
+  });
+  it('offers the one-competitor zekken template for solo engi with zekken', () => {
+    const csv = participantTemplateCSV({ kind: 'individual', engi: true, engiSolo: true, withZekkenName: true });
+    expect(csv).toBe('Name, Zekken, Dojo, Dan\nAkira Tanaka, TANAKA, Gyokusen, 3\n');
+  });
+  it('reads engiSolo only with engi', () => {
+    expect(participantTemplateCSV({ kind: 'individual', engi: false, engiSolo: true })).toBe('Name, Dojo, Dan\nAkira Tanaka, Gyokusen, 3\n');
   });
   it('offers the zekken template for a non-engi zekken comp', () => {
     expect(participantTemplateCSV({ kind: 'individual', withZekkenName: true })).toContain('Name, Zekken, Dojo');
@@ -482,44 +531,37 @@ describe('participantTemplateCSV', () => {
 });
 
 describe('participantFormError', () => {
+  const SOLO = 'This competition takes single competitors. To enter pairs, pick "Two competitors (pairs)" in Settings.';
+  const PAIR = 'Enter both names of the pair as "Name 1 - Name 2".';
   it('requires name and dojo for every competition', () => {
-    expect(participantFormError({ name: '', dojo: 'D', zekken: '', engi: false })).toMatch(/Name and dojo/);
-    expect(participantFormError({ name: 'N', dojo: '', zekken: '', engi: false })).toMatch(/Name and dojo/);
+    expect(participantFormError({ name: '', dojo: 'D', shape: null })).toMatch(/Name and dojo/);
+    expect(participantFormError({ name: 'N', dojo: '', shape: null })).toMatch(/Name and dojo/);
+    expect(participantFormError({ name: '', dojo: 'D', shape: 'solo' })).toMatch(/Name and dojo/);
   });
   it('requires both member names combined for engi pairs', () => {
-    expect(participantFormError({ name: 'Emi Sasaki', dojo: 'Getsurin', engi: true })).toMatch(/Name 1 - Name 2/);
+    expect(participantFormError({ name: 'Emi Sasaki', dojo: 'Getsurin', shape: 'pair' })).toBe(PAIR);
   });
   it('accepts a complete engi pair', () => {
-    expect(participantFormError({ name: 'Emi Sasaki - Ren Fujita', dojo: 'Getsurin', engi: true })).toBeNull();
+    expect(participantFormError({ name: 'Emi Sasaki - Ren Fujita', dojo: 'Getsurin', shape: 'pair' })).toBeNull();
   });
   it('rejects an engi pair with an empty half (Copilot: "Alice - " passed before)', () => {
-    expect(participantFormError({ name: 'Emi Sasaki - ', dojo: 'Getsurin', engi: true })).toMatch(/Name 1 - Name 2/);
-    expect(participantFormError({ name: ' - Ren Fujita', dojo: 'Getsurin', engi: true })).toMatch(/Name 1 - Name 2/);
+    // The add and replace forms trim before asking, so the trimmed shapes are
+    // checked beside the raw ones.
+    for (const name of ['Emi Sasaki - ', ' - Ren Fujita', 'Emi Sasaki -', '- Ren Fujita', '-']) {
+      expect(participantFormError({ name, dojo: 'Getsurin', shape: 'pair' })).toBe(PAIR);
+    }
+  });
+  it('accepts one competitor for solo engi, hyphenated names included', () => {
+    expect(participantFormError({ name: 'Akira Tanaka', dojo: 'Gyokusen', shape: 'solo' })).toBeNull();
+    expect(participantFormError({ name: 'Jean-Paul Martin', dojo: 'Getsurin', shape: 'solo' })).toBeNull();
+  });
+  it('refuses a pair typed into a solo engi competition with the Settings sentence', () => {
+    for (const name of ['Emi Sasaki - Ren Fujita', 'Emi Sasaki -', '- Ren Fujita', 'Emi Sasaki - ', ' - Ren Fujita']) {
+      expect(participantFormError({ name, dojo: 'Getsurin', shape: 'solo' })).toBe(SOLO);
+    }
   });
   it('does not require a zekken for a non-engi comp (member 2 is optional)', () => {
-    expect(participantFormError({ name: 'Alice', dojo: 'DojoA', zekken: '', engi: false })).toBeNull();
-  });
-});
-
-describe('engiPairComplete', () => {
-  it('accepts a pair with both members present', () => {
-    expect(engiPairComplete('Emi Sasaki - Ren Fujita')).toBe(true);
-  });
-  it('rejects a name with no separator', () => {
-    expect(engiPairComplete('Emi Sasaki')).toBe(false);
-  });
-  it('rejects an empty half on either side', () => {
-    expect(engiPairComplete(' - Ren Fujita')).toBe(false);
-    expect(engiPairComplete('Emi Sasaki - ')).toBe(false);
-    expect(engiPairComplete(' - ')).toBe(false);
-  });
-  it('splits on the FIRST separator so a hyphenated member name still passes', () => {
-    // "Mary-Jane" uses a plain hyphen; the pair separator is " - ".
-    expect(engiPairComplete('Mary-Jane Smith - Ren Fujita')).toBe(true);
-  });
-  it('handles null/empty defensively', () => {
-    expect(engiPairComplete('')).toBe(false);
-    expect(engiPairComplete(null)).toBe(false);
-    expect(engiPairComplete(undefined)).toBe(false);
+    expect(participantFormError({ name: 'Alice', dojo: 'DojoA', shape: null })).toBeNull();
+    expect(participantFormError({ name: 'Alice - Bob', dojo: 'DojoA', shape: null })).toBeNull();
   });
 });

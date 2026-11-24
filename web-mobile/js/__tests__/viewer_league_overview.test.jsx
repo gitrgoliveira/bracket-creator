@@ -426,6 +426,29 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     expect(text).toContain('Member2-1');
   });
 
+  // bc-solo: a solo engi league (engiSolo, as the viewer payload carries it)
+  // heads its name column "Player"; a pair league keeps "Pair".
+  it('solo engi league overview heads the name column Player and draws one line per side', () => {
+    const standings = {
+      League: [
+        { player: { id: 's1', name: 'Akira Tanaka', dojo: 'Dojo 1' }, wins: 2, flags: 6, rank: 1 },
+        { player: { id: 's2', name: 'Jean-Paul Martin', dojo: 'Dojo 2' }, wins: 1, flags: 3, rank: 2 },
+      ],
+    };
+    const tree = runtime.mount(ViewerOverview, {
+      ...baseProps,
+      c: { ...engiLeagueComp('pools'), engiSolo: true },
+      standings,
+      pools,
+      poolMatches: mixedMatches(1, 1),
+    });
+    const text = collectText(tree, expandNamed('NumberedName'));
+    expect(text).toContain('Player');
+    expect(text).not.toContain('Pair');
+    expect(text).toContain('Akira Tanaka');
+    expect(text).toContain('Jean-Paul Martin');
+  });
+
   // mp-dunx: a team league resolved by daihyosen shows a DH badge on the
   // Overview summary for any daihyosen winner, mirroring the full standings
   // (PoolsViewer). Without it, a spectator on Overview sees identical rows

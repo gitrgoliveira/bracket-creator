@@ -38,7 +38,7 @@ import {
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES,
   LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
-  LABEL_ZEKKEN, LABEL_ENGI,
+  LABEL_ZEKKEN, LABEL_ENGI, HINT_ENGI_SHAPE_ROWS, engiShapeError, engiShapeLabel,
   teamFieldsVisible, zekkenApplies, engiApplies, teamSizeError,
   resolveTeamSize, kindChangeBlockedReason,
   FORMAT_LEAGUE, FORMAT_MIXED,
@@ -53,7 +53,7 @@ import {
   LABEL_CHECK_IN, HINT_CHECK_IN, tournamentHasCheckIn, checkInApplies,
   LABEL_NUMBER_PREFIX, cutNumberPrefix, numberPrefixHint, LABEL_COURTS,
 } from './competition_shape.jsx';
-import { PillGroup, PillButton, CheckboxField, NumberField, TextField, PoolShapeField } from './competition_fields.jsx';
+import { PillGroup, PillButton, CheckboxField, NumberField, TextField, PoolShapeField, EngiShapeField } from './competition_fields.jsx';
 import { seededRanks } from './admin_helpers.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
@@ -100,6 +100,8 @@ export { readRetimePreview };
 // reached here). teamMatchType and extraQualifiers resolve through their
 // option lists rather than branching per field; everything else prints as-is.
 function formatClearedValue(key, value) {
+  // The engi shape names its pill: a cleared true is Single competitors.
+  if (key === "engiSolo") return engiShapeLabel(value) || "on";
   if (typeof value === "boolean") return "on";
   // Resolve an enum through its own option list rather than branching per
   // field: teamMatchType went through TEAM_MATCH_TYPE_OPTIONS while
@@ -405,7 +407,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       }
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType, c.expectedParticipants, c.publicNames, c.revealUntil]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.engiSolo, c.checkInEnabled, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType, c.expectedParticipants, c.publicNames, c.revealUntil]);
 
   // bc-obox T1: a save that moves a drawn competition (a new date or start
   // time, whose matches the server re-times in the same save) waits for the
@@ -740,10 +742,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // its own lock, `lockedAfterDraw` below, which the Engi/Naginata comment
   // right after this one describes.)
   const isDrawReady = local.status === "draw-ready";
-  // Engi and Naginata are locked from draw-ready onward (lockedAfterDraw =
-  // isDrawReady || isStarted, both checkboxes below use it directly):
-  // flipping engi mid-tournament changes the scoring paradigm; flipping
-  // naginata affects the bronze match, and both would desync from a draw
+  // Engi (with its Competitors per side pills) and Naginata are locked from
+  // draw-ready onward (lockedAfterDraw = isDrawReady || isStarted, the
+  // checkboxes below use it directly): flipping engi mid-tournament changes
+  // the scoring paradigm; flipping naginata affects the bronze match, and
+  // both would desync from a draw
   // already generated on the OLD value, the same reason format/courts/pool
   // sizing lock at draw-ready above.
   const isStarted = !!(local.status && local.status !== "setup" && local.status !== "draw-ready");
@@ -895,6 +898,37 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     ? `${expectedParticipantsLabel} must be a whole number from 0 to ${MAX_EXPECTED_PARTICIPANTS}.`
     : null;
   const blockingExpectedParticipantsErr = !!expectedParticipantsErr;
+  // Engi shape (bc-solo): a competition whose Engi box is newly ticked here
+  // starts with neither Competitors per side pill picked, and Save waits
+  // for one (the server refuses the same PUT with the same sentence). A
+  // stored engi competition always holds a shape, so it never blocks.
+  const engiShapeErr = engiShapeError(local.kind, local.engi, local.engiSolo);
+  // Ticking Engi on a competition stored without it picks neither shape;
+  // re-ticking it on a stored engi competition brings its stored shape back.
+  // Unticking clears a picked Single competitors (engiSolo describes an engi
+  // side and nothing else); on a competition stored without engi it only puts
+  // the stored shape back.
+  const toggleEngi = (on) => {
+    update("engi", on);
+    if (on) {
+      const shape = c.engi ? !!c.engiSolo : null;
+      if (local.engiSolo !== shape) update("engiSolo", shape);
+      // Back to the stored shape: no edit, so a conflict notice must not list it.
+      if (c.engi) editedFieldsRef.current.delete("engiSolo");
+    } else if (c.engi) {
+      // A stored engi competition: the cleared pick is a real change.
+      if (local.engiSolo) update("engiSolo", false);
+    } else {
+      // Stored without engi: the shape is back to what is stored (false), so
+      // it is no edit and a conflict notice must not list it.
+      editedFieldsRef.current.delete("engiSolo");
+      setLocal((prev) => {
+        const next = { ...prev, engiSolo: false };
+        localRef.current = next;
+        return next;
+      });
+    }
+  };
 
   // What THIS save is about to clear, per the operator ruling that a config
   // change must never quietly overwrite or delete the operator's data --
@@ -950,7 +984,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // an invalid shiaijo count the header button greyed out while the footer
   // one stayed live, fired the PUT and took a 400. Anything that should block
   // saving belongs here, never at a call site.
-  const saveDisabled = !!conflict || !isDirty || saving || timeWait.waiting || hasDurationError || blockingCourtsErr || blockingPoolSettingsErr || blockingSwissSettingsErr || blockingTeamSizeErr || blockingExpectedParticipantsErr;
+  const saveDisabled = !!conflict || !isDirty || saving || timeWait.waiting || hasDurationError || blockingCourtsErr || blockingPoolSettingsErr || blockingSwissSettingsErr || blockingTeamSizeErr || blockingExpectedParticipantsErr || !!engiShapeErr;
 
   // The blocking message and its precedence, shared by the header chip and the
   // footer for the same reason saveDisabled is: the footer used to restate the
@@ -976,7 +1010,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           // names the field and the rule, so it prints directly.
           : blockingSwissSettingsErr ? swissSettingsErr
             : blockingTeamSizeErr ? teamSizeErr
-              : blockingExpectedParticipantsErr ? expectedParticipantsErr : "";
+              : blockingExpectedParticipantsErr ? expectedParticipantsErr
+                : engiShapeErr || "";
   const saveBlocked = !!saveBlockMessage;
 
   return (
@@ -1533,7 +1568,15 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             operator unable to see, let alone recover, a setting they
             remember configuring. */}
         <CheckboxField label={LABEL_ZEKKEN} checked={local.withZekkenName} onChange={(on) => update("withZekkenName", on)} disabled={isDrawReady || !zekkenApplies(local.kind)} hint={!zekkenApplies(local.kind) ? HINT_KIND_ONLY_INDIVIDUAL : HINT_ZEKKEN} />
-        <CheckboxField label={LABEL_ENGI} checked={!!local.engi} onChange={(on) => update("engi", on)} disabled={lockedAfterDraw || !engiApplies(local.kind)} hint={!engiApplies(local.kind) ? HINT_KIND_ONLY_INDIVIDUAL : `${HINT_ENGI}${lockedNote}`} />
+        <CheckboxField label={LABEL_ENGI} checked={!!local.engi} onChange={toggleEngi} disabled={lockedAfterDraw || !engiApplies(local.kind)} hint={!engiApplies(local.kind) ? HINT_KIND_ONLY_INDIVIDUAL : `${HINT_ENGI}${lockedNote}`} />
+        {/* Competitors per side (bc-solo): shown only while Engi applies
+            and is ticked, since it describes an engi side and nothing else
+            (the PUT body sends it false whenever engi is). Locked with Engi
+            from the draw on: discarding the draw unlocks both. */}
+        {engiApplies(local.kind) && !!local.engi && (
+          <EngiShapeField engiSolo={local.engiSolo} onChange={(solo) => update("engiSolo", solo)} disabled={lockedAfterDraw}
+            hintSuffix={` ${HINT_ENGI_SHAPE_ROWS}${lockedNote}`} error={engiShapeErr} />
+        )}
         {/* Naginata coupling: ticking naginata also RE-DEFAULTS (does not lock)
             the joint-3rd setting to match the create form's behavior --
             twoThirdPlacesForNaginata picks a sane starting point; the

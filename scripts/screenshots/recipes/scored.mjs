@@ -68,9 +68,10 @@ const SWISS_TEAMS = [
   { name: 'Team Daito', dojo: 'Daito Dojo' },
 ];
 
-// An engi competitor is a PAIR but a SINGLE participant: both member names go
-// in Name, joined by " - " (CLAUDE.md, participant CSV schema). The viewer
-// splits them again for display via window.engiPairParts.
+// An engi competitor is a PAIR (or, in a solo competition, one person) but a
+// SINGLE participant: a pair's member names both go in Name, joined by " - "
+// (CLAUDE.md, participant CSV schema). The viewer splits a pair again for
+// display via window.engiPairParts.
 const ENGI_PAIRS = [
   { name: 'Alpha One - Alpha Two', dojo: 'Aoi' },
   { name: 'Bravo One - Bravo Two', dojo: 'Bara' },
@@ -516,7 +517,8 @@ export const families = {
       await api.start(SWISS_TEAM);
 
       await api.competition(SWISS_ENGI, 'Engi Swiss', {
-        teamSize: 0, format: 'swiss', swissRounds: 2, engi: true, courts: ['A', 'B'],
+        // An engi create must say pairs or single competitors (engiSolo).
+        teamSize: 0, format: 'swiss', swissRounds: 2, engi: true, engiSolo: false, courts: ['A', 'B'],
         date: '20-09-2026', startTime: '12:00',
       });
       await api.participants(SWISS_ENGI, ENGI_PAIRS);

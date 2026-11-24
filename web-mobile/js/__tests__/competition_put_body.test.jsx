@@ -102,6 +102,54 @@ describe('settingsPutBody', () => {
     expect(res.body.configVersion).toBe('v-updated');
   });
 
+  // engiSolo (bc-solo) is round-tripped on every save like engi, so a staged
+  // choice always rides the save. A staged null (Engi newly ticked, neither
+  // shape picked) is left off the body: the server refuses a PUT that turns
+  // engi on without the key.
+  describe('engiSolo', () => {
+    const engiBase = { ...base, engi: true, format: 'knockout', poolSize: 0, poolWinners: 0 };
+
+    it('an untouched solo engi competition keeps engiSolo on an unrelated save', () => {
+      const res = settingsPutBody({ ...engiBase, engiSolo: true }, { startTime: '11:00' }, 'v');
+      expect(res.error).toBeUndefined();
+      expect(res.body.engi).toBe(true);
+      expect(res.body.engiSolo).toBe(true);
+    });
+
+    it('a pair engi competition (no engiSolo key, as every stored one reads) sends false', () => {
+      const res = settingsPutBody(engiBase, {}, 'v');
+      expect(res.body.engiSolo).toBe(false);
+    });
+
+    it('picking Single competitors sends it on', () => {
+      const res = settingsPutBody(engiBase, { engiSolo: true }, 'v');
+      expect(res.body.engiSolo).toBe(true);
+    });
+
+    it('Engi newly ticked with neither shape picked leaves the key off', () => {
+      const res = settingsPutBody({ ...base, engi: false }, { engi: true, engiSolo: null }, 'v');
+      expect(res.body.engi).toBe(true);
+      expect('engiSolo' in JSON.parse(JSON.stringify(res.body))).toBe(false);
+    });
+
+    it('unticking Engi sends engiSolo false too, whatever the hidden box held', () => {
+      const res = settingsPutBody({ ...engiBase, engiSolo: true }, { engi: false }, 'v');
+      expect(res.body.engi).toBe(false);
+      expect(res.body.engiSolo).toBe(false);
+    });
+
+    it('engiSolo without engi is never sent on', () => {
+      const res = settingsPutBody({ ...base, engi: false, engiSolo: true }, {}, 'v');
+      expect(res.body.engiSolo).toBe(false);
+    });
+
+    it('a flip to team clears engiSolo with engi', () => {
+      const res = settingsPutBody({ ...engiBase, engiSolo: true }, { kind: 'team' }, 'v');
+      expect(res.body.engi).toBe(false);
+      expect(res.body.engiSolo).toBe(false);
+    });
+  });
+
   it('clearing expectedParticipants (empty string / NaN edit) sends 0', () => {
     const resEmpty = settingsPutBody({ ...base, expectedParticipants: 40 }, { expectedParticipants: '' }, 'v-ver');
     expect(resEmpty.body.expectedParticipants).toBe(0);
@@ -146,6 +194,15 @@ describe('describeSettingsEdits', () => {
       .toBe('Use Zekken display name to on.');
     expect(describeSettingsEdits({ naginata: false }))
       .toBe('Naginata competition to off.');
+  });
+
+  it('names the Competitors per side setting by its label and its pill, never its wire key', () => {
+    expect(describeSettingsEdits({ engiSolo: true }))
+      .toBe('Competitors per side to Single competitors.');
+    expect(describeSettingsEdits({ engiSolo: false }))
+      .toBe('Competitors per side to Two competitors (pairs).');
+    expect(describeSettingsEdits({ engiSolo: null }))
+      .toBe('Competitors per side to not chosen.');
   });
 
   it('formats array fields joined with comma and space', () => {

@@ -31,6 +31,8 @@ import {
   LABEL_TEAM_MATCH_TYPE,
   LABEL_ZEKKEN,
   LABEL_ENGI,
+  LABEL_ENGI_SHAPE,
+  engiShapeLabel,
   LABEL_POOL_SIZE_MODE,
   LABEL_NAGINATA,
   LABEL_CHECK_IN,
@@ -114,6 +116,7 @@ const SETTINGS_FIELD_LABELS = {
   teamMatchType: LABEL_TEAM_MATCH_TYPE,
   withZekkenName: LABEL_ZEKKEN,
   engi: LABEL_ENGI,
+  engiSolo: LABEL_ENGI_SHAPE,
   naginata: LABEL_NAGINATA,
   checkInEnabled: LABEL_CHECK_IN,
   twoThirdPlaces: LABEL_TWO_THIRD_PLACES,
@@ -149,6 +152,9 @@ function formatEditValue(k, v) {
   }
   if (k === "extraQualifiers") {
     return extraQualifiersLabel(v) || "Standard";
+  }
+  if (k === "engiSolo") {
+    return engiShapeLabel(v) || "not chosen";
   }
   if (typeof v === "boolean") {
     return v ? "on" : "off";
@@ -401,6 +407,17 @@ export function settingsPutBody(base, edits, configVersion) {
     // disabled for team, so the operator cannot clear it themselves), and
     // shaped is where that now runs.
     engi: !!shaped.engi,
+    // engiSolo (bc-solo): whether an engi side is a single competitor rather
+    // than a pair. Round-tripped for the same reason as `engi` just above:
+    // the server keeps the stored value only for a PUT that omits the key on
+    // a competition that is already engi, so a staged choice must ride every
+    // save. It means something only with engi, so it is sent false whenever
+    // `engi` is (unticking Engi, or normalizeConfigForKind going team, clears
+    // it too). A staged null (Engi newly ticked, neither shape picked) is
+    // left off: Save is refused before that (engiShapeError), and the server
+    // refuses a PUT that turns engi on without the key with the same
+    // sentence. Reads from `shaped` for the same reason `engi` does.
+    engiSolo: !shaped.engi ? false : (shaped.engiSolo === null ? undefined : !!shaped.engiSolo),
     checkInEnabled: !!effective.checkInEnabled,
     // twoThirdPlaces (bc-3rdp): round-tripped unconditionally, like
     // naginata above (and teamMatchType below), so an untouched control

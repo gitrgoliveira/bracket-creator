@@ -1,12 +1,12 @@
-# Engi (pair kata) competitions
+# Engi (kata) competitions
 
-Engi is a kata competition for pairs. Two competitors perform a set of
-choreographed forms together, and a panel of referees each raise a flag for the
-side they judge superior. It suits any kata competition judged that way:
-naginata engi-kyogi, kendo kata, jodo and other kata performed in pairs. Each
-side must be a pair, so a kata performed alone, such as iaido, cannot be entered
-as engi yet. It is scored entirely differently from a combat (shiai) bout: there
-are no ippon, no time on the clock, and no draws.
+Engi is a kata competition. A panel of referees each raise a flag for the side
+they judge superior. A side is usually a pair: two competitors perform a set of
+choreographed forms together, as in naginata engi-kyogi, kendo kata and jodo. A
+side can also be one competitor, for a kata performed alone, such as iaido:
+pick **Single competitors** and every side in the competition is one person. It
+is scored entirely differently from a combat (shiai) bout: there are no ippon,
+no time on the clock, and no draws.
 
 ## Turn it on
 
@@ -14,6 +14,22 @@ Tick **Engi (kata competition)** on the **Add competition** form or on an
 individual competition's **Settings** tab to switch its score editor to flag counting. It is offered for individual
 competitions only, works with every format (knockout, pools then knockout,
 league and Swiss), and is locked once the draw is generated.
+
+When Engi is ticked, **Competitors per side** appears under it with two
+choices: **Single competitors**, one person per side, for a solo kata such as
+iaido, and **Two competitors (pairs)**, two people per side. Neither is picked
+until you choose, and the competition cannot be created or saved until you pick
+one. An Engi competition created before this choice existed holds pairs, and
+shows **Two competitors (pairs)** picked. The choice is locked with Engi once
+the draw is generated; to change it before the competition starts, discard the
+draw first. Once the competition has started it cannot be changed.
+
+Rows you have already entered are not changed when you change the choice. The
+**Participants** page lists any row that does not fit it, so you can edit it.
+This includes one-name rows that a pair competition created before this choice
+existed took at the registration desk or on the public sign-up form, which did
+not check names then. Such rows do not stop the draw, but applying a pasted list
+that contains any is refused.
 
 Engi is its own setting, independent of **Naginata competition**. Ticking
 **Naginata competition** does two things: it adds the Sune ippon button, which
@@ -32,10 +48,11 @@ convention.
 
 ## Add Engi pairs
 
-An Engi competitor is a pair: two people from the same dojo or team, scored
-together as one unit. There are no individual bouts inside a pair. Enter each
-pair as a single participant row with both member names combined in the name
-field, joined by a dash with a space on each side (` - `), and the shared dojo.
+With **Two competitors (pairs)** picked, an Engi competitor is a pair: two
+people from the same dojo or team, scored together as one unit.
+There are no individual bouts inside a pair. Enter each pair as a single
+participant row with both member names combined in the name field, joined by a
+dash with a space on each side (` - `), and the shared dojo.
 A row without both names is refused:
 
 ```
@@ -51,6 +68,32 @@ Name 1 - Name 2, ZEKKEN1 - ZEKKEN2, Dojo
 
 The two names display stacked on one side of the match. The pair counts as
 one entry in the draw and one line in the standings.
+
+## Add single competitors
+
+With **Single competitors** picked, enter each competitor as an ordinary row,
+one name and a dojo, the same as an individual competition:
+
+```
+Name, Dojo
+```
+
+With zekken names on, the zekken column holds the competitor's own zekken.
+
+Every place that takes a name checks it against this setting: the paste box and
+CSV import, the Add and Edit forms, the registration desk and the public
+sign-up form. A pair typed as `Name 1 - Name 2` is refused. Before the draw the
+message tells you to pick **Two competitors (pairs)** in Settings; after the
+draw, and on the public sign-up form, it asks for one name. A pair competition
+refuses a row with only one name. A hyphen inside a name, such as `Jean-Paul
+Martin`, is fine. A row you edit and leave with its name unchanged is saved
+without this check, so a row that no longer fits can still have its dojo or
+grade corrected.
+
+Everything else works as it does for pairs: flag scoring, the standings, the
+tie rules, Swiss and the Excel workbooks. On screen, the name column of the
+standings tables is headed **Player** instead of **Pair**, and each side shows
+one name instead of two.
 
 ## Score with flags
 
@@ -75,32 +118,34 @@ on the left and Aka (red) on the right:
 
 ## Standings
 
-In Engi pools, leagues, and Swiss competitions, pairs are ranked by wins first,
-then by the flags they accumulated:
+In Engi pools, leagues, and Swiss competitions, sides (pairs, or single
+competitors with **Single competitors** picked) are ranked by wins first, then by
+the flags they accumulated:
 
 1. Total wins.
 2. Total flags accumulated across all bouts, as the tie-break when wins are equal.
 
 Both the winning and the losing side's flags count toward that side's own tally.
-A pair that loses by three flags to two still keeps its two flags.
+A side that loses by three flags to two still keeps its two flags.
 
-## Ties between pairs
+## Ties between competitors
 
 Engi pools and leagues follow the same tie rule as ippon-scored pools and leagues. Two
-pairs that are level on wins and on flags are tied, and the tie rule says which
-ties get a tie-break bout:
+competitors (pairs, or single competitors with **Single competitors** picked)
+that are level on wins and on flags are tied, and the tie rule says which ties
+get a tie-break bout:
 
 - **League**: a tie for 1st or 2nd place always gets a tie-break bout. A tie for
   3rd place gets one only when **Award two joint 3rd places** is off; with it on
-  the pairs share 3rd. Ticking **Naginata competition** turns it off, so a
+  the sides share 3rd. Ticking **Naginata competition** turns it off, so a
   naginata engi-kyogi division usually has it off. A tie for 4th place or lower
   shares its place.
 - **Pools**: a tie gets a bout only when it decides who goes through or where
-  the pairs are seated. Any other tie shares its place.
+  the sides are seated. Any other tie shares its place.
 
-The tie-break bout opens in the same flag editor as any Engi bout, and the pair
+The tie-break bout opens in the same flag editor as any Engi bout, and the side
 with more flags wins it. Because a bout's flags always total 1, 3, or 5, a
-tie-break between two pairs can never end level. If three or more pairs are
+tie-break between two sides can never end level. If three or more sides are
 level and the round goes in a circle, the Pools tab (League in a league) offers
 another round or lots,
 exactly as for kendo competitors, and the lots are drawn and entered by you.
@@ -109,7 +154,7 @@ Name order never decides a place that counts.
 
 Quick-score, kiken, fusenpai, and daihyosen stay off for Engi, so a tie-break
 bout is always scored by flags. With kiken and fusenpai off, the app records no
-withdrawal for an Engi pair, so a tie-break whose two sides both withdrew does
+withdrawal for an Engi side, so a tie-break whose two sides both withdrew does
 not arise.
 
 ## Swiss standings
@@ -117,23 +162,29 @@ not arise.
 Swiss does not follow the tie rule. A Swiss ranking still tied after wins and
 flags is settled by:
 
-1. Head-to-head: when two pairs are tied on wins and flags, the pair that won
+1. Head-to-head: when two sides are tied on wins and flags, the side that won
    their direct bout ranks higher.
-2. Name order (alphabetical by the pair's first listed member), when wins,
-   flags and head-to-head are all equal.
+2. Name order (alphabetical by the pair's first listed member, or by the
+   competitor's name with **Single competitors** picked), when wins, flags and
+   head-to-head are all equal.
 
-![Engi Swiss standings: a winner banner above a final standings table with rank, pair, victories (V), and flags columns, with a caption ranking by wins, then total flags, then head-to-head.](../../screenshots/swiss-standings-engi.png)
+The screenshot below shows a pair competition. In a competition with **Single
+competitors** picked the name column is headed **Player** and each row holds one
+name.
+
+![Engi Swiss standings for a pair competition: a winner banner above a final standings table with rank, pair, victories (V), and flags columns, with a caption ranking by wins, then total flags, then head-to-head.](../../screenshots/swiss-standings-engi.png)
 
 ## Excel exports
 
 Both Excel downloads on the competition page (refer to
 [Export and print](run-tournament.md#export-and-print)) understand Engi:
 
-- Each pair is a single competitor throughout both workbooks. The data sheet
-  lists the combined pair name under **Player Name** with the shared dojo. Every
-  sheet that shows the pair (pool draw, match grids, standings, bracket
-  pages, and the printable name sheets) shows both members together on one
-  line as `Member 1 - Member 2`.
+- Each side is a single competitor throughout both workbooks. The data sheet
+  lists the name under **Player Name** with the dojo; for a pair that is the
+  combined pair name with the shared dojo. Every sheet that shows the side (pool
+  draw, match grids, standings, bracket pages, and the printable name sheets)
+  shows a pair's members together on one line as `Member 1 - Member 2`, and a
+  solo competitor's one name.
 - Pool standings in both workbooks use the Engi columns: **W** (wins),
   **Flags** (total flags), and **Rank**. Losses are not recorded because
   ranking is determined by wins then accumulated own-side flags. The kendo

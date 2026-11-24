@@ -118,8 +118,9 @@ export function compMatches(c) {
   // (compKind === "team" || teamSize > 0) evaluate false, routing to the
   // individual ScoreEditorModal and rendering individual match UI.
   // compEngi is NOT overridden: an Engi competition is never a team one, so a
-  // supplementary bout there is a tie-break between pairs and opens the flag
-  // editor like every other Engi bout.
+  // supplementary bout there is a tie-break between its sides (pairs, or
+  // single competitors in a solo engi competition) and opens the flag editor
+  // like every other Engi bout.
   // Flat poolMatches from the viewer API don't carry phase/poolName; derive them
   // from the match ID (e.g. "Pool A-0" → poolName "Pool A") when absent.
   rawPoolMatches.forEach(m => {

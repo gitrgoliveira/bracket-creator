@@ -798,10 +798,14 @@ describe('AdminCreateCompetition Competitors per side', () => {
     await tickEngi(container);
     await act(async () => { fireEvent.click(submitButton(container)); });
     expect(onCreate).not.toHaveBeenCalled();
-    expect(container.querySelector('.alert--error').textContent).toBe('Choose single competitors or two competitors (pairs).');
+    const err = container.querySelector('[data-testid="engi-shape-error"]');
+    expect(err.textContent).toBe('Choose single competitors or two competitors (pairs).');
+    expect(container.querySelector('.alert--error'), 'the refusal sits by the pills, not in the banner').toBeNull();
+    expect(shapeGroup(container).getAttribute('aria-describedby')).toBe(err.parentElement.id);
 
     await act(async () => { fireEvent.click(pill(container, 'Two competitors (pairs)')); });
-    expect(container.querySelector('.alert--error'), 'a pick clears the refusal').toBeNull();
+    expect(container.querySelector('[data-testid="engi-shape-error"]'), 'a pick clears the refusal').toBeNull();
+    expect(shapeGroup(container).getAttribute('aria-describedby')).toBeNull();
     expect(pill(container, 'Two competitors (pairs)').getAttribute('aria-pressed')).toBe('true');
     await act(async () => { fireEvent.click(submitButton(container)); });
     expect(onCreate).toHaveBeenCalledTimes(1);

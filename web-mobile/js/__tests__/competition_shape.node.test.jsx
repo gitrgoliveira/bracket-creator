@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   KIND_INDIVIDUAL, KIND_TEAM,
   FORMAT_KNOCKOUT, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS,
@@ -36,6 +38,13 @@ import * as shape from '../competition_shape.jsx';
 const ALL_FORMATS = [FORMAT_KNOCKOUT, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS, '', undefined];
 const ALL_KINDS = [KIND_INDIVIDUAL, KIND_TEAM, '', undefined];
 
+// The refusal sentence the server also writes (internal/mobileapp/handlers_competition.go);
+// the Go test reads the same file.
+const engiMessages = JSON.parse(readFileSync(
+  resolve(__dirname, '..', '..', '..', 'internal', 'mobileapp', 'testdata', 'engi_shape_messages.json'),
+  'utf8',
+));
+
 // Competitors per side (bc-solo): the copy and the wiring the two forms and
 // the kind-flip notice read.
 describe('engi shape setting', () => {
@@ -44,7 +53,7 @@ describe('engi shape setting', () => {
     expect(ENGI_SHAPE_OPTIONS.map((o) => o.label)).toEqual(['Single competitors', 'Two competitors (pairs)']);
     expect(HINT_ENGI_SHAPE).toBe('Single: one person per side, for solo kata such as iaido. Pairs: two people per side, entered as Name 1 - Name 2.');
     expect(HINT_ENGI_SHAPE_ROWS).toBe('Rows already entered are not changed; the Participants page lists any that do not fit.');
-    expect(ENGI_SHAPE_REQUIRED).toBe('Choose single competitors or two competitors (pairs).');
+    expect(ENGI_SHAPE_REQUIRED).toBe(engiMessages.engiShapeRequired);
     expect(HINT_ENGI).toContain('single competitor');
     expect(HINT_ENGI).toContain('pair');
   });

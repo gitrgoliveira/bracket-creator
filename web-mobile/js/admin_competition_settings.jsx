@@ -906,14 +906,25 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // Ticking Engi on a competition stored without it picks neither shape;
   // re-ticking it on a stored engi competition brings its stored shape back.
   // Unticking clears a picked Single competitors (engiSolo describes an engi
-  // side and nothing else).
+  // side and nothing else); on a competition stored without engi it only puts
+  // the stored shape back.
   const toggleEngi = (on) => {
     update("engi", on);
     if (on) {
       const shape = c.engi ? !!c.engiSolo : null;
       if (local.engiSolo !== shape) update("engiSolo", shape);
-    } else if (local.engiSolo) {
-      update("engiSolo", false);
+    } else if (c.engi) {
+      // A stored engi competition: the cleared pick is a real change.
+      if (local.engiSolo) update("engiSolo", false);
+    } else {
+      // Stored without engi: the shape is back to what is stored (false), so
+      // it is no edit and a conflict notice must not list it.
+      editedFieldsRef.current.delete("engiSolo");
+      setLocal((prev) => {
+        const next = { ...prev, engiSolo: false };
+        localRef.current = next;
+        return next;
+      });
     }
   };
 

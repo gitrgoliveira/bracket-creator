@@ -366,7 +366,7 @@ export function teamFieldsVisible(kind) {
 export const LABEL_ZEKKEN = "Use Zekken display name";
 export const LABEL_ENGI = "Engi (kata competition)";
 export const HINT_ZEKKEN = "When enabled, participant CSV uses three columns: Name, Zekken, Dojo.";
-export const HINT_ENGI = "Flag-count scoring for Engi-Kyogi. Choose below whether each side is a single competitor or a pair.";
+export const HINT_ENGI = "Flag-count scoring for Engi-Kyogi. Once ticked, choose whether each side is a single competitor or a pair.";
 
 // The engi shape (bc-solo): whether an engi side is a single competitor (solo
 // kata, such as iaido) or a pair. Both screens render it as two pills under

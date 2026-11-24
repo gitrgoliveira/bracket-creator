@@ -909,6 +909,8 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [twoThirdPlaces, setTwoThirdPlaces] = useState(COMPETITION_DEFAULTS.twoThirdPlaces);
   const [engi, setEngi] = useState(COMPETITION_DEFAULTS.engi);
   const [engiSolo, setEngiSolo] = useState(COMPETITION_DEFAULTS.engiSolo);
+  // The refusal shown beside the Competitors per side pills (not the banner).
+  const [engiShapeMsg, setEngiShapeMsg] = useState("");
   const [checkInEnabled, setCheckInEnabled] = useState(COMPETITION_DEFAULTS.checkInEnabled);
   // bc-hnam: starts as the tournament's default (a self-run tournament always
   // shows names, so the picker is not offered there); the expiry only matters
@@ -1176,7 +1178,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // Competitors per side pills must be picked; neither is at first.
     const engiShapeErr = engiShapeError(kind, engi, engiSolo);
     if (engiShapeErr) {
-      setError(engiShapeErr);
+      setEngiShapeMsg(engiShapeErr);
       return;
     }
 
@@ -1607,13 +1609,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           )}
 
           {engiApplies(kind) && (
-            <CheckboxField label={LABEL_ENGI} checked={engi} onChange={(on) => { setEngi(on); setError(""); }} hint={HINT_ENGI} />
+            <CheckboxField label={LABEL_ENGI} checked={engi} onChange={(on) => { setEngi(on); setEngiShapeMsg(""); }} hint={HINT_ENGI} />
           )}
 
           {/* Competitors per side (bc-solo): drawn only under a ticked Engi,
               with neither pill picked until the organiser chooses. */}
           {engiApplies(kind) && engi && (
-            <EngiShapeField engiSolo={engiSolo} onChange={(solo) => { setEngiSolo(solo); setError(""); }} />
+            <EngiShapeField engiSolo={engiSolo} onChange={(solo) => { setEngiSolo(solo); setEngiShapeMsg(""); }} error={engiShapeMsg} />
           )}
 
           <CheckboxField label={LABEL_NAGINATA} checked={naginata} onChange={(on) => { setNaginata(on); setTwoThirdPlaces(twoThirdPlacesForNaginata(on)); }} hint={HINT_NAGINATA} />

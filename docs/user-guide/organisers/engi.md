@@ -46,7 +46,8 @@ convention.
 
 ## Add Engi pairs
 
-With **Two competitors (pairs)** picked, an Engi competitor is a pair: two people from the same dojo or team, scored together as one unit.
+With **Two competitors (pairs)** picked, an Engi competitor is a pair: two
+people from the same dojo or team, scored together as one unit.
 There are no individual bouts inside a pair. Enter each pair as a single
 participant row with both member names combined in the name field, joined by a
 dash with a space on each side (` - `), and the shared dojo.
@@ -68,7 +69,8 @@ one entry in the draw and one line in the standings.
 
 ## Add single competitors
 
-With **Single competitors** picked, enter each competitor as an ordinary row, one name and a dojo, the same as an individual competition:
+With **Single competitors** picked, enter each competitor as an ordinary row,
+one name and a dojo, the same as an individual competition:
 
 ```
 Name, Dojo
@@ -80,10 +82,11 @@ Every place that takes a name checks it against this setting: the paste box and
 CSV import, the Add and Edit forms, the registration desk and the public
 sign-up form. A pair typed as `Name 1 - Name 2` is refused. Before the draw the
 message tells you to pick **Two competitors (pairs)** in Settings; after the
-draw, and on the public sign-up form, it asks for one name. A pair competition refuses a row with
-only one name. A hyphen inside a name, such as `Jean-Paul Martin`, is fine. A
-row you edit and leave with its name unchanged is saved without this check, so a
-row that no longer fits can still have its dojo or grade corrected.
+draw, and on the public sign-up form, it asks for one name. A pair competition
+refuses a row with only one name. A hyphen inside a name, such as `Jean-Paul
+Martin`, is fine. A row you edit and leave with its name unchanged is saved
+without this check, so a row that no longer fits can still have its dojo or
+grade corrected.
 
 Everything else works as it does for pairs: flag scoring, the standings, the
 tie rules, Swiss and the Excel workbooks. On screen, the name column of the

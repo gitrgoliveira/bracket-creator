@@ -15,6 +15,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// engiShapeRequiredSentence is the refusal both halves share
+// (testdata/engi_shape_messages.json; the JS half is
+// web-mobile/js/__tests__/competition_shape.node.test.jsx).
+func engiShapeRequiredSentence(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "engi_shape_messages.json"))
+	require.NoError(t, err)
+	var table struct {
+		EngiShapeRequired string `json:"engiShapeRequired"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &table))
+	require.NotEmpty(t, table.EngiShapeRequired)
+	return table.EngiShapeRequired
+}
+
 // TestPUTCompetition_EngiPreservedOnCosmetic pins the fix for Finding 1: a
 // cosmetic-only PUT (name change) must not silently reset Engi to false.
 // Before the fix, current.Engi was never copied from comp.Engi, so any PUT
@@ -189,7 +204,7 @@ func TestCreateCompetition_EngiWithoutAShapeIsRefused(t *testing.T) {
 		Error string `json:"error"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &answer))
-	assert.Equal(t, "Choose single competitors or two competitors (pairs).", answer.Error)
+	assert.Equal(t, engiShapeRequiredSentence(t), answer.Error)
 	ids, err := store.ListCompetitions()
 	require.NoError(t, err)
 	assert.Empty(t, ids, "a refused create stores nothing")
@@ -259,7 +274,7 @@ func TestPUTCompetition_EngiSolo(t *testing.T) {
 		require.NoError(t, err)
 		w := cvPut(t, r, stored.ID, engiBodyWithout(t, cvSettingsBody(t, stored, "", map[string]any{"engi": true})))
 		require.Equalf(t, http.StatusBadRequest, w.Code, "%s", w.Body.String())
-		assert.Contains(t, w.Body.String(), "Choose single competitors or two competitors (pairs).")
+		assert.Contains(t, w.Body.String(), engiShapeRequiredSentence(t))
 		got, err := store.LoadCompetition(stored.ID)
 		require.NoError(t, err)
 		assert.False(t, got.Engi, "a refused save stores nothing")

@@ -126,6 +126,34 @@ describe('Settings configVersion pinning, conflict alert, and reload', () => {
     expect(alert.textContent).not.toContain('Competitors per side');
   });
 
+  it('1c. ticking then unticking Engi on a non-engi competition stages no Competitors per side change', async () => {
+    const onUpdate = vi.fn();
+    const initialComp = makeSettingsCompetition({ configVersion: 'v-initial', kind: 'individual', engi: false });
+    const { container, updateComp } = renderSettings(initialComp, onUpdate);
+
+    const engiBox = () => Array.from(container.querySelectorAll('label'))
+      .find((l) => l.textContent.includes('Engi (kata competition)') && l.querySelector('input[type="checkbox"]'))
+      .querySelector('input');
+    await act(async () => { fireEvent.click(engiBox()); });
+    await act(async () => { fireEvent.click(engiBox()); });
+    const startInput = container.querySelector('#settings-start-time');
+    await act(async () => { fireEvent.change(startInput, { target: { value: '15:00' } }); });
+
+    const sseComp = { ...initialComp, configVersion: 'v-server-new', startTime: '10:30' };
+    await updateComp(sseComp);
+    const configChangedErr = new Error('This competition changed, reload it.');
+    configChangedErr.code = 'config_changed';
+    configChangedErr.configVersion = 'v-server-new';
+    configChangedErr.competition = sseComp;
+    onUpdate.mockRejectedValueOnce(configChangedErr);
+    const saveBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Save changes');
+    await act(async () => { fireEvent.click(saveBtn); });
+
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert.textContent).toContain('Start time to 15:00');
+    expect(alert.textContent).not.toContain('Competitors per side');
+  });
+
   it('2. an SSE update before any edit is absorbed: then an edit and Save send the NEW version and succeed', async () => {
     const onUpdate = vi.fn().mockResolvedValue({ configVersion: 'v-final' });
     const initialComp = makeSettingsCompetition({

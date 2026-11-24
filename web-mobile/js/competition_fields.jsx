@@ -106,13 +106,13 @@ export function PillButton({ active, onClick, disabled, children, className, ...
 // which works on any element. Each pill's aria-pressed reads the SAME `active`
 // predicate as its class, never plain equality, so the team-match-format row's
 // stored "" still announces Regular as pressed.
-export function PillGroup({ label, options, value, isActive, onChange, disabled, hint }) {
+export function PillGroup({ label, options, value, isActive, onChange, disabled, hint, describedBy }) {
   const active = isActive || ((v) => v === value);
   const labelId = useStableId('pill-group');
   return (
     <div className="field">
       <label className="field__label" id={labelId}>{label}</label>
-      <div className="radio-group" role="group" aria-labelledby={labelId}>
+      <div className="radio-group" role="group" aria-labelledby={labelId} aria-describedby={describedBy || undefined}>
         {options.map((o) => (
           <PillButton
             key={o.value}
@@ -170,12 +170,13 @@ export function PoolShapeField({ roundRobin, onChange, disabled, hintSuffix = ""
 // neither. `hintSuffix` carries the settings screen's own notes, `error` the
 // refusal the screen shows while neither pill is picked.
 export function EngiShapeField({ engiSolo, onChange, disabled, hintSuffix = "", error }) {
+  const errorId = useStableId('engi-shape-error');
   return (
     <>
-      <PillGroup label={LABEL_ENGI_SHAPE} options={ENGI_SHAPE_OPTIONS} value={engiShapeOf(engiSolo)}
+      <PillGroup label={LABEL_ENGI_SHAPE} describedBy={error ? errorId : undefined} options={ENGI_SHAPE_OPTIONS} value={engiShapeOf(engiSolo)}
         onChange={(v) => onChange(engiSoloOf(v))} disabled={disabled}
         hint={`${HINT_ENGI_SHAPE}${hintSuffix}`} />
-      {error ? <div className="field"><window.FieldError testId="engi-shape-error">{error}</window.FieldError></div> : null}
+      {error ? <div className="field" id={errorId}><window.FieldError testId="engi-shape-error">{error}</window.FieldError></div> : null}
     </>
   );
 }

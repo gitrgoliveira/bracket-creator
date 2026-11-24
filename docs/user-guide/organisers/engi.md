@@ -18,10 +18,13 @@ league and Swiss), and is locked once the draw is generated.
 When Engi is ticked, **One competitor per side (solo kata, such as iaido)**
 appears under it. Leave it unticked for pairs, the default. Tick it when each
 side is a single competitor. It is locked with Engi once the draw is generated;
-to change it before the competition starts, discard the draw first. Rows you
-have already entered are not changed when you switch it. The **Participants**
-page lists any row that no longer fits, so you can edit it. Once the
+to change it before the competition starts, discard the draw first. Once the
 competition has started the setting cannot be changed.
+
+Rows you have already entered are not changed when you switch it. The
+**Participants** page lists any row that no longer fits, so you can edit it.
+Such rows do not stop the draw, but applying a pasted list that contains any is
+refused.
 
 Engi is its own setting, independent of **Naginata competition**. Ticking
 **Naginata competition** does two things: it adds the Sune ippon button, which
@@ -40,7 +43,7 @@ convention.
 
 ## Add Engi pairs
 
-An Engi competitor is a pair: two people from the same dojo or team, scored
+With **One competitor per side** unticked (the default), an Engi competitor is a pair: two people from the same dojo or team, scored
 together as one unit. There are no individual bouts inside a pair. Enter each
 pair as a single participant row with both member names combined in the name
 field, joined by a dash with a space on each side (` - `), and the shared dojo.
@@ -74,8 +77,9 @@ With zekken names on, the zekken column holds the competitor's own zekken.
 
 Every place that takes a name checks it against this setting: the paste box and
 CSV import, the Add and Edit forms, the registration desk and the public
-sign-up form. A pair typed as `Name 1 - Name 2` is refused with a message that
-tells you to turn the setting off, and a pair competition refuses a row with
+sign-up form. A pair typed as `Name 1 - Name 2` is refused. Before the draw the
+message tells you to turn the setting off; after the draw, and on the public
+sign-up form, it asks for one name. A pair competition refuses a row with
 only one name. A hyphen inside a name, such as `Jean-Paul Martin`, is fine. A
 row you edit and leave with its name unchanged is saved without this check, so a
 row that no longer fits can still have its dojo or grade corrected.
@@ -83,8 +87,7 @@ row that no longer fits can still have its dojo or grade corrected.
 Everything else works as it does for pairs: flag scoring, the standings columns
 and the tie rules. On screen, the name column of the standings tables is headed
 **Player** instead of **Pair**, and each side shows one name instead of two.
-In the sections below, read "pair" as "competitor" when this setting is on: the
-standings, tie, Swiss and Excel rules apply unchanged.
+The standings, tie, Swiss and Excel rules apply unchanged.
 
 ## Score with flags
 
@@ -122,7 +125,7 @@ A side that loses by three flags to two still keeps its two flags.
 ## Ties between competitors
 
 Engi pools and leagues follow the same tie rule as ippon-scored pools and leagues. Two
-sides (pairs, or single competitors) that are level on wins and on flags are
+competitors (pairs, or single competitors with **One competitor per side**) that are level on wins and on flags are
 tied, and the tie rule says which ties get a tie-break bout:
 
 - **League**: a tie for 1st or 2nd place always gets a tie-break bout. A tie for

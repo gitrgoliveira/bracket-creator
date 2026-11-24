@@ -5,7 +5,7 @@
 
 <p align="center"><b>Your tournament, live on every screen</b></p>
 
-<p align="center">Score each bout at the court on a laptop or tablet. The court display and every phone in the hall show the score as it is entered. Made for kendo and naginata tournaments; <a href="https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/organisers/engi/">engi</a> kata, in pairs or solo, also suit kendo kata, jodo and iaido.</p>
+<p align="center">Score each bout at the court on a laptop or tablet. The court display and every phone in the hall show the score as it is entered. Made for kendo and naginata tournaments; <a href="https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/organisers/engi/">engi</a>, in pairs or solo, also suits kendo kata, jodo and iaido.</p>
 
 <p align="center">
   <a href="https://gitrgoliveira.github.io/bracket-creator/">

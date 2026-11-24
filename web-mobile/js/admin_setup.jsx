@@ -46,12 +46,15 @@ function deriveCompetitionName(rawName, kind) {
 // or single competitors; it is never a team competition (ScoreEditorModal
 // skips the team check for engi, and the scoring backend treats engi as
 // non-team), so both are forced off for a non-individual kind even if the
-// state lingered from a kind switch. engiSolo (one competitor per side, bc-solo)
-// means something only with engi: an unticked Engi hides its box but keeps
-// the box's state, which must not reach the server.
+// state lingered from a kind switch. engiSolo (Competitors per side, bc-solo)
+// means something only with engi: an unticked Engi hides its pills but keeps
+// their state, which must not reach the server. A null engiSolo (neither
+// pill picked) is left off the body; create refuses it first
+// (engiShapeError), and the server refuses an engi create without the key.
 function createEngiFields(kind, engi, engiSolo) {
   const on = engiApplies(kind) && !!engi;
-  return { engi: on, engiSolo: on && !!engiSolo };
+  if (!on) return { engi: false, engiSolo: false };
+  return engiSolo === null ? { engi: true } : { engi: true, engiSolo: !!engiSolo };
 }
 
 // calendarStackEnd returns the latest window END, in minutes from midnight,
@@ -181,7 +184,7 @@ import {
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES, twoThirdPlacesVisible,
   LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
-  LABEL_ZEKKEN, LABEL_ENGI, LABEL_ENGI_SOLO, HINT_ENGI_SOLO,
+  LABEL_ZEKKEN, LABEL_ENGI, engiShapeError,
   teamFieldsVisible, zekkenApplies, engiApplies, teamMatchTypeActive, twoThirdPlacesForNaginata,
   MIN_TEAM_SIZE, poolSettingsError, swissSettingsError, teamSizeError,
   MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
@@ -192,7 +195,7 @@ import {
   LABEL_CHECK_IN, HINT_CHECK_IN, tournamentHasCheckIn, SELF_RUN_NO_CHECK_IN,
   LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, cutNumberPrefix, LABEL_COURTS,
 } from './competition_shape.jsx';
-import { PillGroup, PillButton, CheckboxField, NumberField, TextField, PoolShapeField } from './competition_fields.jsx';
+import { PillGroup, PillButton, CheckboxField, NumberField, TextField, PoolShapeField, EngiShapeField } from './competition_fields.jsx';
 import { DurationInput } from './duration.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { useLatestRef } from './latest_ref.jsx';
@@ -1169,6 +1172,14 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       return;
     }
 
+    // Engi shape guard (bc-solo): with Engi ticked, one of the two
+    // Competitors per side pills must be picked; neither is at first.
+    const engiShapeErr = engiShapeError(kind, engi, engiSolo);
+    if (engiShapeErr) {
+      setError(engiShapeErr);
+      return;
+    }
+
     if (Number.isFinite(expectedParticipants)) {
       if (!Number.isInteger(expectedParticipants) || expectedParticipants < 0 || expectedParticipants > MAX_EXPECTED_PARTICIPANTS) {
         setError(`${isTeam ? "Expected teams" : "Expected participants"} must be a whole number from 0 to ${MAX_EXPECTED_PARTICIPANTS}.`);
@@ -1282,9 +1293,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       c.knockoutMatchDurationSeconds = knockoutMatchDurationSeconds;
     }
     c.naginata = naginata;
-    // Engi and its One competitor per side box: see createEngiFields for why
+    // Engi and its Competitors per side pills: see createEngiFields for why
     // both are forced off for a team kind and engiSolo off without engi.
-    // Both checkboxes are also hidden unless they apply.
+    // Both controls are also hidden unless they apply.
     Object.assign(c, createEngiFields(kind, engi, engiSolo));
     // FR-044: team match format. Only meaningful for team competitions; sending
     // it for individual comps is harmless but omitting it keeps the payload clean.
@@ -1596,11 +1607,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           )}
 
           {engiApplies(kind) && (
-            <CheckboxField label={LABEL_ENGI} checked={engi} onChange={setEngi} hint={HINT_ENGI} />
+            <CheckboxField label={LABEL_ENGI} checked={engi} onChange={(on) => { setEngi(on); setError(""); }} hint={HINT_ENGI} />
           )}
 
+          {/* Competitors per side (bc-solo): drawn only under a ticked Engi,
+              with neither pill picked until the organiser chooses. */}
           {engiApplies(kind) && engi && (
-            <CheckboxField label={LABEL_ENGI_SOLO} checked={engiSolo} onChange={setEngiSolo} hint={HINT_ENGI_SOLO} />
+            <EngiShapeField engiSolo={engiSolo} onChange={(solo) => { setEngiSolo(solo); setError(""); }} />
           )}
 
           <CheckboxField label={LABEL_NAGINATA} checked={naginata} onChange={(on) => { setNaginata(on); setTwoThirdPlaces(twoThirdPlacesForNaginata(on)); }} hint={HINT_NAGINATA} />

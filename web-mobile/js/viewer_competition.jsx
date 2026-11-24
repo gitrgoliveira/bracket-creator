@@ -517,7 +517,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   const isLeague = c.format === "league";
   const isTeam = c.kind === "team" || c.teamSize > 0;
   const isEngi = !!(c && c.engi);
-  // A solo engi competition (one competitor per side) heads its name column
+  // A solo engi competition (single competitors) heads its name column
   // "Player", as an individual table does; a pair competition heads "Pair".
   const isSolo = engiShape(c) === "solo";
   const leaguePoolName = isLeague && pools && pools[0] ? pools[0].poolName : null;

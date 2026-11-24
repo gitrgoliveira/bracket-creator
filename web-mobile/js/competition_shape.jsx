@@ -366,15 +366,54 @@ export function teamFieldsVisible(kind) {
 export const LABEL_ZEKKEN = "Use Zekken display name";
 export const LABEL_ENGI = "Engi (kata competition)";
 export const HINT_ZEKKEN = "When enabled, participant CSV uses three columns: Name, Zekken, Dojo.";
-export const HINT_ENGI = "Flag-count scoring for Engi-Kyogi. Each side is a pair, entered as one participant (Name 1 - Name 2, Dojo), or one competitor when \"One competitor per side\" is ticked.";
+export const HINT_ENGI = "Flag-count scoring for Engi-Kyogi. Choose below whether each side is a single competitor or a pair.";
 
-// LABEL_ENGI_SOLO / HINT_ENGI_SOLO (bc-solo): the box under Engi that makes
-// an engi side one competitor (solo kata, such as iaido) instead of a pair.
-// Both screens render it only while Engi applies and is ticked; it means
-// nothing without engi (normalizeConfigForKind clears it, and the settings
-// PUT body sends it false whenever engi is false).
-export const LABEL_ENGI_SOLO = "One competitor per side (solo kata, such as iaido)";
-export const HINT_ENGI_SOLO = "Each side is one competitor instead of a pair. Rows already entered are not changed; the Participants page lists any that do not fit.";
+// The engi shape (bc-solo): whether an engi side is a single competitor (solo
+// kata, such as iaido) or a pair. Both screens render it as two pills under
+// Engi, only while Engi applies and is ticked; it means nothing without engi
+// (normalizeConfigForKind clears it, and the settings PUT body sends it false
+// whenever engi is false). Neither pill is picked until the organiser
+// chooses (operator decision S1): engiSolo is true (single), false (pairs) or
+// null (not chosen yet), and engiShapeError refuses Create and Save while it
+// is null. Only null means not chosen: a record without the key (an engi
+// competition saved before the setting) is pairs, so it shows Two
+// competitors (pairs) picked.
+export const LABEL_ENGI_SHAPE = "Competitors per side";
+export const ENGI_SHAPE_SOLO = "solo";
+export const ENGI_SHAPE_PAIRS = "pairs";
+export const ENGI_SHAPE_OPTIONS = [
+  { value: ENGI_SHAPE_SOLO, label: "Single competitors" },
+  { value: ENGI_SHAPE_PAIRS, label: "Two competitors (pairs)" },
+];
+export const HINT_ENGI_SHAPE = "Single: one person per side, for solo kata such as iaido. Pairs: two people per side, entered as Name 1 - Name 2.";
+// The Settings screen's addition: a change there leaves the roster alone.
+export const HINT_ENGI_SHAPE_ROWS = "Rows already entered are not changed; the Participants page lists any that do not fit.";
+export const ENGI_SHAPE_REQUIRED = "Choose single competitors or two competitors (pairs).";
+
+// engiShapeOf: the pill a stored or staged engiSolo picks (null for none).
+export function engiShapeOf(engiSolo) {
+  if (engiSolo === null) return null;
+  return engiSolo === true ? ENGI_SHAPE_SOLO : ENGI_SHAPE_PAIRS;
+}
+
+// engiSoloOf: the engiSolo a pill stores.
+export function engiSoloOf(shape) {
+  return shape === ENGI_SHAPE_SOLO;
+}
+
+// engiShapeLabel: the picked pill's label, for the notices that name a value
+// ("" when none is picked).
+export function engiShapeLabel(engiSolo) {
+  return optionLabel(ENGI_SHAPE_OPTIONS, engiShapeOf(engiSolo)) || "";
+}
+
+// engiShapeError: the refusal Create and Save give while Engi applies and is
+// ticked and neither pill is picked; null otherwise. The server refuses the
+// same request with the same sentence.
+export function engiShapeError(kind, engi, engiSolo) {
+  if (!engiApplies(kind) || !engi) return null;
+  return engiSolo === null ? ENGI_SHAPE_REQUIRED : null;
+}
 
 // --- The remaining shared checkboxes / text fields ----------------------
 //
@@ -1124,7 +1163,7 @@ export const CLEARED_FIELD_LABELS = {
   teamSize: LABEL_TEAM_SIZE,
   teamMatchType: LABEL_TEAM_MATCH_TYPE,
   engi: LABEL_ENGI,
-  engiSolo: LABEL_ENGI_SOLO,
+  engiSolo: LABEL_ENGI_SHAPE,
   withZekkenName: LABEL_ZEKKEN,
 };
 
@@ -1162,7 +1201,8 @@ export const COMPETITION_DEFAULTS = {
   withZekkenName: false,
   naginata: false,
   engi: false,
-  engiSolo: false,
+  // Not chosen: the create form picks neither engi shape (engiShapeError).
+  engiSolo: null,
   checkInEnabled: false,
   // Two joint 3rd places is the standard kendo convention; naginata is the
   // exception and turns it off (twoThirdPlacesForNaginata above). This

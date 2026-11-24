@@ -517,7 +517,8 @@ export const families = {
       await api.start(SWISS_TEAM);
 
       await api.competition(SWISS_ENGI, 'Engi Swiss', {
-        teamSize: 0, format: 'swiss', swissRounds: 2, engi: true, courts: ['A', 'B'],
+        // An engi create must say pairs or single competitors (engiSolo).
+        teamSize: 0, format: 'swiss', swissRounds: 2, engi: true, engiSolo: false, courts: ['A', 'B'],
         date: '20-09-2026', startTime: '12:00',
       });
       await api.participants(SWISS_ENGI, ENGI_PAIRS);

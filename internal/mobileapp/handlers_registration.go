@@ -56,7 +56,7 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 
 		// engi and engiSolo let the form label its name field and ask the
 		// browser's engi entry rule (engi_entry.jsx) before it sends: a pair
-		// ("Name 1 - Name 2") or one competitor per side. engiSolo means
+		// ("Name 1 - Name 2"), or one name for single competitors. engiSolo means
 		// something only with engi, as on the competition itself.
 		c.JSON(http.StatusOK, gin.H{
 			"id":             comp.ID,

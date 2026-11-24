@@ -261,7 +261,7 @@ describe('calendarStackEnd', () => {
 });
 
 // The create body's engi fields (bc-solo): engiSolo reaches the server only
-// on an individual engi competition, whatever the hidden box still holds.
+// on an individual engi competition, whatever the hidden pills still hold.
 describe('createEngiFields', () => {
   it('sends a solo engi competition as engi with engiSolo', () => {
     expect(createEngiFields('individual', true, true)).toEqual({ engi: true, engiSolo: true });
@@ -271,8 +271,13 @@ describe('createEngiFields', () => {
     expect(createEngiFields('individual', true, false)).toEqual({ engi: true, engiSolo: false });
   });
 
-  it('drops engiSolo when Engi was unticked after the box was ticked', () => {
+  it('leaves engiSolo off the body while neither shape is picked', () => {
+    expect(createEngiFields('individual', true, null)).toEqual({ engi: true });
+  });
+
+  it('drops engiSolo when Engi was unticked after a shape was picked', () => {
     expect(createEngiFields('individual', false, true)).toEqual({ engi: false, engiSolo: false });
+    expect(createEngiFields('individual', false, null)).toEqual({ engi: false, engiSolo: false });
   });
 
   it('drops both for a team competition, even with state left over from a kind switch', () => {

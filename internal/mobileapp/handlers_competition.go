@@ -61,6 +61,19 @@ func slugifyID(name string) string {
 // may include a filesystem path, is logged, not returned).
 var errSaveParticipants = errors.New("failed to save participants")
 
+// sentenceError is an error whose text is a whole sentence the person reads,
+// capital and full stop included, as the client shows the same sentence.
+type sentenceError string
+
+func (e sentenceError) Error() string { return string(e) }
+
+// errEngiShapeRequired refuses an engi create, or a settings PUT that turns
+// engi on, whose body does not say whether each side is single competitors or
+// a pair (engiSolo): neither is the default (operator decision S1). The
+// sentence is the one the Add competition and Settings forms show
+// (ENGI_SHAPE_REQUIRED, competition_shape.jsx).
+var errEngiShapeRequired error = sentenceError("Choose single competitors or two competitors (pairs).")
+
 // saveCompetitionWithPlayers persists the competition config and, when players
 // are present, saves participants and extracts seed assignments.
 // Returns (true, nil) when the on-disk content changed, so callers can decide
@@ -366,6 +379,12 @@ type competitionUpdateRequest struct {
 	// that never mentions the field would silently drop the organiser's
 	// expected count and shrink every estimate built on it.
 	ExpectedParticipants *int `json:"expectedParticipants"`
+
+	// EngiSolo carries the key's presence the same way: a PUT that omits it
+	// on a competition that is already engi keeps the stored shape, while a
+	// PUT that turns engi on must say single competitors or pairs, since
+	// neither is the default (errEngiShapeRequired, operator decision S1).
+	EngiSolo *bool `json:"engiSolo"`
 
 	// PublicNames and RevealUntil carry the key's presence the same way: ""
 	// is a real value for both (names shown; the end of the tournament), so
@@ -942,6 +961,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		var req struct {
 			state.Competition
 			PublicNames *string `json:"publicNames"`
+			// EngiSolo carries the key's presence too: an engi competition
+			// must say whether its sides are single competitors or pairs,
+			// and an omitted key is neither (errEngiShapeRequired).
+			EngiSolo *bool `json:"engiSolo"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1014,9 +1037,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": "engi is only valid for individual competitions, not team"})
 			return
 		}
-		// EngiSolo (one competitor per engi side) means something only with
-		// Engi, so a competition created without engi stores it off.
-		comp.EngiSolo = comp.Engi && comp.EngiSolo
+		// EngiSolo (single competitors per engi side) means something only
+		// with Engi, so a competition created without engi stores it off. An
+		// engi competition must choose (operator decision S1): neither shape
+		// is the default.
+		if comp.Engi && req.EngiSolo == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": errEngiShapeRequired.Error()})
+			return
+		}
+		comp.EngiSolo = comp.Engi && req.EngiSolo != nil && *req.EngiSolo
 
 		// POST /competitions can land with an embedded roster via
 		// saveCompetitionWithPlayers, same required-field and length
@@ -2344,9 +2373,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					validationErr = fmt.Errorf("engi is only valid for individual competitions, not team")
 					return nil, nil
 				}
-				// EngiSolo (one competitor per engi side) means something only
-				// with Engi: a save that turns engi off clears it, and a PUT that
-				// omits it stores false, which is why the client round-trips it.
+				// EngiSolo (single competitors per engi side) means something
+				// only with Engi: a save that turns engi off clears it. A PUT
+				// that omits it keeps the stored shape on a competition that is
+				// already engi, and is refused when it turns engi on, since
+				// neither shape is the default (operator decision S1).
 				// Locked after the draw like Engi (operator decision D8): the
 				// draw-ready status counts as started here, so the operator
 				// discards the draw to change it before the start. Only a
@@ -2354,12 +2385,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// finished one is told it cannot be changed. The stored value is
 				// read as the save derives it (beside Engi), so a config.md that
 				// holds engi_solo without engi is no change: the save stores it off.
-				engiSolo := comp.Engi && comp.EngiSolo
-				if started && engiSolo != (current.Engi && current.EngiSolo) {
+				storedEngiSolo := current.Engi && current.EngiSolo
+				engiSolo := storedEngiSolo
+				if req.EngiSolo != nil {
+					engiSolo = *req.EngiSolo
+				} else if comp.Engi && !current.Engi {
+					validationErr = errEngiShapeRequired
+					return nil, nil
+				}
+				engiSolo = comp.Engi && engiSolo
+				if started && engiSolo != storedEngiSolo {
 					if current.Status == state.CompStatusDrawReady {
-						validationErr = fmt.Errorf("one competitor per side can only be changed before the draw is made; discard the draw to change it")
+						validationErr = errors.New("competitors per side can only be changed before the draw is made; discard the draw to change it")
 					} else {
-						validationErr = fmt.Errorf("one competitor per side cannot be changed once the competition has started")
+						validationErr = errors.New("competitors per side cannot be changed once the competition has started")
 					}
 					return nil, nil
 				}

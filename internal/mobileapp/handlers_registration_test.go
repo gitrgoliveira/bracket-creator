@@ -120,7 +120,7 @@ func TestRegistration_GET_CarriesEngiAndEngiSolo(t *testing.T) {
 	}{
 		{"not engi", false, false, false},
 		{"engi pairs", true, false, false},
-		{"engi one competitor per side", true, true, true},
+		{"engi single competitors", true, true, true},
 		{"engi_solo stored without engi", false, true, false},
 	}
 	for i, tc := range cases {

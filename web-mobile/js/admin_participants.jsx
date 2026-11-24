@@ -248,7 +248,7 @@ function validateRosterRows(parsed, withZekkenName, shape, settingLocked = false
 // template should offer, keyed off kind → engi shape → zekken. A pair engi
 // competition combines both member names in the name field ("Name 1 - Name 2"),
 // so it is checked before the zekken branch only to show pair-shaped examples;
-// a solo engi competition (one competitor per side) takes the individual
+// a solo engi competition (single competitors) takes the individual
 // template. Exported for tests.
 function participantTemplateCSV(c) {
   if (c.kind === "team") return "Team Name, Dojo\nTora A, Tora Dojo London\n";
@@ -296,7 +296,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   // The engi side's shape ("pair", "solo", or null when not engi): every
   // per-shape word on this page and the entry rule read it.
   const engiSide = engiShape(c);
-  // True once the One competitor per side setting is locked (a draw exists), so
+  // True once the Competitors per side setting is locked (a draw exists), so
   // a solo refusal does not advise changing it.
   const engiLocked = engiSettingLocked(c);
   // Roster line format for this competition, shown once, in the participant
@@ -1067,9 +1067,9 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   const seedsLocked = isDrawReady || isStarted;
   const seedsLockedTitle = (action) => (isStarted ? "The competition has started; the order and seeds are fixed" : `Discard the draw to ${action}`);
 
-  // Rows already stored that the current "One competitor per side" setting
-  // would refuse today (a pair row after the setting was turned on, a one-name
-  // row after it was turned off). The setting is locked once the draw is
+  // Rows already stored that the current "Competitors per side" setting
+  // would refuse today (a pair row after Single competitors was picked, a
+  // one-name row after Two competitors (pairs) was). The setting is locked once the draw is
   // made, so nothing blocks; the notice below names the rows and the way out. The
   // entry rule (engiEntryProblem) is the one judge, as at every entry door.
   const engiMisfits = engiSide
@@ -1113,12 +1113,12 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
       {engiMisfits.length > 0 && (
         <div className="alert alert--warn" role="status" data-testid="engi-shape-notice" style={{ marginBottom: 12 }}>
           {engiMisfits.length === 1 ? "1 saved row does not" : `${engiMisfits.length} saved rows do not`} fit
-          {engiSide === "solo" ? " this competition, which takes one competitor per side" : " this competition, which takes pairs"}: {engiMisfitNames}.
+          {engiSide === "solo" ? " this competition, which takes single competitors" : " this competition, which takes pairs"}: {engiMisfitNames}.
           {isStarted
-            ? " The competition has started, so the \"One competitor per side\" setting can no longer be changed. Applying a pasted list with rows like these is refused."
+            ? " The competition has started, so \"Competitors per side\" can no longer be changed. Applying a pasted list with rows like these is refused."
             : isDrawReady
-              ? " Edit the rows, or discard the draw (from the competition header) to change \"One competitor per side\" in Settings."
-              : " Edit the rows, or change \"One competitor per side\" back in Settings. Applying a pasted list with rows like these is refused."}
+              ? " Edit the rows, or discard the draw (from the competition header) to change \"Competitors per side\" in Settings."
+              : " Edit the rows, or change \"Competitors per side\" back in Settings. Applying a pasted list with rows like these is refused."}
         </div>
       )}
       {isStarted && (

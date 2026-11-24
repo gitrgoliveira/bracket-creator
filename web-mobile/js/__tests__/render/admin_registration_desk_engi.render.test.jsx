@@ -147,7 +147,7 @@ describe('Registration desk walk-up add asks the engi entry rule', () => {
     expect(window.API.addParticipant).toHaveBeenCalledWith('kata', { name: 'Yuki Ito - Mei Ono', dojo: 'Gyokusen' }, 'pw');
   });
 
-  it('labels the name field "Name" and refuses a pair in a competition with one competitor per side', async () => {
+  it('labels the name field "Name" and refuses a pair in a single competitors competition', async () => {
     const result = await openWalkUp(true);
     expect(walkUpLabel(result)).toBe('Name');
     fillWalkUp(result, 'Yuki Ito - Mei Ono');
@@ -156,7 +156,7 @@ describe('Registration desk walk-up add asks the engi entry rule', () => {
     expect(window.API.addParticipant).not.toHaveBeenCalled();
   });
 
-  it('adds one competitor, a hyphenated name included, with one competitor per side', async () => {
+  it('adds one competitor, a hyphenated name included, with single competitors', async () => {
     const result = await openWalkUp(true);
     fillWalkUp(result, 'Jean-Paul Martin');
     await act(async () => { fireEvent.click(result.getByText('Add & check in')); });
@@ -193,7 +193,7 @@ describe('Registration desk Edit asks the engi entry rule', () => {
     expect(window.API.replaceParticipant.mock.calls[0][2]).toMatchObject({ name: 'Akira Tanaka - Mei Ono', dojo: 'Gyokusen' });
   });
 
-  it('refuses a pair with one competitor per side and sends nothing', async () => {
+  it('refuses a pair with single competitors and sends nothing', async () => {
     const result = await openEdit(true);
     expect(result.getByRole('dialog').querySelector('.field__label').textContent).toBe('Name');
     fireEvent.change(editNameInput(result), { target: { value: 'Akira Tanaka - Ren Fujita' } });
@@ -202,7 +202,7 @@ describe('Registration desk Edit asks the engi entry rule', () => {
     expect(window.API.replaceParticipant).not.toHaveBeenCalled();
   });
 
-  it('saves one name with one competitor per side', async () => {
+  it('saves one name with single competitors', async () => {
     const result = await openEdit(true);
     fireEvent.change(editNameInput(result), { target: { value: 'Akira Tanaka-Sato' } });
     await act(async () => { fireEvent.click(result.getByText('Save changes')); });
@@ -212,7 +212,7 @@ describe('Registration desk Edit asks the engi entry rule', () => {
 });
 
 describe('Registration desk Edit leaves a name that is left as it is unjudged', () => {
-  it('saves a changed dojo on a pair row in a competition with one competitor per side', async () => {
+  it('saves a changed dojo on a pair row in a single competitors competition', async () => {
     const result = await openEdit(true, PAIR);
     fireEvent.change(result.getByRole('dialog').querySelectorAll('input')[1], { target: { value: 'Getsurin' } });
     await act(async () => { fireEvent.click(result.getByText('Save changes')); });
@@ -222,7 +222,7 @@ describe('Registration desk Edit leaves a name that is left as it is unjudged', 
   });
 });
 
-describe('Registration desk Edit once the One competitor per side setting is locked', () => {
+describe('Registration desk Edit once the Competitors per side setting is locked', () => {
   it('refuses a pair on a drawn competition without advising the locked setting', async () => {
     const result = await mount({
       name: 'Spring Taikai',

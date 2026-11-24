@@ -12,8 +12,8 @@
 // wins and the same flags), the engine adds their tie-breaker, and the
 // console's evidence is named by the flow (engi-tie-at-1st-console-up-next,
 // -running, -before-finish, -after; engi-tie-at-1st-desk-table and
-// -public-awards). The last test is a SOLO engi competition (the wizard's "One
-// competitor per side" box, for iaido and other solo kata): one-name rows go in
+// -public-awards). The last test is a SOLO engi competition (the wizard's
+// "Single competitors" pill, for iaido and other solo kata): one-name rows go in
 // through the paste box and the add form, a pair row is refused with the
 // settings sentence at both doors, and a flag bout between two solo competitors
 // is scored on the court console and read on a spectator's phone.
@@ -320,7 +320,7 @@ test.describe('engi', () => {
   });
 
   // A SOLO engi competition on shiaijo B, after the league above has finished
-  // there. The wizard's "One competitor per side" box makes every side one
+  // there. The wizard's "Single competitors" pill makes every side one
   // person: a roster row is a single name ("Name, Dojo"), and a pair row
   // ("Name 1 - Name 2, Dojo") is refused at every door with the sentence that
   // sends the organiser to Settings.
@@ -335,7 +335,7 @@ test.describe('engi', () => {
     ];
     const ADDED = ['Dan Evans', 'Thames'];
     // The sentence a solo competition answers for a pair (engi_entry.jsx).
-    const PAIR_REFUSED = /one competitor per side.*turn off "One competitor per side" in Settings/;
+    const PAIR_REFUSED = /takes single competitors.*pick "Two competitors \(pairs\)" in Settings/;
 
     await login(page);
     const id = await createCompetition(page, {

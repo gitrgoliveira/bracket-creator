@@ -100,7 +100,7 @@ describe('Settings configVersion pinning, conflict alert, and reload', () => {
     expect(alert.textContent).toContain('Not saved: this competition changed somewhere else');
   });
 
-  it('1b. unticking Engi on a pair competition does not list One competitor per side among the changes', async () => {
+  it('1b. unticking Engi on a pair competition does not list Competitors per side among the changes', async () => {
     const onUpdate = vi.fn();
     const initialComp = makeSettingsCompetition({ configVersion: 'v-initial', kind: 'individual', engi: true, engiSolo: false });
     const { container, updateComp } = renderSettings(initialComp, onUpdate);
@@ -123,7 +123,7 @@ describe('Settings configVersion pinning, conflict alert, and reload', () => {
     const alert = container.querySelector('[role="alert"]');
     expect(alert).not.toBeNull();
     expect(alert.textContent).toContain('You had changed:');
-    expect(alert.textContent).not.toContain('One competitor per side');
+    expect(alert.textContent).not.toContain('Competitors per side');
   });
 
   it('2. an SSE update before any edit is absorbed: then an edit and Save send the NEW version and succeed', async () => {

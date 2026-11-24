@@ -22,7 +22,9 @@ import {
   resolvePoolSizeMode, POOL_SIZE_MODE_MAX, POOL_SIZE_MODE_MIN,
   configShapeChangeStaged, shapeConfigForSave,
   pendingConfigClears,
-  LABEL_ENGI_SOLO, HINT_ENGI_SOLO, HINT_ENGI, CLEARED_FIELD_LABELS, COMPETITION_DEFAULTS,
+  LABEL_ENGI_SHAPE, HINT_ENGI_SHAPE, HINT_ENGI_SHAPE_ROWS, ENGI_SHAPE_OPTIONS, ENGI_SHAPE_REQUIRED,
+  engiShapeOf, engiSoloOf, engiShapeLabel, engiShapeError,
+  HINT_ENGI, CLEARED_FIELD_LABELS, COMPETITION_DEFAULTS,
   cutNumberPrefix, MAX_NUMBER_PREFIX_CHARS, HINT_NUMBER_PREFIX, numberPrefixHint,
 } from '../competition_shape.jsx';
 import * as shape from '../competition_shape.jsx';
@@ -34,22 +36,45 @@ import * as shape from '../competition_shape.jsx';
 const ALL_FORMATS = [FORMAT_KNOCKOUT, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS, '', undefined];
 const ALL_KINDS = [KIND_INDIVIDUAL, KIND_TEAM, '', undefined];
 
-// One competitor per side (bc-solo): the copy and the wiring the two forms and
+// Competitors per side (bc-solo): the copy and the wiring the two forms and
 // the kind-flip notice read.
-describe('engiSolo setting', () => {
-  it('has its label and hint, and HINT_ENGI names both shapes', () => {
-    expect(LABEL_ENGI_SOLO).toBe('One competitor per side (solo kata, such as iaido)');
-    expect(HINT_ENGI_SOLO).toBe('Each side is one competitor instead of a pair. Rows already entered are not changed; the Participants page lists any that do not fit.');
+describe('engi shape setting', () => {
+  it('has its label, two pills, its hints and its refusal, and HINT_ENGI names both shapes', () => {
+    expect(LABEL_ENGI_SHAPE).toBe('Competitors per side');
+    expect(ENGI_SHAPE_OPTIONS.map((o) => o.label)).toEqual(['Single competitors', 'Two competitors (pairs)']);
+    expect(HINT_ENGI_SHAPE).toBe('Single: one person per side, for solo kata such as iaido. Pairs: two people per side, entered as Name 1 - Name 2.');
+    expect(HINT_ENGI_SHAPE_ROWS).toBe('Rows already entered are not changed; the Participants page lists any that do not fit.');
+    expect(ENGI_SHAPE_REQUIRED).toBe('Choose single competitors or two competitors (pairs).');
+    expect(HINT_ENGI).toContain('single competitor');
     expect(HINT_ENGI).toContain('pair');
-    expect(HINT_ENGI).toContain('one competitor');
   });
 
-  it('defaults off, so a new engi competition takes pairs as before', () => {
-    expect(COMPETITION_DEFAULTS.engiSolo).toBe(false);
+  it('starts not chosen, so a new engi competition picks neither shape', () => {
+    expect(COMPETITION_DEFAULTS.engiSolo).toBe(null);
+  });
+
+  it('reads a pill from engiSolo and back: only null is not chosen, a record without the key is pairs', () => {
+    expect(engiShapeOf(true)).toBe('solo');
+    expect(engiShapeOf(false)).toBe('pairs');
+    expect(engiShapeOf(undefined)).toBe('pairs');
+    expect(engiShapeOf(null)).toBe(null);
+    expect(engiSoloOf('solo')).toBe(true);
+    expect(engiSoloOf('pairs')).toBe(false);
+    expect(engiShapeLabel(true)).toBe('Single competitors');
+    expect(engiShapeLabel(false)).toBe('Two competitors (pairs)');
+    expect(engiShapeLabel(null)).toBe('');
+  });
+
+  it('refuses a ticked Engi with neither shape picked, and nothing else', () => {
+    expect(engiShapeError(KIND_INDIVIDUAL, true, null)).toBe(ENGI_SHAPE_REQUIRED);
+    expect(engiShapeError(KIND_INDIVIDUAL, true, true)).toBe(null);
+    expect(engiShapeError(KIND_INDIVIDUAL, true, false)).toBe(null);
+    expect(engiShapeError(KIND_INDIVIDUAL, false, null)).toBe(null);
+    expect(engiShapeError(KIND_TEAM, true, null)).toBe(null);
   });
 
   it('is named in the kind-flip notice by its label', () => {
-    expect(CLEARED_FIELD_LABELS.engiSolo).toBe(LABEL_ENGI_SOLO);
+    expect(CLEARED_FIELD_LABELS.engiSolo).toBe(LABEL_ENGI_SHAPE);
   });
 });
 

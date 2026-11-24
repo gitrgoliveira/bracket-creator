@@ -1,7 +1,7 @@
 // engi_entry.jsx: the one owner of "does this name fit a side of this engi
 // competition". An engi side is a PAIR (both member names combined in the one
-// name field, "Name 1 - Name 2") or, when the competition ticks "One
-// competitor per side" (engiSolo), ONE competitor. Every door that takes a
+// name field, "Name 1 - Name 2") or, when the competition picks "Single
+// competitors" under Competitors per side (engiSolo), ONE competitor. Every door that takes a
 // typed engi name asks this module (the Participants page's paste box, add and
 // replace forms, the registration desk, the public self-registration form),
 // so the rule is never re-derived beside it.
@@ -13,13 +13,13 @@ export const ENGI_PAIR_PROBLEM = 'Enter both names of the pair as "Name 1 - Name
 // The sentence a solo competition answers for a name typed as a pair. It says
 // what to do, since the operator who typed a pair most likely meant a pair
 // competition.
-export const ENGI_SOLO_PROBLEM = 'This competition takes one competitor per side. To enter pairs, turn off "One competitor per side" in Settings.';
+export const ENGI_SOLO_PROBLEM = 'This competition takes single competitors. To enter pairs, pick "Two competitors (pairs)" in Settings.';
 
 // The sentence a solo competition answers for a pair typed once its setting can
 // no longer change (a draw exists), and on the public form, whose participant
-// cannot reach Settings: the advice to turn the setting off could not be
+// cannot reach Settings: the advice to change the setting could not be
 // followed, so it says what to do instead.
-export const ENGI_SOLO_PROBLEM_LOCKED = "This competition takes one competitor per side. Enter one name.";
+export const ENGI_SOLO_PROBLEM_LOCKED = "This competition takes single competitors. Enter one name.";
 
 // The sentence a solo competition answers for a blank name.
 export const ENGI_SOLO_BLANK = "Enter the competitor's name.";
@@ -60,9 +60,9 @@ export function engiEntryProblem(name, shape, settingLocked = false) {
   return null;
 }
 
-// engiSettingLocked is true once the competition's One competitor per side
+// engiSettingLocked is true once the competition's Competitors per side
 // setting can no longer be changed: from draw-ready onward, the same lock the
-// Settings checkbox carries (admin_competition_settings.jsx, lockedAfterDraw).
+// Settings pills carry (admin_competition_settings.jsx, lockedAfterDraw).
 export function engiSettingLocked(c) {
   return !!c && !!c.status && c.status !== "setup";
 }

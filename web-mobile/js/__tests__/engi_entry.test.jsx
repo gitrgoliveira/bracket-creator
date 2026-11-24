@@ -12,8 +12,8 @@ import {
 describe('engi entry sentences', () => {
   it('say what to do, word for word', () => {
     expect(ENGI_PAIR_PROBLEM).toBe('Enter both names of the pair as "Name 1 - Name 2".');
-    expect(ENGI_SOLO_PROBLEM).toBe('This competition takes one competitor per side. To enter pairs, turn off "One competitor per side" in Settings.');
-    expect(ENGI_SOLO_PROBLEM_LOCKED).toBe('This competition takes one competitor per side. Enter one name.');
+    expect(ENGI_SOLO_PROBLEM).toBe('This competition takes single competitors. To enter pairs, pick "Two competitors (pairs)" in Settings.');
+    expect(ENGI_SOLO_PROBLEM_LOCKED).toBe('This competition takes single competitors. Enter one name.');
     expect(ENGI_SOLO_BLANK).toBe("Enter the competitor's name.");
   });
 });

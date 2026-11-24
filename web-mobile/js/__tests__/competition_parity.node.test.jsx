@@ -339,9 +339,15 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
   //   LABEL_POOL_SHAPE is rendered by the shared PoolShapeField
   //   (competition_fields.jsx), which both screens draw (bc-rrsh), so
   //   neither screen names it; the order markers below pin that both draw
-  //   the field.
+  //   the field. LABEL_ENGI_SHAPE and HINT_ENGI_SHAPE are the same case,
+  //   rendered by the shared EngiShapeField (bc-solo). HINT_ENGI_SHAPE_ROWS
+  //   is settings only: it says a change leaves the roster alone, and the
+  //   create form has no roster.
   const RENDER_EXEMPT = {
     LABEL_POOL_SHAPE: new Set(['setup', 'settings']),
+    LABEL_ENGI_SHAPE: new Set(['setup', 'settings']),
+    HINT_ENGI_SHAPE: new Set(['setup', 'settings']),
+    HINT_ENGI_SHAPE_ROWS: new Set(['setup']),
     LABEL_POOL_DURATION: new Set(['setup', 'settings']),
     HINT_POOL_DURATION: new Set(['setup', 'settings']),
     HINT_NUMBER_PREFIX: new Set(['settings']),
@@ -457,9 +463,9 @@ describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)
     { key: 'Player number prefix', pattern: '{LABEL_NUMBER_PREFIX}' },
     { key: 'Zekken (participant CSV column)', pattern: '{LABEL_ZEKKEN}' },
     { key: 'Engi (kata pairs)', pattern: '{LABEL_ENGI}' },
-    // bc-solo: the box under Engi; '{LABEL_ENGI}' above cannot match it,
-    // since the closing brace must follow the name directly.
-    { key: 'One competitor per side (engi solo)', pattern: '{LABEL_ENGI_SOLO}' },
+    // bc-solo: the Competitors per side pills under Engi, drawn by the
+    // shared EngiShapeField on both screens.
+    { key: 'Competitors per side (engi shape)', pattern: '<EngiShapeField ' },
     // Naginata and Check-in DID have no LABEL_* constant, so these two
     // markers used to anchor on the raw label markup and Task 2 above could
     // not check their copy at all. That blind spot was not hypothetical:

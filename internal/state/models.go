@@ -529,7 +529,11 @@ type Competition struct {
 	// entry rule accepts and which header a table shows, never scoring, the
 	// draw or a stored result; it is locked after the draw like Engi (the
 	// settings PUT refuses a change once the competition is draw-ready or
-	// later; discarding the draw makes it editable again).
+	// later; discarding the draw makes it editable again). The forms ask it
+	// as Competitors per side, with neither choice picked until the
+	// organiser picks one; the create POST, and a settings PUT that turns
+	// engi on, refuse a body without the key (the handlers read it as their
+	// own *bool), so the stored field stays this plain bool.
 	EngiSolo bool `yaml:"engi_solo,omitempty" json:"engiSolo"`
 
 	CheckInEnabled bool `yaml:"check_in_enabled,omitempty" json:"checkInEnabled,omitempty"`

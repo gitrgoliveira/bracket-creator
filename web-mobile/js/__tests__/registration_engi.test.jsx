@@ -22,7 +22,7 @@ function findInTree(node, predicate) {
   return null;
 }
 
-const SOLO_SENTENCE = 'This competition takes one competitor per side. Enter one name.';
+const SOLO_SENTENCE = 'This competition takes single competitors. Enter one name.';
 
 describe('RegistrationForm on an engi competition', () => {
   let RegistrationForm;
@@ -95,7 +95,7 @@ describe('RegistrationForm on an engi competition', () => {
     expect(posts).toEqual([{ name: 'Akira Tanaka - Ren Fujita', dojo: 'Gyokusen' }]);
   });
 
-  it('asks for a full name and refuses a pair with one competitor per side, worded for a participant', async () => {
+  it('asks for a full name and refuses a pair with single competitors, worded for a participant', async () => {
     serve(meta({ engi: true, engiSolo: true }));
     await mountForm();
     expect(labelText()).toContain('Full name');
@@ -106,7 +106,7 @@ describe('RegistrationForm on an engi competition', () => {
     expect(posts).toHaveLength(0);
   });
 
-  it('registers one name, a hyphenated one included, with one competitor per side', async () => {
+  it('registers one name, a hyphenated one included, with single competitors', async () => {
     serve(meta({ engi: true, engiSolo: true }));
     await mountForm();
     await submit('Jean-Paul Martin');

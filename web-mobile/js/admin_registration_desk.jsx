@@ -491,7 +491,7 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
 // ---------------------------------------------------------------------------
 // rdNameField words the desk's name field for a competition, as the
 // Participants page does: "Team name" for a team, the pair format for a pair
-// engi competition, else "Name" (one competitor per side included).
+// engi competition, else "Name" (single competitors in engi included).
 function rdNameField(comp) {
   if (isTeamCompetition(comp)) return { label: "Team name", placeholder: "Tora A" };
   const shape = engiShape(comp);

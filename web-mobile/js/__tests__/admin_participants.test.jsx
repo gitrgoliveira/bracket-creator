@@ -477,7 +477,7 @@ describe('validateRosterRows', () => {
     const problems = validateRosterRows(parsed, false, 'solo');
     expect(problems.map(pr => pr.index)).toEqual([0, 1, 2, 3, 4]);
     for (const pr of problems) {
-      expect(pr.reason).toBe('This competition takes one competitor per side. To enter pairs, turn off "One competitor per side" in Settings.');
+      expect(pr.reason).toBe('This competition takes single competitors. To enter pairs, pick "Two competitors (pairs)" in Settings.');
     }
   });
 
@@ -531,7 +531,7 @@ describe('participantTemplateCSV', () => {
 });
 
 describe('participantFormError', () => {
-  const SOLO = 'This competition takes one competitor per side. To enter pairs, turn off "One competitor per side" in Settings.';
+  const SOLO = 'This competition takes single competitors. To enter pairs, pick "Two competitors (pairs)" in Settings.';
   const PAIR = 'Enter both names of the pair as "Name 1 - Name 2".';
   it('requires name and dojo for every competition', () => {
     expect(participantFormError({ name: '', dojo: 'D', shape: null })).toMatch(/Name and dojo/);

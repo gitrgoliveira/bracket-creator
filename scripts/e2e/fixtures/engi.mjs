@@ -1,6 +1,6 @@
 // Scoring an ENGI (kata) match on the flag editor (admin_scoring_engi.jsx). An
 // engi side is a pair, rostered as one participant ("Name 1 - Name 2, Dojo"),
-// or, in a competition that ticks "One competitor per side", one person
+// or, in a competition that picks "Single competitors", one person
 // ("Name, Dojo"). A match is scored in flags, not ippon: each side has a
 // counter, and the total must be 1, 3 or 5. The editor
 // is the same whether the shiaijo page mounts it inline or the Scores tab

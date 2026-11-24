@@ -96,6 +96,14 @@ function makeTeamCompetition(overrides = {}) {
 const byText = (container, text) =>
   Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === text);
 
+// The Competitors per side pill row (bc-solo) and one of its two pills.
+const shapeGroup = (container) => Array.from(container.querySelectorAll('[role="group"]'))
+  .find((g) => container.querySelector(`#${CSS.escape(g.getAttribute('aria-labelledby'))}`)?.textContent === 'Competitors per side');
+const shapePill = (container, label) => Array.from(shapeGroup(container)?.querySelectorAll('button') || [])
+  .find((b) => b.textContent === label);
+const SINGLE = 'Single competitors';
+const PAIRS = 'Two competitors (pairs)';
+
 describe('bc-symm: the Settings kind pills route through normalizeConfigForKind', () => {
   it('team(kachinuki) -> individual repairs teamMatchType to "fixed" before the PUT, not just in the hidden field', async () => {
     const onUpdate = vi.fn().mockResolvedValue(undefined);
@@ -169,20 +177,17 @@ describe('bc-symm: the Settings kind pills route through normalizeConfigForKind'
     ).toBe(0);
   });
 
-  // bc-solo: One competitor per side describes an engi side, so a flip to
-  // team clears it with engi, and the notice listing what the save clears
-  // names it by its label.
+  // bc-solo: Competitors per side describes an engi side, so a flip to team
+  // clears it with engi, and the notice listing what the save clears names
+  // it by its label and the pill it held.
   it('individual solo engi -> team clears engiSolo with engi and the notice names it', async () => {
     const onUpdate = vi.fn().mockResolvedValue(undefined);
     const { container } = await mountSettings(makeTeamCompetition({
       kind: 'individual', teamSize: 0, teamMatchType: 'fixed', engi: true, engiSolo: true,
     }), onUpdate);
 
-    const soloLabel = 'One competitor per side (solo kata, such as iaido)';
-    const soloBox = () => Array.from(container.querySelectorAll('label'))
-      .find((l) => l.textContent.includes(soloLabel) && l.querySelector('input[type="checkbox"]'));
-    expect(soloBox(), 'the box shows under a ticked Engi').toBeDefined();
-    expect(soloBox().querySelector('input').checked).toBe(true);
+    expect(shapeGroup(container), 'the pills show under a ticked Engi').toBeDefined();
+    expect(shapePill(container, SINGLE).getAttribute('aria-pressed')).toBe('true');
 
     const teamPill = byText(container, 'Team');
     expect(teamPill, 'expected a "Team" kind pill').toBeDefined();
@@ -191,9 +196,9 @@ describe('bc-symm: the Settings kind pills route through normalizeConfigForKind'
 
     const notice = Array.from(container.querySelectorAll('li')).map((li) => li.textContent);
     expect(notice.some((t) => t.startsWith('Engi (kata competition)')), `notice items: ${JSON.stringify(notice)}`).toBe(true);
-    expect(notice.some((t) => t.startsWith(soloLabel)), `notice items: ${JSON.stringify(notice)}`).toBe(true);
-    // The box goes with the kind: it applies to individual engi only.
-    expect(soloBox()).toBeUndefined();
+    expect(notice, `notice items: ${JSON.stringify(notice)}`).toContain('Competitors per side (Single competitors)');
+    // The pills go with the kind: they apply to individual engi only.
+    expect(shapeGroup(container)).toBeUndefined();
 
     // A team needs a team size before Save is offered (the individual's 0
     // is refused for a team).
@@ -213,26 +218,71 @@ describe('bc-symm: the Settings kind pills route through normalizeConfigForKind'
     expect(payload.engiSolo).toBe(false);
   });
 
-  // bc-solo D8: the box locks with Engi once a draw is made (discarding the
-  // draw unlocks both), and says so.
-  it('locks One competitor per side with Engi after the draw', async () => {
+  // bc-solo D8: the pills lock with Engi once a draw is made (discarding the
+  // draw unlocks both), and say so.
+  it('locks Competitors per side with Engi after the draw', async () => {
     const onUpdate = vi.fn().mockResolvedValue(undefined);
     const { container } = await mountSettings(makeTeamCompetition({
       kind: 'individual', teamSize: 0, teamMatchType: 'fixed', engi: true, engiSolo: true, status: 'draw-ready',
     }), onUpdate);
-    const box = Array.from(container.querySelectorAll('label'))
-      .find((l) => l.textContent.includes('One competitor per side (solo kata, such as iaido)') && l.querySelector('input[type="checkbox"]'));
-    expect(box, 'the box shows under a ticked Engi').toBeDefined();
-    const input = box.querySelector('input');
-    expect(input.checked).toBe(true);
-    expect(input.disabled).toBe(true);
-    expect(box.closest('div').textContent).toContain('Locked after draw.');
+    expect(shapeGroup(container), 'the pills show under a ticked Engi').toBeDefined();
+    expect(shapePill(container, SINGLE).getAttribute('aria-pressed')).toBe('true');
+    expect(shapePill(container, SINGLE).disabled).toBe(true);
+    expect(shapePill(container, PAIRS).disabled).toBe(true);
+    expect(shapeGroup(container).parentElement.textContent).toContain('Locked after draw.');
   });
 
-  // Unticking Engi hides One competitor per side, so it clears with it: a
+  // A stored engi competition shows its stored shape picked; one saved before
+  // the setting (no engiSolo key) is pairs.
+  it.each([
+    ['single competitors', { engiSolo: true }, SINGLE, PAIRS],
+    ['pairs', { engiSolo: false }, PAIRS, SINGLE],
+    ['an engi competition saved before the setting', {}, PAIRS, SINGLE],
+  ])('shows the stored shape picked: %s', async (_name, extra, picked, other) => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    const { container } = await mountSettings(makeTeamCompetition({
+      kind: 'individual', teamSize: 0, teamMatchType: 'fixed', engi: true, ...extra,
+    }), onUpdate);
+    expect(shapePill(container, picked).getAttribute('aria-pressed')).toBe('true');
+    expect(shapePill(container, other).getAttribute('aria-pressed')).toBe('false');
+    expect(container.querySelector('[data-testid="engi-shape-error"]')).toBeNull();
+  });
+
+  // Ticking Engi on a competition stored without it picks neither shape, and
+  // Save is refused with the create form's sentence until one is picked.
+  it('a newly ticked Engi picks neither shape, and Save waits for one', async () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    const { container } = await mountSettings(makeTeamCompetition({
+      kind: 'individual', teamSize: 0, teamMatchType: 'fixed', engi: false, engiSolo: false,
+    }), onUpdate);
+    expect(shapeGroup(container), 'hidden while Engi is off').toBeUndefined();
+    const engi = Array.from(container.querySelectorAll('label'))
+      .find((l) => l.textContent.includes('Engi (kata competition)') && l.querySelector('input[type="checkbox"]'))
+      .querySelector('input');
+    await act(async () => { fireEvent.click(engi); });
+
+    expect(shapePill(container, SINGLE).getAttribute('aria-pressed')).toBe('false');
+    expect(shapePill(container, PAIRS).getAttribute('aria-pressed')).toBe('false');
+    const refusal = 'Choose single competitors or two competitors (pairs).';
+    expect(container.querySelector('[data-testid="engi-shape-error"]').textContent).toContain(refusal);
+    const save = byText(container, 'Save changes');
+    expect(save.disabled).toBe(true);
+    expect(container.textContent).toContain(refusal);
+
+    await act(async () => { fireEvent.click(shapePill(container, SINGLE)); });
+    expect(container.querySelector('[data-testid="engi-shape-error"]')).toBeNull();
+    expect(byText(container, 'Save changes').disabled).toBe(false);
+    await act(async () => { fireEvent.click(byText(container, 'Save changes')); });
+    await waitFor(() => expect(onUpdate).toHaveBeenCalled());
+    const payload = onUpdate.mock.calls[0][0];
+    expect(payload.engi).toBe(true);
+    expect(payload.engiSolo).toBe(true);
+  });
+
+  // Unticking Engi hides Competitors per side, so it clears with it: a
   // later flip to team must not list a setting the operator already took
   // away, and the save sends it false.
-  it('unticking Engi clears One competitor per side, so a later flip to team does not list it', async () => {
+  it('unticking Engi clears Competitors per side, so a later flip to team does not list it', async () => {
     const onUpdate = vi.fn().mockResolvedValue(undefined);
     const { container } = await mountSettings(makeTeamCompetition({
       kind: 'individual', teamSize: 0, teamMatchType: 'fixed', engi: true, engiSolo: true,
@@ -245,7 +295,7 @@ describe('bc-symm: the Settings kind pills route through normalizeConfigForKind'
 
     await act(async () => { fireEvent.click(byText(container, 'Team')); });
     const notice = Array.from(container.querySelectorAll('li')).map((li) => li.textContent);
-    expect(notice.some((t) => t.startsWith('One competitor per side')), `notice items: ${JSON.stringify(notice)}`).toBe(false);
+    expect(notice.some((t) => t.startsWith('Competitors per side')), `notice items: ${JSON.stringify(notice)}`).toBe(false);
 
     const teamSizeInput = container.querySelector('input[type="number"][max]:not([max="1024"])');
     await act(async () => { fireEvent.input(teamSizeInput, { target: { value: '3' } }); });

@@ -102,9 +102,10 @@ describe('settingsPutBody', () => {
     expect(res.body.configVersion).toBe('v-updated');
   });
 
-  // engiSolo (bc-solo) is round-tripped on every save like engi: the server
-  // applies `current.EngiSolo = comp.Engi && comp.EngiSolo` unconditionally,
-  // so a body without it would turn a solo engi competition back into pairs.
+  // engiSolo (bc-solo) is round-tripped on every save like engi, so a staged
+  // choice always rides the save. A staged null (Engi newly ticked, neither
+  // shape picked) is left off the body: the server refuses a PUT that turns
+  // engi on without the key.
   describe('engiSolo', () => {
     const engiBase = { ...base, engi: true, format: 'knockout', poolSize: 0, poolWinners: 0 };
 
@@ -120,9 +121,15 @@ describe('settingsPutBody', () => {
       expect(res.body.engiSolo).toBe(false);
     });
 
-    it('ticking the box sends it on', () => {
+    it('picking Single competitors sends it on', () => {
       const res = settingsPutBody(engiBase, { engiSolo: true }, 'v');
       expect(res.body.engiSolo).toBe(true);
+    });
+
+    it('Engi newly ticked with neither shape picked leaves the key off', () => {
+      const res = settingsPutBody({ ...base, engi: false }, { engi: true, engiSolo: null }, 'v');
+      expect(res.body.engi).toBe(true);
+      expect('engiSolo' in JSON.parse(JSON.stringify(res.body))).toBe(false);
     });
 
     it('unticking Engi sends engiSolo false too, whatever the hidden box held', () => {
@@ -189,9 +196,13 @@ describe('describeSettingsEdits', () => {
       .toBe('Naginata competition to off.');
   });
 
-  it('names the One competitor per side setting by its label, never its wire key', () => {
+  it('names the Competitors per side setting by its label and its pill, never its wire key', () => {
     expect(describeSettingsEdits({ engiSolo: true }))
-      .toBe('One competitor per side (solo kata, such as iaido) to on.');
+      .toBe('Competitors per side to Single competitors.');
+    expect(describeSettingsEdits({ engiSolo: false }))
+      .toBe('Competitors per side to Two competitors (pairs).');
+    expect(describeSettingsEdits({ engiSolo: null }))
+      .toBe('Competitors per side to not chosen.');
   });
 
   it('formats array fields joined with comma and space', () => {

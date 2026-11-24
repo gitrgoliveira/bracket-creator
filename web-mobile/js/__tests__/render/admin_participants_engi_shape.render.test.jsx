@@ -27,11 +27,11 @@ describe('AdminParticipants stored-rows notice for an engi competition', () => {
     expect(n).toBeTruthy();
     expect(n.getAttribute('role')).toBe('status');
     expect(n.textContent).toContain('1 saved row does not fit');
-    expect(n.textContent).toContain('takes one competitor per side');
+    expect(n.textContent).toContain('takes single competitors');
     expect(n.textContent).toContain('Alice Smith - Bob Jones');
     expect(n.textContent).not.toContain('Akira Tanaka');
     // Before the start: edit the rows or change the setting back.
-    expect(n.textContent).toContain('Edit the rows, or change "One competitor per side" back in Settings.');
+    expect(n.textContent).toContain('Edit the rows, or change "Competitors per side" back in Settings.');
     expect(n.textContent).not.toContain('has started');
   });
 
@@ -83,7 +83,7 @@ describe('AdminParticipants stored-rows notice for an engi competition', () => {
     const n = notice(container);
     expect(n).toBeTruthy();
     expect(n.textContent).toContain('Alice Smith - Bob Jones');
-    expect(n.textContent).toContain('Edit the rows, or discard the draw (from the competition header) to change "One competitor per side" in Settings.');
+    expect(n.textContent).toContain('Edit the rows, or discard the draw (from the competition header) to change "Competitors per side" in Settings.');
     expect(n.textContent).not.toContain('back in Settings');
     expect(n.textContent).not.toContain('has started');
   });
@@ -98,7 +98,7 @@ describe('AdminParticipants stored-rows notice for an engi competition', () => {
     const n = notice(container);
     expect(n).toBeTruthy();
     expect(n.textContent).toContain('Alice Smith - Bob Jones');
-    expect(n.textContent).toContain('The competition has started, so the "One competitor per side" setting can no longer be changed. Applying a pasted list with rows like these is refused.');
+    expect(n.textContent).toContain('The competition has started, so "Competitors per side" can no longer be changed. Applying a pasted list with rows like these is refused.');
     expect(n.textContent).not.toContain('can no longer be edited');
     expect(n.textContent).not.toContain('Edit the rows');
     expect(n.textContent).not.toContain('Settings');

@@ -759,36 +759,72 @@ describe('AdminCreateCompetition expected participants and draft estimate (p2-cr
   });
 });
 
-// bc-solo: "One competitor per side" shows only under a ticked Engi and rides
-// into the create body through createEngiFields.
-describe('AdminCreateCompetition One competitor per side', () => {
-  const SOLO_LABEL = 'One competitor per side';
+// bc-solo (operator decision S1): "Competitors per side" shows only under a
+// ticked Engi, as two pills with neither picked; Create is refused until one
+// is, and the pick rides into the create body through createEngiFields.
+describe('AdminCreateCompetition Competitors per side', () => {
   const box = (container, label) => Array.from(container.querySelectorAll('label'))
     .find((l) => l.textContent.includes(label) && l.querySelector('input[type="checkbox"]'))
     ?.querySelector('input');
+  const shapeGroup = (container) => Array.from(container.querySelectorAll('[role="group"]'))
+    .find((g) => container.querySelector(`#${CSS.escape(g.getAttribute('aria-labelledby'))}`)?.textContent === 'Competitors per side');
+  const pill = (container, label) => Array.from(shapeGroup(container)?.querySelectorAll('button') || [])
+    .find((b) => b.textContent === label);
+  const tickEngi = async (container) => {
+    await act(async () => { fireEvent.click(box(container, 'Engi (kata competition)')); });
+  };
 
-  it('shows under a ticked Engi only, and a ticked box rides into the create body', async () => {
+  it('is hidden while Engi is off, and shows two pills, neither picked, under a ticked Engi', async () => {
+    const { container } = await mountForm();
+    expect(shapeGroup(container), 'hidden while Engi is off').toBeUndefined();
+    expect(container.textContent).not.toContain('Single competitors');
+
+    await tickEngi(container);
+    expect(shapeGroup(container), 'shown under a ticked Engi').toBeDefined();
+    const single = pill(container, 'Single competitors');
+    const pairs = pill(container, 'Two competitors (pairs)');
+    expect(single.getAttribute('aria-pressed')).toBe('false');
+    expect(pairs.getAttribute('aria-pressed')).toBe('false');
+    expect(single.classList.contains('radio-pill')).toBe(true);
+    expect(shapeGroup(container).parentElement.textContent).toContain('Single: one person per side, for solo kata such as iaido. Pairs: two people per side, entered as Name 1 - Name 2.');
+
+    await tickEngi(container);
+    expect(shapeGroup(container), 'hidden again once Engi is unticked').toBeUndefined();
+  });
+
+  it('refuses Create until a shape is picked, and sends nothing', async () => {
     const onCreate = vi.fn().mockResolvedValue({ id: 'c1' });
     const { container } = await mountForm({ onCreate });
-    expect(box(container, SOLO_LABEL), 'hidden while Engi is off').toBeUndefined();
+    await tickEngi(container);
+    await act(async () => { fireEvent.click(submitButton(container)); });
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(container.querySelector('.alert--error').textContent).toBe('Choose single competitors or two competitors (pairs).');
 
-    await act(async () => { fireEvent.click(box(container, 'Engi (kata competition)')); });
-    const solo = box(container, SOLO_LABEL);
-    expect(solo, 'shown under a ticked Engi').toBeDefined();
-    expect(solo.checked).toBe(false);
-    await act(async () => { fireEvent.click(solo); });
-    expect(box(container, SOLO_LABEL).checked).toBe(true);
+    await act(async () => { fireEvent.click(pill(container, 'Two competitors (pairs)')); });
+    expect(container.querySelector('.alert--error'), 'a pick clears the refusal').toBeNull();
+    expect(pill(container, 'Two competitors (pairs)').getAttribute('aria-pressed')).toBe('true');
+    await act(async () => { fireEvent.click(submitButton(container)); });
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate.mock.calls[0][0]).toMatchObject({ engi: true, engiSolo: false });
+  });
 
+  it('creates single competitors when Single competitors is picked', async () => {
+    const onCreate = vi.fn().mockResolvedValue({ id: 'c1' });
+    const { container } = await mountForm({ onCreate });
+    await tickEngi(container);
+    await act(async () => { fireEvent.click(pill(container, 'Single competitors')); });
+    expect(pill(container, 'Single competitors').getAttribute('aria-pressed')).toBe('true');
+    expect(pill(container, 'Two competitors (pairs)').getAttribute('aria-pressed')).toBe('false');
     await act(async () => { fireEvent.click(submitButton(container)); });
     expect(onCreate).toHaveBeenCalledTimes(1);
     expect(onCreate.mock.calls[0][0]).toMatchObject({ engi: true, engiSolo: true });
   });
 
-  it('creates pairs when the box is left unticked', async () => {
+  it('needs no shape for a competition without Engi', async () => {
     const onCreate = vi.fn().mockResolvedValue({ id: 'c1' });
     const { container } = await mountForm({ onCreate });
-    await act(async () => { fireEvent.click(box(container, 'Engi (kata competition)')); });
     await act(async () => { fireEvent.click(submitButton(container)); });
-    expect(onCreate.mock.calls[0][0]).toMatchObject({ engi: true, engiSolo: false });
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate.mock.calls[0][0]).toMatchObject({ engi: false, engiSolo: false });
   });
 });

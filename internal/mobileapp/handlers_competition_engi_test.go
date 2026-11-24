@@ -105,6 +105,17 @@ func engiSoloCreate(t *testing.T, r *gin.Engine, store *state.Store, comp state.
 	return stored
 }
 
+// engiBodyWithout answers a settings PUT body with its engiSolo key taken out.
+func engiBodyWithout(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(raw, &m))
+	delete(m, "engiSolo")
+	body, err := json.Marshal(m)
+	require.NoError(t, err)
+	return body
+}
+
 // engiSoloSeed saves an engi competition at the given status and answers it
 // as stored.
 func engiSoloSeed(t *testing.T, store *state.Store, id string, solo bool, status state.CompetitionStatus) *state.Competition {
@@ -119,7 +130,7 @@ func engiSoloSeed(t *testing.T, store *state.Store, id string, solo bool, status
 	return stored
 }
 
-// The create POST keeps "one competitor per side" on an engi competition and
+// The create POST keeps "Single competitors" on an engi competition and
 // stores it off on any other: it means something only with engi.
 func TestCreateCompetition_EngiSolo(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
@@ -131,6 +142,13 @@ func TestCreateCompetition_EngiSolo(t *testing.T) {
 	assert.True(t, solo.Engi)
 	assert.True(t, solo.EngiSolo, "an engi competition created solo keeps it")
 
+	pairs := engiSoloCreate(t, r, store, state.Competition{
+		Name: "Engi Open", Kind: "individual", Format: state.CompFormatKnockout,
+		Date: "12-07-2026", StartTime: "09:00", Engi: true, EngiSolo: false,
+	})
+	assert.True(t, pairs.Engi)
+	assert.False(t, pairs.EngiSolo, "an engi competition created with pairs keeps pairs")
+
 	plain := engiSoloCreate(t, r, store, state.Competition{
 		Name: "Kendo Open", Kind: "individual", Format: state.CompFormatKnockout,
 		Date: "12-07-2026", StartTime: "09:00", EngiSolo: true,
@@ -139,10 +157,51 @@ func TestCreateCompetition_EngiSolo(t *testing.T) {
 	assert.False(t, plain.EngiSolo, "solo without engi is cleared on create")
 }
 
+// engiCreateRaw POSTs a hand-built create body and answers the recorder.
+func engiCreateRaw(t *testing.T, r *gin.Engine, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/competitions", bytes.NewBuffer(raw))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	return w
+}
+
+// An engi create must say single competitors or pairs: neither is the default
+// (operator decision S1), so a body without engiSolo is refused with the
+// sentence the Add competition form shows, and nothing is created. A create
+// without engi needs no shape.
+func TestCreateCompetition_EngiWithoutAShapeIsRefused(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	base := map[string]any{
+		"name": "Engi Cup", "kind": "individual", "format": state.CompFormatKnockout,
+		"date": "12-07-2026", "startTime": "09:00", "courts": []string{"A"},
+	}
+	engi := map[string]any{"engi": true}
+	for k, v := range base {
+		engi[k] = v
+	}
+	w := engiCreateRaw(t, r, engi)
+	require.Equalf(t, http.StatusBadRequest, w.Code, "%s", w.Body.String())
+	var answer struct {
+		Error string `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &answer))
+	assert.Equal(t, "Choose single competitors or two competitors (pairs).", answer.Error)
+	ids, err := store.ListCompetitions()
+	require.NoError(t, err)
+	assert.Empty(t, ids, "a refused create stores nothing")
+
+	w = engiCreateRaw(t, r, base)
+	require.Equalf(t, http.StatusCreated, w.Code, "a create without engi needs no shape: %s", w.Body.String())
+}
+
 // The settings PUT stores EngiSolo only beside Engi: a save without engi, or
-// one turning engi off, clears it, and a save that leaves the key out stores
-// false (an omitted bool decodes as false, which is why the client sends it
-// back on every save).
+// one turning engi off, clears it. A save that leaves the key out keeps the
+// stored shape on an engi competition, and is refused when it turns engi on,
+// since neither shape is the default (operator decision S1).
 func TestPUTCompetition_EngiSolo(t *testing.T) {
 	t.Run("turning it on is stored", func(t *testing.T) {
 		r, store, _, _, _ := setupTestRouter(t)
@@ -177,21 +236,40 @@ func TestPUTCompetition_EngiSolo(t *testing.T) {
 		assert.False(t, got.Engi)
 		assert.False(t, got.EngiSolo)
 	})
-	t.Run("a save that leaves the key out clears it", func(t *testing.T) {
+	t.Run("a save that leaves the key out keeps it", func(t *testing.T) {
+		for _, solo := range []bool{true, false} {
+			r, store, _, _, _ := setupTestRouter(t)
+			stored := engiSoloSeed(t, store, "solo-omit", solo, state.CompStatusSetup)
+			w := cvPut(t, r, stored.ID, engiBodyWithout(t, cvSettingsBody(t, stored, "", map[string]any{"name": "Renamed"})))
+			require.Equalf(t, http.StatusOK, w.Code, "%s", w.Body.String())
+			got, err := store.LoadCompetition(stored.ID)
+			require.NoError(t, err)
+			assert.True(t, got.Engi)
+			assert.Equal(t, "Renamed", got.Name)
+			assert.Equal(t, solo, got.EngiSolo, "an omitted engiSolo keeps the stored shape")
+		}
+	})
+	t.Run("turning engi on without the key is refused", func(t *testing.T) {
 		r, store, _, _, _ := setupTestRouter(t)
-		stored := engiSoloSeed(t, store, "solo-omit", true, state.CompStatusSetup)
-		raw := cvSettingsBody(t, stored, "", nil)
-		var m map[string]any
-		require.NoError(t, json.Unmarshal(raw, &m))
-		delete(m, "engiSolo")
-		body, err := json.Marshal(m)
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "solo-new", Name: "New", Kind: "individual", Format: state.CompFormatKnockout,
+			PoolSize: 3, Courts: []string{"A"},
+		}))
+		stored, err := store.LoadCompetition("solo-new")
 		require.NoError(t, err)
-		w := cvPut(t, r, stored.ID, body)
-		require.Equalf(t, http.StatusOK, w.Code, "%s", w.Body.String())
+		w := cvPut(t, r, stored.ID, engiBodyWithout(t, cvSettingsBody(t, stored, "", map[string]any{"engi": true})))
+		require.Equalf(t, http.StatusBadRequest, w.Code, "%s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "Choose single competitors or two competitors (pairs).")
 		got, err := store.LoadCompetition(stored.ID)
 		require.NoError(t, err)
+		assert.False(t, got.Engi, "a refused save stores nothing")
+
+		w = cvPut(t, r, stored.ID, cvSettingsBody(t, stored, "", map[string]any{"engi": true, "engiSolo": false}))
+		require.Equalf(t, http.StatusOK, w.Code, "%s", w.Body.String())
+		got, err = store.LoadCompetition(stored.ID)
+		require.NoError(t, err)
 		assert.True(t, got.Engi)
-		assert.False(t, got.EngiSolo, "an omitted engiSolo decodes as false and is stored so")
+		assert.False(t, got.EngiSolo, "pairs, chosen, is stored")
 	})
 }
 
@@ -204,7 +282,7 @@ func TestPUTCompetition_EngiSoloLockedAfterTheDraw(t *testing.T) {
 
 	w := cvPut(t, r, stored.ID, cvSettingsBody(t, stored, "", map[string]any{"engiSolo": true}))
 	require.Equalf(t, http.StatusBadRequest, w.Code, "%s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "one competitor per side can only be changed before the draw is made")
+	assert.Contains(t, w.Body.String(), "competitors per side can only be changed before the draw is made")
 	got, err := store.LoadCompetition(stored.ID)
 	require.NoError(t, err)
 	assert.False(t, got.EngiSolo, "a refused save stores nothing")

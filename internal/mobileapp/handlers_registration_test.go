@@ -106,7 +106,6 @@ func TestRegistration_GET_SelfRun_ReturnsMetadata(t *testing.T) {
 	assert.Equal(t, string(state.CompStatusSetup), meta["status"])
 }
 
-
 // The public form labels its name field and asks the engi entry rule from the
 // GET, so it must carry both engi and engiSolo for every shape: a pair, one
 // competitor per side, and a competition that is not engi at all. engiSolo

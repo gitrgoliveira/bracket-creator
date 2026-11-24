@@ -25,7 +25,7 @@ GO_TEST_TIMEOUT ?= 30m
 # govulncheck, oxlint, audit-ci) and in CI (the same, plus grype and CodeQL).
 # Pin one to a named version only while a new release breaks the gate, and
 # remove the pin with the fix.
-GORELEASER_VERSION := v2.20.1
+GORELEASER_VERSION := v2.20.3
 GO_SOURCES := $(shell find . -name "*.go" -type f)
 EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 

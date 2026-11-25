@@ -1244,7 +1244,7 @@ export function downstreamKnockoutReopenedNotice(matches) {
 // the thrown error carries `.firstResultCancelled = true` and
 // FIRST_RESULT_CANCELLED as its message.
 export async function attemptScoreWrite({
-    recordScore, confirmDialog, compId, matchId, result, password, match, label = '', onRefusal, onDownstreamReopened, onForced, allowCourtForce = false,
+    recordScore, confirmDialog, compId, matchId, result, password, match, label = '', matchName = '', onRefusal, onDownstreamReopened, onForced, allowCourtForce = false,
 }) {
     // bc-evts: an outbox door answers pending at once and its refusal arrives
     // later, through `settled`. The downstream-knockout-played 409 is CLAIMED
@@ -1257,11 +1257,14 @@ export async function attemptScoreWrite({
     const claimOther = (e) => typeof onRefusal === 'function' && onRefusal(e) === true;
     // `label` is the host's name for the match as its rows show it ("Pool A ·
     // Match 3"); matchLabel alone falls back to a pool match's raw id.
+    // `matchName` is the same with the pairing ("Pool A · Match 3 · Kato vs
+    // Sato", scoreRowMatchName), which the first-result question names the
+    // match by on every door; a caller that has none gets `label`.
     const started = label || matchLabel(match) || matchLabel(matchId);
     // Awaited only when it asks: a write that asks nothing still reaches
     // recordScore in the same tick (score_write_same_tick.test.jsx).
     if (writeRecordsResult(result) && firstResultAsks(compId) && !(await confirmFirstResult({
-        confirmDialog, compId, label: started, starts: result.status === 'running' && !result.decision,
+        confirmDialog, compId, label: matchName || started, starts: result.status === 'running' && !result.decision,
     }))) {
         const kept = new Error(FIRST_RESULT_CANCELLED);
         kept.firstResultCancelled = true;

@@ -101,7 +101,7 @@ describe('every admin host asks before the first result of a drawn competition (
       expect(window.confirmDialog).toHaveBeenCalledTimes(1);
       const q = window.confirmDialog.mock.calls[0][0];
       expect(q.title).toBe('Start Women?');
-      expect(q.message).toBe('Women has not started yet. Starting Pool 1 · Match 1 starts it. After that the draw is fixed: competitors can no longer be swapped, and the draw can no longer be discarded.');
+      expect(q.message).toBe('Women has not started yet. Starting Pool 1 · Match 1 · Sato vs Suzuki starts it. After that the draw is fixed: competitors can no longer be swapped, and the draw can no longer be discarded.');
       expect(q.confirmLabel).toBe('Start the competition');
       expect(q.cancelLabel).toBe('Not yet');
       expect(window.API.recordScore).not.toHaveBeenCalled();
@@ -120,7 +120,7 @@ describe('every admin host asks before the first result of a drawn competition (
 
       await act(async () => { await onEditScore('c2', m.id, { status: 'completed', ipponsA: ['M'] }, m); });
       expect(window.confirmDialog).toHaveBeenCalledTimes(1);
-      expect(window.confirmDialog.mock.calls[0][0].message).toContain('Recording a result for Pool 1 · Match 1 starts it.');
+      expect(window.confirmDialog.mock.calls[0][0].message).toContain('Recording a result for Pool 1 · Match 1 · Sato vs Suzuki starts it.');
       expect(window.API.recordScore).toHaveBeenCalledTimes(1);
 
       const m2 = poolMatch('Pool 1-1');

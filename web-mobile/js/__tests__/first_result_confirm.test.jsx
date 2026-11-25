@@ -129,6 +129,16 @@ describe('attemptScoreWrite asks before the first result (every host)', () => {
         expect(recordScore.mock.calls[0][2]).toEqual({ status: 'running' });
     });
 
+    it('names the match by matchName, the label with the pairing, when the host gives one', async () => {
+        noteFirstResultCompetitions([drawn()]);
+        const confirmDialog = vi.fn().mockResolvedValue(false);
+        await attemptScoreWrite({
+            recordScore: vi.fn(), confirmDialog, compId: 'c1', matchId: 'Pool A-0', result: { status: 'running' }, password: 'pw',
+            label: 'Pool A · Match 1', matchName: 'Pool A · Match 1 · Kato vs Sato',
+        }).catch(() => {});
+        expect(confirmDialog.mock.calls[0][0].message).toContain('Starting Pool A · Match 1 · Kato vs Sato starts it.');
+    });
+
     it('a decision asks too, worded as a result', async () => {
         noteFirstResultCompetitions([drawn()]);
         const recordScore = vi.fn().mockResolvedValue({ applied: true });

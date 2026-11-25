@@ -13,7 +13,7 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { installIndividualEditor, resetOutbox, bout, API } from '../helpers/individual_editor.js';
-import { teamBout } from '../helpers/team_editor.js';
+import { teamBout, kachinukiBout, ipponBtn } from '../helpers/team_editor.js';
 import { noteFirstResultCompetitions, resetFirstResultConfirm } from '../../first_result_confirm.jsx';
 
 let ScoreEditorModal;
@@ -78,6 +78,38 @@ describe.each([
     await act(async () => { fireEvent.click(startButton()); });
     expect(window.confirmDialog).not.toHaveBeenCalled();
     expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Record bout on a queued kachinuki encounter (its start) asks first', () => {
+  const queued = () => kachinukiBout({ status: 'scheduled', phase: 'bracket', scoreVersion: 2 });
+  const recordButton = () => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Record bout');
+  const scoreTwo = async (r) => { await tap(ipponBtn(r.container, 0, 'aka', 'M')); await tap(ipponBtn(r.container, 0, 'aka', 'M')); };
+
+  it('Not yet begins no start and sends nothing, and Start and Record bout stay offered', async () => {
+    const onSubmit = vi.fn(() => Promise.resolve({ applied: true, pending: true, settled: new Promise(() => {}) }));
+    window.confirmDialog = vi.fn().mockResolvedValue(false);
+    const r = render(el(queued(), onSubmit));
+    await scoreTwo(r);
+    await tap(recordButton());
+    await settle();
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.confirmDialog.mock.calls[0][0].title).toBe('Start Women?');
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(startButton(), 'Start is still offered').toBeTruthy();
+    expect(recordButton()).toBeTruthy();
+  });
+
+  it('agreed, the bout is recorded once and the competition is not asked again', async () => {
+    const onSubmit = vi.fn(() => Promise.resolve({ applied: true, pending: true, settled: new Promise(() => {}) }));
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+    const r = render(el(queued(), onSubmit));
+    await scoreTwo(r);
+    await tap(recordButton());
+    await settle();
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ status: 'running', kachinukiBoutFinal: true });
   });
 });
 

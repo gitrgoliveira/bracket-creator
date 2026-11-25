@@ -19,13 +19,21 @@
 // admin host notes the tournament it shows. A competition no surface has noted
 // is not asked about; nothing is fetched to find out.
 //
-// Two doors ask (confirmFirstResult): the court console's Start (before it
-// sends a running bout back, admin_shiaijo_start.jsx) and attemptScoreWrite
-// (write_result.jsx), which every editor's start, finish and decision on every
-// host goes through. Once the operator agrees for a competition, neither asks
-// again for it, so a start queued offline and the finish that follows it ask
-// once; the agreement is forgotten when the competition is seen back in setup
-// (its draw discarded), so a draw generated again asks again.
+// Every door asks through confirmFirstResult, the one question:
+// attemptScoreWrite (write_result.jsx), which every editor's start, finish and
+// decision on every host goes through, is the last one. The others ask EARLIER,
+// before something a Not yet must leave as it was: the court console's Start
+// (before it sends a running bout back, admin_shiaijo_start.jsx), the editors'
+// Start match and the kachinuki sheet's Record bout on a queued encounter
+// (before the owner shows the start), the team sheet's representative-bout add
+// on a queued match (before the sheet is saved), a decision (before the unsaved
+// entries' question, makeSubmitDecision) and the barred-match notice's Record
+// fusensho (barred_match_notice.jsx). The editors reach it through
+// confirmFirstResultFor (admin_scoring_shared.jsx), which names the match the
+// way the operator's rows do. Once the operator agrees for a competition, no
+// door asks again for it, so a start queued offline and the finish that follows
+// it ask once; the agreement is forgotten when the competition is seen back in
+// setup (its draw discarded), so a draw generated again asks again.
 //
 // The question opens through the injected confirmDialog (ui.jsx DialogHost),
 // which already moves focus in and back, traps Tab, cancels on Escape and takes

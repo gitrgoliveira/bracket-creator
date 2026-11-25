@@ -5540,13 +5540,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                 // ONE TAP (hot path, recoverable); End keeps the two-step
                 // arm/confirm and any score edit disarms it.
                 <>
-                <button type="button" className="btn btn--primary" onClick={(ev) => boutChangeTap("bout", () => {
+                <button type="button" className="btn btn--primary" onClick={(ev) => boutChangeTap("bout", async () => {
                   // ONE TAP (user ruling via critique): Record is the hot
                   // path, repeated every bout, and a running, mergeable
                   // write — a mis-tap is recovered by editing the appended
                   // bout. End/Reopen keep the two-step arm: they are rare
                   // and terminal.
                   setEndArmed(false);
+                  // bc-drev D4 b: on a QUEUED encounter this tap is the match's
+                  // start, so a drawn competition's first result asks BEFORE the
+                  // owner shows the start, as the Start button does; a Not yet
+                  // begins nothing and leaves Start and Record bout offered.
+                  // A running encounter's competition has started already.
+                  if (m.status === "scheduled" && firstResultAsks(m.compId) && !(await confirmFirstResultFor(m, true))) return;
                   // Under a roster warning (team-members.yaml or lineups.yaml
                   // unread) nobody is seated, and a bout that names no fighter
                   // (neither a name nor a member id) is saved but the server cannot

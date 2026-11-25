@@ -19,7 +19,7 @@ import { keptInHistoryNote } from './match_groups.jsx';
 import { normalizeCompetitionDetail } from './api_serializers.jsx';
 import { confirmMatchLabel, confirmRunningCourtMove } from './court_move.jsx';
 import { holdsUnsaved, discardUnsaved } from './unsaved_entries.jsx';
-import { scoreRowMatchLabel } from './pool_ids.jsx';
+import { scoreRowMatchLabel, scoreRowMatchName } from './pool_ids.jsx';
 import { mergeSavedCompetition } from './competition_put_body.jsx';
 import { AdminCalendarPage } from './admin_calendar.jsx';
 import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor } from './queued_writes_wait.jsx';
@@ -529,6 +529,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // The Start anyway confirm names the bout it would start the way the
         // operator's rows do, never by its raw id.
         label: match ? scoreRowMatchLabel(match) : '',
+        // The first-result question names it the same way every other door
+        // does (confirmFirstResultFor): the label with the pairing.
+        matchName: match ? scoreRowMatchName(match) : '',
         onRefusal: opts && opts.onRefusal,
         onDownstreamReopened: toastReopened,
         // bc-adna: only an admin host's options turn the court_busy warning

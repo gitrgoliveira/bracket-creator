@@ -414,6 +414,17 @@ func TestSwapDrawPlaces_Refusals(t *testing.T) {
 		requireSwapRefused(t, err, SwapSameCompetitor)
 	})
 
+	t.Run("the same place for both competitors", func(t *testing.T) {
+		eng, store, dir := drawn(t, "ref-sameplace", state.CompFormatMixed)
+		req := poolsReq(t, store, "ref-sameplace")
+		req.B.Place = req.A.Place
+		files := drawFiles(t, dir, "ref-sameplace")
+		_, err := eng.SwapDrawPlaces("ref-sameplace", req)
+		refused := requireSwapRefused(t, err, SwapInvalid)
+		assert.Contains(t, refused.Message, "same place")
+		assert.Equal(t, files, drawFiles(t, dir, "ref-sameplace"))
+	})
+
 	t.Run("invalid places", func(t *testing.T) {
 		eng, store, _ := drawn(t, "ref-inv", state.CompFormatMixed)
 		base := poolsReq(t, store, "ref-inv")
@@ -557,6 +568,17 @@ func TestSwapDrawPlaces_Refusals(t *testing.T) {
 			},
 			"a history file": func(t *testing.T, store *state.Store, compID, matchID string) {
 				require.NoError(t, store.AppendMatchHistory(compID, state.MatchHistoryEntry{MatchID: matchID, Door: "score", Stamp: 1}))
+			},
+			"a score log file": func(t *testing.T, store *state.Store, compID, matchID string) {
+				tap := domain.ScoreEvent{ID: "e1", Session: "s", Seq: 1, Stamp: 10, Kind: domain.ScoreIpponAdd, Side: "a", Letter: "M"}
+				require.NoError(t, store.AppendScoreLog(compID, matchID, state.ScoreLogLine{Event: &tap}))
+			},
+			"a score held on a scheduled match": func(t *testing.T, store *state.Store, compID, matchID string) {
+				_, err := store.UpdatePoolMatchByID(compID, matchID, func(r *state.MatchResult) error {
+					r.IpponsA = []string{"M"}
+					return nil
+				})
+				require.NoError(t, err)
 			},
 		} {
 			t.Run(name, func(t *testing.T) {

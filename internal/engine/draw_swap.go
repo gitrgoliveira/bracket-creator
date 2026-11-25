@@ -352,6 +352,9 @@ func planSwap(snap swapSnapshot, req SwapRequest) (swapPlan, error) {
 	if req.A.ID == req.B.ID {
 		return swapPlan{}, swapRefused(SwapSameCompetitor, "Pick two different competitors to swap.")
 	}
+	if samePlace(req.A.Place, req.B.Place) {
+		return swapPlan{}, swapRefused(SwapInvalid, "Two competitors cannot be at the same place: pick the place each of them is at.")
+	}
 
 	placeOf := func(id string) (DrawPlace, bool) {
 		if source == DrawInPools {

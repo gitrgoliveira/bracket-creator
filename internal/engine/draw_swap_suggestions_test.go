@@ -304,6 +304,56 @@ func TestSwapSuggestions_StuckDojo(t *testing.T) {
 	assert.Empty(t, got.Stuck)
 }
 
+func TestSwapSuggestions_StuckDojoNamesThePairNoSwapHelps(t *testing.T) {
+	// Omega holds slots 0, 2, 4 and 5. Swaps can move the pair at 4 and 5
+	// apart, but none helps the pair at slots 0 and 2, which meet in the
+	// semi-final: moving either of them brings it next to another Omega and
+	// that pair meets sooner. The dojo is stuck on that pair even though other
+	// pairs of it have a fix.
+	roster := koRoster("Omega", "Solo 1", "Omega", "Solo 3", "Omega", "Omega", "Solo 6", "Solo 7")
+	bracket := koDraw(roster)
+	comp := drawReady(state.CompFormatKnockout)
+	got := SuggestSwaps(comp, nil, bracket, roster)
+	require.NotEmpty(t, got.Suggestions, "some pair of the dojo has a fix")
+	require.Len(t, got.Stuck, 1)
+	assert.Equal(t, "Omega", got.Stuck[0].Dojo)
+	assert.Equal(t, "s0", got.Stuck[0].Meeting.A.ID)
+	assert.Equal(t, "s2", got.Stuck[0].Meeting.B.ID)
+	for _, sug := range got.Suggestions {
+		for _, imp := range sug.Improves {
+			assert.NotEqual(t, pairIDs("s0", "s2"), pairIDs(imp.Before.A.ID, imp.Before.B.ID), "no suggestion helps the stuck pair")
+		}
+	}
+	assert.Positive(t, checkAgainstTheSummary(t, comp, nil, nil, bracket, roster))
+}
+
+func TestSwapSuggestions_ReportsAByeThatChangesHands(t *testing.T) {
+	// Eight leaves with S1 missing, so S0 holds the first-round bye. Omega's
+	// S0 and S3 meet in the semi-final. Moving S0 to S4's match keeps them
+	// apart until the final, takes S0's bye away and gives it to S4, who
+	// takes S0's place alone in a match.
+	roster := koRoster("Omega", "Solo 1", "Solo 2", "Omega", "Solo 4", "Solo 5", "Solo 6", "Solo 7")
+	bracket := koDraw(roster)
+	bracket.Rounds[0][0].SideB, bracket.Rounds[0][0].SideBID = "", ""
+	comp := drawReady(state.CompFormatKnockout)
+	got := SuggestSwaps(comp, nil, bracket, roster)
+
+	byPair := map[[2]string]SwapSuggestion{}
+	for _, sug := range got.Suggestions {
+		byPair[[2]string{sug.A.ID, sug.B.ID}] = sug
+	}
+	require.Contains(t, byPair, [2]string{"s0", "s4"})
+	assert.Equal(t, []SwapBye{{ID: "s0", Name: "S0", Bye: false}, {ID: "s4", Name: "S4", Bye: true}}, byPair[[2]string{"s0", "s4"}].Byes)
+	for pair, sug := range byPair {
+		if pair[0] != "s0" && pair[1] != "s0" {
+			assert.Empty(t, sug.Byes, "a swap between two matches that both hold two competitors hands over no bye: %v", pair)
+		}
+	}
+
+	// A pools draw has no byes to hand over.
+	assert.Nil(t, (&swapSuggester{}).byes(0, 1))
+}
+
 func TestSwapSuggestions_EmptyAnswers(t *testing.T) {
 	pools := []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{{ID: "a1", Dojo: "Omega"}, {ID: "a2", Dojo: "Omega"}}}}
 	for _, comp := range []*state.Competition{

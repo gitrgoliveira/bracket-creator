@@ -47,11 +47,14 @@ type SwapImprovement struct {
 
 // SwapSuggestion is one suggested swap. A is the earlier of the two in the
 // draw. Improves lists every pair that meets later after the swap, the
-// earliest meeting first; every other pair meets where it did.
+// earliest meeting first; every other pair meets where it did. Byes lists the
+// first-round byes the swap hands over, as the swap's own answer does, so the
+// card can say so before the organiser asks for the dry run.
 type SwapSuggestion struct {
 	A        SuggestedSide     `json:"a"`
 	B        SuggestedSide     `json:"b"`
 	Improves []SwapImprovement `json:"improves"`
+	Byes     []SwapBye         `json:"byes,omitempty"`
 }
 
 // StuckDojo is a dojo with a pair that shares a pool or can meet before the
@@ -122,6 +125,9 @@ type swapSuggester struct {
 	rounds   int
 	ranks    map[[2]int]meetingRank
 	before   map[[2]string]DojoMeeting
+	// groupSize is how many drawn competitors each first-round match holds, in
+	// a knockout-only draw: one means a bye. Nil for a pools draw.
+	groupSize map[int]int
 }
 
 // pairIDs is the unordered key of a pair of competitors.
@@ -146,7 +152,7 @@ func pairIDs(a, b string) [2]string {
 // becomes, then by how many pairs improve, then by the two ids, and at most
 // maxSwapSuggestions are returned. Stuck lists, in summary order, every dojo
 // with a pair that shares a pool or meets before the final that no candidate
-// keeps apart for longer.
+// keeps apart for longer, quoting the earliest such pair.
 func SuggestSwaps(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, roster []domain.Player) SwapSuggestions {
 	out := SwapSuggestions{Suggestions: []SwapSuggestion{}, Stuck: []StuckDojo{}}
 	if comp == nil || comp.Status != state.CompStatusDrawReady || !CompetitionDrawsBracket(comp.EffectiveFormat()) {
@@ -164,7 +170,7 @@ func SuggestSwaps(comp *state.Competition, pools []helper.Pool, bracket *state.B
 		gain       meetingRank
 	}
 	var found []ranked
-	helped := map[string]bool{}
+	helped := map[[2]string]bool{}
 	n := len(s.entrants)
 	for x := 0; x < n; x++ {
 		for y := x + 1; y < n; y++ {
@@ -173,12 +179,10 @@ func SuggestSwaps(comp *state.Competition, pools []helper.Pool, bracket *state.B
 				continue
 			}
 			fixed, gain := improves[0].rankBefore, improves[0].gain
-			sug := SwapSuggestion{A: s.side(x), B: s.side(y), Improves: make([]SwapImprovement, len(improves))}
+			sug := SwapSuggestion{A: s.side(x), B: s.side(y), Improves: make([]SwapImprovement, len(improves)), Byes: s.byes(x, y)}
 			for i, imp := range improves {
 				sug.Improves[i] = imp.SwapImprovement
-				if imp.rankBefore.depth < s.rounds-1 {
-					helped[helper.DojoKey(imp.Dojo)] = true
-				}
+				helped[pairIDs(imp.Before.A.ID, imp.Before.B.ID)] = true
 			}
 			found = append(found, ranked{suggestion: sug, fixed: fixed, gain: gain})
 		}
@@ -206,15 +210,13 @@ func SuggestSwaps(comp *state.Competition, pools []helper.Pool, bracket *state.B
 	listed := map[string]bool{}
 	for _, dm := range summary {
 		key := helper.DojoKey(dm.Dojo)
-		if listed[key] {
+		// The summary is sorted earliest first, so a dojo's first unhelped row
+		// is its earliest pair that no swap keeps apart for longer.
+		if listed[key] || rankMeeting(dm, s.rounds).depth >= s.rounds-1 || helped[pairIDs(dm.A.ID, dm.B.ID)] {
 			continue
 		}
-		// The summary is sorted earliest first, so a dojo's first row is its
-		// earliest meeting.
 		listed[key] = true
-		if rankMeeting(dm, s.rounds).depth < s.rounds-1 && !helped[key] {
-			out.Stuck = append(out.Stuck, StuckDojo{Dojo: dm.Dojo, Meeting: dm})
-		}
+		out.Stuck = append(out.Stuck, StuckDojo{Dojo: dm.Dojo, Meeting: dm})
 	}
 	return out
 }
@@ -266,6 +268,10 @@ func newSwapSuggester(comp *state.Competition, pools []helper.Pool, bracket *sta
 			slot := c.slot
 			places[c.side.ID] = DrawPlace{Slot: &slot}
 			groups[c.side.ID] = slot / 2
+		}
+		s.groupSize = map[int]int{}
+		for _, g := range groups {
+			s.groupSize[g]++
 		}
 	default:
 		return nil
@@ -423,6 +429,25 @@ func (s *swapSuggester) evaluate(x, y int) (improves []improvement, ok bool) {
 		return a.Before.B.ID < b.Before.B.ID
 	})
 	return improves, true
+}
+
+// byes is the first-round byes the swap of entrants x and y hands over in a
+// knockout-only draw, as SwapResult.Byes would list them: a competitor takes
+// the bye of the match they move to, so both change hands exactly when one of
+// the two matches holds one competitor and the other two.
+func (s *swapSuggester) byes(x, y int) []SwapBye {
+	if s.groupSize == nil {
+		return nil
+	}
+	ex, ey := s.entrants[x], s.entrants[y]
+	toX, toY := s.groupSize[ey.group] == 1, s.groupSize[ex.group] == 1
+	if toX == toY {
+		return nil
+	}
+	return []SwapBye{
+		{ID: ex.c.side.ID, Name: ex.c.side.Name, Bye: toX},
+		{ID: ey.c.side.ID, Name: ey.c.side.Name, Bye: toY},
+	}
 }
 
 // side names entrant i at the place they hold now.

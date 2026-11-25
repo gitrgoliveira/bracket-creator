@@ -331,3 +331,72 @@ func TestSwapDrawPlaces_ALineupThatCannotMoveLeavesEverythingWhereItWas(t *testi
 	assert.Equal(t, lineups, lineupsFile(t, dir, compID), "every lineup stayed where it was")
 	assert.Equal(t, pools, loadSwapPools(t, store, compID))
 }
+
+// The same failure in a knockout-only draw, where the plan stages the bracket
+// before the lineups: nothing lands.
+func TestSwapDrawPlaces_AFailedSaveAfterTheBracketLandsNothing(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	const compID = "swap-lineups-ko-fail"
+	drawDojoComp(t, eng, store, compID, state.CompFormatKnockout, 3, uniqueDojos(8), swapTeamComp)
+	before := loadBracket(t, store, compID)
+	m0, m1 := before.Rounds[0][0], before.Rounds[0][1]
+	// A position a three-person team has no place for, kept from older data.
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: m0.SideAID, MatchID: m0.ID,
+		Positions: map[domain.Position]string{domain.PosJiho: "A-jiho"},
+	}, 5))
+	draw, lineups := drawFiles(t, dir, compID), lineupsFile(t, dir, compID)
+
+	_, err := eng.SwapDrawPlaces(compID, SwapRequest{A: SwapSide{ID: m0.SideAID, Place: swapSlot(0)}, B: SwapSide{ID: m1.SideAID, Place: swapSlot(2)}})
+	require.Error(t, err)
+	assert.Equal(t, draw, drawFiles(t, dir, compID), "the bracket was not changed")
+	assert.Equal(t, lineups, lineupsFile(t, dir, compID))
+	assert.Equal(t, before, loadBracket(t, store, compID))
+}
+
+// --- carried lineups ----------------------------------------------------------
+
+// A stamped lineup carried from the team's earlier match moves with the team
+// and is worked out again over the new match order: it names the team's new
+// earlier match, not the match the old place had.
+func TestSwapDrawPlaces_CarriedLineupFollowsTheTeamToTheNewPlace(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "swap-lineups-carried"
+	drawDojoComp(t, eng, store, compID, state.CompFormatMixed, 3, uniqueDojos(6), swapTeamComp)
+	pools := loadSwapPools(t, store, compID)
+	a, b := poolSwapSide(pools, 0, 0), poolSwapSide(pools, 1, 1)
+	oldA := teamMatchIDs(t, store, compID, a.ID)
+	require.Len(t, oldA, 2)
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+
+	saveSwapLineup(t, store, compID, a.ID, oldA[0], "A-first")
+	carryTestMatchSave(t, store, comp, a.ID, oldA[1], domain.PositionNumbered(2), "A-second", "", 1000)
+	carried := func(match string) domain.TeamLineup {
+		t.Helper()
+		lineups, err := store.LoadTeamLineups(compID)
+		require.NoError(t, err)
+		for _, l := range lineups {
+			if l.TeamID == a.ID && l.MatchID == match {
+				return l
+			}
+		}
+		require.Failf(t, "no lineup", "team %s has none at %s", a.ID, match)
+		return domain.TeamLineup{}
+	}
+	require.Positive(t, carried(oldA[1]).CopiedAt, "the stamped save made a carried copy")
+	require.Equal(t, oldA[0], carried(oldA[1]).CopiedFrom, "carried from the team's earlier match")
+
+	got, err := eng.SwapDrawPlaces(compID, SwapRequest{A: a, B: b})
+	require.NoError(t, err)
+	require.True(t, got.Applied)
+
+	newA := teamMatchIDs(t, store, compID, a.ID)
+	require.Len(t, newA, 2)
+	require.NotEqual(t, oldA, newA)
+	moved := carried(newA[1])
+	assert.Positive(t, moved.CopiedAt, "the copy is still a carried copy")
+	assert.Equal(t, newA[0], moved.CopiedFrom, "it names the team's new earlier match")
+	assert.Equal(t, "A-first", moved.Positions[domain.PositionNumbered(1)], "and carries that match's fighter")
+	assert.Equal(t, "A-second", moved.Positions[domain.PositionNumbered(2)], "the stamped change stays its own")
+}

@@ -19,6 +19,7 @@ import * as knockout from './knockout.mjs';
 import * as hero from './hero.mjs';
 import * as branding from './branding.mjs';
 import * as publicNames from './public_names.mjs';
+import * as posters from './posters.mjs';
 
 // Each module paired with its file name, because a module cannot name its own
 // file and the SINCE scoping (lib/scope.mjs) needs to know which recipe files
@@ -36,6 +37,7 @@ const groups = [
   [hero, 'hero.mjs'],
   [branding, 'branding.mjs'],
   [publicNames, 'public_names.mjs'],
+  [posters, 'posters.mjs'],
 ];
 
 // family -> Set of repo-relative recipe file paths that touch it. A family may

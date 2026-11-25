@@ -88,7 +88,7 @@ The same **Edit details** page also has branding and sponsor fields, below tourn
 
 ## QR-code posters
 
-Click **Posters** on the dashboard to print a poster for the viewer home and one for each shiai-jo, each with a QR code that opens the right page on a spectator's phone. Refer to [Print QR-code posters](posters.md) for the choices, saving and printing. The codes open the **Public URL** set above, and the poster page warns you when it is not set.
+Click **Posters** on the dashboard to print a poster for the viewer home and one for each shiai-jo, each with a QR code that opens the right page on a spectator's phone. Refer to [Print QR-code posters](posters.md) for the choices, saving and printing. The codes open the **Public URL** set above. When it is not set and the page is open at an address phones may not reach, such as `localhost`, the poster page warns you.
 
 ## Announcements
 

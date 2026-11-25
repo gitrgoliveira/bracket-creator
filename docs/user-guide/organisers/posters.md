@@ -19,7 +19,7 @@ Pick a poster from the list. The preview beside the choices changes as you type,
 
 - **Heading**: the line above the code. Leave it empty to use the standard words ("Follow the tournament live" on the viewer-home poster, "Follow this court live" on a shiai-jo poster). The box shows the standard words in grey while it is empty. A heading holds up to 80 characters.
 - **Call to action**: an optional second line under the heading, for example "Scan for live results". Leave it empty and nothing prints. It holds up to 120 characters.
-- A counter under each box shows how many characters it holds. While a heading or call to action is over its limit, **Save** is switched off and the page says so; shorten the text to save.
+- **Over a limit**: a counter under each box shows how many characters it holds. While a heading or call to action is over its limit, **Save** is switched off and the page says so; shorten the text to save.
 - **Logo**: shown only when the tournament has a logo. Choose **Logo in the centre of the code**, the choice a new poster starts with, or **Logo above the code**. The code stays readable with a logo in its centre because the poster uses the code's strongest error correction. A very long address does not leave room for that, so the centre choice is switched off and a sentence under the choices says why. The logo then goes above the code, and a shorter public address brings the centre choice back.
 - **Show sponsors**: shown only when the tournament has sponsors. Untick it to leave the sponsor strip off this poster.
 

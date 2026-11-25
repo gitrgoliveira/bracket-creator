@@ -259,7 +259,7 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !ok {
 			return
 		}
-		v, _, ok := publicReadExisting(c, names, comps, compID)
+		v, ok := publicReadExisting(c, names, comps, compID)
 		if !ok {
 			return
 		}
@@ -284,7 +284,7 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !ok {
 			return
 		}
-		v, _, ok := publicReadExisting(c, names, comps, compID)
+		v, ok := publicReadExisting(c, names, comps, compID)
 		if !ok {
 			return
 		}
@@ -317,7 +317,7 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !ok {
 			return
 		}
-		v, _, ok := publicReadExisting(c, names, comps, compID)
+		v, ok := publicReadExisting(c, names, comps, compID)
 		if !ok {
 			return
 		}
@@ -349,7 +349,7 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !ok {
 			return
 		}
-		v, _, ok := publicReadExisting(c, names, comps, compID)
+		v, ok := publicReadExisting(c, names, comps, compID)
 		if !ok {
 			return
 		}
@@ -475,24 +475,24 @@ func publicReadViewOf(c *gin.Context, names *publicNames, compID string) (maskVi
 }
 
 // publicReadExisting is publicReadViewOf for a read that answers 404 for an
-// unknown competition, so the competition it gives is never nil when ok. The
-// judge's own read is the one read of the competition: it is not asked for
-// again, and its finding none is the 404. With no judge comps answers (a
-// public endpoint, so internalError leaks no store error string).
-func publicReadExisting(c *gin.Context, names *publicNames, comps competitionLoader, compID string) (maskView, *state.Competition, bool) {
+// unknown competition. The judge's own read is the one read of the
+// competition: it is not asked for again, and its finding none is the 404.
+// With no judge comps answers (a public endpoint, so internalError leaks no
+// store error string).
+func publicReadExisting(c *gin.Context, names *publicNames, comps competitionLoader, compID string) (maskView, bool) {
 	v, comp, ok := publicReadViewOf(c, names, compID)
 	if !ok {
-		return maskView{}, nil, false
+		return maskView{}, false
 	}
 	if comp != nil {
-		return v, comp, true
+		return v, true
 	}
 	if names != nil {
 		respondCompetitionNotFound(c)
-		return maskView{}, nil, false
+		return maskView{}, false
 	}
-	comp, ok = loadExistingCompetition(c, comps, compID)
-	return v, comp, ok
+	_, ok = loadExistingCompetition(c, comps, compID)
+	return v, ok
 }
 
 // kachinukiRosterRead is the kachinuki roster read's answer: the engine's

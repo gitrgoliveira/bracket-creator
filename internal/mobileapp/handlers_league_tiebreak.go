@@ -236,7 +236,7 @@ func registerPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 		if !ok {
 			return
 		}
-		v, _, ok := publicReadExisting(c, names, store, id)
+		v, ok := publicReadExisting(c, names, store, id)
 		if !ok {
 			return
 		}

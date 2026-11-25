@@ -10,9 +10,9 @@ Install bracket-creator on your computer by following the section of [Download](
 bracket-creator mobile-app --folder ./tournament-data --bind 0.0.0.0
 ```
 
-`--bind 0.0.0.0` lets the other devices in the hall (a scoreboard screen, a phone) reach the app; without it only this computer can. The operating system may ask whether to allow incoming connections for bracket-creator: allow them, or the other devices cannot connect. Refer to [Start the server](../organisers/run-tournament.md#start-the-server) for the server's flags, and to [Security notes](../organisers/operating-modes.md#security-notes) for what opening the app to the hall network means for the admin password.
+`--bind 0.0.0.0` lets the other devices in the hall (a scoreboard screen, a phone) reach the app; without it only this computer can. The operating system may ask whether to allow incoming connections for bracket-creator: allow them, or the other devices cannot connect. Refer to [Start the server](../organisers/run-tournament.md#start-the-server) for the server's flags. [Security notes](../organisers/operating-modes.md#security-notes) explains what opening the app to the hall network means for the admin password.
 
-To run it in a container instead, use the [Docker option](../install/download.md#any-computer-with-docker): the image starts the tournament app by itself, already open to the other devices in the hall.
+To run it in a container instead, use the [Docker option](../install/download.md#any-computer-with-docker). The image starts the tournament app by itself, already open to the other devices in the hall.
 
 Open `http://localhost:8080` in a browser on the same computer. When the data folder is empty, the app prompts you to create a tournament. Fill in the name, date, venue, number of shiai-jo, and the admin password. Before you set the password, read [Operating modes](../organisers/operating-modes.md) to choose between officiated and self-run.
 
@@ -20,7 +20,7 @@ Open `http://localhost:8080` in a browser on the same computer. When the data fo
 
 From the dashboard, click **+ Add competition**. Choose Individual or Team, then pick a format: **Knockout only**, **Pools + Knockout**, **League**, or **Swiss** (work in progress). Refer to [Formats](../organisers/formats.md) for a description of each format and when to use it.
 
-The number of shiai-jo you entered in [Install and start the server](#1-install-and-start-the-server) is your venue's total. It can be anything from 1 to 16. Each competition is then assigned some of them. A competition that ends in a knockout must be assigned 1, 2, 4, 8 or 16, because its bracket splits into one block per shiai-jo, and those blocks merge in pairs. So a hall with three shiai-jo runs each competition on 1 or 2, and can run two competitions at once to use all three. Refer to [Assigning shiai-jo](../organisers/run-tournament.md#assigning-shiai-jo).
+The number of shiai-jo you entered in [Install and start the server](#1-install-and-start-the-server) is your venue's total. It can be anything from 1 to 16. Each competition is then assigned some of them. A competition that ends in a knockout must be assigned 1, 2, 4, 8 or 16. Its bracket splits into one block per shiai-jo, and those blocks merge in pairs. So a hall with three shiai-jo runs each competition on 1 or 2, and can run two competitions at once to use all three. Refer to [Assigning shiai-jo](../organisers/run-tournament.md#assigning-shiai-jo).
 
 ![Creating a competition: the name, type, format, pool-size, and shiai-jo options on the setup form.](../../screenshots/mobile-create-competition.png)
 
@@ -47,10 +47,10 @@ Go to the **Scores** tab, open a match, and record the result. Refer to [Scoring
 
 ## If you print your brackets instead
 
-Steps 1 to 5 run the whole tournament in the app. To run the day from paper instead, with no app at the courts, follow steps 1 to 4 up to **Generate draw** for every competition, then print from the app instead of starting the competitions:
+Steps 1 to 5 run the whole tournament in the app. To run the day from paper instead, with no app at the courts, follow steps 1 to 4 up to **Generate draw** for every competition. Then print from the app instead of starting the competitions:
 
-- **Export PDFs** on the dashboard renders the registration sheets, name sheets, competitor tags, pool and match sheets, and bracket trees of every competition as print-ready PDFs, from the draw you generated. The [sample printouts](../organisers/sample-printouts.md) show a page of each. A competition with no draw yet prints as empty places. It needs LibreOffice where the app runs: install it on the computer, or with Docker run the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf` image.
-- **Download blank template (.xlsx)** on a competition's **Export & print** tab gives the same draw as a workbook with linked formulas for scoring by hand. Before the draw it gives empty places only, sized from the expected number of participants, and the tab warns if you have not shuffled the competitor list yet.
+- **Export PDFs** on the dashboard renders print-ready PDFs from the draw you generated. They cover the registration sheets, name sheets, competitor tags, pool and match sheets, and bracket trees of every competition. The [sample printouts](../organisers/sample-printouts.md) show a page of each. A competition with no draw yet prints as empty places. It needs LibreOffice where the app runs: install it on the computer, or with Docker run the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf` image.
+- **Download blank template (.xlsx)** on a competition's **Export & print** tab gives the same draw as a workbook with linked formulas for scoring by hand. Before the draw it gives empty places only, sized from the expected number of participants. The tab warns if you have not shuffled the competitor list yet.
 
 Neither export covers a Swiss competition; follow its live standings instead. Refer to [Export and print](../organisers/run-tournament.md#export-and-print).
 
@@ -66,7 +66,7 @@ If you have multiple shiai-jo and run on printed brackets, share each competitio
 
 1. Download the blank template (.xlsx) from the competition's page, upload it to Google Drive and open it with Google Sheets. The workbook's formulas work in Google Sheets as they do in Excel.
 2. Share the sheet with the person at each table, with permission to edit.
-3. At each table, open the sheet on any device with a browser or the Google Sheets app, and type that court's results into its own matches: the points in the score cells, and an **X** in the centre column for a tie.
+3. At each table, open the sheet on any device with a browser or the Google Sheets app. Type that court's results into its own matches: the points in the score cells, and an **X** in the centre column for a tie.
 
 ## Next steps
 

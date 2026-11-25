@@ -1,6 +1,6 @@
 # Follow the tournament
 
-The public viewer needs no password. It is the shared screen for competitors, coaches, and spectators. Open the tournament URL on any device on the same network and you see results as they happen, the standings, and the bracket as the day unfolds.
+The public viewer needs no password. It is the shared screen for competitors, coaches, and spectators. Open the tournament URL on any device on the same network. You then see results as they happen, the standings, and the bracket as the day unfolds.
 
 If you are not sure which role fits you, refer to [Choosing your setup](../start-here/choosing-your-setup.md) for a full guide.
 
@@ -45,7 +45,7 @@ The queue updates live; if another competition on the same shiai-jo finishes or 
 
 ### Projected start times
 
-Each bout has a planned start time. When a shiai-jo runs behind or ahead of its plan, the viewer shows a projected start time instead, written with a tilde, for example "~10:52" (screen readers announce "about 10:52"). It replaces the planned time. The planned time is not shown beside it.
+Each bout has a planned start time. When a shiai-jo runs behind or ahead of its plan, the viewer shows a projected start time instead. It is written with a tilde, for example "~10:52" (screen readers announce "about 10:52"). It replaces the planned time. The planned time is not shown beside it.
 
 The projected time is the app's estimate of when the bout will really start. It appears only when the estimate differs from the plan by 5 minutes or more. When a shiai-jo is within 5 minutes of its schedule, the planned time shows as usual.
 
@@ -55,9 +55,19 @@ The app works out the drift for each shiai-jo across every competition sharing i
 - When no bout is running, from how long the first waiting bout is already past its planned start.
 - If neither applies, there is no drift.
 
-You see the projected time wherever upcoming bouts appear: in the home page's **Up next** list, on the schedule, on match cards, on your watchlist, on the lobby screen, on the competition match list, and on court scoreboards. Every public screen shows the same time for a bout.
+You see the projected time wherever upcoming bouts appear:
 
-The estimate refreshes every minute and as results arrive. It takes the time from the tournament server, not from your device's clock, and shows it in your device's time zone. A projected start is never earlier than now, never earlier than when the running bout is expected to end, and at least one match slot after the previous waiting bout. If a bout runs long, the next bout shows the current time (for example ~10:52 at 10:52), moving on minute by minute.
+- The home page's **Up next** list.
+- The schedule.
+- Match cards.
+- Your watchlist.
+- The lobby screen.
+- The competition match list.
+- Court scoreboards.
+
+Every public screen shows the same time for a bout.
+
+The estimate refreshes every minute and as results arrive. It takes the time from the tournament server, not from your device's clock, and shows it in your device's time zone. A projected start is never earlier than now, nor earlier than when the running bout is expected to end. It is also at least one match slot after the previous waiting bout. If a bout runs long, the next bout shows the current time (for example ~10:52 at 10:52), moving on minute by minute.
 
 Keep a few limits in mind:
 
@@ -71,15 +81,15 @@ Keep a few limits in mind:
 
 Once the draw for a competition has run, its competitors are numbered. The number starts with a short prefix that belongs to that competition, so "K12" and "M12" are two different people in two different draws. Swiss competitions are the exception and use no numbers at all.
 
-The same number identifies that competitor everywhere it appears: on their tag, on the pool or draw sheet, on the Names to Print cards, at the desk, and beside their name on screen in the viewer and on the venue's display boards. Type it the way it is printed, prefix included:
+The same number identifies that competitor everywhere it appears. It is on their tag, on the pool or draw sheet, on the Names to Print cards and at the desk. It is also beside their name on screen, in the viewer and on the venue's display boards. Type it the way it is printed, prefix included:
 
-- **The prefix on its own** brings up that whole draw. Type "K" and every K number is listed, along with anyone whose name or dojo happens to contain a "k". A prefix can carry digits of its own when the plain letter was already taken by another competition: "K02" is then a prefix like any other, so typing "K02" lists that whole draw and "K" lists both.
+- **The prefix on its own** brings up that whole draw. Type "K" and every K number is listed, along with anyone whose name or dojo happens to contain a "k". A prefix can carry digits of its own when the plain letter was already taken by another competition. "K02" is then a prefix like any other. Typing "K02" lists that whole draw, and "K" lists both.
 - **The prefix and the digits** finds that one competitor. "K12" finds K12, and not K120.
 - **Digits on their own** find nobody by number. "12" is not a competitor number, because it does not say which competition it belongs to. As with the prefix on its own, anyone whose name or dojo happens to contain "12" is still listed.
 
 Names and dojos still match on any part of what you type, so a surname fragment is enough for those. Only the number needs to be typed in full.
 
-Refer to [QR codes on competitor tags](#qr-codes-on-competitor-tags): if you have the tag in your hand, scanning it adds that competitor to your watchlist, with no typing at all.
+If you have the tag in your hand, scanning it adds that competitor to your watchlist, with no typing at all. Refer to [QR codes on competitor tags](#qr-codes-on-competitor-tags).
 
 If someone is entered in more than one competition, they have a separate number in each one, and the filter lists them once per competition. Searching either number finds them, and each result tells you which competition it belongs to.
 
@@ -87,7 +97,7 @@ If someone is entered in more than one competition, they have a separate number 
 
 An organiser can choose to show competitor numbers instead of names on the public pages. In that competition every competitor reads as their number, such as K12, on the schedule, the standings, the bracket, the court displays and the live updates. Dojo names and team names stay visible, and the members of a team read as a label built from the team's number. The competitor-number search above is then the way to find someone: type the number, prefix included, as printed on their tag. A name typed into the search finds nobody in that competition, though a dojo still matches.
 
-If you hold a link from the organiser, open it to see names. A link on a competitor's tag shows that competitor's name, and a team's link shows the names of that team's members. A competition link, shown at the venue as a QR code, shows every name in the competition. Your phone keeps the link, so the names stay shown on that phone until the link stops working: the organiser sets when that happens, and a link that has stopped says so and offers the competition by numbers. Open the link on a phone you trust, because it shows names to whoever uses that phone. Some competitions give no link at all, and show numbers only.
+If you hold a link from the organiser, open it to see names. A link on a competitor's tag shows that competitor's name, and a team's link shows the names of that team's members. A competition link, shown at the venue as a QR code, shows every name in the competition. Your phone keeps the link, so the names stay shown on that phone until the link stops working. The organiser sets when that happens. A link that has stopped says so and offers the competition by numbers. Open the link on a phone you trust, because it shows names to whoever uses that phone. Some competitions give no link at all, and show numbers only.
 
 Refer to [Hide competitor names from the public](../organisers/hide-competitor-names.md) for the organiser's side.
 
@@ -97,9 +107,9 @@ Your watchlist is kept on the device you built it on. It is not tied to an accou
 
 The share sheet gives you a link, and a QR code when the list is short enough to fit in one. Anyone who opens the link gets those competitors **added** to their own watchlist. It never replaces what they are already watching, so a coach can send the same link to every parent without anyone losing their own list.
 
-Share the link on the day of the tournament. Competitors are identified by their number where they have one, and numbers come from the draw, so a link created before a draw is regenerated can point at a different competitor afterwards.
+Share the link on the day of the tournament. Competitors are identified by their number where they have one, and numbers come from the draw. A link created before a draw is regenerated can therefore point at a different competitor afterwards.
 
-On the home screen, the address bar carries your watchlist too, and it updates as you add or remove someone. A bookmark of the home screen, or its address copied into another browser, therefore works like a shared link: opening it adds those competitors. Because opening a link only ever adds, an older copy brings back anyone you have removed since. To send your list to someone else, use **Share** rather than the address bar: on the venue network the address bar can show the venue's local address, which works only on that network, while Share uses the tournament's public address when the organiser has set one.
+On the home screen, the address bar carries your watchlist too, and it updates as you add or remove someone. A bookmark of the home screen, or its address copied into another browser, therefore works like a shared link: opening it adds those competitors. Because opening a link only ever adds, an older copy brings back anyone you have removed since. To send your list to someone else, use **Share** rather than the address bar. On the venue network, the address bar can show the venue's local address, which works only on that network. Share uses the tournament's public address when the organiser has set one.
 
 ## Scoreboards and court displays
 
@@ -109,7 +119,7 @@ The app provides three display URLs:
 
 - `/display?court=A` shows a single court's current match, upcoming queue, and recent results.
 - `/display?court=all` shows every court at once, for a lobby or overview screen.
-- Add `&overlay=true` to a single-court URL (for example, `/display?court=A&overlay=true`) for a transparent variant you key into a video stream as a browser source (for example, OBS or vMix), so online viewers see competitor names and the current score over the video.
+- Add `&overlay=true` to a single-court URL (for example, `/display?court=A&overlay=true`) for a transparent variant. You key it into a video stream as a browser source (for example, OBS or vMix), so online viewers see competitor names and the current score over the video.
 
 ![Single-court scoreboard for shiai-jo A: the current pool's bouts with the running one highlighted, Shiro on the left and Aka in red on the right, and the next pool's bouts listed below.](../../screenshots/display-scoreboard.png)
 
@@ -143,4 +153,4 @@ Scores entered by the operator appear on the viewer immediately, across every co
 When the organiser sets the tournament public URL, each printed competitor tag includes a personal QR code. Scanning it opens the viewer and adds that competitor to your watchlist, so their next match and results appear on the home screen. The code is a shared watchlist link with one competitor in it: it adds to whatever you already watch and never removes anyone. If that competitor's competition is still loading when you scan, they are added as soon as it loads.
 
 !!! tip
-    If the competition hides names and gives a link per person, the code on the tag is that competitor's own link: scanning it follows the competitor and shows their name on your phone. A competition that hides names with no per-person link keeps the watchlist code on its tags. The code only works once the organiser has configured a public URL for the tournament. If scanning your tag does not open anything, ask the organiser for the tournament URL and add yourself to the watchlist by name or number instead.
+    If the competition hides names and gives a link per person, the code on the tag is that competitor's own link. Scanning it follows the competitor and shows their name on your phone. A competition that hides names with no per-person link keeps the watchlist code on its tags. The code only works once the organiser has configured a public URL for the tournament. If scanning your tag does not open anything, ask the organiser for the tournament URL and add yourself to the watchlist by name or number instead.

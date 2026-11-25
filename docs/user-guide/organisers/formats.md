@@ -1,6 +1,6 @@
 # Tournament formats
 
-bracket-creator supports four competition formats. The format determines how competitors are paired and how the final standings are reached. The choice between individual and team play is separate, made at competition creation; all four formats support both. Refer to [Team tournaments](team-tournaments.md) for team-specific behaviour.
+bracket-creator supports four competition formats. The format determines how competitors are paired and how the final standings are reached. The choice between individual and team play is separate, made at competition creation. All four formats support both. Refer to [Team tournaments](team-tournaments.md) for team-specific behaviour.
 
 ## Choosing a format
 
@@ -22,7 +22,7 @@ Knockout is a direct single-elimination format. Each match eliminates one compet
 
 Use knockout when the field is small, or when you are running a dedicated knockout stage after a separate qualifying event.
 
-A knockout competition splits its bracket across shiai-jo just as a mixed one does, so it must be assigned **1, 2, 4, 8 or 16 shiai-jo (courts)**. Refer to [Mixed](#mixed) for the reason, or [How many shiai-jo a competition can use](knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
+A knockout competition splits its bracket across shiai-jo just as a mixed one does. It must therefore be assigned **1, 2, 4, 8 or 16 shiai-jo (courts)**. Refer to [Mixed](#mixed) for the reason, or [How many shiai-jo a competition can use](knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
 
 ## Mixed
 
@@ -37,11 +37,11 @@ Use mixed for most events. Pools give every competitor several matches before th
 
 The knockout half is not a fresh random draw. Each shiai-jo gets its own block of the bracket. A pool's winner stays in that block, and its other qualifiers cross into a partner shiai-jo's block. This keeps two competitors from the same pool apart for as long as the bracket allows. Byes are worked out within each block, and the seeds you set decide which quarter of the draw the top competitors land in. Refer to [The knockout draw](knockout-draw.md) for the full rules and worked examples.
 
-Because those blocks merge in pairs, a mixed competition must be assigned **1, 2, 4, 8 or 16 shiai-jo (courts)**. Two blocks produce one survivor, those survivors pair off again, and so on, so the count has to halve cleanly all the way down to a single final. Being even is not enough on its own: six blocks pair off into three, and three cannot pair off again, so 6 and 10 are refused just as 3, 5 and 7 are. A single shiai-jo is always allowed. Where each pool sends up two or more qualifiers, its block splits into two halves that act as partner shiai-jo. Where each pool sends up one, nothing crosses and the block is left whole.
+Because those blocks merge in pairs, a mixed competition must be assigned **1, 2, 4, 8 or 16 shiai-jo (courts)**. Two blocks produce one survivor, those survivors pair off again, and so on. The count therefore has to halve cleanly all the way down to a single final. Being even is not enough on its own. Six blocks pair off into three, and three cannot pair off again. So 6 and 10 are refused just as 3, 5 and 7 are. A single shiai-jo is always allowed. Where each pool sends up two or more qualifiers, its block splits into two halves that act as partner shiai-jo. Where each pool sends up one, nothing crosses and the block is left whole.
 
-This applies to the competition's own allocation, not to the venue. A hall with three shiai-jo is normal and stays as it is: it runs each of its competitions on 1 or 2 of the three, and can run two competitions side by side to keep all three busy. Knockout competitions follow the same rule, because they also split their bracket across shiai-jo. League and Swiss competitions produce no bracket and can use any number the tournament has. Refer to [How many shiai-jo a competition can use](knockout-draw.md#how-many-shiai-jo-a-competition-can-use).
+This applies to the competition's own allocation, not to the venue. A hall with three shiai-jo is normal and stays as it is. It runs each of its competitions on 1 or 2 of the three. It can run two competitions side by side to keep all three busy. Knockout competitions follow the same rule, because they also split their bracket across shiai-jo. League and Swiss competitions produce no bracket and can use any number the tournament has. Refer to [How many shiai-jo a competition can use](knockout-draw.md#how-many-shiai-jo-a-competition-can-use).
 
-By default every pool sends the same number of qualifiers, set by **Winners per pool**, which can be at most **Players per pool** (one more when pool size is a minimum). With pool size set to a minimum, two further options let oversized pools send an extra qualifier instead of leaving the difference as byes, or let you choose pool sizes so the qualifiers fill the bracket exactly. Refer to [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool).
+By default every pool sends the same number of qualifiers, set by **Winners per pool**. That number can be at most **Players per pool** (one more when pool size is a minimum). With pool size set to a minimum, two further options are available. One lets oversized pools send an extra qualifier instead of leaving the difference as byes. The other has the app choose pool sizes so the qualifiers fill the bracket exactly. Refer to [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool).
 
 ## League
 
@@ -49,7 +49,7 @@ League is a full round-robin: every competitor meets every other competitor. Fin
 
 Use league for small fields (typically eight or fewer competitors) where you want standings that reflect the complete head-to-head record rather than a single bracket run.
 
-Of the podium places in a league, only 3rd can be shared: a tie for 1st or 2nd place is always settled by a tie-breaker with a winner. Refer to [Ties in a league](team-tournaments.md#ties-in-a-league) for 3rd place, lower places and lots.
+Of the podium places in a league, only 3rd can be shared. A tie for 1st or 2nd place is always settled by a tie-breaker with a winner. Refer to [Ties in a league](team-tournaments.md#ties-in-a-league) for 3rd place, lower places and lots.
 
 ## Swiss
 
@@ -61,28 +61,28 @@ Swiss is a tournament system that runs over a fixed number of rounds. Competitor
 Use Swiss for large individual fields where a full round-robin would require too many rounds, but you still want every competitor to play multiple well-matched bouts.
 
 !!! note
-    Swiss is a format, not a status. A Swiss competition runs through the same lifecycle as mixed and league, but its rounds are generated one at a time rather than all at once.
+    Swiss is a format, not a status. A Swiss competition runs through the same lifecycle as mixed and league. Its rounds, though, are generated one at a time rather than all at once.
 
 !!! note
     A Swiss competition cannot hide competitor names from the public yet, because a Swiss draw gives competitors no numbers to show instead. The **Competitor names on public pages** field is not offered for it, and a tournament-wide choice leaves Swiss competitions as they are. The other three formats can hide names. Refer to [Hide competitor names from the public](hide-competitor-names.md).
 
 ### Swiss round flow
 
-Before play begins, set the number of rounds in the competition settings. You can change this number later, including after rounds have started; the next round you generate uses the updated number. Then follow these steps for each round:
+Before play begins, set the number of rounds in the competition settings. You can change this number later, including after rounds have started. The next round you generate uses the updated number. Then follow these steps for each round:
 
-1. **Start the competition.** Round 1 pairings are generated automatically. If seeds are set, round 1 uses fold pairing (1 vs N, 2 vs N-1, and so on). Without seeds, the pairing is deterministic-random. From round 2 onward, players with similar win records face each other. With an odd number of active competitors, one receives a bye each round: the lowest-ranked competitor who has not had one yet, recorded as a win with no points scored.
+1. **Start the competition.** Round 1 pairings are generated automatically. If seeds are set, round 1 uses fold pairing (1 vs N, 2 vs N-1, and so on). Without seeds, the pairing is deterministic-random. From round 2 onward, players with similar win records face each other. With an odd number of active competitors, one receives a bye each round. It goes to the lowest-ranked competitor who has not had one yet, and is recorded as a win with no points scored.
 
 2. **Record match results.** Scorers enter results in the tournament app. All matches in the current round must be completed before you can advance.
 
-3. **Review the standings.** Standings update in real time and are ranked by wins, then the scoring detail for the competition kind (points scored for individual, the full [team tie-break chain](team-tournaments.md#team-standings-and-tie-breaks) for teams, accumulated flags for [Engi](engi.md#standings)), then head-to-head, then name order. Swiss does not follow the league tie rule: it never schedules a tie-break bout. The standings page is public and visible to competitors and spectators.
+3. **Review the standings.** Standings update in real time. They are ranked by wins, then the scoring detail for the competition kind, then head-to-head, then name order. The scoring detail is points scored for individual, the full [team tie-break chain](team-tournaments.md#team-standings-and-tie-breaks) for teams, and accumulated flags for [Engi](engi.md#standings). Swiss does not follow the league tie rule: it never schedules a tie-break bout. The standings page is public and visible to competitors and spectators.
 
-4. **Generate the next round.** Once all matches in the current round are complete, use the admin panel to generate the next round's pairings. The app refuses to generate a round while any match in the current round is unfinished, and it stops after the last round you set.
+4. **Generate the next round.** Once all matches in the current round are complete, use the admin panel to generate the next round's pairings. The app refuses to generate a round while any match in the current round is unfinished. It stops after the last round you set.
 
 Repeat steps 2 through 4 until all rounds are done.
 
 ## Showing numbers instead of names
 
-Knockout, Mixed and League competitions can show competitor numbers instead of names on the public pages, for events that do not want every name read off a phone or a court display. The numbers come from the draw, so each of these formats has them. Refer to [Hide competitor names from the public](hide-competitor-names.md).
+Knockout, Mixed and League competitions can show competitor numbers instead of names on the public pages. This suits events that do not want every name read off a phone or a court display. The numbers come from the draw, so each of these formats has them. Refer to [Hide competitor names from the public](hide-competitor-names.md).
 
 ## Competition lifecycle
 

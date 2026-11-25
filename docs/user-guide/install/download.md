@@ -8,7 +8,7 @@ Once the app is running, open `http://localhost:8080` on that computer. Courts a
 
 Docker runs the same app on macOS, Windows and Linux. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine on Linux). The tournament is stored in a `tournament-data` folder that you create once.
 
-On Linux, make that folder writable by the container's user before the first run, or the app cannot save the tournament: create it with `mkdir -p tournament-data`, then run `sudo chown 65534 tournament-data`. Docker Desktop on macOS and Windows handles that for you. [Install](install.md#docker) explains why, and lists the other images.
+On Linux, make that folder writable by the container's user before the first run, or the app cannot save the tournament. Create it with `mkdir -p tournament-data`, then run `sudo chown 65534 tournament-data`. Docker Desktop on macOS and Windows handles that for you. [Install](install.md#docker) explains why, and lists the other images.
 
 Then run the tournament app image:
 

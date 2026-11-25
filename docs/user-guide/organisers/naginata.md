@@ -32,7 +32,7 @@ competition for another art ticks **Engi** alone.
 ## Sune ippon
 
 Turn on **Naginata competition** and the score editor's waza buttons gain an **S**
-(Sune) alongside the kendo set, so the row reads **M K D T S H**. Award it the
+(Sune) alongside the kendo set. The row then reads **M K D T S H**. Award it the
 same way as any other waza:
 
 - On screen: tap **S** under the side that scored.
@@ -47,16 +47,16 @@ exactly as it does for kendo.
 ## Third-place match
 
 Whether a competition awards two joint 3rd places or decides a single one with
-a bronze match is its own setting: the **Award two joint 3rd places**
+a bronze match is its own setting. It is the **Award two joint 3rd places**
 checkbox on the competition's **Settings** tab. It is independent of the **Naginata competition** and **Engi (kata competition)** checkboxes. It applies to knockout, pools-then-knockout, and
-league competitions; it is not shown for Swiss, which has no bracket.
+league competitions. It is not shown for Swiss, which has no bracket.
 
 Kendo awards two equal 3rd places to the beaten semi-finalists and plays no
-bronze match; that is the default for every new competition. Naginata
+bronze match. That is the default for every new competition. Naginata
 conventionally awards a single 3rd instead, so turning on **Naginata
 competition** also unticks **Award two joint 3rd places** for you. You can tick it back on afterwards if your event wants naginata to share 3rd place
-too. The same applies in reverse: a kendo (non-naginata) competition can turn
-the checkbox off to decide a single 3rd with a bronze match, for example for a
+too. The same applies in reverse. A kendo (non-naginata) competition can turn
+the checkbox off to decide a single 3rd with a bronze match. This suits, for example, a
 selection event that needs exactly one bronze medal.
 
 When a single 3rd place is in effect and both semi-finals are complete, the

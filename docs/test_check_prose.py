@@ -238,6 +238,59 @@ class MarkdownUnchangedTest(unittest.TestCase):
         self.assertEqual(check_prose.check_markdown("```\nthe mat\n```\n"), [])
 
 
+def words(n: int) -> str:
+    """A sentence of exactly n words."""
+    return " ".join(["Word"] + ["word"] * (n - 1)) + "."
+
+
+class SentenceLengthTest(unittest.TestCase):
+    def rules(self, text):
+        return rules_by_line(check_prose.check_markdown(text))
+
+    def test_a_sentence_over_the_limit_is_refused_at_its_first_line(self):
+        self.assertEqual(self.rules(f"{words(40)}\n\n{words(41)}\n"), [(3, "long-sentence")])
+
+    def test_a_sentence_wrapped_over_lines_is_one_sentence(self):
+        wrapped = words(41).replace(" word word", "\nword word", 1)
+        self.assertEqual(self.rules(wrapped), [(1, "long-sentence")])
+
+    def test_list_items_headings_and_tables_end_a_sentence(self):
+        half = words(30)[:-1]
+        text = f"- {half}\n- {half}.\n\n## {half}\n{half}.\n\n{half}\n| {half} |\n{half}.\n"
+        self.assertEqual(self.rules(text), [])
+
+    def test_code_quotations_and_link_targets_are_one_word_or_none(self):
+        quoted = '"' + " ".join(["q"] * 20) + '"'
+        text = words(35)[:-1] + f" `a b c d e f` {quoted} [a link](https://example.com/a/b/c).\n"
+        self.assertEqual(self.rules(text), [])
+
+    def test_a_quotation_that_ends_a_sentence_ends_it(self):
+        text = words(30)[:-1] + ' reads "Reset the password." ' + words(30)
+        self.assertEqual(self.rules(text), [])
+
+    def test_an_abbreviation_does_not_end_a_sentence(self):
+        text = words(20)[:-1] + " e.g. " + words(21).lower()
+        self.assertEqual(self.rules(text), [(1, "long-sentence")])
+
+    def test_fenced_code_is_not_a_sentence(self):
+        self.assertEqual(self.rules(f"```\n{words(60)}\n```\n"), [])
+
+    def test_an_exception_with_a_reason_lets_the_sentence_stand(self):
+        long = words(41).replace(" word", "\nword", 1)
+        self.assertEqual(self.rules(f"{long} <!-- long-sentence: quoted from the FIK rules -->\n"), [])
+
+    def test_an_exception_needs_a_reason(self):
+        self.assertEqual(self.rules(f"{words(41)} <!-- long-sentence: -->\n"), [(1, "long-sentence-exception")])
+
+    def test_an_exception_with_no_long_sentence_is_refused(self):
+        text = f"{words(10)} <!-- long-sentence: stale -->\n"
+        self.assertEqual(self.rules(text), [(1, "long-sentence-exception")])
+
+    def test_html_text_is_checked_too(self):
+        html = f"<p>{words(41)}</p>\n<p>{words(40)}</p>\n"
+        self.assertEqual(rules_by_line(check_prose.check_html(html)), [(1, "long-sentence")])
+
+
 class MainTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

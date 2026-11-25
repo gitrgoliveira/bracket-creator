@@ -40,7 +40,7 @@ Everything the tables need to run the day on paper: the pool draw, every pool's 
 
 ## Team competition
 
-12 teams of five in pools of three, the first two of each pool going through to a knockout, on two shiai-jo. Printed from the example workbook [pools-example-medium-teams.xlsx](https://github.com/gitrgoliveira/bracket-creator/blob/main/pools-example-medium-teams.xlsx). There are no competitor tags: tags are printed for individual competitors only (with `print`, a workbook counts as a team one when its name contains `team` or it is named with `--team-file`).
+12 teams of five in pools of three, the first two of each pool going through to a knockout, on two shiai-jo. Printed from the example workbook [pools-example-medium-teams.xlsx](https://github.com/gitrgoliveira/bracket-creator/blob/main/pools-example-medium-teams.xlsx). There are no competitor tags: tags are printed for individual competitors only. With `print`, a workbook counts as a team one when its name contains `team` or it is named with `--team-file`.
 
 ### Registration sheet
 

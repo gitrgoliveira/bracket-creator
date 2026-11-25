@@ -95,8 +95,8 @@ CI publishes **three images** to GHCR, each built for amd64 and arm64:
   vendor-frontend, esbuild) and adds shell completions and man pages. It publishes archives for
   Linux, macOS, and Windows (zip on Windows), one universal macOS binary in place of the two
   per-architecture ones, and deb, rpm, and apk packages.
-- Two jobs follow the release: **Smoke test Linux packages** installs the amd64 deb, rpm, and apk
-  and runs the binary, and **Bump Homebrew formula** points the formula in the
+- Two jobs follow the release. **Smoke test Linux packages** installs the amd64 deb, rpm, and apk
+  and runs the binary. **Bump Homebrew formula** points the formula in the
   `gitrgoliveira/homebrew-tap` repository at the new tag's source archive (the formula builds
   from source).
 
@@ -120,8 +120,8 @@ flowchart TB
     caddy --> cvol
 ```
 
-- The Compose file (`deploy/docker/docker-compose.yaml`) runs `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest` by default; change its `image:` line to `bracket-creator-mobile` for the lean image without PDF export.
-- App runs as **non-root (uid 65534)**. The data volume must be owned by that uid, or the app refuses to start: at startup it tries a write in the data folder, the transaction log (`.wal/`), every competition folder, its match history, its score event logs (`events/`), and, when present, the `branding/`, `sponsors/`, `backups/` and `.restore/` folders, and names every one it cannot write to. App port 8080 is `expose`d to the proxy only, never published to the host.
+- The Compose file (`deploy/docker/docker-compose.yaml`) runs `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest` by default. Change its `image:` line to `bracket-creator-mobile` for the lean image without PDF export.
+- App runs as **non-root (uid 65534)**. The data volume must be owned by that uid, or the app refuses to start. At startup it tries a write in the data folder, the transaction log (`.wal/`), every competition folder, its match history and its score event logs (`events/`). When present, it also tries the `branding/`, `sponsors/`, `backups/` and `.restore/` folders. It names every one it cannot write to. App port 8080 is `expose`d to the proxy only, never published to the host.
 - `restart: unless-stopped` (compose) / auto-restart (cloud) brings the app back after reboots.
 
 ## 3. Deployment options
@@ -162,7 +162,7 @@ flowchart TB
   TLS proxy on the same host. A proxy on another host, or devices on the venue LAN reaching the
   app directly, need `--bind 0.0.0.0` (or `BIND_ADDRESS`).
 - **Which image each target runs.** Compose and Oracle default to `bracket-creator-mobile-pdf:latest`
-  (Oracle's 12 GB of RAM leaves room for LibreOffice); GCP defaults to the lean
+  (Oracle's 12 GB of RAM leaves room for LibreOffice). GCP defaults to the lean
   `bracket-creator-mobile:latest`, which matters on a 1 GB `e2-micro`. The Terraform modules take
   the image as `image_ref`, and the Compose file names it on its `image:` line. Oracle's Ampere
   instance is arm64, which the multi-arch images cover.
@@ -249,8 +249,8 @@ Each court's display screen can be rendered two ways, and the choice decides whe
 scoreboard freezes during a Wi-Fi outage:
 
 - **Same machine as the operator console (recommended).** Connect a TV or monitor to the
-  operator's laptop or mini-PC with an **HDMI cable**, extend the desktop, and open the court's
-  display URL in a second browser window on that same machine. The operator console and the display board are then two tabs in the same browser on the same computer. They share a private same-origin channel, so every score the operator records reaches the board **directly, on the machine, with no network hop**. If the venue Wi-Fi drops mid-match, that court's
+  operator's laptop or mini-PC with an **HDMI cable** and extend the desktop. Then open the
+  court's display URL in a second browser window on that same machine. The operator console and the display board are then two tabs in the same browser on the same computer. They share a private same-origin channel, so every score the operator records reaches the board **directly, on the machine, with no network hop**. If the venue Wi-Fi drops mid-match, that court's
   scoreboard keeps updating from the operator's entries for as long as the scoring tab stays
   open. The board shows a small amber dot while it is running on this local feed (refer to
   [the scoreboard status dot](../user-guide/spectators/following.md#scoreboards-and-court-displays)).
@@ -267,10 +267,10 @@ flowchart TB
     op -->|"writes, queued + synced<br/>when the link returns"| net["Venue network /<br/>app server"]
 ```
 
-This local hub needs no internet, no secure context, and no extra software. It works in every topology (cloud-hosted, on-prem, or bare-IP HTTP). It **complements** the network fixes in [Venue connectivity](#venue-connectivity-a-four-court-event) rather than replacing them. The operator's scoring taps and writes are still held in the browser's outbox and synced to the server once the link returns, so the authoritative record stays correct. It is per machine
+This local hub needs no internet, no secure context, and no extra software. It works in every topology (cloud-hosted, on-prem, or bare-IP HTTP). It **complements** the network fixes in [Venue connectivity](#venue-connectivity-a-four-court-event) rather than replacing them. The operator's scoring taps and writes are still held in the browser's outbox and synced to the server once the link returns. The authoritative record therefore stays correct. It is per machine
 and per court. Reloading the **display** tab during an outage is fine. It cold-starts from the operator tab's snapshot over the same channel, as long as an operator tab is still open on that
 machine to answer (it only stays blank if none is). The genuine gap is reloading the **operator**
-tab itself mid-outage, since it holds the court's working data while offline and would have
+tab itself mid-outage. That tab holds the court's working data while offline, and would have
 nothing to fetch from the down server.
 
 ## 4. Persistence model
@@ -303,10 +303,10 @@ flowchart TB
 The diagram shows the main files; [On disk layout](data-model.md#4-on-disk-layout) in the data
 model lists every file and what its columns mean.
 
-- **Files, not a database.** State is human-readable Markdown + CSV on disk, and each match keeps an
+- **Files, not a database.** State is human-readable Markdown + CSV on disk. Each match keeps an
   append-only log of its scoring taps and its writes (JSON lines) beside its audit history. Every write made
   inside a transaction is made durable through a write-ahead log replayed on startup. The disk survives reboots and stop/start.
-- **Backups.** The app takes a daily copy of the whole tournament into `tournament-data/backups/` when the data changed, and another at a normal shutdown if anything changed since the newest daily copy. The admin console also downloads a backup on demand. Those copies sit on the same disk, so keep a downloaded archive or a disk snapshot off the VM as well. A plain copy of `tournament-data/` taken while the server runs can catch a multi-file write half done; stop the server first. Refer to [Backup and restore](../user-guide/organisers/backup-and-restore.md).
+- **Backups.** The app takes a daily copy of the whole tournament into `tournament-data/backups/` when the data changed. It takes another at a normal shutdown if anything changed since the newest daily copy. The admin console also downloads a backup on demand. Those copies sit on the same disk, so keep a downloaded archive or a disk snapshot off the VM as well. A plain copy of `tournament-data/` taken while the server runs can catch a multi-file write half done, so stop the server first. Refer to [Backup and restore](../user-guide/organisers/backup-and-restore.md).
 - **Disk sizing is not about data volume.** Tournament state is tiny (KB–MB). The cloud disks
   (30 GB on GCP, 50 GB on Oracle) are the free-tier **boot-disk** allowances (they hold the OS,
   Docker, and the app image, with `tournament-data/` alongside). The module uses the free
@@ -360,6 +360,6 @@ are written to a protected, root-owned file on the instance, never baked into th
 - **Zero-dependency runtime**: no DB, no cache, no message broker. Only the binary, a TLS proxy,
   and a disk.
 - **Graceful shutdown** (30 s): lets in-flight writes finish and SSE streams close cleanly before
-  a container restart, then takes the closing backup copy if the data changed since the newest
+  a container restart. It then takes the closing backup copy if the data changed since the newest
   daily copy.
 - **Teardown is one command** (`terraform destroy`), so no stray paid resources linger.

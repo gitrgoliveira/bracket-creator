@@ -1,6 +1,6 @@
 # Choosing your setup
 
-Two questions shape every tournament you run with bracket-creator. First, how digital your venue is: whether you print and score on paper, keep one device per shiai-jo, or run fully on-screen scoreboards with real-time mobile pages. Second, who runs and scores the matches: trained staff behind an admin password (officiated) or competitors scoring their own bouts with no password required (self-run). You choose each one separately, with one constraint described under [Operating model](#operating-model).
+Two questions shape every tournament you run with bracket-creator. First, how digital your venue is. You might print and score on paper, keep one device per shiai-jo, or run fully on-screen scoreboards with real-time mobile pages. Second, who runs and scores the matches: trained staff behind an admin password (officiated) or competitors scoring their own bouts with no password required (self-run). You choose each one separately, with one constraint described under [Operating model](#operating-model).
 
 ## Digitisation level
 
@@ -57,4 +57,4 @@ Refer to [Following a tournament](../spectators/following.md) for the full list 
 
 ## Start with your first tournament
 
-If this is your first time using the app, work through [Your first tournament](first-tournament.md) for the fastest path from an empty server to real-time results on a screen.
+If this is your first time using the app, work through [Your first tournament](first-tournament.md). It is the fastest path from an empty server to real-time results on a screen.

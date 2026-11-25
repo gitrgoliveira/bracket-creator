@@ -17,14 +17,14 @@ Each option links to its full guide on **GitHub**, where the Compose and Terrafo
 | [GCP free tier](https://github.com/gitrgoliveira/bracket-creator/tree/main/deploy/gcp) | GCP Always-Free e2-micro (1 GB RAM, x86-64), Terraform-deployed | Club-sized events; 1 GB/month egress cap | You want a free cloud VM. Watch the egress cap: a busy day with a few hundred connected viewers can exceed it. |
 | [Oracle free tier](https://github.com/gitrgoliveira/bracket-creator/tree/main/deploy/oracle) | Oracle Always-Free Ampere A1 (2 OCPU / 12 GB, Arm64), Terraform-deployed | Large events; 10 TB/month egress | You need the free-forever tier that matches the app's large-event SSE target. |
 
-The Docker baseline is the reusable core: the GCP and Oracle Terraform modules render the same Compose file and Caddyfile onto a cloud VM using cloud-init. Each guide includes the full prerequisites and a one-command Terraform (or Compose) flow.
+The Docker baseline is the reusable core. The GCP and Oracle Terraform modules render the same Compose file and Caddyfile onto a cloud VM using cloud-init. Each guide includes the full prerequisites and a one-command Terraform (or Compose) flow.
 
 !!! note "PDF export needs the PDF-enabled image"
     The lean default image cannot generate PDFs (competitor tags, name sheets, trees). It ships without LibreOffice to stay small. If your operators export PDFs, run the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest` image variant instead. Excel export works on every image. The [sample printouts](../organisers/sample-printouts.md) show what the PDF export prints.
 
 ## Security
 
-Any deployment reachable over the internet should run in locked mode rather than the default file mode. Locked mode reads a bcrypt hash from an environment variable and turns the password-reset endpoint off (in file mode it answers only the machine running the server). Refer to [Admin authentication](../organisers/operating-modes.md#admin-authentication-mode) for the setup steps.
+Any deployment reachable over the internet should run in locked mode rather than the default file mode. Locked mode reads a bcrypt hash from an environment variable and turns the password-reset endpoint off. In file mode, that endpoint answers only the machine running the server. Refer to [Admin authentication](../organisers/operating-modes.md#admin-authentication-mode) for the setup steps.
 
 ## Backups
 

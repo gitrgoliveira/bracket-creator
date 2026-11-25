@@ -11,7 +11,7 @@ Luke Rodriguez, Team Beta
 Michael Lewis, Team Gamma
 ```
 
-The first column is the participant name. The second column is the dojo or team affiliation. **Both are required**: a competitor is identified by name and dojo together, and two competitors who share a name can only be told apart by it. A row with no dojo is rejected on every path: the command line, the Legacy Web UI, archive import, and the tournament app. Further columns are accepted and kept as metadata, such as a dan grade; they do not affect the draw.
+The first column is the participant name. The second column is the dojo or team affiliation. **Both are required**. A competitor is identified by name and dojo together, and two competitors who share a name can only be told apart by it. A row with no dojo is rejected on every path: the command line, the Legacy Web UI, archive import, and the tournament app. Further columns are accepted and kept as metadata, such as a dan grade; they do not affect the draw.
 
 ## Zekken display name
 
@@ -29,18 +29,18 @@ For team tournaments (`--team-matches N`), each row is one team: the name column
 
 ## How names are stored
 
-Names and dojos are stored title-cased: the first letter of each word is upper-cased and nothing is lower-cased, so `kenshinkan` is stored as `Kenshinkan` and `BKA` stays `BKA`. A word that starts with a digit is kept exactly as typed, so `2nd dojo` is stored as `2nd Dojo` and `3RD` stays `3RD`. The rule applies on the command line, in the generated spreadsheet and in the tournament app, where it also covers team members' names, a fighter typed into a lineup, and the fighting-spirit award's recipient.
+Names and dojos are stored title-cased. The first letter of each word is upper-cased and nothing is lower-cased, so `kenshinkan` is stored as `Kenshinkan` and `BKA` stays `BKA`. A word that starts with a digit is kept exactly as typed, so `2nd dojo` is stored as `2nd Dojo` and `3RD` stays `3RD`. The rule applies on the command line, in the generated spreadsheet and in the tournament app. In the app it also covers team members' names, a fighter typed into a lineup, and the fighting-spirit award's recipient.
 
-Names saved by an earlier release are title-cased the same way when they are loaded. Since nothing is lower-cased, a dojo saved as `2Nd Dojo` keeps that spelling. A name an earlier release kept as pasted, such as `kenshinkan 2nd` (shown then as `Kenshinkan 2Nd`), is spelled `Kenshinkan 2nd` in the participant list, the pools, the seeds and every match not yet fought.
+Names saved by an earlier release are title-cased the same way when they are loaded. Since nothing is lower-cased, a dojo saved as `2Nd Dojo` keeps that spelling. A name an earlier release kept as pasted, such as `kenshinkan 2nd`, was shown then as `Kenshinkan 2Nd`. It is now spelled `Kenshinkan 2nd` in the participant list, the pools, the seeds and every match not yet fought.
 
-A match keeps the names it was recorded with once it has been fought, is under way, or was sent back to the queue with points, fouls, flags or overtime already recorded.
+A match keeps the names it was recorded with once it has been fought or is under way. It also keeps them once it was sent back to the queue with points, fouls, flags or overtime already recorded.
 
 ## Constraints
 
 - Two people who share a name are accepted as long as their dojos differ, which is common with widespread surnames. The same name at the same dojo is one person entered twice and is rejected before any bracket is generated. The tournament app compares names and dojos ignoring case and accents, so `José Ruiz` and `jose ruiz` at the same dojo are one person.
 - The dojo must not be blank. A roster stored before this rule existed, or edited by hand, still loads so it can be repaired. Until you fix the blank dojo, the app refuses every change to that roster (check-ins included) and refuses to generate a draw from it. Each refusal names the participant to fix. Importing a saved tournament is refused the same way: correct the dojo in the archive's participant file and import again.
 - The name must not be blank either. The command line, the Legacy Web UI, and archive import refuse a row with no name and quote it. The tournament app refuses it when you save the roster, and a roster with a blank name cannot be drawn.
-- **Team names are the exception**: two teams may not share a name even at different dojos, because a team's name is what identifies it in results.
+- **Team names are the exception**: two teams may not share a name even at different dojos. A team's name is what identifies it in results.
 - Names in a [seeds file](../commands/create-pools.md#seeding) must match the participant name exactly, accents included. The seeds file is title-cased the same way (refer to [How names are stored](#how-names-are-stored)), so `alice adams` matches `Alice Adams` but `ALICE ADAMS` does not. The same applies to the dojo column of a seeds file.
 
 ## Seeds file

@@ -710,8 +710,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // `opts`, for a page that saves one part of the settings and says itself how
   // the save went (the Posters page, bc-qrps); the Edit tournament form passes
   // none, so its behaviour is the one above:
-  //   quiet       no "Tournament updated" and no saved-offline toast: the page
-  //               shows its own status line;
+  //   quiet       no "Tournament updated", no saved-offline toast and no
+  //               error toast for a save that throws: the page shows its own
+  //               status line;
   //   onRefusal   the page's claim on a refusal (tournament_changed, a 400),
   //               asked before the Edit tournament form's, so a refusal made on
   //               that page reaches it and never the outbox's alert; a page no
@@ -862,7 +863,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // this copy, so a stale save stays refused until then).
       if (e && e.code === "tournament_changed" && e.tournament) {
         onUpdateRef.current(tournamentFromConflict(tRef.current, e.tournament, password, locked));
-      } else {
+      } else if (!quiet) {
+        // A quiet page shows the failure in its own status line, so the
+        // operator is told once.
         showToast(e.message, "error");
       }
       throw e;

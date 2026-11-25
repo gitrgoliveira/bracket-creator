@@ -122,6 +122,11 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             and the Pool Draw sheet's pools), folder import,
                             /reset, logo and sponsor uploads, the Backup and
                             restore page; runtime PNG and import-bundle makers
+    fixtures/posters.mjs    the Posters page: the picker, the boxes of a
+                            poster's pieces (posterBoxes), Print with the
+                            browser's dialog stubbed (printWithoutDialog),
+                            and a PDF reader for pages, page size and fill
+                            colours (readPdf)
     fixtures/archive.mjs    zip reader and writer, CSV parser and formatter
     fixtures/text.mjs       escape: the one regexp escape for a pattern built
                             from the app's text
@@ -231,6 +236,16 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   (cleared by Shuffle unseeded) and Download
                                   results appearing only once a bout is
                                   recorded
+      posters                     the venue posters in a real browser: the
+                                  court letter the largest element, the
+                                  sponsors one row at one height for 1 to 6,
+                                  the viewer code larger than a court code,
+                                  the longest text still fitting a court
+                                  poster; laid out for A4, a court code over
+                                  8 cm; Print all as a PDF: one A4 portrait
+                                  page per poster, the band in colour with
+                                  background graphics off, against a control
+                                  without print-color-adjust
       organiser-locked            locked mode: sign-in with the hashed password,
                                   no Forgot password, and /reset shows it is
                                   disabled.

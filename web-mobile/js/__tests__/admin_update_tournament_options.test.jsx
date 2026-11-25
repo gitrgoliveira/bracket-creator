@@ -116,6 +116,13 @@ describe('the Posters page saves through updateTournament with its options', () 
     expect(showToast).not.toHaveBeenCalled();
   });
 
+  it('a save that throws raises no error toast, so the page alone tells it', async () => {
+    window.API.updateTournament.mockRejectedValueOnce(new Error('Network down'));
+    await expect(appFor('posters').props.onSave({ tournamentVersion: 'v1', posters: {} }, { onRefusal: vi.fn(() => true) }))
+      .rejects.toThrow('Network down');
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
   it('a tournament_changed refusal reaches the page and raises no outbox alert', async () => {
     queueOnce();
     const pageRefusal = vi.fn(() => true);
@@ -195,5 +202,12 @@ describe('the Edit tournament form passes no options, and its path is unchanged'
     await saver(appFor('editTournament')).props.onSave({ tournamentVersion: 'v1', name: 'Autumn Taikai' });
     expect(showToast).toHaveBeenCalledTimes(1);
     expect(showToast.mock.calls[0][1]).toBe('success');
+  });
+
+  it('toasts the error of a save that throws', async () => {
+    window.API.updateTournament.mockRejectedValueOnce(new Error('Network down'));
+    await expect(saver(appFor('editTournament')).props.onSave({ tournamentVersion: 'v1', name: 'Autumn Taikai' }))
+      .rejects.toThrow('Network down');
+    expect(showToast).toHaveBeenCalledWith('Network down', 'error');
   });
 });

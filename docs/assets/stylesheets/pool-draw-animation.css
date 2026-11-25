@@ -371,7 +371,7 @@
 
 	.bcda__grid { column-gap: 0.2rem; }
 	.bcda__seat { min-width: 3.2rem; padding-right: 0.25rem; }
-	.bcda__tag { width: 1rem; height: 1rem; font-size: 0.56rem; }
+	.bcda__tag { width: 1rem; height: 1rem; font-size: 0.6rem; }
 	.bcda__progress { margin-left: 0; width: 100%; }
 }
 

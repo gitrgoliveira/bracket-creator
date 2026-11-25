@@ -111,9 +111,11 @@ describe('QR roundtrip decode', () => {
   });
 });
 
-// The level-M pin. The fixture holds the matrices the encoder produced BEFORE
-// level H was added, so these tests prove the change kept level M byte for
-// byte, not merely that the encoder agrees with itself.
+// The level-M pin. The fixture holds the version 3 and 5 matrices the encoder
+// produced BEFORE level H was added, so these tests prove those two kept level
+// M byte for byte, not merely that the encoder agrees with itself. Level M from
+// version 7 up changes on purpose (block table, version information, alignment
+// order) and is covered by the decode round trips above instead.
 describe('QR level M is unchanged', () => {
   const toRows = (modules, size) => {
     const rows = [];

@@ -39,6 +39,18 @@ function decode(matrix, pad = 0) {
   return jsQR(img.data, img.width, img.height);
 }
 
+// Read the two-bit EC level indicator from the top-left 15-bit format word
+// (ISO 18004 Table C.1, XOR mask 0x5412: 0b00 is level M, 0b10 is level H).
+function formatLevelBits({ size, modules }) {
+  const tlR = [8, 8, 8, 8, 8, 8, 8, 8, 7, 5, 4, 3, 2, 1, 0];
+  const tlC = [0, 1, 2, 3, 4, 5, 7, 8, 8, 8, 8, 8, 8, 8, 8];
+  let word = 0;
+  for (let i = 0; i < 15; i++) {
+    word = (word << 1) | (modules[tlR[i] * size + tlC[i]] === 1 ? 1 : 0);
+  }
+  return ((word ^ 0x5412) >> 13) & 0b11;
+}
+
 // The largest whole-module square whose area is at most `share` of the code:
 // sqrt(share) of the side, rounded DOWN.
 function maxPad(size, share = 0.2) { return Math.floor(Math.sqrt(share) * size); }
@@ -84,8 +96,12 @@ describe('QR level H', () => {
 
   it('marks the code level H in the format information', () => {
     const url = 'https://tournament.example.org/';
-    const result = decode(qrMatrix(url, { level: 'H' }));
-    expect(result.version).toBe(Math.floor((qrMatrix(url, { level: 'H' }).size - 17) / 4));
+    const levelH = qrMatrix(url, { level: 'H' });
+    expect(formatLevelBits(levelH)).toBe(0b10);
+    expect(formatLevelBits(qrMatrix(url))).toBe(0b00);
+    const result = decode(levelH);
+    expect(result).not.toBeNull();
+    expect(result.version).toBe(Math.floor((levelH.size - 17) / 4));
   });
 
   it('differs from level M for the same text', () => {

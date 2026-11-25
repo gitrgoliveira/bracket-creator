@@ -33,7 +33,7 @@ const Modal = window.Modal;
 // Hoisted into ui.jsx when the public watchlist share sheet needed the same
 // "take this link" sheet: a public surface cannot import the admin shell, and
 // a second copy of a QR-plus-copy modal is the drift this repo keeps paying
-// for. qr.js is no longer imported here because ShareLinkModal owns the QR.
+// for. qr.jsx is no longer imported here because ShareLinkModal owns the QR.
 const ShareLinkModal = window.ShareLinkModal;
 
 // Maximum running-match chips rendered in the topbar status strip before the

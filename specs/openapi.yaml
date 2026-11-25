@@ -9833,12 +9833,12 @@ components:
           $ref: '#/components/schemas/PosterChoices'
         courts:
           type: object
-          maxProperties: 32
           description: >
             One entry per court poster, keyed by court label (one non-blank
             character). An entry for a court the tournament no longer has is
-            kept and valid, and is not shown. At most 32 entries (twice the
-            court limit).
+            kept and valid, and is not shown. At most 32 entries that are not
+            empty (twice the court limit); empty entries are dropped before
+            they are counted.
           propertyNames:
             minLength: 1
             maxLength: 1

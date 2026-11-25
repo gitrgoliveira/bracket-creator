@@ -51,6 +51,11 @@ type Store struct {
 	// FileVersion does. Read by CompetitionWriteToken.
 	compWrites sync.Map
 
+	// configWrites counts the moves of any competition's config.md version
+	// (fileCache.bump, through bumpFileVersion and invalidate), store-wide.
+	// Never reset. Read by ConfigWritesToken.
+	configWrites atomic.Uint64
+
 	// keptWAL marks competitions whose transaction log this process kept in
 	// .wal after a commit it could not finish (ErrTxCommitted, or a Done that
 	// failed). The next write to that competition, and the next read, finish
@@ -120,6 +125,21 @@ type fileCache struct {
 	// pre-write data afterwards (mp-n6ke). Read atomically, so callers do not
 	// need to hold mu.
 	version atomic.Uint64
+
+	// storeWrites, when set, is a store-wide counter moved with version
+	// (bump). getFileCache sets it to Store.configWrites for config.md, and
+	// for no other file.
+	storeWrites *atomic.Uint64
+}
+
+// bump advances the version and, for config.md, the store-wide
+// ConfigWritesToken with it. Every move of a version goes through here
+// (bumpFileVersion and invalidate), so the token can never miss one.
+func (f *fileCache) bump() {
+	f.version.Add(1)
+	if f.storeWrites != nil {
+		f.storeWrites.Add(1)
+	}
 }
 
 // invalidate drops the cached body and then advances the version.
@@ -134,7 +154,7 @@ func (f *fileCache) invalidate() {
 	f.data = nil
 	f.mtime = 0
 	f.mu.Unlock()
-	f.version.Add(1)
+	f.bump()
 }
 
 func NewStore(folder string) (*Store, error) {
@@ -406,7 +426,11 @@ func (s *Store) WithCourtExclusivityLock(fn func() error) error {
 func (s *Store) getFileCache(compID, filename string) *fileCache {
 	c, _ := s.compCache.LoadOrStore(compID, &compCache{})
 	cc := c.(*compCache)
-	f, _ := cc.files.LoadOrStore(filename, &fileCache{})
+	fresh := &fileCache{}
+	if filename == "config.md" {
+		fresh.storeWrites = &s.configWrites
+	}
+	f, _ := cc.files.LoadOrStore(filename, fresh)
 	return f.(*fileCache)
 }
 
@@ -579,7 +603,21 @@ func (s *Store) FileMtime(compID, filename string) int64 {
 // recompute; a MISSED bump serves stale data. Callers should therefore bump on
 // anything that can change the file, including deletes and transaction aborts.
 func (s *Store) bumpFileVersion(compID, filename string) {
-	s.getFileCache(compID, filename).version.Add(1)
+	s.getFileCache(compID, filename).bump()
+}
+
+// ConfigWritesToken returns a store-wide count of config.md writes across
+// every competition: it moves whenever any competition's config.md version
+// moves (a create, a settings save, a draw generated, published, hidden or
+// discarded, a start, a transaction abort, a delete or a restore), and never
+// for a score write, a check-in, an overrides save or a read.
+//
+// A singleflight over a read of several competitions (the viewer list, the
+// court feeds) keys on it, so a request made after a config write never joins
+// a build begun before it, while live scoring, which writes no config.md,
+// keeps sharing builds. Monotonic for the life of the process.
+func (s *Store) ConfigWritesToken() uint64 {
+	return s.configWrites.Load()
 }
 
 // FileVersion returns the monotonic in-process write counter for a file inside

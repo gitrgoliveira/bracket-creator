@@ -898,8 +898,9 @@ func (e *Engine) StartCompetition(id string) error {
 		// Draw already exists; only flip status.
 		return e.transitionDrawToRunning(id)
 	}
-	// One-click path: generate draw then transition.
-	if err := e.runDrawPipeline(id); err != nil {
+	// One-click path: generate draw then transition. The draw is not hidden:
+	// the competition is public as soon as it starts.
+	if err := e.runDrawPipeline(id, false); err != nil {
 		return err
 	}
 	return e.transitionDrawToRunning(id)
@@ -919,7 +920,7 @@ func (e *Engine) GenerateDraw(id string) error {
 	}
 	switch {
 	case state.CanGenerateDraw(comp.Status):
-		return e.runDrawPipeline(id)
+		return e.runDrawPipeline(id, true)
 	case comp.Status == state.CompStatusDrawReady:
 		return validationErrorf("competition %s draw already generated; discard it first to regenerate", id)
 	default:
@@ -1001,6 +1002,7 @@ func (e *Engine) DiscardDraw(id string) error {
 		}
 		current.Status = state.CompStatusSetup
 		current.SwissCurrentRound = 0 // reset so a fresh GenerateDraw can re-initialise it
+		current.DrawHidden = false    // the next GenerateDraw hides its own draft
 		return current, nil
 	})
 	return err
@@ -1233,7 +1235,12 @@ func applyLeagueSinglePool(c *state.Competition, n int) {
 }
 
 // runDrawPipeline runs the full draw-generation pipeline for a Setup
-// competition and commits CompStatusDrawReady.
+// competition and commits CompStatusDrawReady. hideDraw is stored as the
+// competition's DrawHidden in that same commit: GenerateDraw passes true, so
+// a new draft is kept off the public pages until it is published, in every
+// tournament mode (state.Competition.DrawHiddenIn judges self-run at read
+// time); the one-click start passes false, since the competition it starts
+// is public at once.
 //
 // Pipeline limitations (pre-existing):
 //   - Pool/bracket generation (writes pools.csv / bracket.json) runs
@@ -1242,7 +1249,7 @@ func applyLeagueSinglePool(c *state.Competition, n int) {
 //     commit serializes them. Left as a follow-up.
 //   - SaveParticipants also has its own lock acquisition. A failure
 //     mid-pipeline leaves partial state on disk.
-func (e *Engine) runDrawPipeline(id string) error {
+func (e *Engine) runDrawPipeline(id string, hideDraw bool) error {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {
 		return err
@@ -1806,6 +1813,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// nobody changed underneath us. It is a no-op when courts were stored.
 		current.Courts = comp.Courts
 		current.Status = comp.Status
+		current.DrawHidden = hideDraw
 		if comp.Format == state.CompFormatSwiss {
 			current.SwissCurrentRound = comp.SwissCurrentRound
 		}

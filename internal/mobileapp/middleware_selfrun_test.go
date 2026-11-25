@@ -284,7 +284,12 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		// The calendar is the organiser planning view, and each call places every competition once (one estimate per competition).
 		{http.MethodGet, "/api/schedule/calendar"},
 		{http.MethodGet, "/api/schedule/calendar/preview"},
+		// A draw swap (bc-drev) changes who meets whom: the organiser's
+		// review of the draw before the start, never a participant's.
+		{http.MethodPost, "/api/competitions/some-id/draw/swap"},
 	}
+	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodPost, "/api/competitions/:id/draw/swap"),
+		"POST /api/competitions/:id/draw/swap must be organiser-only in self-run")
 	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodGet, "/api/schedule/draft-estimate"),
 		"GET /api/schedule/draft-estimate must be organiser-only in self-run")
 	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodGet, "/api/schedule/calendar"),

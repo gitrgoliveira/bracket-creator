@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -396,6 +397,43 @@ func TestFingerprintDoors(t *testing.T) {
 		require.NoError(t, err)
 		grown := append(players, domain.Player{Name: "Kudo Rin", Dojo: "Akita Dojo"})
 		h.real(http.MethodPost, participants, map[string]any{"players": rosterBody(grown)})
+	})
+
+	// The draw review's swap (bc-drev): a dry run and a resend of a swap that
+	// landed write nothing; the swap itself changes the draw.
+	t.Run("draw swap", func(t *testing.T) {
+		h.t = t
+		const compID = "ind-swap"
+		h.send(http.MethodPost, "/api/competitions", map[string]any{
+			"id": compID, "name": "Individual Swap", "kind": "individual",
+			"format": state.CompFormatKnockout, "courts": []string{"A", "B"},
+			"players": []map[string]any{
+				{"name": "Ueda Sho", "dojo": "Nara Dojo"},
+				{"name": "Ono Rei", "dojo": "Nara Dojo"},
+				{"name": "Abe Taro", "dojo": "Mito Dojo"},
+				{"name": "Goto Yui", "dojo": "Oita Dojo"},
+			},
+		})
+		h.send(http.MethodPost, "/api/competitions/"+compID+"/generate-draw", nil)
+		b, err := pt.Store.LoadBracket(compID)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(b.Rounds[0]), 2)
+		a, other := b.Rounds[0][0].SideAID, b.Rounds[0][1].SideAID
+		pa, ok := engine.LeafSlotOf(b, a)
+		require.True(t, ok)
+		po, ok := engine.LeafSlotOf(b, other)
+		require.True(t, ok)
+		swap := func(dryRun bool) map[string]any {
+			return map[string]any{
+				"a":      map[string]any{"id": a, "place": pa},
+				"b":      map[string]any{"id": other, "place": po},
+				"dryRun": dryRun,
+			}
+		}
+		path := "/api/competitions/" + compID + "/draw/swap"
+		h.noOp(http.MethodPost, path, swap(true))
+		h.real(http.MethodPost, path, swap(false))
+		h.noOp(http.MethodPost, path, swap(false))
 	})
 
 	// Every stamp-table entry and every skipped folder was moved by a measured

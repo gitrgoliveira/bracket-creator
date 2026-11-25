@@ -227,7 +227,7 @@ func respondCompetitionNotFound(c *gin.Context) {
 // table operator. Organiser actions are NOT operational play, so the self-run
 // pass-through would otherwise let an anonymous client tamper with them: the
 // routes below mutate tournament setup (name/password/courts/check-in
-// windows), competition setup (creation + config, seeds), make
+// windows), competition setup (creation + config, seeds, a draw's swaps), make
 // corrections, or destroy data (delete or invalidate a competition, discard a
 // draw, reset overrides, import a tournament). There is no second password
 // for any of them (operator ruling 2026-10-12: the destructive-ops password
@@ -266,6 +266,7 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodDelete + " /api/competitions/:id",                                       // bc-cmpw: deleting a competition, organiser, destructive
 		http.MethodPost + " /api/competitions/:id/invalidate",                              // bc-cmpw: invalidating a competition, organiser, irreversible
 		http.MethodDelete + " /api/competitions/:id/draw",                                  // bc-cmpw: discarding a draw, organiser, destructive
+		http.MethodPost + " /api/competitions/:id/draw/swap",                               // bc-drev: two competitors trade draw places, organiser review before the start
 		http.MethodPost + " /api/competitions/:id/bracket/quarantine",                      // bc-cmpw: setting aside a damaged bracket file, organiser repair
 		http.MethodDelete + " /api/competitions/:id/overrides",                             // bc-cmpw: resetting manual ranking overrides, organiser correction
 		http.MethodPut + " /api/competitions/:id/awards",                                   // bc-cmpw: fighting-spirit awards, organiser

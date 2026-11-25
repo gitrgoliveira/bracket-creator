@@ -220,6 +220,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// confirmedRoutes, after the sign-in, and covers only the routes below.
 	adminSmallBody.Use(RequireConfirmPassword(verifier))
 	RegisterCompetitionHandlers(adminSmallBody, store, eng, hub)
+	RegisterDrawReviewHandlers(adminSmallBody, store, eng, hub)
 	RegisterRevealLinkHandlers(adminSmallBody, store)
 	RegisterDraftEstimateHandlers(adminSmallBody, store, eng)
 	RegisterCalendarHandlers(adminSmallBody, store, eng)

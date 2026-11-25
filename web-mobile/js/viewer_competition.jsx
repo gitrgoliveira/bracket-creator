@@ -3,7 +3,7 @@
 
 import { TermV, competitionKindLabel, poolLabel, compMatchesForCompetition } from './viewer_utils.jsx';
 import { isFollowedPlayer, isPlayerWatched, entryKey, dojoKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
-import { MatchDetailCard, VSchedItem, MatchViewerModal, useLiveMatch, bracketMatchIn, competitionUnderWay } from './viewer_match.jsx';
+import { MatchDetailCard, VSchedItem, MatchViewerModal, useLiveMatch, bracketMatchIn } from './viewer_match.jsx';
 import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName, tiedPlaces, tiedPlaceOf } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
@@ -15,7 +15,7 @@ import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 import { Icon } from './icon.jsx';
 import { andList } from './list_phrase.jsx';
 import { engiShape } from './engi_entry.jsx';
-import { isTeamCompetition } from './competition_shape.jsx';
+import { isTeamCompetition, competitionUnderWay } from './competition_shape.jsx';
 
 const { useState, useMemo, useRef } = React;
 const StatusBadge = window.StatusBadge;

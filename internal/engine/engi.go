@@ -417,7 +417,7 @@ func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerS
 		Status:           state.MatchStatusCompleted,
 		Court:            bm.Court,
 		ScheduledAt:      bm.ScheduledAt,
-		CorrectionReason: correctionReason,
+		CorrectionReason: bm.CorrectionReason,
 		ResultSource:     bm.ResultSource,
 	}
 }

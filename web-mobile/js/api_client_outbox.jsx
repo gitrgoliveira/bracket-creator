@@ -127,6 +127,14 @@ export const outboxApi = {
         // change or lineup save of the match is not one.
         return _entriesFor(_revKey(compID, matchID)).some(([, d]) => isFinishedResultWrite(d));
     },
+    // hasPendingResultWrite: the same question for a RESULT only, a finished
+    // score write or a decision, never a representative bout change (which is
+    // counted with the results but leaves the match running with its score
+    // still open). The public card reads it: "Result entered on this phone"
+    // must not claim a result for a queued representative bout add.
+    hasPendingResultWrite(compID, matchID) {
+        return _entriesFor(_revKey(compID, matchID)).some(([, d]) => isFinishedResultWrite(d) && d.kind !== 'daihyosen');
+    },
     // The way past a held write the server keeps refusing (a 5xx on every
     // retry, past the server-error notice threshold). It holds back no other
     // write, but it is retried for as long as the page is open, keeps the

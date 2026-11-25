@@ -309,6 +309,8 @@ describe('the tap-outcome readers', () => {
     it('the alert counts one item per tap', () => {
         expect(tapNotAppliedAlertText(1, true, 'Not applied: the bout was already decided.')).toBe('Not applied: the bout was already decided.');
         expect(tapNotAppliedAlertText(3, false)).toMatch(/^3 taps were not applied\./);
+        // The alert is one per match, so a match not shown on the page is still "the match".
+        expect(tapNotAppliedAlertText(3, false)).toContain('Open the match to see why');
     });
     it('no em-dash, no "mat", no "default win" in any of the copy', () => {
         const all = [MATCH_CLOSED_REASON, MATCH_CLOSED_ADVICE, RESULT_LOCKED_PLAYED_REASON, RESULT_LOCKED_RUNNING_REASON,

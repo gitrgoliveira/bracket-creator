@@ -2,7 +2,7 @@
 // has not sent yet, the public match card reads the SERVER's copy, which knows
 // nothing of it: it offered Report result as though nothing had been entered,
 // so a competitor could open the editor and enter the result a second time over
-// their own. While API.hasPendingTerminalWrite is true the card says the result
+// their own. While API.hasPendingResultWrite is true the card says the result
 // is waiting on this phone and does not offer Report result; it refreshes on the
 // two signals the held-writes count uses (sync status, unsent-write count).
 import React from 'react';
@@ -27,7 +27,7 @@ const STUBBED_GLOBALS = {
   API: {
     fetchCompetitionDetails: vi.fn().mockResolvedValue(null),
     recordScore: vi.fn(),
-    hasPendingTerminalWrite: vi.fn((compId, matchId) => pending.value && compId === 'c1' && matchId === 'm1'),
+    hasPendingResultWrite: vi.fn((compId, matchId) => pending.value && compId === 'c1' && matchId === 'm1'),
     heldWriteState: vi.fn(() => ({ ...held })),
   },
 };
@@ -48,7 +48,7 @@ beforeEach(() => {
   held.blocker = null;
   listeners.sync.clear();
   listeners.unsent.clear();
-  STUBBED_GLOBALS.API.hasPendingTerminalWrite.mockClear();
+  STUBBED_GLOBALS.API.hasPendingResultWrite.mockClear();
 });
 
 afterEach(() => cleanup());
@@ -72,7 +72,7 @@ describe('the public match card while a finished result waits on this phone', ()
     await mount();
     expect(screen.getByText(WAITING)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Report result' })).toBeNull();
-    expect(STUBBED_GLOBALS.API.hasPendingTerminalWrite).toHaveBeenCalledWith('c1', 'm1');
+    expect(STUBBED_GLOBALS.API.hasPendingResultWrite).toHaveBeenCalledWith('c1', 'm1');
   });
 
   it('does not blame the connection for a result the server keeps refusing', async () => {

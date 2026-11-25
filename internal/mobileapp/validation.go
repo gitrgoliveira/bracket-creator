@@ -1403,11 +1403,13 @@ func (r *ScoreRequest) AsMatchResult() *state.MatchResult {
 // fusensho is only valid on sub-results (ScoreRequest.Validate rejects it
 // at the top level), so it's not listed here. "kachinuki-exhaustion" is
 // allowed too: it is the End match write of the kachinuki sheet, not a
-// ruling. The server works its winner out from the bout log
-// (engine.deriveKachinukiWinner, which also refuses an end on a drawn last
-// bout) and refuses it outside a kachinuki competition
-// (refuseKachinukiDecisionForComp), so a participant ending their own
-// encounter from the public sheet decides nothing the bouts have not.
+// ruling. Where a scored bout exists the server works its winner out from
+// the bout log (engine.deriveKachinukiWinner, which also refuses an end on a
+// drawn last bout); with no scored bout, or when member ids cannot attribute
+// the last one, the winner the participant named stands, exactly as it does
+// for "" and "fought", so this decision adds no power over those two. The
+// server refuses it outside a kachinuki competition
+// (refuseKachinukiDecisionForComp).
 //
 // Rejected: "kiken-voluntary", "kiken-injury", "fusenpai", "daihyosen",
 // "fusensho", referee/operator rulings with

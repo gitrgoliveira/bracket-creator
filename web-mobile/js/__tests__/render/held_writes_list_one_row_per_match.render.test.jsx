@@ -89,7 +89,7 @@ describe('the held-writes list: one row per match', () => {
     ]);
     expect(rows.map((r) => r.key)).toEqual(['a1', 'b1']);
     expect(rows[0].line).toBe('2 changes: waiting to be sent');
-    expect(rows[1].line).toBe('2 changes: waiting for you to sign in');
+    expect(rows[1].line).toBe('2 taps: waiting for you to sign in');
   });
 
   it('a write the server keeps refusing keeps its own row and its Discard, which discards that write alone', async () => {
@@ -100,7 +100,7 @@ describe('the held-writes list: one row per match', () => {
     ];
     const rows = await openList();
     expect(rows).toHaveLength(2);
-    expect(rows[0]).toHaveTextContent('2 changes: waiting to be sent');
+    expect(rows[0]).toHaveTextContent('2 taps: waiting to be sent');
     expect(rows[0].querySelector('[data-testid="held-write-discard-one"]')).toBeNull();
     expect(rows[1]).toHaveTextContent('Finished result: the server keeps refusing it');
     await act(async () => { fireEvent.click(rows[1].querySelector('[data-testid="held-write-discard-one"]')); });

@@ -5,11 +5,11 @@ import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, c
 import { matchParticipantIds, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, sharedLinkPass, readSharedLedger, writeSharedLedger, clearSharedLedger, sessionStore, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
-import { VSchedItem, MatchViewerModal, useLiveMatch, matchInList, competitionUnderWay } from './viewer_match.jsx';
+import { VSchedItem, MatchViewerModal, useLiveMatch, matchInList } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
 import { mirrorWatchlistParam } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
-import { isTeamCompetition, TEAMS_ENTERED_BY_ORGANIZER } from './competition_shape.jsx';
+import { isTeamCompetition, TEAMS_ENTERED_BY_ORGANIZER, competitionUnderWay } from './competition_shape.jsx';
 import { Icon } from './icon.jsx';
 
 const { useState, useMemo, useRef, useEffect } = React;
@@ -255,7 +255,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // Under-way set: gates the home NOW / Up-next strips. Setup is excluded,
   // and so is draw-ready in an officiated tournament (no match has been
   // called); a self-run draw-ready competition is under way, since its
-  // competitors start it (competitionUnderWay, viewer_match.jsx, the one
+  // competitors start it (competitionUnderWay, competition_shape.jsx, the one
   // owner). (The competition detail view still shows its Pools/Bracket tabs;
   // that is governed separately by isPreStart in ViewerCompetition.)
   const runningCompIds = useMemo(() => new Set((t.competitions || []).filter(c => competitionUnderWay(c, t)).map(c => c.id)), [t]);

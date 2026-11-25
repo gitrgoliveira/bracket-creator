@@ -99,7 +99,8 @@ export function heldWriteRows(items) {
     let what;
     if (finished.length === 1) what = heldWriteWhat(lead);
     else {
-      const { n, noun } = queuedWritesNoun(finished.length, row.entries.length);
+      const taps = row.entries.every((e) => e.kind === 'evt');
+      const { n, noun } = queuedWritesNoun(finished.length, row.entries.length, { taps });
       what = `${n} ${noun}`;
     }
     const state = heldWriteState({

@@ -485,6 +485,22 @@ export function competitionCallsByNumber(tournament, comp) {
 export function isTeamCompetition(comp) {
   return !!comp && (comp.kind === "team" || Number(comp.teamSize) > 0);
 }
+// competitionUnderWay: whether the public page lists a competition's matches
+// as running and next (the home page's Now and Up next, the Overview's Up
+// next). The ONE owner of that question for the viewer pages.
+//
+// A competition with a draw that is past draw-ready is under way. A
+// draw-ready one is under way only in a SELF-RUN tournament: there the
+// competitors start it themselves, since its first recorded result starts it
+// (engine.MaybeAutoCompletePools, AutoCompleteStarted), so its first match must be where a competitor looks
+// for it. In an officiated tournament a draw-ready competition waits for the
+// organiser and nothing of it is called yet.
+export function competitionUnderWay(comp, tournament) {
+  const status = comp && comp.status;
+  if (!status || status === "setup") return false;
+  if (status === "draw-ready") return !!(tournament && tournament.mode === "self-run");
+  return true;
+}
 // The one sentence for how a team gets into a team competition: no public
 // registration form takes one, so the organizer enters it. Said on the viewer
 // home card in place of the Register button (while the competition is in

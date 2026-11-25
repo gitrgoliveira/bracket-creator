@@ -10334,13 +10334,16 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    inline and gives error toasts a tappable dismiss. Its pill shape is
    rounded down to a card below, so a message of several lines is not clipped. */
 .toast { display: flex; align-items: flex-start; gap: 10px; }
-/* A toast that holds several lines is a readable card: it keeps the pill on one
-   line, grows to the viewport less the 16px gutters (left:50% alone would cap it
-   at half the screen), reads left-aligned and top-aligns the icon and the dismiss
-   with the first line. The icon box is one line tall so a single line stays centred. */
+/* A toast that holds several lines is a readable card: a short message stays a
+   pill sized to its text, a longer one grows to the viewport less the 16px
+   gutters (left:50% alone would cap it at half the screen) but never past a
+   readable line length, so a long refusal sentence wraps on a wide screen
+   instead of running across it. It reads left-aligned and top-aligns the icon
+   and the dismiss with the first line. The icon box is one line tall so a
+   single line stays centred. */
 .toast {
   width: max-content;
-  max-width: calc(100vw - 32px);
+  max-width: min(calc(100vw - 32px), 560px);
   padding: 12px 20px;
   border-radius: 20px;
   line-height: 1.4;

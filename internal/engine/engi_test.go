@@ -172,6 +172,23 @@ func TestRecordEngiMatchResult_BracketAdvances(t *testing.T) {
 	assert.Equal(t, sf[0].SideAID, bracket.Rounds[sfIdx][0].WinnerID, "the decided semifinal's own WinnerID is stamped on disk")
 }
 
+// A write with no reason over a bracket match that already holds one answers
+// (and broadcasts) the stored reason and source, like the stored match.
+func TestApplyEngiToBracketMatch_EchoesStoredReasonAndSource(t *testing.T) {
+	bm := &state.BracketMatch{
+		ID: "r1-m1", SideA: "Alice", SideB: "Bob", SideAID: "a", SideBID: "b",
+		CorrectionReason: "scored the wrong flags", ResultSource: "organiser",
+	}
+	res := applyEngiToBracketMatch(bm, 3, 2, "A", "", "")
+	assert.Equal(t, "scored the wrong flags", res.CorrectionReason)
+	assert.Equal(t, "organiser", res.ResultSource)
+	assert.Equal(t, bm.CorrectionReason, res.CorrectionReason)
+
+	res = applyEngiToBracketMatch(bm, 2, 3, "B", "a better reason", "")
+	assert.Equal(t, "a better reason", res.CorrectionReason)
+	assert.Equal(t, "a better reason", bm.CorrectionReason)
+}
+
 // --- Standings -------------------------------------------------------------
 
 // TestComputeEngiStandings_PoolWinsThenFlags builds a 3-player round-robin and

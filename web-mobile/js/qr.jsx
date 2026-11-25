@@ -592,6 +592,18 @@ export function qrMatrix(text, { level = "M" } = {}) {
   return { size, modules: Uint8Array.from(mat, (v) => (v === 1 ? 1 : 0)) };
 }
 
+/**
+ * The share of a level-H code's area a centre logo pad may cover and still
+ * decode, by the code's side in modules. MEASURED with jsQR on codes filled to
+ * capacity (qr_level_h_decode.test.jsx): the 20% limit holds from version 5 up,
+ * but v2 to v4 have too few codewords to spare and decode only up to 10%.
+ * @param {number} size  the matrix side, as qrMatrix returns it
+ * @returns {number} 0.1 or 0.2
+ */
+export function qrLogoPadShare(size) {
+  return (size - 17) / 4 >= 5 ? 0.2 : 0.1;
+}
+
 // Expose on window so non-importing surfaces (the /display StreamingOverlay,
 // which is loaded as a standalone module and reads window.renderQR) can draw
 // the QR. Mirrors the window-global convention used across the web-mobile

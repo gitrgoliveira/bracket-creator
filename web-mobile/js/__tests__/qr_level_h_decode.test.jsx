@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import jsQR from 'jsqr';
-import { qrMatrix, qrFits } from '../qr.jsx';
+import { qrMatrix, qrFits, qrLogoPadShare } from '../qr.jsx';
 
 // Level H decode tests. The poster paints a logo over the centre of a level-H
 // code, so the contract is: the code still reads with the largest pad the
@@ -43,14 +43,13 @@ function decode(matrix, pad = 0) {
 // sqrt(share) of the side, rounded DOWN.
 function maxPad(size, share = 0.2) { return Math.floor(Math.sqrt(share) * size); }
 
-// The share of the code a white centre pad may cover and still decode, MEASURED
-// with jsQR on level-H codes filled to capacity (the largest pad that decoded,
-// against the 20% limit, in modules):
+// The share of the code a white centre pad may cover is qrLogoPadShare's rule,
+// the one the poster layout asks. MEASURED with jsQR on level-H codes filled to
+// capacity (the largest pad that decoded, against the 20% limit, in modules):
 //   v2 8 of 11, v3 10 of 12, v4 13 of 14   (the 20% pad does NOT decode)
 //   v5 17 of 16, v6 18 of 18, v7 20 of 20, v8 21 of 21, v9 23 of 23, v10 27 of 25
-// A small code has few codewords to spare, so from v5 up the 20% limit holds
-// and at v2 to v4 only a pad of at most 10% of the area does.
-function padShare(version) { return version >= 5 ? 0.2 : 0.1; }
+// The tests below decode at that cap, so a rule that grew past the measurement
+// fails here.
 
 // Deterministic URL-like text of an exact byte length.
 function textOfLength(len, seed) {
@@ -132,7 +131,7 @@ describe('QR level H', () => {
         const text = textOfLength(len, 11 * version);
         const matrix = qrMatrix(text, { level: 'H' });
         expect(matrix.size).toBe(17 + 4 * version);
-        const share = padShare(version);
+        const share = qrLogoPadShare(matrix.size);
         const pad = maxPad(matrix.size, share);
         expect(pad * pad).toBeLessThanOrEqual(share * matrix.size * matrix.size);
         expect((pad + 1) * (pad + 1)).toBeGreaterThan(share * matrix.size * matrix.size);
@@ -142,10 +141,17 @@ describe('QR level H', () => {
       });
     });
 
+    it('caps the pad at 10% for versions 2 to 4 and 20% from version 5', () => {
+      H_CAPACITY.forEach((len, i) => {
+        const version = i + 2;
+        expect(qrLogoPadShare(17 + 4 * version)).toBe(version >= 5 ? 0.2 : 0.1);
+      });
+    });
+
     it('decodes a short URL with the pad', () => {
       const url = 'https://a.example/b';
       const matrix = qrMatrix(url, { level: 'H' });
-      const result = decode(matrix, maxPad(matrix.size, padShare((matrix.size - 17) / 4)));
+      const result = decode(matrix, maxPad(matrix.size, qrLogoPadShare(matrix.size)));
       expect(result).not.toBeNull();
       expect(result.data).toBe(url);
     });

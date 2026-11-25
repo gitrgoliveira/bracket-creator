@@ -114,3 +114,40 @@ func TestConfigWritesToken_StaysForScoresCheckInsOverridesAndReads(t *testing.T)
 	_ = store.FileVersion(compID, "config.md")
 	assert.Equal(t, before, store.ConfigWritesToken(), "reads")
 }
+
+// A competition nothing has loaded since startup has no cache entry, yet a
+// delete or a restore still changes its config.md: the token must move for it.
+func TestConfigWritesToken_MovesOnADeleteOfACompetitionNothingLoaded(t *testing.T) {
+	store := newConfigTokenStore(t)
+	require.NoError(t, store.SaveCompetition(&Competition{ID: "men", Name: "Men"}))
+	store.compCache.Delete("men")
+
+	before := store.ConfigWritesToken()
+	require.NoError(t, store.DeleteCompetition("men"))
+	assert.Greater(t, store.ConfigWritesToken(), before)
+}
+
+func TestConfigWritesToken_MovesOnARestoreOfEveryKind(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		prepare   func(t *testing.T, s *Store)
+		decisions map[string]RestoreDecision
+	}{
+		{"create", func(t *testing.T, s *Store) { require.NoError(t, s.DeleteCompetition("men")) }, nil}, // an id the folder lacks needs no decision
+		{"replace", func(t *testing.T, s *Store) {}, map[string]RestoreDecision{"men": {Action: RestoreReplace}}},
+		{"copy", func(t *testing.T, s *Store) {}, map[string]RestoreDecision{"men": {Action: RestoreCopy, CopyName: "Men B"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newRestoreTestStore(t)
+			addRestoreComp(t, s, "men", "Men", "K", MatchStatusScheduled, "A")
+			a := archiveOf(t, s, ScopeCompetition, "men")
+			tc.prepare(t, s)
+			s.compCache.Delete("men")
+
+			before := s.ConfigWritesToken()
+			_, err := s.Restore(RestoreRequest{Archive: a, Decisions: tc.decisions})
+			require.NoError(t, err)
+			assert.Greater(t, s.ConfigWritesToken(), before)
+		})
+	}
+}

@@ -668,14 +668,18 @@ func (s *Store) FileToken(compID, filename string) (mtime int64, version uint64)
 // life of the process. Competitions are few and deletions rare, and the bodies,
 // which are the only large part, are released.
 //
+// config.md is invalidated whether or not it was ever cached: a competition
+// deleted or restored before anything loaded it has no cache entry, yet its
+// config.md changed, and ConfigWritesToken must move with it.
+//
 // Caller must hold the per-competition write lock.
 func (s *Store) discardCompCacheBodies(compID string) {
-	c, ok := s.compCache.Load(compID)
-	if !ok {
-		return
-	}
-	c.(*compCache).files.Range(func(_, v any) bool {
-		v.(*fileCache).invalidate()
+	s.getFileCache(compID, "config.md").invalidate()
+	c, _ := s.compCache.Load(compID)
+	c.(*compCache).files.Range(func(name, v any) bool {
+		if name != "config.md" {
+			v.(*fileCache).invalidate()
+		}
 		return true
 	})
 }

@@ -83,6 +83,10 @@ func TestStartCompetition_AHiddenDraftIsPublicOnceStarted(t *testing.T) {
 // hides itself.
 func TestDiscardDraw_ClearsDrawHidden(t *testing.T) {
 	eng, store, id := drawReadyHidden(t, state.CompFormatMixed)
+	_, err := eng.SetDrawHidden(id, false)
+	require.NoError(t, err)
+	require.False(t, loadComp(t, store, id).DrawHidden, "the draft is published before it is discarded")
+
 	require.NoError(t, eng.DiscardDraw(id))
 	c := loadComp(t, store, id)
 	assert.Equal(t, state.CompStatusSetup, c.Status)

@@ -168,14 +168,6 @@ var sseEventCatalogue = map[EventType]sseEventSpec{
 	EventDrawVisibilityChanged: {class: sseEventPasses},
 }
 
-// sseEventClassOf is t's class; an unknown type is organiser-only.
-func sseEventClassOf(t EventType) sseEventClass {
-	if spec, ok := sseEventCatalogue[t]; ok {
-		return spec.class
-	}
-	return sseEventOrganiserOnly
-}
-
 // eventCompetitionID is the competition a masked event names: its data's
 // competitionId, read from the value when it is a map and from the
 // marshalled envelope otherwise.

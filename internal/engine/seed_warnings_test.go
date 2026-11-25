@@ -156,3 +156,30 @@ func TestSeedWarningsSurviveACorruptTournament(t *testing.T) {
 			"a corrupt tournament.md must degrade to comp.Courts, not silence the surplus-seed warning")
 	})
 }
+
+// TestSeedWarningsFollowASwappedSeed pins FR5's last clause: the warnings are
+// recomputed from the stored pools, so a seed the draw review's swap moved
+// into another seed's pool is reported like any other placement the draw
+// could not honour, and swapping it back silences it.
+func TestSeedWarningsFollowASwappedSeed(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "warnings-swapped-seed"
+	pools := drawSeededComp(t, eng, store, compID, state.CompFormatMixed, 12, 2)
+	require.Empty(t, seedWarningsByID(t, eng, compID), "the draw keeps the two seeds apart")
+
+	sp, sr := seededRow(t, pools, 1)
+	p2, _ := seededRow(t, pools, 2)
+	require.NotEqual(t, sp, p2)
+	a, b := poolSwapSide(pools, sp, sr), poolSwapSide(pools, p2, unseededRow(t, pools, p2))
+	got, err := eng.SwapDrawPlaces(compID, SwapRequest{A: a, B: b})
+	require.NoError(t, err)
+	require.True(t, got.BracketRebuilt)
+
+	warnings := seedWarningsByID(t, eng, compID)
+	require.NotEmpty(t, warnings, "two seeds now share a pool, and the organiser is told")
+	assert.Contains(t, warnings[0], "two seeds must never share a pool")
+
+	_, err = eng.SwapDrawPlaces(compID, SwapRequest{A: SwapSide{ID: a.ID, Place: b.Place}, B: SwapSide{ID: b.ID, Place: a.Place}})
+	require.NoError(t, err)
+	assert.Empty(t, seedWarningsByID(t, eng, compID), "swapped back, the seeds are apart again")
+}

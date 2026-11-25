@@ -131,6 +131,30 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches
 	if len(pools) == 0 {
 		return nil
 	}
+	// Tournament load failures abort the draw so the operator notices the
+	// missing schedule data rather than silently shipping a uniform-start
+	// bracket.
+	tournament, err := e.store.LoadTournament()
+	if err != nil {
+		return err
+	}
+	bracket, err := e.buildPoolPreviewBracket(comp, pools, poolMatches, courtFloor, tournament)
+	if err != nil || bracket == nil {
+		return err
+	}
+	return e.store.SaveBracket(comp.ID, bracket)
+}
+
+// buildPoolPreviewBracket is generatePoolPreviewBracket's build with nothing
+// read or saved: the knockout preview of pools, timed after poolMatches and
+// courtFloor on tournament's schedule. The draw saves what it returns; the
+// draw review's seeded swap (bc-drev) builds it from the swapped pools inside
+// its own transaction, so both run one builder. It answers nil, and no error,
+// when there are no pools or the draw comes back empty.
+func (e *Engine) buildPoolPreviewBracket(comp *state.Competition, pools []helper.Pool, poolMatches []state.MatchResult, courtFloor map[string]time.Time, tournament *state.Tournament) (*state.Bracket, error) {
+	if len(pools) == 0 {
+		return nil, nil
+	}
 
 	// Mirror the Excel create-pools path exactly: the SAME court-first draw
 	// builds both, so the preview bracket has the same topology, the same
@@ -154,25 +178,24 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches
 		// the generic "outside what extraQualifiers currently supports"
 		// for every shape alike.
 		if reason != "" {
-			return validationErrorf("competition %s: the %s qualifier draw could not be built for %d pools across %d court(s): %s", comp.ID, comp.ExtraQualifiers, len(pools), len(comp.Courts), reason)
+			return nil, validationErrorf("competition %s: the %s qualifier draw could not be built for %d pools across %d court(s): %s", comp.ID, comp.ExtraQualifiers, len(pools), len(comp.Courts), reason)
 		}
-		return validationErrorf("competition %s: the %s qualifier draw could not be built for %d pools across %d court(s); this shape is outside what extraQualifiers %q currently supports, adjust courts/pools or switch extraQualifiers back to standard", comp.ID, comp.ExtraQualifiers, len(pools), len(comp.Courts), comp.ExtraQualifiers)
+		return nil, validationErrorf("competition %s: the %s qualifier draw could not be built for %d pools across %d court(s); this shape is outside what extraQualifiers %q currently supports, adjust courts/pools or switch extraQualifiers back to standard", comp.ID, comp.ExtraQualifiers, len(pools), len(comp.Courts), comp.ExtraQualifiers)
 	}
 	if draw == nil {
-		return nil
+		return nil, nil
 	}
 
 	// nil drawOrder: a pool-fed bracket's leaves are pool-origin placeholders,
 	// never resolved competitors at draw time, so there is nothing to stamp
 	// (see buildBracketFromDraw's own doc comment). ResolveQualifiedPools
 	// stamps ids as each placeholder resolves to a real pool finisher.
-	bracket, err := e.buildBracketFromDraw(comp, draw, nil, poolMatches, courtFloor)
+	bracket, err := e.buildBracketFromDrawFor(comp, draw, nil, poolMatches, courtFloor, tournament)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	bracket.Preview = true
-
-	return e.store.SaveBracket(comp.ID, bracket)
+	return bracket, nil
 }
 
 // buildBracketFromDraw builds a balanced single-elimination bracket from a
@@ -214,6 +237,20 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches
 // rebuild passes nil, so a repair never moves times against competitions
 // drawn later.
 func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.KnockoutDraw, drawOrder []string, poolMatches []state.MatchResult, courtFloor map[string]time.Time) (*state.Bracket, error) {
+	// Tournament load failures abort the start so the operator notices the
+	// missing schedule data rather than silently shipping a uniform-start
+	// bracket.
+	tournament, err := e.store.LoadTournament()
+	if err != nil {
+		return nil, err
+	}
+	return e.buildBracketFromDrawFor(comp, draw, drawOrder, poolMatches, courtFloor, tournament)
+}
+
+// buildBracketFromDrawFor is buildBracketFromDraw on a tournament the caller
+// has read, so a build inside a competition's transaction (the draw review's
+// seeded swap) reads no file under the lock.
+func (e *Engine) buildBracketFromDrawFor(comp *state.Competition, draw *helper.KnockoutDraw, drawOrder []string, poolMatches []state.MatchResult, courtFloor map[string]time.Time, tournament *state.Tournament) (*state.Bracket, error) {
 	if draw == nil || draw.Root == nil {
 		return nil, fmt.Errorf("buildBracketFromDraw: no draw to build from")
 	}
@@ -353,14 +390,6 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 				m.Status = state.MatchStatusCompleted
 			}
 		}
-	}
-
-	// Tournament load failures abort the start so the operator notices the
-	// missing schedule data rather than silently shipping a uniform-start
-	// bracket (the slots are assigned below, once the matches are numbered).
-	tournament, err := e.store.LoadTournament()
-	if err != nil {
-		return nil, err
 	}
 
 	// Display metadata (mp-7f2w): label each match with its effective round and

@@ -1,0 +1,469 @@
+package engine
+
+import (
+	"sort"
+	"strings"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
+)
+
+// The draw review's swap suggestions (bc-drev): swaps of two unseeded
+// competitors that keep dojo-mates apart for longer. Nothing is stored; the
+// answer is recomputed from the stored draw on every read, like the dojo
+// separation summary it improves on.
+//
+// A suggestion never trades one dojo's pairing for another's: it is made only
+// when no pair of dojo-mates can meet earlier after it and at least one pair
+// meets later. Seeded competitors are never suggested, since moving a seed
+// rebuilds a pools + knockout bracket, which a suggestion must never do on its
+// own. Without a rebuild the bracket keeps its shape, so a swap changes only
+// the meetings of the pairs that hold one of the two competitors, and each
+// candidate is scored on those pairs alone.
+
+// maxSwapSuggestions is how many suggestions an answer holds at most.
+const maxSwapSuggestions = 5
+
+// SuggestedSide is one competitor of a suggested swap and the place they hold
+// now. ID and Place are what the swap request takes; the rest names them.
+type SuggestedSide struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	DisplayName string    `json:"displayName,omitempty"`
+	Number      string    `json:"number,omitempty"`
+	Dojo        string    `json:"dojo,omitempty"`
+	Place       DrawPlace `json:"place"`
+}
+
+// SwapImprovement is one pair of dojo-mates a suggestion keeps apart for
+// longer: their summary row before the swap and the row the summary would
+// show after it.
+type SwapImprovement struct {
+	Dojo   string      `json:"dojo"`
+	Before DojoMeeting `json:"before"`
+	After  DojoMeeting `json:"after"`
+}
+
+// SwapSuggestion is one suggested swap. A is the earlier of the two in the
+// draw. Improves lists every pair that meets later after the swap, the
+// earliest meeting first; every other pair meets where it did.
+type SwapSuggestion struct {
+	A        SuggestedSide     `json:"a"`
+	B        SuggestedSide     `json:"b"`
+	Improves []SwapImprovement `json:"improves"`
+}
+
+// StuckDojo is a dojo with a pair that shares a pool or can meet before the
+// final, which no swap keeps apart for longer without bringing another pair
+// of dojo-mates together earlier. Meeting is the dojo's earliest summary row.
+type StuckDojo struct {
+	Dojo    string      `json:"dojo"`
+	Meeting DojoMeeting `json:"meeting"`
+}
+
+// SwapSuggestions is the answer of GET .../draw/swap-suggestions.
+type SwapSuggestions struct {
+	Suggestions []SwapSuggestion `json:"suggestions"`
+	Stuck       []StuckDojo      `json:"stuck"`
+}
+
+// meetingRank says how late a pair of dojo-mates can first meet, larger is
+// later: depth is -1 for a shared pool, the round of the earliest meeting
+// (0 = the first round), or the bracket's round count when they cannot meet;
+// winners is the same for the if-both-win meeting, which breaks a tie.
+type meetingRank struct {
+	depth, winners int
+}
+
+func (r meetingRank) compare(o meetingRank) int {
+	if r.depth != o.depth {
+		return r.depth - o.depth
+	}
+	return r.winners - o.winners
+}
+
+// rankMeeting ranks a summary row. rounds is the bracket's round count.
+func rankMeeting(dm DojoMeeting, rounds int) meetingRank {
+	if dm.SamePool != "" {
+		return meetingRank{depth: -1, winners: -1}
+	}
+	r := meetingRank{depth: rounds, winners: rounds}
+	if dm.Earliest != nil {
+		r.depth = dm.Earliest.Round
+	}
+	if dm.IfBothWin != nil {
+		r.winners = dm.IfBothWin.Round
+	}
+	return r
+}
+
+// suggestEntrant is one drawn competitor as the suggestions see them: the
+// summary's own record of them, their dojo key, seed and place, their index
+// in draw order, the group a swap must leave (pool, or first-round match)
+// and the place key their meetings are read from (pool, or leaf).
+type suggestEntrant struct {
+	c     drawnCompetitor
+	key   string
+	seed  int
+	place DrawPlace
+	order int
+	group int
+	at    int
+}
+
+// swapSuggester holds one draw's entrants, indexed by dojo, and the rank of
+// every pair of place keys it has read, so the search reads each meeting of
+// two places once.
+type swapSuggester struct {
+	entrants []suggestEntrant
+	byDojo   map[string][]int
+	meet     func(a, b drawnCompetitor) DojoMeeting
+	rounds   int
+	ranks    map[[2]int]meetingRank
+	before   map[[2]string]DojoMeeting
+}
+
+// pairIDs is the unordered key of a pair of competitors.
+func pairIDs(a, b string) [2]string {
+	if b < a {
+		a, b = b, a
+	}
+	return [2]string{a, b}
+}
+
+// SuggestSwaps is the suggestions for comp's draw, from the draw's own
+// records: pools serves a pools draw and roster a knockout-only draw, as for
+// DojoSeparation. Only a draw-ready competition whose format draws a bracket
+// has any; every other answers empty lists.
+//
+// A candidate is two unseeded competitors in different pools (pools draw) or
+// different first-round matches (knockout only). It is suggested when no
+// pair of dojo-mates meets earlier after it and at least one meets later: a
+// shared pool is the earliest of all, then earlier rounds before later ones,
+// with the if-both-win meeting breaking a tie. Suggestions are ranked by the
+// earliest meeting they fix (a shared pool first), then by how much later it
+// becomes, then by how many pairs improve, then by the two ids, and at most
+// maxSwapSuggestions are returned. Stuck lists, in summary order, every dojo
+// with a pair that shares a pool or meets before the final that no candidate
+// keeps apart for longer.
+func SuggestSwaps(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, roster []domain.Player) SwapSuggestions {
+	out := SwapSuggestions{Suggestions: []SwapSuggestion{}, Stuck: []StuckDojo{}}
+	if comp == nil || comp.Status != state.CompStatusDrawReady || !CompetitionDrawsBracket(comp.EffectiveFormat()) {
+		return out
+	}
+	summary := DojoSeparation(comp, pools, bracket, roster)
+	s := newSwapSuggester(comp, pools, bracket, roster, summary)
+	if s == nil {
+		return out
+	}
+
+	type ranked struct {
+		suggestion SwapSuggestion
+		fixed      meetingRank
+		gain       meetingRank
+	}
+	var found []ranked
+	helped := map[string]bool{}
+	n := len(s.entrants)
+	for x := 0; x < n; x++ {
+		for y := x + 1; y < n; y++ {
+			improves, ok := s.evaluate(x, y)
+			if !ok {
+				continue
+			}
+			fixed, gain := improves[0].rankBefore, improves[0].gain
+			sug := SwapSuggestion{A: s.side(x), B: s.side(y), Improves: make([]SwapImprovement, len(improves))}
+			for i, imp := range improves {
+				sug.Improves[i] = imp.SwapImprovement
+				if imp.rankBefore.depth < s.rounds-1 {
+					helped[helper.DojoKey(imp.Dojo)] = true
+				}
+			}
+			found = append(found, ranked{suggestion: sug, fixed: fixed, gain: gain})
+		}
+	}
+	sort.SliceStable(found, func(i, j int) bool {
+		a, b := found[i], found[j]
+		if c := a.fixed.compare(b.fixed); c != 0 {
+			return c < 0
+		}
+		if c := a.gain.compare(b.gain); c != 0 {
+			return c > 0
+		}
+		if la, lb := len(a.suggestion.Improves), len(b.suggestion.Improves); la != lb {
+			return la > lb
+		}
+		if a.suggestion.A.ID != b.suggestion.A.ID {
+			return a.suggestion.A.ID < b.suggestion.A.ID
+		}
+		return a.suggestion.B.ID < b.suggestion.B.ID
+	})
+	for i := 0; i < len(found) && i < maxSwapSuggestions; i++ {
+		out.Suggestions = append(out.Suggestions, found[i].suggestion)
+	}
+
+	listed := map[string]bool{}
+	for _, dm := range summary {
+		key := helper.DojoKey(dm.Dojo)
+		if listed[key] {
+			continue
+		}
+		// The summary is sorted earliest first, so a dojo's first row is its
+		// earliest meeting.
+		listed[key] = true
+		if rankMeeting(dm, s.rounds).depth < s.rounds-1 && !helped[key] {
+			out.Stuck = append(out.Stuck, StuckDojo{Dojo: dm.Dojo, Meeting: dm})
+		}
+	}
+	return out
+}
+
+// newSwapSuggester lists comp's drawn competitors in draw order, with the
+// place each holds, beside summary, the draw's DojoSeparation, whose rows
+// the suggestions quote as the before of each pair; nil for a draw that has
+// no source of places.
+func newSwapSuggester(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, roster []domain.Player, summary []DojoMeeting) *swapSuggester {
+	s := &swapSuggester{
+		byDojo: map[string][]int{},
+		ranks:  map[[2]int]meetingRank{},
+		before: make(map[[2]string]DojoMeeting, len(summary)),
+	}
+	for _, dm := range summary {
+		s.before[pairIDs(dm.A.ID, dm.B.ID)] = dm
+	}
+	if bracket != nil {
+		s.rounds = len(bracket.Rounds)
+	}
+	var drawn []drawnCompetitor
+	seeds := map[string]int{}
+	places := map[string]DrawPlace{}
+	groups := map[string]int{}
+	switch DrawSourceFor(comp) {
+	case DrawInPools:
+		drawn = poolCompetitors(pools, comp.EffectiveNumberPrefix() != "")
+		s.meet = poolMeeting(pools, bracket)
+		for pi, p := range pools {
+			for i, pl := range p.Players {
+				if pl.ID != "" {
+					seeds[pl.ID] = pl.Seed
+					places[pl.ID] = DrawPlace{Pool: p.PoolName, Position: i + 1}
+					groups[pl.ID] = pi
+				}
+			}
+		}
+	case DrawInBracket:
+		drawn = leafCompetitors(comp, bracket, roster)
+		s.meet = func(a, b drawnCompetitor) DojoMeeting {
+			return DojoMeeting{A: a.side, B: b.side, Earliest: leafMeeting(bracket, a.slot, b.slot)}
+		}
+		for _, p := range roster {
+			if p.ID != "" {
+				seeds[p.ID] = p.Seed
+			}
+		}
+		for _, c := range drawn {
+			slot := c.slot
+			places[c.side.ID] = DrawPlace{Slot: &slot}
+			groups[c.side.ID] = slot / 2
+		}
+	default:
+		return nil
+	}
+	for i, c := range drawn {
+		e := suggestEntrant{
+			c:     c,
+			key:   helper.DojoKey(c.dojo),
+			seed:  seeds[c.side.ID],
+			place: places[c.side.ID],
+			order: i,
+			group: groups[c.side.ID],
+			at:    groups[c.side.ID],
+		}
+		if DrawSourceFor(comp) == DrawInBracket {
+			e.at = c.slot
+		}
+		s.entrants = append(s.entrants, e)
+		if e.key != "" {
+			s.byDojo[e.key] = append(s.byDojo[e.key], i)
+		}
+	}
+	return s
+}
+
+// view is entrant i as the swap of x and y leaves them: x takes y's place
+// (pool or leaf, the number it carries, its place in draw order) and y takes
+// x's. Everyone else stays.
+func (s *swapSuggester) view(i, x, y int) suggestEntrant {
+	e := s.entrants[i]
+	var from int
+	switch i {
+	case x:
+		from = y
+	case y:
+		from = x
+	default:
+		return e
+	}
+	o := s.entrants[from]
+	e.c.side.Pool, e.c.side.Number, e.c.slot = o.c.side.Pool, o.c.side.Number, o.c.slot
+	e.place, e.order, e.group, e.at = o.place, o.order, o.group, o.at
+	return e
+}
+
+// rank is how late two entrants can first meet, read from their place keys
+// (a pools draw's meeting depends on the two pools only, a knockout's on the
+// two leaves), each pair of keys read once.
+func (s *swapSuggester) rank(a, b suggestEntrant) meetingRank {
+	k := [2]int{a.at, b.at}
+	if k[1] < k[0] {
+		k[0], k[1] = k[1], k[0]
+	}
+	if r, ok := s.ranks[k]; ok {
+		return r
+	}
+	r := rankMeeting(s.meet(a.c, b.c), s.rounds)
+	s.ranks[k] = r
+	return r
+}
+
+// row is the summary row of entrants i and j after the swap of x and y, as
+// DojoSeparation would write it on the swapped draw: the earlier in draw
+// order is A, and the dojo reads under its first member's spelling.
+func (s *swapSuggester) row(i, j, x, y int) DojoMeeting {
+	a, b := s.view(i, x, y), s.view(j, x, y)
+	if b.order < a.order {
+		a, b = b, a
+	}
+	dm := s.meet(a.c, b.c)
+	first := a
+	for _, m := range s.byDojo[a.key] {
+		if v := s.view(m, x, y); v.order < first.order {
+			first = v
+		}
+	}
+	dm.Dojo = strings.TrimSpace(first.c.dojo)
+	return dm
+}
+
+// improvement is a SwapImprovement with the ranks the search sorts by.
+type improvement struct {
+	SwapImprovement
+	rankBefore meetingRank
+	gain       meetingRank
+}
+
+// evaluate scores the swap of entrants x and y. ok is true when it is a
+// candidate (both unseeded, in different groups) that no pair of dojo-mates
+// meets earlier after and at least one meets later; improves then lists the
+// pairs that meet later, the earliest meeting first, with the largest gain
+// first among equals.
+func (s *swapSuggester) evaluate(x, y int) (improves []improvement, ok bool) {
+	ex, ey := s.entrants[x], s.entrants[y]
+	if ex.seed > 0 || ey.seed > 0 || ex.group == ey.group {
+		return nil, false
+	}
+	type pair struct{ i, j int }
+	var pairs []pair
+	for _, m := range s.byDojo[ex.key] {
+		if m != x {
+			pairs = append(pairs, pair{x, m})
+		}
+	}
+	for _, m := range s.byDojo[ey.key] {
+		if m != y && m != x {
+			pairs = append(pairs, pair{y, m})
+		}
+	}
+	if len(pairs) == 0 {
+		return nil, false
+	}
+	type later struct {
+		pair
+		before, after meetingRank
+	}
+	var gained []later
+	for _, p := range pairs {
+		before := s.rank(s.entrants[p.i], s.entrants[p.j])
+		after := s.rank(s.view(p.i, x, y), s.view(p.j, x, y))
+		switch c := after.compare(before); {
+		case c < 0:
+			return nil, false
+		case c > 0:
+			gained = append(gained, later{p, before, after})
+		}
+	}
+	if len(gained) == 0 {
+		return nil, false
+	}
+	improves = make([]improvement, len(gained))
+	for k, g := range gained {
+		ids := pairIDs(s.entrants[g.i].c.side.ID, s.entrants[g.j].c.side.ID)
+		before := s.before[ids]
+		improves[k] = improvement{
+			SwapImprovement: SwapImprovement{Dojo: before.Dojo, Before: before, After: s.row(g.i, g.j, x, y)},
+			rankBefore:      g.before,
+			gain:            meetingRank{depth: g.after.depth - g.before.depth, winners: g.after.winners - g.before.winners},
+		}
+	}
+	sort.SliceStable(improves, func(i, j int) bool {
+		a, b := improves[i], improves[j]
+		if c := a.rankBefore.compare(b.rankBefore); c != 0 {
+			return c < 0
+		}
+		if c := a.gain.compare(b.gain); c != 0 {
+			return c > 0
+		}
+		if a.Dojo != b.Dojo {
+			return a.Dojo < b.Dojo
+		}
+		if a.Before.A.ID != b.Before.A.ID {
+			return a.Before.A.ID < b.Before.A.ID
+		}
+		return a.Before.B.ID < b.Before.B.ID
+	})
+	return improves, true
+}
+
+// side names entrant i at the place they hold now.
+func (s *swapSuggester) side(i int) SuggestedSide {
+	e := s.entrants[i]
+	return SuggestedSide{
+		ID: e.c.side.ID, Name: e.c.side.Name, DisplayName: e.c.side.DisplayName,
+		Number: e.c.side.Number, Dojo: strings.TrimSpace(e.c.dojo), Place: clonePlace(e.place),
+	}
+}
+
+// SwapSuggestionsFor loads comp's draw and answers SuggestSwaps for it. It
+// takes the record, as DojoSeparationFor does, because its caller has just
+// loaded it to decide between 200 and 404. A draw that cannot be read is an
+// error, never an empty answer, which would say there is nothing to improve.
+func (e *Engine) SwapSuggestionsFor(comp *state.Competition) (*SwapSuggestions, error) {
+	empty := &SwapSuggestions{Suggestions: []SwapSuggestion{}, Stuck: []StuckDojo{}}
+	if comp == nil || comp.Status != state.CompStatusDrawReady || !CompetitionDrawsBracket(comp.EffectiveFormat()) {
+		return empty, nil
+	}
+	var (
+		pools  []helper.Pool
+		roster []domain.Player
+		err    error
+	)
+	switch DrawSourceFor(comp) {
+	case DrawInPools:
+		if pools, err = e.store.LoadPools(comp.ID); err != nil {
+			return nil, err
+		}
+	case DrawInBracket:
+		if roster, err = e.store.LoadParticipants(comp.ID, comp.EffectiveWithZekkenName()); err != nil {
+			return nil, err
+		}
+	default:
+		return empty, nil
+	}
+	bracket, err := e.store.LoadBracket(comp.ID)
+	if err != nil {
+		return nil, err
+	}
+	answer := SuggestSwaps(comp, pools, bracket, roster)
+	return &answer, nil
+}

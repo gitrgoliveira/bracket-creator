@@ -143,6 +143,19 @@ This matters most for a **Knockout only** competition, where there is no pool ph
 
 Two things it never does. It does not move a **seeded** competitor: seed places are worked out from the ranks you set, and a shared dojo is not a reason to override them. It does not force an exchange that would create the same problem somewhere else, so where the draw is too tight to fix a pairing, the pairing stands. In a **Pools + Knockout** competition the pools have already spread each dojo, so there is usually nothing left to correct by the time the bracket is drawn. Refer to [The pool draw](pool-draw.md) for how that spreading works.
 
+## Review the draw
+
+Once a knockout draw is ready, the competition's **Overview** shows a **Draw review** card. Its **Dojo separation** table has one row for every pair of competitors from the same dojo, with the earliest round where they can meet:
+
+- In a **Knockout only** competition, that is the match where the two competitors' first-round places join, so **Quarterfinals** means they cannot meet before the quarterfinals, whoever wins.
+- In a **Pools + Knockout** competition, it is the earliest meeting over every place their two pools send up, or **Share Pool C** when they are in the same pool. Refer to [Review the draw](pool-draw.md#review-the-draw) in the pool draw.
+
+If a pairing is wrong, swap two competitors on the card, or, for a **Knockout only** competition, turn on **Swap competitors** on **Bracket (preview)** and tap the two names. A **Pools + Knockout** bracket has no swap mode, because before the pools are fought its places are pool places, such as Pool A-1st, not competitors: swap on **Pools (preview)** instead.
+
+A knockout swap trades two first-round places. The competitor goes, with their seed, check-in and, for a team, its saved lineups; the place stays, with its number, its match, its shiai-jo and its time, as described in [Competitor numbers](#competitor-numbers). A [bye](#byes) belongs to the place too, so a competitor swapped into a place with a bye gets the bye, and the check panel names who gains or loses one. Moving a seeded competitor is allowed with a warning, but the bracket is not reshuffled around it: the seed now fights from the place they moved to.
+
+The app shows what every swap does before it makes it, and swaps are possible only until the first result is recorded. Refer to [Review the draw](run-tournament.md#review-the-draw) for the whole workflow.
+
 ## Competitor numbers
 
 A **Knockout only** competition numbers its competitors the same way a pooled one does, down the bracket instead of pool by pool. Refer to [Competitor numbers](pool-draw.md#competitor-numbers) for the pooled-format rule (mixed and league).
@@ -273,4 +286,4 @@ What this shows:
 | Pool sizes and how many qualify from each pool | Which qualifiers cross, and into which block |
 | The seeds and the order you rank them in | Which quarter each seed lands in, and which competitor receives a bye |
 
-Everything the draw decides is worked out the same way every time, so regenerating a draw with the same roster, the same shiai-jo and the same seeds produces the same bracket. Check it in the [draw preview](run-tournament.md#draw-preview) before you start the competition; if it is not what you want, discard the draw, change the inputs, and generate it again.
+Everything the draw decides is worked out the same way every time, so regenerating a draw with the same roster, the same shiai-jo and the same seeds produces the same bracket. Check it in the [draw preview](run-tournament.md#draw-preview) before you start the competition. To move two competitors, swap them as described in [Review the draw](#review-the-draw); for anything else, discard the draw, change the inputs, and generate it again.

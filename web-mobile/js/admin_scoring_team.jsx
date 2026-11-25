@@ -42,7 +42,6 @@ import {
   HeldWriteDiscard,
   HeldWriteNotice,
   useClearPendingWhenNothingHeld,
-  useMatchHeldWrite,
   useTapOutcomeNote,
   tapBoardOf,
   useTapBoard,
@@ -85,6 +84,7 @@ import { SideLabel, sideWithColour } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
+import { useMatchHeldWrite } from './held_writes_panel.jsx';
 import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, writePending, writeHeldOnDeviceOnly, queuedNotice, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, decisionWord, FETCH_TIMEOUT_MS, TIMED_OUT, withinDeadline } from './write_result.jsx';
 
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, DEFAULT_WIN_IPPON, hanteiDecided } from './result_slot.jsx';

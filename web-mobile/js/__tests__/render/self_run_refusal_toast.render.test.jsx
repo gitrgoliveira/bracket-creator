@@ -18,7 +18,7 @@ const SENTENCE = 'This match result has already been reported. Contact the tourn
 
 const probe = { props: null };
 function ProbeScoreEditor(props) {
-  probe.props = props;
+  Object.assign(probe, { props });
   return <div data-testid="probe-score-editor" />;
 }
 

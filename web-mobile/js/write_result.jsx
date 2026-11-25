@@ -483,6 +483,21 @@ export function queuedNotice(res, { keepsFailing = false, blockedBy = null } = {
     return res && typeof res === 'object' && res.persisted === false ? QUEUED_UNSAVED_NOTICE : QUEUED_NOTICE;
 }
 
+// unsentResultNotice: the public match card's line for a finished result this
+// phone holds and the server does not yet (F5), worded from where the write
+// stands, as the editors' banner is (useMatchHeldWrite's answer): one the
+// server refuses says so; one waiting on another write of this phone, or on a
+// wait cycle (never worded as refused), says it waits; one that already failed
+// a pass waits for the connection; any other is on its way now (its first send
+// is out, or another tab sends it).
+export function unsentResultNotice({ held = null, refused = false, stuck = false, blocker = null } = {}) {
+    const lead = 'Result entered on this phone, not sent yet.';
+    if (refused) return `${lead} The server has not accepted it, and it is still being tried.`;
+    if (blocker || stuck) return `${lead} It waits for another entry from this phone that is not sent yet.`;
+    if (held) return `${lead} It is sent when the connection returns.`;
+    return `${lead} It is being sent.`;
+}
+
 // HELD_WRITE_DISCARD_LABEL / heldWriteDiscardConfirm: the way past a held
 // write the server keeps refusing (discardFailingHeldWrites, api_client_outbox.jsx).
 // It holds back no other write, but it is retried as long as the page is

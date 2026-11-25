@@ -39,9 +39,9 @@ describe('a toast of several lines', () => {
     expect(container.querySelectorAll('.toast').length).toBe(1);
   });
 
-  it('is a card that fits the phone: capped to the viewport less the gutters, left-aligned, top-aligned', () => {
+  it('is a card that fits the phone: capped to the viewport less the gutters and to a readable width, left-aligned, top-aligned', () => {
     const toast = declarations('.toast');
-    expect(toast).toMatch(/max-width:\s*calc\(100vw - 32px\)/);
+    expect(toast).toMatch(/max-width:\s*min\(calc\(100vw - 32px\),\s*560px\)/);
     expect(toast).toMatch(/width:\s*max-content/);
     expect(toast).toMatch(/text-align:\s*left/);
     expect(toast).toMatch(/align-items:\s*flex-start/);

@@ -393,6 +393,39 @@ export function alertNamedInCompetition(alert, competitions) {
   return { ...alert, where: `${comp.name} · ${alert.where}` };
 }
 
+// toastQueueAlert: tell one outbox alert as a toast, its match named in the
+// competition (alertNamedInCompetition) when `competitions` holds it.
+function toastQueueAlert(alert, competitions) {
+  const message = queueAlertMessage(alertNamedInCompetition(alert, competitions));
+  if (message) pushToast(message, queueAlertToastType(alert), queueAlertToastOptions(alert));
+}
+
+// useQueueAlertToasts: the one subscriber that renders the outbox's alerts as
+// toasts. An alert replayed on subscribe, raised before the tournament was
+// read (`tournament` is undefined until the first answer, a tournament or
+// null), waits for that read, so it is named with its competition like the
+// later ones; the competitions are read when the alert comes, not when the
+// subscription was made. Exported for test.
+export function useQueueAlertToasts(tournament) {
+  const alertCompetitionsRef = useLatestRef(tournament && tournament.competitions);
+  const tournamentReadRef = useLatestRef(tournament !== undefined);
+  const waitingAlertsRef = useRef([]);
+  useEffect(() => {
+    if (typeof window.subscribeQueueAlert !== "function") return;
+    return window.subscribeQueueAlert((alert) => {
+      if (tournamentReadRef.current) toastQueueAlert(alert, alertCompetitionsRef.current);
+      else waitingAlertsRef.current.push(alert);
+    });
+    // The refs are stable; the toast queue is module-level.
+  }, [tournamentReadRef, alertCompetitionsRef]);
+  useEffect(() => {
+    if (tournament === undefined) return;
+    const waiting = waitingAlertsRef.current;
+    waitingAlertsRef.current = [];
+    waiting.forEach((alert) => toastQueueAlert(alert, tournament && tournament.competitions));
+  }, [tournament]);
+}
+
 // bc-qttl: turn a queue alert from the outbox (api_client_queue.jsx) into operator-facing prose.
 //
 // The queue holds writes that have not reached the server. Every alert below but
@@ -772,17 +805,7 @@ function App() {
   // load-bearing here: the queue rehydrates from localStorage at module load,
   // long before App mounts, so the "results were discarded" alert is always
   // raised before this effect can run. Subscribing replays it.
-  // The competitions an alert's match is named in (alertNamedInCompetition),
-  // read when the alert comes, not when the subscription was made.
-  const alertCompetitionsRef = useLatestRef(tournament && tournament.competitions);
-  useEffect(() => {
-    if (typeof window.subscribeQueueAlert !== "function") return;
-    return window.subscribeQueueAlert((alert) => {
-      const message = queueAlertMessage(alertNamedInCompetition(alert, alertCompetitionsRef.current));
-      if (message) showToast(message, queueAlertToastType(alert), queueAlertToastOptions(alert));
-    });
-    // Mount-only: showToast pushes into the module-level toast queue.
-  }, []);
+  useQueueAlertToasts(tournament);
 
   // Sync state to URL whenever it changes. Uses the AppRouter.route()
   // helper (preact-router-backed) which mirrors history.pushState while

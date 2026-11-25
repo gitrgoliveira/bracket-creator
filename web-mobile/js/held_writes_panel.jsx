@@ -5,7 +5,7 @@ import { heldWriteLine, heldWriteWhat, heldWriteState, heldWriteDiscardConfirm, 
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useRef, useCallback } = React;
 
 // useHeldWritesRefresh: runs `refresh` whenever the sync status or this tab's
 // unsent-write count moves, until unmount (never after it). Returns the
@@ -22,6 +22,54 @@ export function useHeldWritesRefresh(refresh) {
     return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
   }, [refreshRef]);
   return mountedRef;
+}
+
+// useMatchHeldWrite: what this device still holds for one match, read from
+// the outbox in ONE place for the editors' pending banner and the public
+// match card. `held`: any write at all (a running update, a result, a
+// decision) that already failed a pass; `stuck`: one the server keeps
+// refusing or that sits on a wait cycle; `refused`: the match's own write is
+// the one the server refuses (a wait cycle is not a refusal, so worded as a
+// wait); `blocker`: the write of another kind this match waits for that is
+// stuck (a team member's add; stage 3 review 4, G2); `resultUnsent`: a
+// finished result or decision is queued, a representative bout change not
+// counting (the public card must not claim a result for one). Re-read on
+// every sync status change and every change of the held counts, which
+// include the failing count, so a second write crossing the threshold, a
+// write landing, and a discard made from the topbar's list all reach it.
+export function useMatchHeldWrite(compId, matchId, match = null) {
+  const api = window.API;
+  // The match the editor shows names its held writes, and its teams' (H5).
+  if (match && api && compId && typeof api.noteShownMatch === 'function') api.noteShownMatch(compId, match);
+  // `held` is null when this page has no queue to ask (the editors' render
+  // tests stub window.API without one): unknown, so nothing is cleared.
+  // `stuck`, `refused` and `blocker` come from ONE read of the queue
+  // (heldWriteState, stage 3 review 5, H2); a page whose API has only the two
+  // older questions asks them.
+  const read = useCallback(() => {
+    const asks = !!(api && compId && matchId);
+    const state = asks && typeof api.heldWriteState === 'function' ? api.heldWriteState(compId, matchId) : null;
+    return {
+      held: asks && typeof api.hasHeldWrite === 'function' ? api.hasHeldWrite(compId, matchId) : null,
+      stuck: state ? !!state.keepsFailing
+        : !!(asks && typeof api.heldWriteKeepsFailing === 'function' && api.heldWriteKeepsFailing(compId, matchId)),
+      refused: !!(state && state.refused),
+      blocker: (state ? state.blocker
+        : (asks && typeof api.heldWriteBlocker === 'function' && api.heldWriteBlocker(compId, matchId))) || null,
+      resultUnsent: !!(asks && typeof api.hasPendingResultWrite === 'function' && api.hasPendingResultWrite(compId, matchId)),
+    };
+  }, [api, compId, matchId]);
+  const [state, setState] = useState(read);
+  const refresh = () => {
+    const next = read();
+    const blockerKey = (s) => (s.blocker ? s.blocker.key : '');
+    setState((prev) => (prev.held === next.held && prev.stuck === next.stuck && prev.refused === next.refused
+      && prev.resultUnsent === next.resultUnsent && blockerKey(prev) === blockerKey(next) ? prev : next));
+  };
+  useHeldWritesRefresh(refresh);
+  // Once for the match shown, again when the page is handed another.
+  useEffect(refresh, [read]);
+  return state;
 }
 
 // The held writes that belong to no competition (the court-call

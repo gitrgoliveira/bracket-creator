@@ -12,11 +12,13 @@ import { installWindowStubs } from '../helpers/stub_globals.js';
 
 const WAITING = 'Result entered on this phone, not sent yet. It is sent when the connection returns.';
 const REFUSED = 'Result entered on this phone, not sent yet. The server has not accepted it, and it is still being tried.';
+const WAITS_ON_ANOTHER = 'Result entered on this phone, not sent yet. It waits for another entry from this phone that is not sent yet.';
+const SENDING = 'Result entered on this phone, not sent yet. It is being sent.';
 
 const listeners = { sync: new Set(), unsent: new Set() };
 const subscribeTo = (set) => (fn) => { set.add(fn); return () => set.delete(fn); };
 const pending = { value: false };
-const held = { keepsFailing: false, blocker: null };
+const held = { keepsFailing: false, refused: false, blocker: null, waitedForConnection: true };
 
 const STUBBED_GLOBALS = {
   ScoreEditorModal: () => <div data-testid="probe-score-editor" />,
@@ -28,7 +30,8 @@ const STUBBED_GLOBALS = {
     fetchCompetitionDetails: vi.fn().mockResolvedValue(null),
     recordScore: vi.fn(),
     hasPendingResultWrite: vi.fn((compId, matchId) => pending.value && compId === 'c1' && matchId === 'm1'),
-    heldWriteState: vi.fn(() => ({ ...held })),
+    hasHeldWrite: vi.fn(() => held.waitedForConnection),
+    heldWriteState: vi.fn(() => ({ keepsFailing: held.keepsFailing, refused: held.refused, blocker: held.blocker })),
   },
 };
 
@@ -45,7 +48,9 @@ afterAll(() => restoreGlobals());
 beforeEach(() => {
   pending.value = false;
   held.keepsFailing = false;
+  held.refused = false;
   held.blocker = null;
+  held.waitedForConnection = true;
   listeners.sync.clear();
   listeners.unsent.clear();
   STUBBED_GLOBALS.API.hasPendingResultWrite.mockClear();
@@ -78,17 +83,37 @@ describe('the public match card while a finished result waits on this phone', ()
   it('does not blame the connection for a result the server keeps refusing', async () => {
     pending.value = true;
     held.keepsFailing = true;
+    held.refused = true;
     await mount();
     expect(screen.getByText(REFUSED)).toBeTruthy();
     expect(screen.queryByText(WAITING)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Report result' })).toBeNull();
   });
 
-  it('says the same for a result waiting behind a refused write of another match', async () => {
+  it('says it waits, never that it was refused, for a result behind a write of another match', async () => {
     pending.value = true;
+    held.keepsFailing = true;
     held.blocker = { key: 'k', kind: 'score' };
     await mount();
-    expect(screen.getByText(REFUSED)).toBeTruthy();
+    expect(screen.getByText(WAITS_ON_ANOTHER)).toBeTruthy();
+    expect(screen.queryByText(REFUSED)).toBeNull();
+  });
+
+  it('says it waits, never that it was refused, for a result on a wait cycle', async () => {
+    pending.value = true;
+    held.keepsFailing = true;
+    await mount();
+    expect(screen.getByText(WAITS_ON_ANOTHER)).toBeTruthy();
+    expect(screen.queryByText(REFUSED)).toBeNull();
+    expect(screen.queryByText(WAITING)).toBeNull();
+  });
+
+  it('does not blame the connection for a result whose first send is out', async () => {
+    pending.value = true;
+    held.waitedForConnection = false;
+    await mount();
+    expect(screen.getByText(SENDING)).toBeTruthy();
+    expect(screen.queryByText(WAITING)).toBeNull();
   });
 
   it('offers Report result, with no waiting line, when nothing is waiting', async () => {

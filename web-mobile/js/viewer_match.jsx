@@ -12,8 +12,8 @@
 // here (plus window.* assignments) so the public surface of viewer.jsx is
 // unchanged.
 
-import { writeKeepsEditorOpen } from './write_result.jsx';
-import { useHeldWritesRefresh } from './held_writes_panel.jsx';
+import { writeKeepsEditorOpen, unsentResultNotice } from './write_result.jsx';
+import { useMatchHeldWrite } from './held_writes_panel.jsx';
 import { SideLabel, WinnerTick } from './side_cell.jsx';
 import { useTeamLineups, TeamScoreboard, IndividualScore, numberedParts, teamNameMark } from './match_scoreboard.jsx';
 import { NumberedName } from './numbered_name.jsx';
@@ -420,18 +420,10 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
   // The competition id the card and the editor both read (the editor below
   // used to work it out on its own). F5: a finished result this phone has
   // queued and not yet sent is invisible in the server's copy, so the card
-  // asks the outbox, on the two signals the held-writes count refreshes on.
+  // asks the outbox, through the one reader of what this device holds.
   const compId = (match && match.compId) || defaultCompId;
-  const [, bumpUnsent] = useState(0);
-  useHeldWritesRefresh(() => bumpUnsent((n) => n + 1));
-  const resultUnsent = !!(match && window.API && typeof window.API.hasPendingResultWrite === "function"
-    && window.API.hasPendingResultWrite(compId, match.id));
-  // Worded from where the write stands (heldWriteState), as the editors' own
-  // banner is: one the server keeps refusing, or one waiting behind such a
-  // write of another match, is not waiting for the connection.
-  const unsentState = resultUnsent && typeof window.API.heldWriteState === "function"
-    ? window.API.heldWriteState(compId, match.id) : null;
-  const unsentRefused = !!(unsentState && (unsentState.keepsFailing || unsentState.blocker));
+  const heldWrite = useMatchHeldWrite(compId, match && match.id);
+  const resultUnsent = heldWrite.resultUnsent;
   const triggerRef = useRef(null);
   const trapRef = useRef(null);
   const modalRefCb = useCallback((node) => {
@@ -528,9 +520,7 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
           <div className="card" style={{ marginTop: 12, padding: 16 }}>
             {resultUnsent ? (
               <div data-testid="result-unsent" style={{ fontSize: 13, color: "var(--ink-2)" }}>
-                {unsentRefused
-                  ? "Result entered on this phone, not sent yet. The server has not accepted it, and it is still being tried."
-                  : "Result entered on this phone, not sent yet. It is sent when the connection returns."}
+                {unsentResultNotice(heldWrite)}
               </div>
             ) : isFinalized ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-3)" }}>

@@ -315,6 +315,26 @@ describe('leaving', () => {
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 
+  it('a running-match chip in the topbar asks first through beforeLeave, and goes at once with nothing unsaved', async () => {
+    let leave;
+    window.AdminTopbar = (props) => { leave = props.beforeLeave; return null; };
+    try {
+      window.confirmDialog = vi.fn(async () => false);
+      mount();
+      expect(leave()).toBe(true);
+      type(headingBox(), 'Scan me');
+      let answer;
+      await act(async () => { answer = leave(); });
+      expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+      expect(await answer).toBe(false);
+      window.confirmDialog = vi.fn(async () => true);
+      await act(async () => { answer = leave(); });
+      expect(await answer).toBe(true);
+    } finally {
+      delete window.AdminTopbar;
+    }
+  });
+
   it('Back with nothing unsaved leaves at once', () => {
     mount();
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));

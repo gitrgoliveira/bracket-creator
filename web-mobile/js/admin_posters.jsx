@@ -30,7 +30,7 @@ import {
   withChoice,
 } from "./posters_model.jsx";
 import { isNonPublicOrigin } from "./viewer_utils.jsx";
-import { confirmDiscardUnsaved } from "./unsaved_entries.jsx";
+import { confirmDiscardUnsaved, whenConfirmed } from "./unsaved_entries.jsx";
 import { Icon } from "./icon.jsx";
 import { useLatestRef } from "./latest_ref.jsx";
 
@@ -120,11 +120,14 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
 
   // Every way off the page asks first while something is unsaved; with nothing
   // unsaved it goes in the same tick.
+  // The topbar's running-match chips ask the same question through its
+  // `beforeLeave`: `true` at once, or a promise of the operator's answer.
+  const confirmLeave = () => (dirtyRef.current
+    ? confirmDiscardUnsaved(true, LEAVE_POSTERS_ANYWAY).then((ok) => ok && mountedRef.current)
+    : true);
   const guarded = (go) => (...args) => {
     if (typeof go !== "function") return;
-    const leave = () => { leavingRef.current = true; go(...args); };
-    if (!dirtyRef.current) { leave(); return; }
-    confirmDiscardUnsaved(true, LEAVE_POSTERS_ANYWAY).then((ok) => { if (ok && mountedRef.current) leave(); });
+    whenConfirmed(confirmLeave(), () => { leavingRef.current = true; go(...args); });
   };
 
   const list = posterList(t);
@@ -222,7 +225,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
 
   return (
     <div className="app">
-      {AdminTopbar && <AdminTopbar onLogout={guarded(onLogout)} onViewerMode={guarded(onViewerMode)} tournament={t} />}
+      {AdminTopbar && <AdminTopbar onLogout={guarded(onLogout)} onViewerMode={guarded(onViewerMode)} beforeLeave={confirmLeave} tournament={t} />}
       <div className="page page--wide posters-page">
         {Breadcrumbs && (
           <Breadcrumbs items={[{ label: t.name || "Tournament", onClick: guarded(onBack) }, { label: "Posters" }]} />

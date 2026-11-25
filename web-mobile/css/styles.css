@@ -1817,7 +1817,8 @@ a:hover {
   font-size: 11px;
   line-height: 1.4;
   color: var(--ink-3);
-  text-align: right;
+  /* Left-aligned, so a wrapped line keeps the icon beside its first word. */
+  text-align: left;
 }
 .draw-visibility-hint svg {
   flex: none;

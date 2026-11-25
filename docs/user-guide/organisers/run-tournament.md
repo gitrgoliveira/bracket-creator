@@ -259,12 +259,20 @@ A draw-ready competition is already listed on the shiai-jo operator views, since
 
 A new draw starts hidden from the public. Spectators, court displays and the stream overlay see the competition as if it were still in setup: its name, its competitors and the line **Draw being prepared**, but no pools, bracket, matches or competitor numbers. Your own screens show the draw as usual, and so does the court console. Refer to [Follow the tournament](../spectators/following.md#when-the-draw-is-being-prepared) for what spectators see.
 
-The preview header holds three buttons, in this order: **Discard draw**, **Publish draw** and **Start competition**. A line below them says where the draw stands:
+The preview header holds three buttons, in this order: **Discard draw**, **Publish draw** and **Start competition**. A line below them says where the draw stands.
+
+![The draw preview header of a hidden draw: Discard draw, Publish draw and Start competition, with the line "Hidden from the public" below them.](../../screenshots/draw-hidden-header.png)
+
+![The same header once the draw is published: Discard draw, Unpublish and Start competition, with the line "Published" below them.](../../screenshots/draw-published-header.png)
+
+The two lines read:
 
 - While it is hidden: "Hidden from the public. Publish draw or Start competition makes it public."
 - Once it is published: "Published. The public can see this draw. Changes you make show on public pages at once."
 
 The dashboard card of a draw-ready competition shows the same thing at a glance: a crossed-out eye and "Hidden from the public", or an open eye and "Public".
+
+![A dashboard card of a draw-ready competition with a crossed-out eye and the words Hidden from the public.](../../screenshots/draw-hidden-card.png)
 
 - **Publish draw** shows the draw on the public pages at once, without waiting for the start. It asks nothing first. Once published, the button reads **Unpublish**.
 - **Unpublish** hides the draw again, for example when you published it by mistake or spotted an error after publishing. The app says "Hidden again. Anyone who looked still has what they saw.": a spectator who already read the draw, took a screenshot or printed it keeps that copy, so tell people when a published draw changes.

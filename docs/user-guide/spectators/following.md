@@ -87,6 +87,8 @@ If someone is entered in more than one competition, they have a separate number 
 
 The organiser makes the draw and checks it before anyone else sees it. Until they publish it or start the competition, the competition reads **Draw being prepared**, on the home list and at the top of its own page. Its page then shows only the Overview (and the Standings, for a Swiss competition, with nobody scored yet), with a card that says when it starts, if a start time is set, and how many competitors or teams are entered. There are no pools, bracket, matches or competitor numbers to see yet, and the court displays show none of its matches.
 
+![A competition page on a phone while the draw is being prepared: the name, the start time and the number of competitors, with no pools or bracket.](../../screenshots/draw-preparing-public.png)
+
 A watched competitor or dojo in that competition shows "Draw being prepared" beside the competition's name on your watchlist, alongside whatever their other competitions show.
 
 Once the draw is published, the page fills in by itself, with no reload: its **Pools**, **League** or **Bracket** tab appears, and its matches show on the schedule and the court displays. If the organiser hides the draw again, for example to correct it, the page goes back to **Draw being prepared** and any tab that was open returns to the Overview. What you read before that may change, so check the page again once the draw is back.

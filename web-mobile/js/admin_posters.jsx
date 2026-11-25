@@ -359,7 +359,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                   <Icon name="printer" /> Print all posters
                 </button>
               </div>
-              <div className="field__hint">Prints on A4. For A3, choose A3 paper and scale to fit in the print dialog, and turn on background graphics so the colours print.</div>
+              <div className="field__hint">Prints on A4. For A3, choose A3 paper and scale to fit in the print dialog. The colours print without turning on background graphics.</div>
             </div>
           </div>
 

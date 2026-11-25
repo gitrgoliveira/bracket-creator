@@ -6,7 +6,7 @@ Each poster carries a large QR code, the tournament name on a coloured band, a h
 
 ## Open the posters
 
-Click **Posters** on the dashboard, beside **Import competitions** and **Backup and restore**. The page works before any competition exists, because the viewer-home poster does not need one. The list at the top of the page holds **Viewer home** and then one poster per shiai-jo, in the order of the tournament's courts.
+Click **Posters** on the dashboard, beside **Backup and restore**. The page works before any competition exists, because the viewer-home poster does not need one. The list at the top of the page holds **Viewer home** and then one poster per shiai-jo, in the order of the tournament's courts.
 
 <figure class="bc-fig" markdown="span">
   ![The Posters page: the list of posters, the choices for the viewer-home poster, and a live preview of it with a logo in the centre of the code and two sponsors along the foot.](../../screenshots/posters-viewer-home.png)
@@ -55,7 +55,7 @@ Click **Print this poster** for the poster in the preview, or **Print all poster
 
 - **A4 portrait** is the poster's size. Each poster fits one sheet, and no blank sheet is added at the end.
 - **A3**: choose A3 paper in the dialog and set the scale to fit the page. The poster scales as a whole, so nothing moves.
-- **Colours**: the coloured band prints in colour. Nothing needs turning on in the print dialog, such as **Background graphics**.
+- **Colours**: the coloured band prints in colour. You do not need to turn on **Background graphics** in the print dialog.
 - To keep a copy as a file, choose **Save as PDF** as the printer.
 
 Print one poster on paper first and scan it with a phone before you print the whole set, to check the logo and the address.

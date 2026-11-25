@@ -15,6 +15,7 @@ import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 import { Icon } from './icon.jsx';
 import { andList } from './list_phrase.jsx';
 import { engiShape } from './engi_entry.jsx';
+import { isTeamCompetition } from './competition_shape.jsx';
 
 const { useState, useMemo, useRef } = React;
 const StatusBadge = window.StatusBadge;
@@ -515,7 +516,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   const isSelfRun = tournament && tournament.mode === "self-run";
 
   const isLeague = c.format === "league";
-  const isTeam = c.kind === "team" || c.teamSize > 0;
+  const isTeam = isTeamCompetition(c);
   const isEngi = !!(c && c.engi);
   // A solo engi competition (single competitors) heads its name column
   // "Player", as an individual table does; a pair competition heads "Pair".

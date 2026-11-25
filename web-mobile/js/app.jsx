@@ -423,7 +423,10 @@ export function queueAlertMessage(alert) {
         // current copy and save again, never to re-enter it over theirs.
         if (alert.code === "tournament_changed") return "Tournament settings were not saved: they were changed on another device. Open them and save again.";
         if (alert.code === "awards_changed") return "The fighting-spirit awards were not saved: they were changed on another device. Open them and save again.";
-        const what = Number(alert.terminalCount) > 0 ? "A result" : "A change";
+        // A match write names its match (`where`, the words the outbox's
+        // other alerts name it by), so a refusal told away from the match
+        // says which one it is about (decision q-f6-one-message).
+        const what = `${Number(alert.terminalCount) > 0 ? "A result" : "A change"}${alert.where ? ` in ${alert.where}` : ""}`;
         if (alert.sentence && alert.detail) return `${what} was refused by the server and cannot be saved. ${alert.detail}`;
         return `${what} was refused by the server${detail} and cannot be saved. Re-enter it.`;
       }
@@ -466,14 +469,16 @@ export function queueAlertMessage(alert) {
     // its history. Recorded, so not an error: the history has the change.
     case "displaced":
       return displacedAlertText(n, one);
-    // bc-evts: taps the server did not apply this pass, one alert a pass;
-    // a single one says why in the server's words or the outcome's.
-    // A tap the server turned away after its own answer said it landed
-    // (`turnedAway`) is told away from its match, so the alert names the match
-    // and the tap.
+    // bc-evts: taps the server did not apply this pass, one alert a match
+    // (decision q-f6-one-message), naming the match; a single one says why in
+    // the server's words or the outcome's, and several end on those words
+    // when every tap was given the same (`sameReason`). A tap the server
+    // turned away after its own answer said it landed (`turnedAway`) is told
+    // away from its match, so the alert names the match and the tap.
     case "not_applied":
       return tapNotAppliedAlertText(n, one,
-        tapNotAppliedText(alert.outcome, alert.where || "", alert.tap ? tapWords(alert.tap) : ""), alert.where || "");
+        tapNotAppliedText(alert.outcome, alert.where || "", alert.tap ? tapWords(alert.tap) : ""), alert.where || "",
+        alert.sameReason ? tapNotAppliedText(alert.outcome) || "" : "");
     // bc-evts S5 b: a batch of taps the server refused is held, not dropped.
     case "taps_parked":
       return `The server refused ${one ? "a tap" : `${n} taps`}. ${one ? "It is" : "They are"} held and ${one ? "holds" : "hold"} back that match's later changes: open the held writes list to discard ${one ? "it" : "them"}.`;

@@ -11,6 +11,7 @@
 import { useUnsavedInput } from './app_version.jsx';
 import { isNoConnection, REGISTRATION_NOT_CONFIRMED } from './write_result.jsx';
 import { engiShape, engiEntryProblem, engiNameFieldLabel } from './engi_entry.jsx';
+import { TEAMS_ENTERED_BY_ORGANIZER } from './competition_shape.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -23,6 +24,15 @@ const { useState, useEffect, useRef } = React;
 // "Name is required." and never reaches here.
 export function registrationNameProblem(shape, name) {
   return engiEntryProblem(name, shape, true);
+}
+
+// registrationRefusal words a 404 from the registration route by its body's
+// code, never by its English text: a team competition is entered by the
+// organizer (the sentence lives in competition_shape.jsx), anything else gets
+// the general refusal.
+function registrationRefusal(body) {
+  if (body && body.code === "team_competition") return `${TEAMS_ENTERED_BY_ORGANIZER} Ask them to add your team.`;
+  return "Registration is not available for this competition.";
 }
 
 function RegistrationForm({ compId, onBack }) {
@@ -67,7 +77,9 @@ function RegistrationForm({ compId, onBack }) {
       .then(async (res) => {
         if (ac.signal.aborted) return;
         if (res.status === 404) {
-          setMetaErr("Registration is not available for this competition.");
+          const body = await res.json().catch(() => ({}));
+          if (ac.signal.aborted) return;
+          setMetaErr(registrationRefusal(body));
           setLoading(false);
           return;
         }
@@ -130,7 +142,7 @@ function RegistrationForm({ compId, onBack }) {
         return;
       }
       if (res.status === 404) {
-        setErr("Registration is not available for this competition.");
+        setErr(registrationRefusal(data));
       } else if (res.status === 409) {
         // Two distinct 409 cases: closed or duplicate name.
         const msg = data.error || "";

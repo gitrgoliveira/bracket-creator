@@ -10,6 +10,7 @@
 //
 // pool_ids.jsx is a leaf module (no imports, no side effects), so importing it
 // here does not introduce a load-order dependency or a double-eval risk.
+import { isTeamCompetition } from './competition_shape.jsx';
 import { isSupplementaryBout, teamMatchTypeFor, poolNameOf, swissRoundLabel, poolMatchNumberOf } from './pool_ids.jsx';
 
 // TermV: kendo-glossary tooltip wrapper. Lazy lookup so the script
@@ -23,7 +24,7 @@ export function TermV(props) {
 }
 
 export function competitionKindLabel(c) {
-  return c.kind === "team" ? "Teams" : "Individual";
+  return isTeamCompetition(c) ? "Teams" : "Individual";
 }
 
 // leagueAwareLabel: the single source of truth for the pool-vs-league-vs-swiss

@@ -206,12 +206,28 @@ function tapNotAppliedReasonText(o) {
         default: return 'Not applied: the server refused it.';
     }
 }
-// tapNotAppliedAlertText: the one queue alert per pass for taps the server did
-// not apply (kind 'not_applied'); `text` is the one tap's sentence.
-export function tapNotAppliedAlertText(n, one, text, where = '') {
+// tapNotAppliedAlertText: the queue alert for taps the server did not apply
+// (kind 'not_applied'), one per match a pass (decision q-f6-one-message);
+// `text` is the one tap's sentence. `shared` is the reason every tap of the
+// alert was given (tapsShareReason), with no match named: several taps of one
+// match end on it, so the operator reads the server's own words, rather than
+// being sent to a match a competitor cannot open the history of.
+export function tapNotAppliedAlertText(n, one, text, where = '', shared = '') {
     if (one) return text || 'A tap was not applied.';
-    if (where) return `${n} taps were not applied in ${where}. Open the match to see why; anything the server kept is in the match's history.`;
-    return `${n} taps were not applied. Open their matches to see why; anything the server kept is in the match's history.`;
+    const lead = `${n} taps were not applied${where ? ` in ${where}` : ''}`;
+    if (shared) {
+        return shared.startsWith('Not applied:') ? `${lead}:${shared.slice('Not applied:'.length)}` : `${lead}. ${shared}`;
+    }
+    if (where) return `${lead}. Open the match to see why; anything the server kept is in the match's history.`;
+    return `${lead}. Open their matches to see why; anything the server kept is in the match's history.`;
+}
+// tapsShareReason: whether every tap outcome given would be told in the same
+// words (the server's sentence, or the outcome's own), so one alert can end on
+// them. False for no outcome or a quiet one.
+export function tapsShareReason(outcomes) {
+    if (!Array.isArray(outcomes) || outcomes.length === 0) return false;
+    const first = tapNotAppliedReasonText(outcomes[0]);
+    return !!first && outcomes.every((o) => tapNotAppliedReasonText(o) === first);
 }
 
 // decisionWord (operator ruling 2026-10-04): "default

@@ -7547,6 +7547,12 @@ details[open] > summary::before { transform: rotate(90deg); }
   box-shadow: 0 0 0 2px var(--warn-strong), 0 8px 24px var(--black-a20);
 }
 
+/* An error: a refusal or a failure, so it never reads like a confirmation.
+   The danger ring is to an error what the amber one is to a warning. */
+.toast--error {
+  box-shadow: 0 0 0 2px var(--danger), 0 8px 24px var(--black-a20);
+}
+
 /* Rises 64px into place (the path bottom: -40px to 24px drew), on transform so
    it never relays out; the X translate is the .toast centring and must stay.
    Reduced motion: the .toast rule under prefers-reduced-motion drops it. */
@@ -10326,9 +10332,21 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* Lay out the icon, message, and (error-only) dismiss control on one row.
    The base .toast keeps its pill shape and single-slot positioning; this just
    arranges the children inline and gives error toasts a tappable dismiss. */
-.toast { display: flex; align-items: center; gap: 10px; }
-.toast__icon { line-height: 1; flex: 0 0 auto; }
-.toast__msg  { flex: 1 1 auto; }
+.toast { display: flex; align-items: flex-start; gap: 10px; }
+/* A toast that holds several lines is a readable card: it keeps the pill on one
+   line, grows to the viewport less the 16px gutters (left:50% alone would cap it
+   at half the screen), reads left-aligned and top-aligns the icon and the dismiss
+   with the first line. The icon box is one line tall so a single line stays centred. */
+.toast {
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 12px 20px;
+  border-radius: 20px;
+  line-height: 1.4;
+  text-align: left;
+}
+.toast__icon { flex: 0 0 auto; display: flex; align-items: center; height: 1.4em; line-height: 1; }
+.toast__msg  { flex: 1 1 auto; min-width: 0; white-space: pre-line; overflow-wrap: anywhere; }
 .toast__dismiss {
   flex: 0 0 auto;
   background: none;

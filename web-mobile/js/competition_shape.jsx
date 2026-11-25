@@ -485,6 +485,11 @@ export function competitionCallsByNumber(tournament, comp) {
 export function isTeamCompetition(comp) {
   return !!comp && (comp.kind === "team" || Number(comp.teamSize) > 0);
 }
+// The one sentence for how a team gets into a team competition: no public
+// registration form takes one, so the organizer enters it. Said on the viewer
+// home card in place of the Register button (while the competition is in
+// setup) and, with the ask appended, on the registration page's refusal.
+export const TEAMS_ENTERED_BY_ORGANIZER = "Teams are entered by the tournament organizer.";
 // Whether "Shuffle unseeded" (Participants) can change anything: it reorders
 // the unseeded competitors only, so it needs at least two of them, and sends
 // nothing below that. The one owner of that rule, asked by the shuffle's own

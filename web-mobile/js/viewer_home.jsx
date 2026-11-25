@@ -9,6 +9,7 @@ import { VSchedItem, MatchViewerModal, useLiveMatch, matchInList } from './viewe
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
 import { mirrorWatchlistParam } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
+import { isTeamCompetition, TEAMS_ENTERED_BY_ORGANIZER } from './competition_shape.jsx';
 import { Icon } from './icon.jsx';
 
 const { useState, useMemo, useRef, useEffect } = React;
@@ -59,10 +60,19 @@ export function filterSecondaryOnDeck(bothSidesMatches, resolvedWatched, primary
 // shouldShowRegister returns true when a "Register for this competition" button
 // should be shown on a competition card. Extracted for unit testability (mp-e5j).
 export function shouldShowRegister(tournament, competition, hasHandler) {
-  return !!(hasHandler &&
-    tournament && tournament.mode === "self-run" &&
-    competition && competition.kind !== "team" &&
-    (!competition.status || competition.status === "setup"));
+  return !!(hasHandler && inSelfRunSetup(tournament, competition) && !isTeamCompetition(competition));
+}
+
+// shouldShowTeamNote: a self-run team competition still in setup has no
+// Register button, so its card says how teams get in instead. After the draw no
+// competition offers registration, so nothing then needs explaining.
+export function shouldShowTeamNote(tournament, competition) {
+  return inSelfRunSetup(tournament, competition) && isTeamCompetition(competition);
+}
+
+function inSelfRunSetup(tournament, competition) {
+  return !!(tournament && tournament.mode === "self-run" &&
+    competition && (!competition.status || competition.status === "setup"));
 }
 
 // The viewer home's path: app.jsx's pathFromState returns "/" for it.
@@ -532,7 +542,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
                               {[
                                 competitionKindLabel(c),
                                 c.teamSize > 1 ? `${c.teamSize}-person` : "",
-                                `${c.players.length} ${c.kind === "team" ? "teams" : "players"}`,
+                                `${c.players.length} ${isTeamCompetition(c) ? "teams" : "players"}`,
                                 formatLabel(c.format),
                                 c.startTime ? `starts ${c.startTime}` : "",
                               ].filter(Boolean).join(", ")}
@@ -549,6 +559,11 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
                           </div>
                         )}
                       </button>
+                      {shouldShowTeamNote(t, c) && (
+                        <div className="vlist-item--row-padded">
+                          <div className="vlist-item__meta">{TEAMS_ENTERED_BY_ORGANIZER}</div>
+                        </div>
+                      )}
                       {showRegister && (
                         <div className="vlist-item--row-padded">
                           <button type="button"

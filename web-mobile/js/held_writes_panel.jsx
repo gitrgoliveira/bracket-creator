@@ -10,7 +10,7 @@ const { useState, useEffect, useRef } = React;
 // useHeldWritesRefresh: runs `refresh` whenever the sync status or this tab's
 // unsent-write count moves, until unmount (never after it). Returns the
 // mounted flag for a caller whose own async work must check it too.
-function useHeldWritesRefresh(refresh) {
+export function useHeldWritesRefresh(refresh) {
   const mountedRef = useRef(true);
   const refreshRef = useLatestRef(refresh);
   useEffect(() => () => { mountedRef.current = false; }, []);

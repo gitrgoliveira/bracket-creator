@@ -176,6 +176,12 @@ function positionLabelFor(teamSize, index, sub) {
 // words live here once because the slot that holds the line reserves the
 // tallest of them (stage 6 review 13, m5): a hint can be two or three lines on
 // a tablet, and the Encho clause is the longer form of the two it can end in.
+// The longest label End match shows armed ("Tap again: Aka wins", "... Shiro
+// wins" or "... Draw (hikiwake)"), reserved by .holds-label so the button keeps
+// its width between its two taps. Worked out from the one wording owner.
+const KACHINUKI_END_ARMED_RESERVE = [{ kind: "win", winnerSide: "a" }, { kind: "win", winnerSide: "b" }, { kind: "draw" }]
+  .map((o) => `Tap again: ${kachinukiEndOutcomeLabel(o)}`)
+  .reduce((longest, label) => (label.length > longest.length ? label : longest));
 const KACHINUKI_HINT_NOTHING = "Nothing recorded yet: score a bout before ending the match.";
 const kachinukiTiedHint = (enchoOffered) =>
   `Tied bout. End match records a drawn encounter. Record bout retires both and brings the next pair up.${enchoOffered ? " Encho keeps the same pair fighting when this pairing must produce a result." : ""}`;
@@ -5618,7 +5624,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     </button>
                   </>
                 )}
-                <button type="button" className={`btn ${endArmed ? "btn--confirm" : ""}`} data-testid="kachinuki-end-match-button" onClick={(ev) => {
+                <button type="button" className={`btn holds-label ${endArmed ? "btn--confirm" : ""}`} data-testid="kachinuki-end-match-button"
+                  // Holds its width between its two taps (.holds-label, as
+                  // Finish and Fusensho do): the longest armed label is laid
+                  // hidden beside the shown one, so tapping never widens or
+                  // wraps the button and a quick second tap lands on it again.
+                  data-reserve={KACHINUKI_END_ARMED_RESERVE}
+                  onClick={(ev) => {
                   if (kachinukiEndOutcome?.kind === "blocked") return;
                   if (!confirmEnd(ev)) { setFinishArmed(false); return; }
                   doSubmit(() => onSubmit(buildPatch("completed", { endOutcome: kachinukiEndOutcome })));
@@ -5630,10 +5642,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                           ? "No draws in a knockout: continue (next bout or encho) until there is a point"
                           : "No draws in a knockout: record the bout and continue until there is a point")
                     : "End the match on the last scored bout"}>
-                  {submitting ? "Saving…"
+                  <span className="holds-label__text">{submitting ? "Saving…"
                     : endArmed
                     ? `Tap again: ${kachinukiEndOutcomeLabel(kachinukiEndOutcome)}`
-                    : "End match"}
+                    : "End match"}</span>
                 </button>
                 </>
               ) : (isKachinuki && isComplete) ? null : (

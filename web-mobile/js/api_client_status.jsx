@@ -10,9 +10,10 @@
 
 import {
     writeWasRefusedForClock, writeMatchClosed, writeResultLocked, supersededBanner, isFinishedResultWrite,
+    tapsShareReason,
 } from './write_result.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
-import { _revKey, _notifyQueueAlert, _writeQueue, _dequeue } from './api_client_queue.jsx';
+import { _revKey, _notifyQueueAlert, _writeQueue, _dequeue, _baseOf } from './api_client_queue.jsx';
 import {
     _publishOwnStatus, _forgetOwnStatusAnswersWhere, _clearOwnStatusAnswers, _revertLocalFields,
     _CHECKIN_KINDS, _checkInsOf,
@@ -126,6 +127,52 @@ export function _notifyScoreSupersededAlert(count, compID, matchID, matchClosed 
         kind: 'superseded', count, terminalCount: count, compID, matchID,
         ...(matchClosed ? { matchClosed: true } : {}),
     });
+}
+
+// One message per match (decision q-f6-one-message). A pass hands each tap
+// batch it sends a view of itself naming the batch's match (_tapPassFor), and
+// notes every match whose finished result it saw refused, told or held
+// (_noteRefusedResult); at its end _notifyNotAppliedTaps tells the taps the
+// server did not apply, one alert per match, leaving out the taps of a match
+// whose result the same pass refused: that refusal is the one message (a phone
+// back online after another phone finished the match is told once, by its
+// refused Finish). api_client_taps.jsx hands each such tap over by setting
+// `pass.lastNotApplied`; the view keeps it with its match. A tap id is unique
+// only within its match (session and seq), so the match is never looked up
+// from the id. Every other field of the view reads and writes the pass itself.
+export function _tapPassFor(pass, batch) {
+    const [k, d] = batch[0];
+    const base = _baseOf(k);
+    return new Proxy(pass, {
+        set(target, prop, value) {
+            if (prop === 'lastNotApplied') {
+                if (value) target.notAppliedTaps.push({ outcome: value, base, d });
+                return true;
+            }
+            target[prop] = value;
+            return true;
+        },
+    });
+}
+export function _noteRefusedResult(pass, key, d) {
+    if (isFinishedResultWrite(d)) pass.refusedResults.add(_baseOf(key));
+}
+export function _notifyNotAppliedTaps(pass) {
+    const byMatch = new Map();
+    for (const { outcome, base, d } of pass.notAppliedTaps) {
+        if (pass.refusedResults.has(base)) continue;
+        if (!byMatch.has(base)) byMatch.set(base, { d, outcomes: [] });
+        byMatch.get(base).outcomes.push(outcome);
+    }
+    for (const { d, outcomes } of byMatch.values()) {
+        const where = _whereOf(d);
+        _notifyQueueAlert({
+            kind: 'not_applied', count: outcomes.length, terminalCount: 0, compID: d.compID, matchID: d.matchID,
+            ...(where ? { where } : {}),
+            outcome: outcomes[outcomes.length - 1],
+            ...(tapsShareReason(outcomes) ? { sameReason: true } : {}),
+        });
+    }
 }
 
 // _heldForClosedMatch: the answer turned this write's own change away because

@@ -13,6 +13,7 @@
 // unchanged.
 
 import { writeKeepsEditorOpen } from './write_result.jsx';
+import { useHeldWritesRefresh } from './held_writes_panel.jsx';
 import { SideLabel, WinnerTick } from './side_cell.jsx';
 import { useTeamLineups, TeamScoreboard, IndividualScore, numberedParts, teamNameMark } from './match_scoreboard.jsx';
 import { NumberedName } from './numbered_name.jsx';
@@ -24,6 +25,7 @@ import { matchShowsScore } from './match_shows_score.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 import { Icon } from './icon.jsx';
+import { pushToast } from './toast_queue.jsx';
 
 const { useState, useMemo, useRef, useCallback } = React;
 
@@ -415,6 +417,15 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
   // Whether the editor is open, not a copy of the match: the editor reads the
   // live `match` prop, so it follows a result corrected on another device.
   const [isScoring, setIsScoring] = useState(false);
+  // The competition id the card and the editor both read (the editor below
+  // used to work it out on its own). F5: a finished result this phone has
+  // queued and not yet sent is invisible in the server's copy, so the card
+  // asks the outbox, on the two signals the held-writes count refreshes on.
+  const compId = (match && match.compId) || defaultCompId;
+  const [, bumpUnsent] = useState(0);
+  useHeldWritesRefresh(() => bumpUnsent((n) => n + 1));
+  const resultUnsent = !!(match && window.API && typeof window.API.hasPendingTerminalWrite === "function"
+    && window.API.hasPendingTerminalWrite(compId, match.id));
   const triggerRef = useRef(null);
   const trapRef = useRef(null);
   const modalRefCb = useCallback((node) => {
@@ -461,7 +472,6 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
   const dialogLabel = sideAName && sideBName ? `Match: ${sideBName} vs ${sideAName}` : "Match details";
 
   if (isScoring && window.ScoreEditorModal) {
-    const compId = match.compId || defaultCompId;
     const comp = ((tournament && tournament.competitions) || []).find((c) => c.id === compId);
     return React.createElement(window.ScoreEditorModal, {
       match,
@@ -470,32 +480,26 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
         try {
           // bc-evts: the write is the outbox's and the answer here is the
           // pending one (never waited on). A refusal the server sends later
-          // comes through onRefusal, told by this page's one fallback, as a
-          // direct refusal is below, and claimed so no second alert is raised.
-          // A refusal the editor says itself (its own Start's, opts.onRefusal)
-          // is not alerted again.
-          const onRefusal = (e) => {
-            const own = opts && typeof opts.onRefusal === "function" && opts.onRefusal(e) === true;
-            if (!own) window.alert(e && e.message ? e.message : "Couldn't save the result. Please try again.");
-            return true;
-          };
-          const res = await window.API.recordScore(compId, match.id, patch, "", match, { onRefusal });
+          // is told by the outbox's one rule (_tellRefusal): the editor open on
+          // the match says it, else an error toast does. This page claims
+          // nothing of its own; only the refusal the editor says itself (its
+          // own Start's, opts.onRefusal) is passed through.
+          const res = await window.API.recordScore(compId, match.id, patch, "", match, { onRefusal: opts && opts.onRefusal });
           // Close only when a landed write ends the match (writeKeepsEditorOpen,
           // the rule every closing host asks). Start, an autosave, or a write
           // that did not land keeps the editor open; the last shows its
-          // not-saved banner, the only report this toast-less surface has.
+          // not-saved banner (a refused Finish, which closes at once, reaches the toast).
           if (writeKeepsEditorOpen(patch, res)) return res;
           setIsScoring(false);
           onClose();
           return res;
         } catch (err) {
           // A non-queued failure (direct 4xx validation/conflict, or an unexpected
-          // exception). ScoreEditorModal doesn't render generic submit errors and the
-          // public viewer has no toast, so surface it explicitly: log + alert (the
-          // established fallback here, mirroring app.jsx): rather than silently
+          // exception). ScoreEditorModal doesn't render generic submit errors, so
+          // surface it as an error toast (above every modal) rather than silently
           // leaving the modal open. The modal stays open so the operator can retry.
           console.error("Self-run score submit failed:", err);
-          window.alert(err && err.message ? err.message : "Couldn't save the result. Please try again.");
+          pushToast(err && err.message ? err.message : "Couldn't save the result. Please try again.", "error");
         }
       },
       password: "",
@@ -516,7 +520,11 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
         <MatchDetailCard match={match} onClose={onClose} escapeToClose={false} slotLabel={slotLabel} paceLookup={paceLookup} />
         {isSelfRun && bothSidesReady && (
           <div className="card" style={{ marginTop: 12, padding: 16 }}>
-            {isFinalized ? (
+            {resultUnsent ? (
+              <div data-testid="result-unsent" style={{ fontSize: 13, color: "var(--ink-2)" }}>
+                Result entered on this phone, not sent yet. It is sent when the connection returns.
+              </div>
+            ) : isFinalized ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-3)" }}>
                 <span style={{ background: "var(--bg-2)", padding: "4px 10px", borderRadius: 4, fontSize: 12 }}>Result reported</span>
                 <span>Contact the organizer to correct this result.</span>

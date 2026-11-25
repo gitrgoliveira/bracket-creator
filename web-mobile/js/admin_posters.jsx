@@ -27,6 +27,7 @@ import {
   postersChanged,
   postersTooLong,
   textLength,
+  trimText,
   withChoice,
 } from "./posters_model.jsx";
 import { isNonPublicOrigin } from "./viewer_utils.jsx";
@@ -84,6 +85,9 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
   const [draft, setDraft] = useState(() => normalisePosters(t.posters));
   // The block as last read or saved: what "unsaved" is measured against.
   const [savedBlock, setSavedBlock] = useState(() => normalisePosters(t.posters));
+  // The block the server is known to hold: what a refused or discarded save
+  // turns the page back to.
+  const storedRef = useRef(savedBlock);
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState(null);
   const [selectedKey, setSelectedKey] = useState("viewer");
@@ -151,19 +155,24 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
     if (tooLong) return;
     const block = normalisePosters(draft);
     if (!again && !postersChanged(block, savedBlock)) { setRefusal(null); return; }
-    const prior = savedBlock;
     let turnedBack = false;
     if (again) versionRef.current = tournamentRef.current.tournamentVersion;
     const id = ++saveSeqRef.current;
     setRefusal(null);
     setSaving(true);
     const latest = () => id === saveSeqRef.current;
+    // A refused or discarded save puts back the block the server holds, but
+    // only the newest save does: an older one's answer must not undo a newer
+    // save that is still out.
+    const turnBack = () => {
+      turnedBack = true;
+      if (latest()) setSavedBlock(storedRef.current);
+    };
     try {
       await onSave({ tournamentVersion: versionRef.current, posters: block }, {
         onRefusal: (e) => {
           if (!mountedRef.current) return false;
-          turnedBack = true;
-          setSavedBlock(prior);
+          turnBack();
           if (latest()) setSaving(false);
           setRefusal(e && e.code === "tournament_changed"
             ? { changed: true, message: POSTERS_CHANGED_ELSEWHERE }
@@ -173,10 +182,10 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
         onSettled: (saved) => {
           if (!mountedRef.current) return;
           if (saved) {
+            storedRef.current = block;
             if (saved.tournamentVersion) versionRef.current = saved.tournamentVersion;
           } else {
-            turnedBack = true;
-            setSavedBlock(prior);
+            turnBack();
           }
           if (latest()) setSaving(false);
         },
@@ -241,7 +250,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
         {showAddressWarning && (
           <div className="alert alert--warn poster-no-print" role="note" data-testid="posters-address-warning">
             No public address is set, so the codes open this device&apos;s address ({window.location.origin}), which phones at the venue may not reach.{" "}
-            <button type="button" className="btn btn--sm" onClick={guarded(onEditTournament)}>Set it in Edit tournament</button>
+            <button type="button" className="btn btn--sm" onClick={guarded(onEditTournament)}>Set it in Edit details</button>
           </div>
         )}
 
@@ -287,7 +296,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                   aria-describedby={idBase + "-heading-count"}
                   onChange={(e) => change({ heading: e.target.value })}
                 />
-                <Counter id={idBase + "-heading-count"} text={choices.heading.trim()} max={POSTER_RULES.headingMaxLength} />
+                <Counter id={idBase + "-heading-count"} text={trimText(choices.heading)} max={POSTER_RULES.headingMaxLength} />
               </div>
 
               <div className="field">
@@ -300,7 +309,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                   aria-describedby={idBase + "-cta-count"}
                   onChange={(e) => change({ callToAction: e.target.value })}
                 />
-                <Counter id={idBase + "-cta-count"} text={choices.callToAction.trim()} max={POSTER_RULES.callToActionMaxLength} />
+                <Counter id={idBase + "-cta-count"} text={trimText(choices.callToAction)} max={POSTER_RULES.callToActionMaxLength} />
               </div>
 
               {lp.offered && (

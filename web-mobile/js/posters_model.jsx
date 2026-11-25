@@ -68,6 +68,14 @@ const textOf = (s) => (typeof s === "string" ? s : "");
 // units), so the counters beside the boxes agree with its 400.
 export const textLength = (s) => [...textOf(s)].length;
 
+// trimText trims the way the server does (Go's strings.TrimSpace), not the way
+// String.trim does: the two differ on U+0085 (Go strips it) and U+FEFF (only
+// JavaScript strips it), and a counter that trimmed otherwise would disagree
+// with the server's 400.
+const TRIM_SPACE = "[\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]+";
+const TRIM_EDGES = new RegExp("^" + TRIM_SPACE + "|" + TRIM_SPACE + "$", "g");
+export const trimText = (s) => textOf(s).replace(TRIM_EDGES, "");
+
 // posterList: the viewer-home poster, then one per court of the tournament, in
 // the tournament's order. A court that is no longer in the tournament is not
 // listed (its stored choices stay in the block and return with the court).
@@ -116,8 +124,8 @@ export function posterChoices(t, poster) {
   return {
     heading,
     callToAction,
-    headingText: heading.trim() || defaultHeading(poster),
-    callToActionText: callToAction.trim(),
+    headingText: trimText(heading) || defaultHeading(poster),
+    callToActionText: trimText(callToAction),
     logo: s.logo === "centre" || s.logo === "above" ? s.logo : "",
     hideSponsors: !!s.hideSponsors,
   };
@@ -244,7 +252,7 @@ function cleanEntry(e, trim) {
   const entry = e || {};
   for (const field of ["heading", "callToAction"]) {
     const v = textOf(entry[field]);
-    if (v.trim()) out[field] = trim ? v.trim() : v;
+    if (trimText(v)) out[field] = trim ? trimText(v) : v;
   }
   if (entry.logo === "centre" || entry.logo === "above") out.logo = entry.logo;
   if (entry.hideSponsors) out.hideSponsors = true;

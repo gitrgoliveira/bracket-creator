@@ -144,11 +144,11 @@ describe('the poster list and the choices', () => {
 });
 
 describe('the public-address warning', () => {
-  it('shows when no public address is set and this address is not public, and leads to Edit tournament', async () => {
+  it('shows when no public address is set and this address is not public, and leads to Edit details', async () => {
     mount(base({ publicURL: '' }));
     const warning = screen.getByTestId('posters-address-warning');
     expect(warning).toHaveClass('poster-no-print');
-    await tap('Set it in Edit tournament');
+    await tap('Set it in Edit details');
     expect(onEditTournament).toHaveBeenCalledTimes(1);
   });
 
@@ -268,6 +268,31 @@ describe('what counts as unsaved', () => {
     expect(status()).toBe('Unsaved changes');
     await tap('Back');
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+  });
+
+  it('two saves out at once, both refused, turn the page back to what the server holds', async () => {
+    mount();
+    type(headingBox(), 'First');
+    await tap('Save');
+    type(headingBox(), 'Second');
+    await tap('Save');
+    await act(async () => { saves[0].opts.onRefusal(new Error('The server refused it.')); });
+    await act(async () => { saves[1].opts.onRefusal(new Error('The server refused it.')); });
+    // The server holds no poster text: the first save's text is not stored.
+    type(headingBox(), 'First');
+    expect(status()).toBe('Unsaved changes');
+  });
+
+  it('an older save refused while a newer one is out leaves the newer one as sent', async () => {
+    mount();
+    type(headingBox(), 'First');
+    await tap('Save');
+    type(headingBox(), 'Second');
+    await tap('Save');
+    await act(async () => { saves[0].opts.onRefusal(new Error('The server refused it.')); });
+    expect(status()).toBe('Saving');
+    await act(async () => { saves[1].opts.onSettled({ tournamentVersion: 'v2' }); });
+    expect(status()).toBe('Saved');
   });
 });
 

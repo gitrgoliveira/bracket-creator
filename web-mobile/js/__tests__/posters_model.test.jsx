@@ -20,6 +20,7 @@ import {
   postersChanged,
   postersTooLong,
   textLength,
+  trimText,
   logoURL,
   CENTRE_TOO_LONG_SENTENCE,
 } from '../posters_model.jsx';
@@ -49,6 +50,15 @@ describe('the shared poster rules table', () => {
 
   it('counts characters the way the server does', () => {
     for (const c of rules.lengthCases) expect(textLength(c.text)).toBe(c.length);
+  });
+
+  it('trims the way the server does', () => {
+    for (const c of rules.trimCases) expect(trimText(c.text)).toBe(c.trimmed);
+  });
+
+  it('counts a heading of the limit plus a trailing U+0085 as within the limit', () => {
+    const heading = 'a'.repeat(rules.headingMaxLength) + '\u0085';
+    expect(postersTooLong({ viewer: { heading } })).toBe(false);
   });
 
   it('takes the default headings from the table', () => {

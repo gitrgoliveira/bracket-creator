@@ -28,6 +28,10 @@ type posterRulesTable struct {
 		Text   string `json:"text"`
 		Length int    `json:"length"`
 	} `json:"lengthCases"`
+	TrimCases []struct {
+		Text    string `json:"text"`
+		Trimmed string `json:"trimmed"`
+	} `json:"trimCases"`
 }
 
 func readPosterRules(t *testing.T) posterRulesTable {
@@ -53,6 +57,10 @@ func TestPosterRules_SharedTable(t *testing.T) {
 	require.NotEmpty(t, table.LengthCases)
 	for _, c := range table.LengthCases {
 		assert.Equal(t, c.Length, utf8.RuneCountInString(c.Text), "length of %q", c.Text)
+	}
+	require.NotEmpty(t, table.TrimCases)
+	for _, c := range table.TrimCases {
+		assert.Equal(t, c.Trimmed, strings.TrimSpace(c.Text), "trim of %q", c.Text)
 	}
 }
 

@@ -33,7 +33,7 @@ Each poster keeps its own choices, so the viewer-home poster and the poster for 
 
 Nothing is sent until you click **Save**. The line beside the button reads **Unsaved changes** while what you see differs from what is stored, **Saving** while the save is on its way, and **Saved** once it has landed. Saving shares the choices with every device, so the posters look the same wherever you open the page.
 
-- Click **Print** at any time: it prints what is on screen, saved or not. Printing never saves.
+- Click **Print this poster** or **Print all posters** at any time: it prints what is on screen, saved or not. Printing never saves.
 - If you leave the page with unsaved changes, the app asks **Leave Posters anyway?**. Choose **Keep entries** to stay and save, or **Discard entries** to leave.
 - If another device changed the tournament settings while you were typing, the page says "Not saved: the tournament settings were changed on another device. Your poster text is still here." Your text stays on screen. Click **Save again** to save it over the current settings.
 
@@ -55,7 +55,7 @@ Click **Print this poster** for the poster in the preview, or **Print all poster
 
 - **A4 portrait** is the poster's size. Each poster fits one sheet, and no blank sheet is added at the end.
 - **A3**: choose A3 paper in the dialog and set the scale to fit the page. The poster scales as a whole, so nothing moves.
-- **Colours**: turn on **Background graphics** (Chrome and Edge) or **Print backgrounds** (Safari) in the dialog, or the coloured band prints white.
+- **Colours**: the coloured band prints in colour. Nothing needs turning on in the print dialog, such as **Background graphics**.
 - To keep a copy as a file, choose **Save as PDF** as the printer.
 
 Print one poster on paper first and scan it with a phone before you print the whole set, to check the logo and the address.

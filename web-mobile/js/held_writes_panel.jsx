@@ -68,8 +68,8 @@ export function heldWriteWhere(held, competitions) {
 // waiting (for the connection, a sign-in, or another write) shares that
 // match's row, named by its finished result when it holds one; a write the
 // server keeps refusing keeps a row of its own, since it is discarded alone
-// and the confirm names it. A write about no match (a lineup, a check-in, a
-// court call) is its own row. Order is the order the first write of each row
+// and the confirm names it. A lineup save is its own row even when it names a
+// match, and so is a write about no match (a check-in, a court call). Order is the order the first write of each row
 // is listed in.
 export function heldWriteRows(items) {
   const rows = [];
@@ -77,7 +77,7 @@ export function heldWriteRows(items) {
   for (const held of items || []) {
     if (!held) continue;
     const matchID = typeof held.matchID === 'string' ? held.matchID : '';
-    if (held.keepsFailing || !matchID) {
+    if (held.keepsFailing || !matchID || held.kind === 'lineup') {
       rows.push({ key: held.key, lead: held, entries: [held] });
       continue;
     }

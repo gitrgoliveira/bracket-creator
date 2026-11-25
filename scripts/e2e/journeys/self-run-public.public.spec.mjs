@@ -89,7 +89,7 @@ async function schedulePairs(page, names) {
   return out;
 }
 
-// Findings this journey raised that are still OPEN in findings.md. A step
+// Findings this journey raised that are still OPEN (keyed S1, S2, ...). A step
 // that meets one records what it saw (an annotation and an AUDIT row) instead
 // of failing; the fix takes the id out of this set, and the assertion holds
 // from then on. None is open now. Fixed, and asserted: S1 (a self-run
@@ -116,8 +116,8 @@ async function unlessOpen(id, what, check) {
 // What a public editor offers that only the organiser may record. The team
 // and kachinuki sheets' per-bout Fusensho is NOT one of them: the server takes
 // it from a participant on purpose (IsSelfRunReportableSubDecision, "per-bout
-// forfeiture is a factual observation"), so it is recorded for the rulings
-// (findings.md) and left out of the check.
+// forfeiture is a factual observation"), so it is recorded in the journey's
+// report and left out of the check.
 async function expectNoDecisions(page, record, what) {
   const found = await offeredDecisions(page);
   const rest = found.filter((f) => !/fusensho/i.test(f));
@@ -598,13 +598,6 @@ test.describe('a competitor scores on the self-run public page', () => {
           await expect(Team.rowSlots(r1, 'shiro'), 'the strike shows on bout 1').toHaveCount(1, { timeout: 3_000 });
         });
         record({ step: 'first strike after naming', focusedBefore: focused, counted });
-        if (!counted) {
-          // What the competitor does when nothing shows: taps it again.
-          await shot(page, 'first-strike-lost', { fullPage: true });
-          await page.waitForTimeout(600);
-          await Team.rowIppon(r1, 'shiro', 'M').tap();
-          await expect(Team.rowSlots(r1, 'shiro')).toHaveCount(1);
-        }
         await settled(page);
         totals.push(await teamTotals(page));
         await teamBoutIppon(page, 2, 'aka', 'K');

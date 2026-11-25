@@ -108,6 +108,16 @@ describe('the held-writes list: one row per match', () => {
     expect(window.API.discardHeldWrite).toHaveBeenCalledTimes(1);
   });
 
+  it('a match lineup save is its own row, so the match row keeps naming the match', () => {
+    const rows = heldWriteRows([
+      waiting('k-lineup', 'lineup', { teamId: 't1' }),
+      waiting('k-tap', 'evt'),
+    ]);
+    expect(rows.map((r) => r.key)).toEqual(['k-lineup', 'k-tap']);
+    expect(rows[0].line).toBe('Team lineup: waiting to be sent');
+    expect(rows[1].line).toBe('Tap: waiting to be sent');
+  });
+
   it('a write about no match is its own row, named as before', () => {
     const rows = heldWriteRows([
       waiting('k-lineup', 'lineup', { matchID: '', teamId: 't1' }),

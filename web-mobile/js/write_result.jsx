@@ -218,7 +218,6 @@ export function tapNotAppliedAlertText(n, one, text, where = '', shared = '') {
     if (shared) {
         return shared.startsWith('Not applied:') ? `${lead}:${shared.slice('Not applied:'.length)}` : `${lead}. ${shared}`;
     }
-    if (where) return `${lead}. Open the match to see why; anything the server kept is in the match's history.`;
     return `${lead}. Open the match to see why; anything the server kept is in the match's history.`;
 }
 // tapsShareReason: whether every tap outcome given would be told in the same

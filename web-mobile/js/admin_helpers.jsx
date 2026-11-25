@@ -965,16 +965,20 @@ function competitionDrawBlocker(competition, tournamentCourts) {
 // What the dashboard's "Start all" may actually start, and what it must not
 // offer. Returns { startable: [competition], blocked: [{ comp, reason }] }.
 //
-// Eligibility (still in setup, at least 2 participants) and the court rules
-// are answered together so the picker cannot offer a competition the server
-// refuses: batching a blocked competition in produced a guaranteed entry in
-// the modal's "failed" list carrying a raw API message. Blocked competitions
-// are RETURNED rather than dropped so the modal can name them; "start all"
-// must never quietly mean "start most".
+// Eligibility (in setup with at least 2 participants, or already drawn and
+// waiting to start) and the court rules are answered together so the picker
+// cannot offer a competition the server refuses: batching a blocked
+// competition in produced a guaranteed entry in the modal's "failed" list
+// carrying a raw API message. Blocked competitions are RETURNED rather than
+// dropped so the modal can name them; "start all" must never quietly mean
+// "start most". A drawn competition (draw-ready, hidden or published) has its
+// pools and bracket already, so the court and seeding rules, which judge the
+// draw, have nothing left to refuse: starting it only opens scoring.
 function partitionStartableCompetitions(competitions, tournamentCourts) {
   const startable = [];
   const blocked = [];
   (competitions || []).forEach((c) => {
+    if (c && c.status === "draw-ready") { startable.push(c); return; }
     if (!c || c.status !== "setup" || (c.players || []).length < 2) return;
     // reason carries its own remedy: the modal lists several competitions at
     // once and a single hard-coded tail cannot be right for all of them.

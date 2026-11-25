@@ -1391,7 +1391,8 @@ function StartAllModal({ state, tournament, onConfirm, onRetry, onClose }) {
           {comps.length === 0
             ? "Nothing can be started yet."
             : <>This will start {window.pluralize(comps.length, "competition")} now. Once a
-              competition starts, its pools and bracket are generated and scoring opens.</>}
+              competition starts, its pools and bracket are generated (if they are not
+              already) and scoring opens.</>}
         </p>
         <ul className="start-all__list">
           {comps.map(c => <li key={c.id}>{c.name}</li>)}

@@ -3,6 +3,7 @@ import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { startHiddenDrawMessage, startAllHiddenDrawsNote } from '../../draw_visibility.jsx';
+import { partitionStartableCompetitions } from '../../admin_helpers.jsx';
 
 // bc-drpb: the dashboard card says who can see a draft's draw (FR16) and its
 // Start competition asks first on a hidden draft (FR9); Start all names the
@@ -160,12 +161,16 @@ describe('Dashboard card: Start on a hidden draft asks first (FR9)', () => {
 });
 
 describe('Start all: names the hidden draws it makes public (FR10)', () => {
+  // The modal is handed what the dashboard's Start all hands it: the
+  // partition of the tournament's competitions, so a draw-ready competition
+  // reaches it only if the app really offers one.
   async function mountStartAll({ comps, tournament = OFFICIATED, phase = 'confirm' }) {
+    const { startable, blocked } = partitionStartableCompetitions(comps, tournament.courts);
     let result;
     await act(async () => {
       result = render(
         <StartAllModal
-          state={{ phase, comps, blocked: [], failed: [] }}
+          state={{ phase, comps: startable, blocked, failed: [] }}
           tournament={tournament}
           onConfirm={noop}
           onRetry={noop}
@@ -187,6 +192,12 @@ describe('Start all: names the hidden draws it makes public (FR10)', () => {
     expect(note()).not.toBeNull();
     expect(note().textContent).toBe('Starting makes these hidden draws public: Mudansha, Kyu grades.');
     expect(note().textContent).toBe(startAllHiddenDrawsNote(OFFICIATED, [hiddenA, published, setup, hiddenB]));
+  });
+
+  it('lists the drawn competitions with the one in setup, as the dashboard hands them over', async () => {
+    await mountStartAll({ comps: [hiddenA, published, setup, hiddenB] });
+    const names = [...document.body.querySelectorAll('.start-all__list li')].map((li) => li.textContent);
+    expect(names).toEqual(['Mudansha', 'Open', 'Juniors', 'Kyu grades']);
   });
 
   it('says nothing when no competition it starts has a hidden draw', async () => {

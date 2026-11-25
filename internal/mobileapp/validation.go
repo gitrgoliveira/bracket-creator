@@ -1401,10 +1401,16 @@ func (r *ScoreRequest) AsMatchResult() *state.MatchResult {
 // Allowed at the top level: "" (none), "fought", "hikiwake". These are
 // factual observations a participant can make without referee authority.
 // fusensho is only valid on sub-results (ScoreRequest.Validate rejects it
-// at the top level), so it's not listed here.
+// at the top level), so it's not listed here. "kachinuki-exhaustion" is
+// allowed too: it is the End match write of the kachinuki sheet, not a
+// ruling. The server works its winner out from the bout log
+// (engine.deriveKachinukiWinner, which also refuses an end on a drawn last
+// bout) and refuses it outside a kachinuki competition
+// (refuseKachinukiDecisionForComp), so a participant ending their own
+// encounter from the public sheet decides nothing the bouts have not.
 //
 // Rejected: "kiken-voluntary", "kiken-injury", "fusenpai", "daihyosen",
-// "kachinuki-exhaustion", "fusensho", referee/operator rulings with
+// "fusensho", referee/operator rulings with
 // eligibility side-effects or official designation requirements. A
 // match-level "daihyosen" is the /decision ruling; the representative bout
 // itself is a sub-result row a participant may score (see
@@ -1415,7 +1421,7 @@ func IsSelfRunReportableDecision(decision string, hanteiDecided bool) bool {
 		return false
 	}
 	switch decision {
-	case "", "fought", "hikiwake":
+	case "", "fought", "hikiwake", string(domain.DecisionKachinukiExhaustion):
 		return true
 	default:
 		return false

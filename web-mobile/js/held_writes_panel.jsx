@@ -1,7 +1,7 @@
 // The one home of the held-writes list, shared by the admin topbar and the
 // public page.
 
-import { heldWriteLine, heldWriteDiscardConfirm, matchLabel, heldLineupLabel, HELD_WRITES_TITLE, HELD_WRITES_EMPTY, HELD_WRITE_DISCARD_ONE_LABEL, queuedWritesNoun, isFinishedResultWrite } from './write_result.jsx';
+import { heldWriteLine, heldWriteWhat, heldWriteState, heldWriteDiscardConfirm, matchLabel, heldLineupLabel, HELD_WRITES_TITLE, HELD_WRITES_EMPTY, HELD_WRITE_DISCARD_ONE_LABEL, queuedWritesNoun, isFinishedResultWrite } from './write_result.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 
@@ -62,6 +62,54 @@ export function heldWriteWhere(held, competitions) {
   return compName && what ? `${compName} · ${what}` : (compName || what);
 }
 
+// heldWriteRows: the list's rows, one per match as the corner counts them
+// (getHeldBadgeText: a match's finished result is one result, whatever
+// score update and taps wait with it). Every write of a match that is only
+// waiting (for the connection, a sign-in, or another write) shares that
+// match's row, named by its finished result when it holds one; a write the
+// server keeps refusing keeps a row of its own, since it is discarded alone
+// and the confirm names it. A write about no match (a lineup, a check-in, a
+// court call) is its own row. Order is the order the first write of each row
+// is listed in.
+export function heldWriteRows(items) {
+  const rows = [];
+  const byMatch = new Map();
+  for (const held of items || []) {
+    if (!held) continue;
+    const matchID = typeof held.matchID === 'string' ? held.matchID : '';
+    if (held.keepsFailing || !matchID) {
+      rows.push({ key: held.key, lead: held, entries: [held] });
+      continue;
+    }
+    const group = `${held.compID || ''}\u001f${matchID}`;
+    let row = byMatch.get(group);
+    if (!row) {
+      row = { key: held.key, lead: held, entries: [] };
+      byMatch.set(group, row);
+      rows.push(row);
+    }
+    row.entries.push(held);
+  }
+  return rows.map((row) => {
+    if (row.entries.length === 1) {
+      return { ...row, line: heldWriteLine(row.lead), keepsFailing: !!row.lead.keepsFailing };
+    }
+    const finished = row.entries.filter(isFinishedResultWrite);
+    const lead = finished[0] || row.lead;
+    let what;
+    if (finished.length === 1) what = heldWriteWhat(lead);
+    else {
+      const { n, noun } = queuedWritesNoun(finished.length, row.entries.length);
+      what = `${n} ${noun}`;
+    }
+    const state = heldWriteState({
+      cycled: row.entries.some((e) => e.cycled),
+      authBlocked: row.entries.some((e) => e.authBlocked),
+    });
+    return { ...row, lead, line: `${what.charAt(0).toUpperCase() + what.slice(1)}: ${state}`, keepsFailing: false };
+  });
+}
+
 // HeldWritesPanel: every write held on this device, opened from the topbar's
 // held-writes indicator. A write the server keeps refusing can be discarded
 // here, one at a time and after a confirm, whatever it is: a running
@@ -98,21 +146,21 @@ export function HeldWritesPanel({ competitions, onClose }) {
         <p className="held-writes__empty">{HELD_WRITES_EMPTY}</p>
       ) : (
         <ul className="held-writes" data-testid="held-writes">
-          {items.map((held) => (
-            <li key={held.key} className="held-writes__item" data-testid="held-write">
+          {heldWriteRows(items).map((row) => (
+            <li key={row.key} className="held-writes__item" data-testid="held-write">
               <div className="held-writes__text">
-                <div className="held-writes__where">{heldWriteWhere(held, competitions)}</div>
-                <div className={`held-writes__state${held.keepsFailing ? ' held-writes__state--error' : ''}`}>
-                  {heldWriteLine(held)}
+                <div className="held-writes__where">{heldWriteWhere(row.lead, competitions)}</div>
+                <div className={`held-writes__state${row.keepsFailing ? ' held-writes__state--error' : ''}`}>
+                  {row.line}
                 </div>
               </div>
-              {held.keepsFailing && (
+              {row.keepsFailing && (
                 <button
                   type="button"
                   className="btn btn--sm btn--ghost"
                   data-testid="held-write-discard-one"
                   disabled={busyKey !== null}
-                  onClick={() => discard(held)}
+                  onClick={() => discard(row.lead)}
                 >{HELD_WRITE_DISCARD_ONE_LABEL}</button>
               )}
             </li>

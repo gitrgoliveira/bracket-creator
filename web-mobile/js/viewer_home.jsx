@@ -5,7 +5,7 @@ import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, c
 import { matchParticipantIds, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, sharedLinkPass, readSharedLedger, writeSharedLedger, clearSharedLedger, sessionStore, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
-import { VSchedItem, MatchViewerModal, useLiveMatch, matchInList } from './viewer_match.jsx';
+import { VSchedItem, MatchViewerModal, useLiveMatch, matchInList, competitionUnderWay } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
 import { mirrorWatchlistParam } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
@@ -252,12 +252,13 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // Every door on this page shows the live row from this list.
   const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id, compId) => matchInList(allMatches, id, compId));
   const bothSidesMatches = useMemo(() => allMatches.filter(hasBothSides), [allMatches]);
-  // Running-comp set: gates the home NOW / Up-next strips and the running dot.
-  // BOTH setup and draw-ready are excluded: a draw-ready comp has a published
-  // draw but no match has been called, so it is NOT running. (The competition
-  // detail view still shows its Pools/Bracket tabs; that is governed separately
-  // by isPreStart in ViewerCompetition.)
-  const runningCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready").map(c => c.id)), [t.competitions]);
+  // Under-way set: gates the home NOW / Up-next strips. Setup is excluded,
+  // and so is draw-ready in an officiated tournament (no match has been
+  // called); a self-run draw-ready competition is under way, since its
+  // competitors start it (competitionUnderWay, viewer_match.jsx, the one
+  // owner). (The competition detail view still shows its Pools/Bracket tabs;
+  // that is governed separately by isPreStart in ViewerCompetition.)
+  const runningCompIds = useMemo(() => new Set((t.competitions || []).filter(c => competitionUnderWay(c, t)).map(c => c.id)), [t]);
   // Apply hasBothSides here too: pre-fix, a bracket match marked
   // `running` while one side was still an unresolved "Winner of rX-mY"
   // placeholder would appear in the public NOW strip, even though

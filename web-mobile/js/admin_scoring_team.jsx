@@ -3118,7 +3118,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   const openDoneBoutEdit = (idx) => {
     const t = subTotals[idx];
     setEditingDoneOriginal({ winner: t ? t.winner : null });
-    stampTap(boutListTapRef);
+    stampBoutList(null);
     setEditingDoneBoutIdx(idx);
   };
   // bc-kbrw: opening a fought bout expands it under the finger, so the second
@@ -3129,7 +3129,35 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // state, so a batched double tap cannot read a stale value. Keyboard
   // activation is never swallowed: a click synthesized from Enter/Space
   // carries detail === 0.
+  //
+  // A pick from a bout row's list (bc-flst) guards only the area the list was
+  // drawn over (`boutListGuardBoxRef`, the box LineupNameInput hands to
+  // onListPick): the bounce of the pick lands where the option was, and a tap
+  // elsewhere (another bout, straight after naming a fighter) is a deliberate
+  // one, which the whole-list guard swallowed (the self-run walk's S3). Opening
+  // a fought bout moves every row, so it guards the whole list (box null).
+  // The box's edges are relative to its anchor, the picked name box, read
+  // again when a tap comes, never kept in screen coordinates: a list that
+  // opened upward lay over the sheet, and bringing bout 1 into view scrolled
+  // its M under where the list had been on screen. A bounce never scrolls the
+  // sheet. An anchor no longer in the page drew no list under this tap.
   const boutListTapRef = useRef(null);
+  const boutListGuardBoxRef = useRef(null);
+  const stampBoutList = (box) => {
+    boutListGuardBoxRef.current = box || null;
+    stampTap(boutListTapRef);
+  };
+  const swallowBoutListBounce = (ev) => {
+    const box = boutListGuardBoxRef.current;
+    if (box) {
+      if (!box.anchor.isConnected) return;
+      const at = box.anchor.getBoundingClientRect();
+      const x = ev.clientX - at.left;
+      const y = ev.clientY - at.top;
+      if (!(x >= box.left && x <= box.right && y >= box.top && y <= box.bottom)) return;
+    }
+    swallowBounce(boutListTapRef)(ev);
+  };
   // bc-dtip: a bouncing thumb recorded two ippons (or two fouls, the second
   // awarding an H to the opponent) from one tap. A repeat POINTER tap on the
   // same bout side within TAP_BOUNCE_MS is ignored; keyed by the row side's
@@ -4375,7 +4403,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               body, under the team header and result band (.team-sheet-pin)
               and above the footer, which are pinned in every host and both
               layouts. */}
-          <div className="team-bouts-scroll" onClickCapture={swallowBounce(boutListTapRef)}>
+          <div className="team-bouts-scroll" onClickCapture={swallowBoutListBounce}>
           {[
             // mp-gmcg: operator-led completion. The banner reads "ended"
             // ONLY for a completed match (correction view): a running
@@ -4836,10 +4864,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                               // tap's second tap would score the ippon it
                               // uncovered (bc-flst). Only that pick stamps the
                               // bout list's bounce ref, as opening a fought bout
-                              // does (bc-kbrw): a typed name committed by tapping
-                              // an ippon button lands on a visible target, and
-                              // that tap must score.
-                              onListPick={() => stampTap(boutListTapRef)}
+                              // does (bc-kbrw), over the list's own box alone (a
+                              // tap on another bout counts, S3): a typed name
+                              // committed by tapping an ippon button lands on a
+                              // visible target, and that tap must score.
+                              onListPick={stampBoutList}
                               onSelect={sideActions[rs.key].onSelectName}
                             />
                           ) : (

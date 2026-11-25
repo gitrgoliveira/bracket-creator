@@ -81,6 +81,48 @@ const CONSOLE_ALLOWLIST = [
     codeUnreadable: true,
     request: (r) => !!r && r.method === 'PUT',
   },
+  {
+    reason: 'A public page logs its tournament reload failing while the journey has the phone offline (the self-run offline journeys, spec FR9 and FR10; load in app.jsx, which keeps the last good data and lets the connection indicator report the outage); it reloads again once back online.',
+    text: /^Failed to load tournament TypeError: Failed to fetch\b/,
+    url: /\/dist\/(?:[0-9a-f]+\/)?app\.jsx?$/,
+    whileOffline: true,
+  },
+  // The self-run public journey (self-run-public.public.spec.mjs) makes these
+  // refusals on purpose. A refused tap is a 200 per event and logs nothing.
+  {
+    reason: 'Two phones on a self-run match: phone A, offline, finishes a match phone B then finishes first, and the server refuses A\'s finishing write when it comes back online (409 result_finalized, spec FR9). Only a completed write over a finished match; any other /score write refused this way is a real error.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/competitions\/[^/]+\/matches\/[^/]+\/score$/,
+    code: /^result_finalized$/,
+    request: (r) => !!r && r.method === 'PUT' && writeStatus(r.postData) === 'completed',
+  },
+  {
+    reason: 'The self-run registration link of a TEAM competition (spec FR11): the page asks for the registration form of a competition whose teams the organiser enters, and the server answers 404 team_competition on both the GET and the POST. The collector reads the body\'s `error` sentence, since `code` is the same refusal\'s second field.',
+    text: /^Failed to load resource: the server responded with a status of 404 \(Not Found\)$/,
+    url: /\/api\/register\/competitions\/[^/]+$/,
+    code: /^registration is not available for this competition$/,
+  },
+  {
+    reason: 'The self-run registration link after the draw (spec FR11): registering for a competition whose draw exists is refused 409 and the page says registration is closed.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/register\/competitions\/[^/]+$/,
+    code: /^registration is closed for this competition$/,
+    request: (r) => !!r && r.method === 'POST',
+  },
+  {
+    reason: 'A competitor saves the lineup of a self-run team match that has finished from the public score sheet (spec FR7): the participant\'s write is refused 409 result_finalized and the sheet tells them to ask the organizer.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/competitions\/[^/]+\/teams\/[^/]+\/match-lineups\/[^/]+$/,
+    code: /^result_finalized$/,
+    request: (r) => !!r && r.method === 'PUT',
+  },
+  {
+    reason: 'A competitor renames a team member who already has a name from the public score sheet (spec FR7): refused 409 member_already_named, which only the organiser changes.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/competitions\/[^/]+\/teams\/[^/]+\/members\/[^/]+$/,
+    code: /^member_already_named$/,
+    request: (r) => !!r && r.method === 'PUT',
+  },
 ];
 
 // The `error` field of a refusal body; read with a pattern, since the body is

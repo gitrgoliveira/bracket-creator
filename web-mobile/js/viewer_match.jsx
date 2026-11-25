@@ -30,6 +30,24 @@ import { pushToast } from './toast_queue.jsx';
 const { useState, useMemo, useRef, useCallback } = React;
 
 // ---------------------------------------------------------------------------
+// competitionUnderWay: whether the public page lists a competition's matches
+// as running and next (the home page's Now and Up next, the Overview's Up
+// next). The ONE owner of that question for the viewer pages.
+//
+// A competition with a draw that is past draw-ready is under way. A
+// draw-ready one is under way only in a SELF-RUN tournament: there the
+// competitors start it themselves, since its first recorded result starts it
+// (engine.MaybeAutoCompletePools, AutoCompleteStarted), so its first match must be where a competitor looks
+// for it. In an officiated tournament a draw-ready competition waits for the
+// organiser and nothing of it is called yet.
+export function competitionUnderWay(comp, tournament) {
+  const status = comp && comp.status;
+  if (!status || status === "setup") return false;
+  if (status === "draw-ready") return !!(tournament && tournament.mode === "self-run");
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // mymatchQueueLabel: FR-025 label for the "Your next match" Queue chip.
 //
 // Contract:

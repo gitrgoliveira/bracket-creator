@@ -3,7 +3,7 @@
 
 import { TermV, competitionKindLabel, poolLabel, compMatchesForCompetition } from './viewer_utils.jsx';
 import { isFollowedPlayer, isPlayerWatched, entryKey, dojoKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
-import { MatchDetailCard, VSchedItem, MatchViewerModal, useLiveMatch, bracketMatchIn } from './viewer_match.jsx';
+import { MatchDetailCard, VSchedItem, MatchViewerModal, useLiveMatch, bracketMatchIn, competitionUnderWay } from './viewer_match.jsx';
 import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName, tiedPlaces, tiedPlaceOf } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
@@ -554,12 +554,15 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
     );
   }
 
-  // draw-ready: the draw is published but no match has been called yet.
-  // The comp is not running, so the Overview has no running/recent matches to
-  // show: point spectators to the now-available tabs. Swiss comps render a
-  // Standings tab instead of Pools/Bracket (same isSwiss signal as the tab
-  // logic in ViewerCompetition), so the pointer text must match.
-  if (c.status === "draw-ready") {
+  // draw-ready in an officiated tournament: the draw is published but no
+  // match has been called yet. The comp is not running, so the Overview has
+  // no running/recent matches to show: point spectators to the now-available
+  // tabs. Swiss comps render a Standings tab instead of Pools/Bracket (same
+  // isSwiss signal as the tab logic in ViewerCompetition), so the pointer
+  // text must match. A self-run draw-ready competition is under way
+  // (competitionUnderWay): its competitors start it, so its Overview lists
+  // the first matches under Up next like any running competition's.
+  if (c.status === "draw-ready" && !competitionUnderWay(c, tournament)) {
     let tabHint = "Browse the Pools and Bracket tabs to see the draw.";
     if (c.format === "swiss") tabHint = "Check the Standings tab to follow the rounds.";
     else if (isLeague) tabHint = "Browse the League tab to see the draw.";

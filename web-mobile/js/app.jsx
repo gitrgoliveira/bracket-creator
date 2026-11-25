@@ -379,6 +379,20 @@ function parseCourtFromSearch() {
   return raw.toLowerCase() === 'all' ? 'ALL' : raw.toUpperCase();
 }
 
+// alertNamedInCompetition: an outbox alert about a match names it by `where`,
+// the match's label ("Match 1"), which every competition has. The held-writes
+// list names the same write "<competition> · <match>" (heldWriteWhere,
+// held_writes_panel.jsx), so the alert is named the same way whenever this
+// page holds the competition (the self-run walk's S7). Never by its id: a
+// competition the page does not hold leaves the alert as it was, as does an
+// alert that names no match. Exported for test.
+export function alertNamedInCompetition(alert, competitions) {
+  if (!alert || !alert.compID || !alert.matchID || !alert.where) return alert;
+  const comp = (competitions || []).find((c) => c && c.id === alert.compID);
+  if (!comp || !comp.name) return alert;
+  return { ...alert, where: `${comp.name} · ${alert.where}` };
+}
+
 // bc-qttl: turn a queue alert from the outbox (api_client_queue.jsx) into operator-facing prose.
 //
 // The queue holds writes that have not reached the server. Every alert below but
@@ -758,10 +772,13 @@ function App() {
   // load-bearing here: the queue rehydrates from localStorage at module load,
   // long before App mounts, so the "results were discarded" alert is always
   // raised before this effect can run. Subscribing replays it.
+  // The competitions an alert's match is named in (alertNamedInCompetition),
+  // read when the alert comes, not when the subscription was made.
+  const alertCompetitionsRef = useLatestRef(tournament && tournament.competitions);
   useEffect(() => {
     if (typeof window.subscribeQueueAlert !== "function") return;
     return window.subscribeQueueAlert((alert) => {
-      const message = queueAlertMessage(alert);
+      const message = queueAlertMessage(alertNamedInCompetition(alert, alertCompetitionsRef.current));
       if (message) showToast(message, queueAlertToastType(alert), queueAlertToastOptions(alert));
     });
     // Mount-only: showToast pushes into the module-level toast queue.

@@ -1314,7 +1314,14 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
 // (the Up Next lineup panel); without it a nameless placement had no way out.
 // `onListPick` is told of a pick made by tapping a row of the open list (an
 // option or "+ Add"), never of a typed commit, Enter, the clear button or a
-// click outside: only that pick closes the list under the finger.
+// click outside: only that pick closes the list under the finger. It is handed
+// the list's box as drawn when the pick was made (null when there is none), so
+// a host can guard just that area against the pick's bounce rather than every
+// control near it. The box is `{ anchor, left, right, top, bottom }`, its edges
+// relative to `anchor` (the box's own root, which stays mounted once the list
+// closes): a host reads `anchor.getBoundingClientRect()` when a tap comes, so
+// the area moves with the sheet if it scrolled in between. A box in screen
+// coordinates covered whatever the scroll brought under it (the walk's S3).
 // The name list is absolutely placed under its input. It opens down when the room
 // below fits the list, else toward the larger room, and caps its height to that
 // room. The room is bounded by the viewport (the visual one, which the iPad
@@ -1542,6 +1549,15 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
     }
   };
 
+  // The list's box as drawn now, relative to this box's root, for onListPick
+  // (the area a pick's bounce lands in).
+  const listBox = () => {
+    if (!listRef.current || !ref.current) return null;
+    const list = listRef.current.getBoundingClientRect();
+    const at = ref.current.getBoundingClientRect();
+    return { anchor: ref.current, left: list.left - at.left, right: list.right - at.left, top: list.top - at.top, bottom: list.bottom - at.top };
+  };
+
   const fielded = !value && !numberLabel && !!fieldedLabel;
   // A nameless member the box holds reads its number alone, in ink like a name.
   const numberedOnly = !value && !!numberLabel;
@@ -1599,7 +1615,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
           {matches.map((entry, i) => (
             <button type="button" key={entry.isObject ? (entry.raw?.id || entry.raw?.index) : entry.name}
               className={`pmf__option ${i === active ? "pmf__option--active" : ""}`}
-              onMouseDown={(e) => e.preventDefault()} onClick={() => { onListPick?.(); commitEntry(entry); }}>
+              onMouseDown={(e) => e.preventDefault()} onClick={() => { onListPick?.(listBox()); commitEntry(entry); }}>
               {entry.isObject ? (
                 <>
                   <span className="pmf__opt-label">{entry.label}</span>
@@ -1613,7 +1629,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
           {canAddNew && (
             <button type="button"
               className={`pmf__option lineup-name__add ${active === matches.length ? "pmf__option--active" : ""}`}
-              onMouseDown={(e) => e.preventDefault()} onClick={() => { onListPick?.(); commit(q); }}>
+              onMouseDown={(e) => e.preventDefault()} onClick={() => { onListPick?.(listBox()); commit(q); }}>
               <span className="pmf__opt-name">+ Add “{q}”</span>
             </button>
           )}

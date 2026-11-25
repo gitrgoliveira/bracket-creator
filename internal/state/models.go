@@ -797,8 +797,7 @@ func (c *Competition) CheckInApplies(t *Tournament) bool {
 // DrawHiddenIn reports whether the public may NOT see this competition's
 // draw now in tournament t: the competition is draw-ready, its draw is
 // stored as hidden (DrawHidden), and the tournament is officiated. This is
-// the ONE owner of that rule (the client's twin is drawHiddenFromPublic in
-// draw_visibility.jsx): a started competition is public whatever is stored,
+// the ONE owner of that rule: a started competition is public whatever is stored,
 // and a self-run tournament shows its draw as soon as it is made, judged
 // here at read time with the stored field left alone. It says nothing of
 // who is asking; the organiser's answers never hide the draw.

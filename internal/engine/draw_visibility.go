@@ -8,8 +8,8 @@ import (
 
 // ErrDrawNotReady is the sentinel errors.Is finds under the refusal
 // SetDrawHidden answers for a competition that is not draw-ready: only a
-// draw waiting to start can be published or hidden. Handlers answer it
-// 409 draw_not_ready.
+// draw waiting to start can be published or hidden. A route that calls SetDrawHidden
+// maps it to 409 draw_not_ready.
 var ErrDrawNotReady = errors.New("the draw can be published or hidden only while it waits to start")
 
 // SetDrawHidden stores whether the draw of a draw-ready competition is kept
@@ -20,8 +20,8 @@ var ErrDrawNotReady = errors.New("the draw can be published or hidden only while
 // nothing written, so a repeated tap is harmless. A competition that is not
 // draw-ready is refused with a ValidationError wrapping ErrDrawNotReady, and
 // a missing one with a NotFoundError. The tournament mode is not judged here:
-// state.Competition.DrawHiddenIn reads it at read time, and the routes refuse
-// a self-run tournament before they call this.
+// state.Competition.DrawHiddenIn reads it at read time, so a route that calls
+// this refuses a self-run tournament itself first.
 func (e *Engine) SetDrawHidden(id string, hidden bool) (bool, error) {
 	return e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 		if current == nil {

@@ -916,8 +916,9 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 // not hold by id, for every caller (the organiser too since bc-drev: a draw
 // swap moves a team to another place, and a save made before it must not land
 // on a match the team no longer plays): nothing reads such a lineup, and each
-// one would add a key to lineups.yaml. A side with no id yet (an unresolved
-// knockout feeder) takes no lineup either.
+// one would add a key to lineups.yaml. An anonymous caller is refused the same
+// way when a side has no id yet (an unresolved knockout feeder); the organiser's
+// save there still lands (matchHoldsTeam).
 var errTeamNotInMatch = &selfRunRefusal{
 	status:  http.StatusNotFound,
 	code:    "team_not_in_match",

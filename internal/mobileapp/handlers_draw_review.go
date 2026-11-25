@@ -114,7 +114,7 @@ func drawReviewCompetition(c *gin.Context, comps CompetitionLoader) (*state.Comp
 		return nil, false
 	}
 	if comp == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+		respondCompetitionNotFound(c)
 		return nil, false
 	}
 	return comp, true

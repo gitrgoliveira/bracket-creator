@@ -239,6 +239,8 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
       posters                     the venue posters in a real browser: the
                                   court letter the largest element, the
                                   sponsors one row at one height for 1 to 6,
+                                  taller for fewer sponsors and never under
+                                  the floor, the address just under its code,
                                   the viewer code larger than a court code,
                                   the longest text still fitting a court
                                   poster; laid out for A4, a court code over

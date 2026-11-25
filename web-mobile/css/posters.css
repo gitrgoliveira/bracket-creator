@@ -180,6 +180,15 @@
   background: #fff;
 }
 
+/* The code and its address stay together, the address just under the code. */
+.poster__code-group {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2cqw;
+}
+
 .poster__address {
   flex: none;
   max-width: 84cqw;
@@ -191,22 +200,36 @@
 }
 
 /* The strip: one row of logos of one height, spread evenly; a single sponsor
- * sits in the middle and is never stretched. Each logo's width is capped so any
- * count from 1 to 6 fits on the row. */
+ * sits in the middle and is never stretched. The strip takes twice the body's
+ * share of the space the body leaves, and its logos grow to fill it, up to
+ * --poster-sponsor-max (posters_model.jsx, larger for fewer sponsors). With no
+ * space to spare it keeps --poster-sponsor-min. It is a size container so a
+ * logo can read its height (cqh); it spans the poster's width with no side
+ * padding, so a cqw inside it is still a hundredth of the poster's width. Each
+ * logo's width is capped so any count from 1 to 6 fits on the row. */
 .poster__sponsors {
-  flex: none;
+  flex: 2 0 auto;
+  container-type: size;
+  box-sizing: border-box;
+  min-height: calc(var(--poster-sponsor-min) + 2.9cqw);
+  max-height: calc(var(--poster-sponsor-max) + 2.9cqw);
+  padding: 1.2cqw 0 1.4cqw;
+  border-top: 0.3cqw solid #d8d8d8;
+}
+
+.poster__sponsors-row {
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: space-evenly;
   gap: 2cqw;
-  padding: 1.2cqw 5cqw 1.4cqw;
-  border-top: 0.3cqw solid #d8d8d8;
+  padding: 0 5cqw;
 }
 
 .poster__sponsor {
   flex: 0 1 auto;
   display: block;
-  height: 6.5cqw;
+  height: 100cqh;
   width: auto;
   max-width: calc((90cqw - 2cqw * (var(--poster-sponsors) - 1)) / var(--poster-sponsors));
   object-fit: contain;

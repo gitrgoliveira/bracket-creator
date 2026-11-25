@@ -143,6 +143,20 @@ describe('the poster list and the choices', () => {
   });
 });
 
+describe('where the logo and the sponsors come from', () => {
+  it('says they come from Edit details, and leads there', async () => {
+    mount();
+    expect(screen.getByTestId('posters-branding')).toHaveTextContent('The logo and the sponsor images come from the Branding and Sponsors sections of Edit details.');
+    await tap('Open Edit details');
+    expect(onEditTournament).toHaveBeenCalledTimes(1);
+  });
+
+  it('says where to add them when there are none', () => {
+    mount(base({ sponsors: [], theme: { hasLogo: false } }));
+    expect(screen.getByTestId('posters-branding')).toHaveTextContent('To put a logo or sponsor images on the posters, add them in the Branding and Sponsors sections of Edit details.');
+  });
+});
+
 describe('the public-address warning', () => {
   it('shows when no public address is set and this address is not public, and leads to Edit details', async () => {
     mount(base({ publicURL: '' }));

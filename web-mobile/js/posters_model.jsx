@@ -44,6 +44,12 @@ export const POSTER_SIZES = Object.freeze({
   courtLetter: 44,
   viewerLogoAbove: 15,
   courtLogoAbove: 5.5,
+  // The tallest a sponsor logo grows, by the number of sponsors (one to six):
+  // the strip takes the space the rest of the poster leaves, so a poster with a
+  // short heading gets large logos, and fewer sponsors get taller ones. At the
+  // longest text the server allows the strip keeps its floor, sponsorMin.
+  sponsorMax: Object.freeze([22, 18, 15, 13, 11.5, 10]),
+  sponsorMin: 6.5,
 });
 
 // A code is drawn with this many white modules around it (the QR standard's quiet

@@ -349,6 +349,13 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                 </div>
               )}
 
+              <div className="field__hint posters-branding" data-testid="posters-branding">
+                {lp.offered || sponsorsOffered
+                  ? "The logo and the sponsor images come from the Branding and Sponsors sections of Edit details."
+                  : "To put a logo or sponsor images on the posters, add them in the Branding and Sponsors sections of Edit details."}{" "}
+                <button type="button" className="btn btn--sm" onClick={guarded(onEditTournament)}>Open Edit details</button>
+              </div>
+
               <div className="field__hint posters-address">The code opens {address}</div>
 
               <div className="posters-print-row">

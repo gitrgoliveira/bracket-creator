@@ -19,10 +19,17 @@ Pick a poster from the list. The preview beside the choices changes as you type,
 
 - **Heading**: the line above the code. Leave it empty to use the standard words ("Follow the tournament live" on the viewer-home poster, "Follow this court live" on a shiai-jo poster). The box shows the standard words in grey while it is empty. A heading holds up to 80 characters.
 - **Call to action**: an optional second line under the heading, for example "Scan for live results". Leave it empty and nothing prints. It holds up to 120 characters.
-- **Logo**: shown only when the tournament has a logo (set it on **Edit details**, under [Branding and sponsors](run-tournament.md#branding-and-sponsors)). Choose **Logo in the centre of the code**, or **Logo above the code**. The code stays readable with a logo in its centre because the poster uses the code's strongest error correction. A very long address does not leave room for that, so the centre choice is switched off and a sentence under the choices says why. The logo then goes above the code, and a shorter public address brings the centre choice back.
-- **Show sponsors**: shown only when the tournament has sponsors. Untick it to leave the sponsor strip off this poster. Sponsors print along the foot of the poster, evenly spaced.
+- A counter under each box shows how many characters it holds. While a heading or call to action is over its limit, **Save** is switched off and the page says so; shorten the text to save.
+- **Logo**: shown only when the tournament has a logo. Choose **Logo in the centre of the code**, the choice a new poster starts with, or **Logo above the code**. The code stays readable with a logo in its centre because the poster uses the code's strongest error correction. A very long address does not leave room for that, so the centre choice is switched off and a sentence under the choices says why. The logo then goes above the code, and a shorter public address brings the centre choice back.
+- **Show sponsors**: shown only when the tournament has sponsors. Untick it to leave the sponsor strip off this poster.
 
 Each poster keeps its own choices, so the viewer-home poster and the poster for each shiai-jo can say different things.
+
+## Add the logo and the sponsors
+
+The posters use the tournament's own logo and sponsor images. Upload them on **Edit details**, in the **Branding** and **Sponsors** sections (refer to [Branding and sponsors](run-tournament.md#branding-and-sponsors)). The Posters page has an **Open Edit details** button under the choices that takes you there, and the posters pick the images up as soon as you come back.
+
+Sponsors print along the foot of the poster in one row, evenly spaced, up to six of them. The logos grow into the space the rest of the poster leaves, so fewer sponsors, or a poster with a short heading, get larger logos. A shiai-jo poster has less room to spare than the viewer-home poster, because its court letter comes first.
 
 <figure class="bc-fig" markdown="span">
   ![The Posters page showing the poster for shiai-jo A: the court letter in very large type, the logo above a smaller code, and the sponsors along the foot.](../../screenshots/posters-court.png)
@@ -36,6 +43,7 @@ Nothing is sent until you click **Save**. The line beside the button reads **Uns
 - Click **Print this poster** or **Print all posters** at any time: it prints what is on screen, saved or not. Printing never saves.
 - If you leave the page with unsaved changes, the app asks **Leave Posters anyway?**. Choose **Keep entries** to stay and save, or **Discard entries** to leave.
 - If another device changed the tournament settings while you were typing, the page says "Not saved: the tournament settings were changed on another device. Your poster text is still here." Your text stays on screen. Click **Save again** to save it over the current settings.
+- If the save fails for any other reason, the page says **Not saved** and why, and your text stays on screen.
 
 ## What a code opens
 
@@ -47,7 +55,7 @@ A code never carries a link that reveals competitor names. If a competition [hid
 
 The codes open the tournament's **Public URL**. Set it on **Edit details** (refer to [Tournament details](run-tournament.md#tournament-details-and-the-public-info-page)), using the address people can reach from their own phones.
 
-If no public address is set, and the page is open at an address only this device can reach, such as `localhost` or a network address on this venue's network, the page shows a warning above the poster list. The codes would open that address, which phones outside the venue network cannot reach. The warning shows on screen only and never prints, and its button takes you to the tournament details. You can still print: the poster prints the address it would use.
+If no public address is set, the codes open the address the page is open at. When that address is one phones may not reach, such as `localhost`, a venue-network address like `192.168.1.20`, or any address with a port number, the page shows a warning above the poster list. The warning shows on screen only and never prints, and its button takes you to the tournament details. You can still print: the poster prints the address it would use.
 
 ## Print the posters
 

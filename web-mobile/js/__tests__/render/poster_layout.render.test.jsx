@@ -34,6 +34,22 @@ describe('Poster sponsor strip', () => {
     expect(strips[0].getAttribute('data-count')).toBe(String(n));
   });
 
+  it('lets fewer sponsors grow taller, never under the floor', () => {
+    const maxOf = (n) => draw({ ...base, sponsors: sponsors(n) }, viewer)
+      .querySelector('.poster__sponsors').style.getPropertyValue('--poster-sponsor-max');
+    const caps = [1, 2, 3, 4, 5, 6].map((n) => parseFloat(maxOf(n)));
+    expect(caps).toEqual([...POSTER_SIZES.sponsorMax]);
+    for (let i = 1; i < caps.length; i += 1) expect(caps[i]).toBeLessThan(caps[i - 1]);
+    expect(caps[5]).toBeGreaterThan(POSTER_SIZES.sponsorMin);
+    const strip = draw({ ...base, sponsors: sponsors(2) }, viewer).querySelector('.poster__sponsors');
+    expect(strip.style.getPropertyValue('--poster-sponsor-min')).toBe(POSTER_SIZES.sponsorMin + 'cqw');
+  });
+
+  it('keeps the address right under its code', () => {
+    const group = draw(base, viewer).querySelector('.poster__code-group');
+    expect([...group.children].map((n) => n.className.split(' ')[0])).toEqual(['poster__code', 'poster__address']);
+  });
+
   it('draws no strip without sponsors', () => {
     const root = draw(base, viewer);
     expect(root.querySelector('.poster__sponsors')).toBeNull();

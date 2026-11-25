@@ -113,9 +113,9 @@ function PosterCode({ address, placement, level, fits, logoKey }) {
 function hideFailedSponsor(e) {
   const logo = e.currentTarget;
   logo.style.display = "none";
-  const strip = logo.parentElement;
-  if (strip && [...strip.children].every((c) => c.style.display === "none")) {
-    strip.style.display = "none";
+  const row = logo.parentElement;
+  if ([...row.children].every((c) => c.style.display === "none")) {
+    row.parentElement.style.display = "none";
   }
 }
 
@@ -167,8 +167,10 @@ export function Poster({ tournament, poster, choices, logoKey }) {
           {logoAbove && lp.offered && (
             <img className="poster__logo-above" src={logoURL(logoKey)} alt="Tournament logo" />
           )}
-          <PosterCode address={address} placement={lp.placement} level={lp.level} fits={fits} logoKey={logoKey} />
-          <p className="poster__address">{address}</p>
+          <div className="poster__code-group">
+            <PosterCode address={address} placement={lp.placement} level={lp.level} fits={fits} logoKey={logoKey} />
+            <p className="poster__address">{address}</p>
+          </div>
         </div>
         {sponsors.length > 0 && (
           <div
@@ -177,17 +179,23 @@ export function Poster({ tournament, poster, choices, logoKey }) {
             role="complementary"
             aria-label="Sponsors"
             data-count={sponsors.length}
-            style={{ "--poster-sponsors": sponsors.length }}
+            style={{
+              "--poster-sponsors": sponsors.length,
+              "--poster-sponsor-max": POSTER_SIZES.sponsorMax[sponsors.length - 1] + "cqw",
+              "--poster-sponsor-min": POSTER_SIZES.sponsorMin + "cqw",
+            }}
           >
-            {sponsors.map((s) => (
-              <img
-                key={s.file}
-                className="poster__sponsor"
-                src={"/api/sponsors/" + s.file}
-                alt={s.name || "Sponsor"}
-                onError={hideFailedSponsor}
-              />
-            ))}
+            <div className="poster__sponsors-row">
+              {sponsors.map((s) => (
+                <img
+                  key={s.file}
+                  className="poster__sponsor"
+                  src={"/api/sponsors/" + s.file}
+                  alt={s.name || "Sponsor"}
+                  onError={hideFailedSponsor}
+                />
+              ))}
+            </div>
           </div>
         )}
       </div>

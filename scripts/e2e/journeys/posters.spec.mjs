@@ -73,6 +73,7 @@ test.describe('venue posters', () => {
       await uploadLogo(page, logo);
     });
 
+    const heights = [];
     for (let n = 1; n <= SPONSORS.length; n += 1) {
       await test.step(`${n} sponsor${n > 1 ? 's' : ''}: one row of logos at one height`, async () => {
         const [name, [w, h]] = SPONSORS[n - 1];
@@ -94,11 +95,32 @@ test.describe('venue posters', () => {
           expect(s.left, 'inside the strip').toBeGreaterThanOrEqual(b.strip.left - 0.5);
           expect(s.right, 'inside the strip').toBeLessThanOrEqual(b.strip.right + 0.5);
         }
+        heights.push(first.height / b.poster.width);
         expect(b.strip.height, 'the strip is one row tall').toBeLessThan(first.height * 2);
         expect(b.strip.bottom, 'the strip is on the sheet').toBeLessThanOrEqual(b.poster.bottom + 0.5);
         if (n === 1 || n === SPONSORS.length) await shot(page, `court-poster-${n}-sponsors`);
       });
     }
+
+    await test.step('the logos grow into the space the poster leaves, taller for fewer sponsors', async () => {
+      record({ journey: 'posters', step: 'sponsor heights', shareOfWidth: heights });
+      for (let i = 1; i < heights.length; i += 1) {
+        expect(heights[i], `${i + 1} sponsors are no taller than ${i}`).toBeLessThanOrEqual(heights[i - 1] + 0.002);
+      }
+      expect(heights[0], 'one sponsor is taller than six').toBeGreaterThan(heights[heights.length - 1]);
+      expect(heights[0], 'one sponsor is at least twice the floor').toBeGreaterThanOrEqual(2 * 0.065);
+      expect(heights[heights.length - 1], 'six sponsors are over the floor').toBeGreaterThanOrEqual(0.065 - 0.002);
+    });
+
+    await test.step('the address sits just under its code', async () => {
+      for (const label of ['Viewer home', 'Shiaijo A']) {
+        const b = await posterBoxes(await choosePoster(page, label));
+        const gap = (b.address.top - b.code.bottom) / b.poster.width;
+        record({ journey: 'posters', step: 'address gap', poster: label, shareOfWidth: gap });
+        expect(gap, `${label}: the address is under the code`).toBeGreaterThanOrEqual(0);
+        expect(gap, `${label}: and close to it`).toBeLessThan(0.02);
+      }
+    });
 
     await test.step('the court letter is the largest element of a court poster', async () => {
       const poster = await choosePoster(page, 'Shiaijo A');

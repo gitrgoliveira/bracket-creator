@@ -147,7 +147,7 @@ function Suggestions({ answer, bracket, onPick }) {
                   Swap <strong>{competitorLabel(s.a)}</strong> ({drawPlaceLabel(s.a.place, bracket)}) and{' '}
                   <strong>{competitorLabel(s.b)}</strong> ({drawPlaceLabel(s.b.place, bracket)})
                 </div>
-                {(s.improves || []).map((imp, i) => <div key={i} className="draw-review__effect">{improvementSentence(imp)}</div>)}
+                {(s.improves || []).map((imp) => <div key={improvementSentence(imp)} className="draw-review__effect">{improvementSentence(imp)}</div>)}
                 <div className="draw-review__effect">Nobody else meets earlier.</div>
                 {(s.byes || []).map((b) => (
                   <div key={b.id} className="draw-review__effect">

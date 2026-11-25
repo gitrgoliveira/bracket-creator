@@ -270,7 +270,7 @@ describe('Swap competitors on Bracket (preview)', () => {
   });
 
   it('is offered on a knockout whose config names no format, as the server reads it', async () => {
-    const { format, ...noFormat } = knockout;
+    const { format: _format, ...noFormat } = knockout;
     await mountBracket({ c: noFormat });
     await turnOn();
     expect(targets()).toHaveLength(4);

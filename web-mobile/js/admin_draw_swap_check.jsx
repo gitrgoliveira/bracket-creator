@@ -321,14 +321,14 @@ export function DrawSwapCheck({ comp, bracket, a, b, password, onClose, onSwappe
             <p className="draw-swap-check__line" data-testid="swap-moves">{movesSentence(check.moves, bracket)}</p>
             {separation.length > 0 && (
               <ul className="draw-swap-check__list" data-testid="swap-separation">
-                {separation.map((l, i) => (
-                  <li key={i} className={l.earlier ? 'draw-swap-check__earlier' : undefined}>{l.text}</li>
+                {separation.map((l) => (
+                  <li key={l.text} className={l.earlier ? 'draw-swap-check__earlier' : undefined}>{l.text}</li>
                 ))}
               </ul>
             )}
             {numbers && <p className="draw-swap-check__line" data-testid="swap-numbers">{numbers}</p>}
-            {details.map((l, i) => (
-              <p key={i} className={`draw-swap-check__line${l.kind === 'warn' ? ' draw-swap-check__line--warn' : ''}`}>{l.text}</p>
+            {details.map((l) => (
+              <p key={l.text} className={`draw-swap-check__line${l.kind === 'warn' ? ' draw-swap-check__line--warn' : ''}`}>{l.text}</p>
             ))}
             <p className="draw-swap-check__line draw-swap-check__line--muted">The public pages update at once.</p>
           </div>

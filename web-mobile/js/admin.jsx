@@ -236,7 +236,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // The tournament's competitions carry their poolMatches and bracket; the open
   // competition's detail, when loaded, is noted after them, as it is the
   // fresher copy of that one competition.
-  useEffect(() => { noteFirstResultCompetitions(t && t.competitions); }, [t && t.competitions]);
+  const tournamentCompetitions = t && t.competitions;
+  useEffect(() => { noteFirstResultCompetitions(tournamentCompetitions); }, [tournamentCompetitions]);
   useEffect(() => {
     const cfg = adminCompData && adminCompData.config;
     if (!cfg || !cfg.id) return;

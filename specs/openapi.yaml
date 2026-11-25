@@ -9826,8 +9826,9 @@ components:
         defaults). Text is trimmed and empty entries are dropped before it is
         stored. A refusal is 400 with one sentence, for example "The heading
         on the Shiaijo B poster is longer than 80 characters.". The limits,
-        logo values and default headings are shared with the browser through
-        `internal/state/testdata/poster_rules.json`.
+        logo values and default headings are in the table
+        `internal/state/testdata/poster_rules.json`, which the browser's copy is
+        tested against.
       properties:
         viewer:
           $ref: '#/components/schemas/PosterChoices'

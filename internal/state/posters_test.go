@@ -21,8 +21,8 @@ type posterRulesTable struct {
 	LogoValues            []string `json:"logoValues"`
 	MaxCourtEntries       int      `json:"maxCourtEntries"`
 	DefaultHeadings       struct {
-		Viewer      string `json:"viewer"`
-		CourtPrefix string `json:"courtPrefix"`
+		Viewer string `json:"viewer"`
+		Court  string `json:"court"`
 	} `json:"defaultHeadings"`
 	LengthCases []struct {
 		Text   string `json:"text"`
@@ -49,7 +49,7 @@ func TestPosterRules_SharedTable(t *testing.T) {
 	assert.Equal(t, MaxPosterCourtEntries, table.MaxCourtEntries)
 	assert.Equal(t, 2*helper.MaxCourts, table.MaxCourtEntries)
 	assert.Equal(t, PosterViewerHeading, table.DefaultHeadings.Viewer)
-	assert.Equal(t, PosterCourtHeadingPrefix, table.DefaultHeadings.CourtPrefix)
+	assert.Equal(t, PosterCourtHeading, table.DefaultHeadings.Court)
 	require.NotEmpty(t, table.LengthCases)
 	for _, c := range table.LengthCases {
 		assert.Equal(t, c.Length, utf8.RuneCountInString(c.Text), "length of %q", c.Text)
@@ -124,6 +124,13 @@ func TestValidatePosters_KeepsAStaleEntryOutsideAToP(t *testing.T) {
 	assert.NoError(t, ValidatePosters(p))
 }
 
+// An entry with nothing in it is dropped on save, so its key is not judged.
+func TestValidatePosters_DoesNotJudgeTheKeyOfAnEmptyEntry(t *testing.T) {
+	p := &Posters{Courts: map[string]PosterChoices{"AB": {}, "": {Heading: "  "}}}
+	assert.NoError(t, ValidatePosters(p))
+	assert.Nil(t, NormalizePosters(p), "nothing of it is stored")
+}
+
 func TestValidatePosters_BoundsTheCourtEntries(t *testing.T) {
 	courts := map[string]PosterChoices{}
 	for i := 0; len(courts) < MaxPosterCourtEntries; i++ {
@@ -174,6 +181,25 @@ func TestPostersIsEmpty(t *testing.T) {
 	assert.True(t, (&Posters{Courts: map[string]PosterChoices{"A": {}}}).IsEmpty())
 	assert.False(t, (&Posters{Viewer: PosterChoices{HideSponsors: true}}).IsEmpty())
 	assert.False(t, (&Posters{Courts: map[string]PosterChoices{"A": {Logo: PosterLogoAbove}}}).IsEmpty())
+}
+
+func TestPosters_CloneSharesNoMapWithTheOriginal(t *testing.T) {
+	assert.Nil(t, (*Posters)(nil).Clone())
+	orig := &Posters{Viewer: PosterChoices{Heading: "Home"}, Courts: map[string]PosterChoices{"A": {Heading: "Main"}}}
+	cp := orig.Clone()
+	assert.Equal(t, orig, cp)
+	cp.Courts["A"] = PosterChoices{Heading: "Changed"}
+	cp.Courts["B"] = PosterChoices{HideSponsors: true}
+	assert.Equal(t, map[string]PosterChoices{"A": {Heading: "Main"}}, orig.Courts)
+}
+
+// The cached tournament must not change when a caller edits its copy.
+func TestCopyTournament_DeepCopiesThePosters(t *testing.T) {
+	cached := posterTournament(&Posters{Courts: map[string]PosterChoices{"A": {Heading: "Main"}}})
+	cp := (&Store{}).copyTournament(cached)
+	cp.Posters.Courts["A"] = PosterChoices{Heading: "Changed"}
+	cp.Posters.Viewer.Heading = "Changed"
+	assert.Equal(t, posterTournament(&Posters{Courts: map[string]PosterChoices{"A": {Heading: "Main"}}}).Posters, cached.Posters)
 }
 
 func posterTournament(posters *Posters) *Tournament {

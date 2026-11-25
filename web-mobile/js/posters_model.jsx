@@ -26,7 +26,7 @@ export const POSTER_RULES = Object.freeze({
   callToActionMaxLength: 120,
   logoValues: Object.freeze(["", "centre", "above"]),
   maxCourtEntries: 32,
-  defaultHeadings: Object.freeze({ viewer: "Follow the tournament live", courtPrefix: "Shiaijo " }),
+  defaultHeadings: Object.freeze({ viewer: "Follow the tournament live", court: "Follow this court live" }),
 });
 
 // Sizes in cqw, a hundredth of the poster's width, so the preview and the paper
@@ -90,7 +90,7 @@ export function posterAddress(t, poster) {
 
 export function defaultHeading(poster) {
   return poster.kind === "court"
-    ? POSTER_RULES.defaultHeadings.courtPrefix + poster.letter
+    ? POSTER_RULES.defaultHeadings.court
     : POSTER_RULES.defaultHeadings.viewer;
 }
 

@@ -217,16 +217,21 @@
 /* The print root is built only to print: it never shows on the page. */
 .poster-print-root { display: none; }
 
-@page {
+/* A named page, so only the print root's pages are A4 with these margins: every
+ * other print from the app keeps the browser's own page. */
+@page poster {
   size: A4 portrait;
   margin: 10mm;
 }
 
 @media print {
+  .poster-print-root { page: poster; }
+
   /* styles.css pins the page to the viewport height and clips the overflow,
-   * which would print a multi-page job as its first page. */
-  html,
-  body {
+   * which would print a multi-page job as its first page. Only while posters
+   * print, so no other print changes. */
+  html:has(body.printing-posters),
+  body.printing-posters {
     height: auto !important;
     overflow: visible !important;
   }

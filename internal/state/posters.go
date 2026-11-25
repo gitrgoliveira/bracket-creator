@@ -10,9 +10,10 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
-// The poster rules shared with the browser through
-// testdata/poster_rules.json (TestPosterRules_SharedTable pins the table to
-// these values, and the Posters page's counters and defaults read the table).
+// The poster rules the browser keeps a copy of (POSTER_RULES in
+// posters_model.jsx). testdata/poster_rules.json is the shared table:
+// TestPosterRules_SharedTable pins it to these values and a browser test pins
+// the copy to it, so a rule changed here fails one of them until both agree.
 const (
 	// MaxPosterHeadingLen and MaxPosterCallToActionLen are counted in
 	// characters (runes), after trimming.
@@ -30,10 +31,13 @@ const (
 	// without end.
 	MaxPosterCourtEntries = 2 * helper.MaxCourts
 
-	// PosterViewerHeading is the viewer home poster's default heading, and a
-	// court poster's default is PosterCourtHeadingPrefix plus its label.
-	PosterViewerHeading      = "Follow the tournament live"
-	PosterCourtHeadingPrefix = "Shiaijo "
+	// PosterViewerHeading and PosterCourtHeading are the default headings. A
+	// court poster already prints "Shiaijo" and its letter above the heading,
+	// so its default does not repeat them. PosterCourtNamePrefix plus the label
+	// names the poster in the Posters page's sentences.
+	PosterViewerHeading   = "Follow the tournament live"
+	PosterCourtHeading    = "Follow this court live"
+	PosterCourtNamePrefix = "Shiaijo "
 )
 
 // PosterLogoValues lists every logo value a save may send, the default first.
@@ -86,6 +90,16 @@ func trimPosterChoices(c PosterChoices) PosterChoices {
 	return c
 }
 
+// Clone returns a copy of p that shares no map with it, nil for nil.
+func (p *Posters) Clone() *Posters {
+	if p == nil {
+		return nil
+	}
+	cp := *p
+	cp.Courts = maps.Clone(p.Courts)
+	return &cp
+}
+
 // NormalizePosters returns a trimmed copy of p with the empty court entries
 // dropped, or nil when nothing is left, so an empty block is never written
 // to tournament.md. p itself is not changed.
@@ -121,7 +135,7 @@ func posterName(court string) string {
 	if court == "" {
 		return "viewer home"
 	}
-	return PosterCourtHeadingPrefix + court
+	return PosterCourtNamePrefix + court
 }
 
 // PosterError is a refused posters block: Message is one plain sentence for
@@ -159,6 +173,9 @@ func ValidatePosters(p *Posters) error {
 		return posterErrorf("Poster choices can be kept for at most %d shiaijo; this save holds %d.", MaxPosterCourtEntries, kept)
 	}
 	for _, key := range slices.Sorted(maps.Keys(p.Courts)) {
+		if p.Courts[key].isEmpty() {
+			continue // NormalizePosters drops it, so nothing of it is stored
+		}
 		if !IsCourtLabel(key) {
 			return posterErrorf("The poster choices name a shiaijo %q, which is not a shiaijo label: a label is one letter or character.", key)
 		}

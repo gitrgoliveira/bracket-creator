@@ -51,7 +51,7 @@ describe('the shared poster rules table', () => {
 
   it('takes the default headings from the table', () => {
     expect(posterChoices(base, viewer).headingText).toBe(rules.defaultHeadings.viewer);
-    expect(posterChoices(base, court('B')).headingText).toBe(rules.defaultHeadings.courtPrefix + 'B');
+    expect(posterChoices(base, court('B')).headingText).toBe(rules.defaultHeadings.court);
   });
 });
 
@@ -129,7 +129,7 @@ describe('posterChoices', () => {
 
   it('falls back to the default heading when the box is empty or blank', () => {
     const t = { ...base, posters: { courts: { A: { heading: '   ' } } } };
-    expect(posterChoices(t, court('A')).headingText).toBe('Shiaijo A');
+    expect(posterChoices(t, court('A')).headingText).toBe(rules.defaultHeadings.court);
   });
 
   it('reads an absent block as every default', () => {

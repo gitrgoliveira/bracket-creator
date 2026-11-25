@@ -17,9 +17,10 @@ type maskView struct {
 	m *nameMask
 	// reveal holds the participant ids the caller's own links reveal.
 	reveal map[string]bool
-	// drawHidden says the audience may not see the competition's draw now
-	// (publicNames.drawHidden, bc-drpb): the read answers it as the same
-	// competition in setup. It is judged apart from names, so a view that
+	// drawHidden says the audience may not read the competition's draw now
+	// (publicNames.readsAsSetup, bc-drpb): a draw hidden from it, or any
+	// competition still in setup, whose draw files may be a draft's. The read
+	// answers it as the same competition in setup. It is judged apart from names, so a view that
 	// masks nothing (names shown, or a competition link's holder) can still
 	// hide the draw; a reveal key never shows a hidden draw.
 	drawHidden bool

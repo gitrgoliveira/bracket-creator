@@ -304,9 +304,10 @@ func saveQueueComp(t *testing.T, store *state.Store, id string, status state.Com
 }
 
 // TestViewerDetail_SetupCompetitionTakesNoCourtQueuePosition: a competition
-// still in setup that holds matches a failed draw attempt left behind gets no
-// queuePosition on either viewer endpoint, and those matches take no place
-// from another competition's on the same court.
+// still in setup that holds matches a failed draw attempt left behind is
+// answered to the public without them (they are a draft nobody published), on
+// both viewer endpoints, and those matches take no place from another
+// competition's on the same court.
 func TestViewerDetail_SetupCompetitionTakesNoCourtQueuePosition(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "p"}))
@@ -320,18 +321,13 @@ func TestViewerDetail_SetupCompetitionTakesNoCourtQueuePosition(t *testing.T) {
 	})
 
 	detail := getViewerDetail(t, r, "su")
-	require.Len(t, detail.PoolMatches, 2)
-	for _, m := range detail.PoolMatches {
-		assert.Zerof(t, m.QueuePosition, "detail: setup match %s", m.ID)
-	}
+	assert.Empty(t, detail.PoolMatches, "detail: the setup competition's leftover matches are not served")
 	assert.Equal(t, 1, getViewerDetail(t, r, "po").PoolMatches[0].QueuePosition,
 		"the setup competition's leftover matches take no place ahead of it")
 
 	aggregate := getViewerAggregate(t, r)
 	if su, ok := aggregate["su"]; ok {
-		for _, m := range su.PoolMatches {
-			assert.Zerof(t, m.QueuePosition, "aggregate: setup match %s", m.ID)
-		}
+		assert.Empty(t, su.PoolMatches, "aggregate: the setup competition's leftover matches are not served")
 	}
 	require.Contains(t, aggregate, "po")
 	assert.Equal(t, 1, aggregate["po"].PoolMatches[0].QueuePosition)

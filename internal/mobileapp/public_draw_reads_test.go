@@ -198,6 +198,61 @@ func TestPublicDrawReads_HiddenDraftIsAnsweredAsBeforeItsDraw(t *testing.T) {
 	}
 }
 
+// A competition still in setup is answered without its draw files whoever asks.
+// They are a draft with no status yet: the draw pipeline writes them before the
+// commit that makes the competition draw-ready and hidden, and a refused draw
+// leaves them behind. Here the files of a generated draw sit under a competition
+// put back to setup, which is what both look like to a read.
+func TestPublicDrawReads_SetupCompetitionIsAnsweredWithoutItsDrawFiles(t *testing.T) {
+	w := newPDRWorld(t)
+	matchID := w.drawMatch(t)
+	require.NoError(t, w.eng.DiscardDraw(pdrComp))
+	before := w.answers(t, matchID, dhPublic)
+
+	require.Equal(t, matchID, w.drawMatch(t), "premise: the draw gives the same match id again")
+	comp, err := w.store.LoadCompetition(pdrComp)
+	require.NoError(t, err)
+	comp.Status, comp.DrawHidden = state.CompStatusSetup, false
+	require.NoError(t, w.store.SaveCompetition(comp))
+	matches, err := w.store.LoadPoolMatches(pdrComp)
+	require.NoError(t, err)
+	require.Len(t, matches, 1, "premise: the draw's files are still there")
+	require.NoError(t, w.store.SetTeamLineup(pdrComp, domain.TeamLineup{
+		TeamID: w.teamA, MatchID: matchID, Positions: map[domain.Position]string{domain.PositionNumbered(1): "Ishida"},
+	}, 3))
+
+	for name, want := range before {
+		got := w.answers(t, matchID, dhPublic)[name]
+		assert.Equal(t, want.code, got.code, "%s: status", name)
+		if json.Valid([]byte(want.body)) {
+			assert.JSONEq(t, want.body, got.body, "%s: the public reads setup as before the draw", name)
+		}
+	}
+
+	// The viewer's detail and list carry no match of the files.
+	matchesOf := func(body string) int {
+		var p struct {
+			PoolMatches []json.RawMessage `json:"poolMatches"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(body), &p))
+		return len(p.PoolMatches)
+	}
+	code, body := w.do(t, http.MethodGet, "/api/viewer/competitions/"+pdrComp, nil, dhPublic)
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Zero(t, matchesOf(body), "the public detail")
+	code, body = w.do(t, http.MethodGet, "/api/viewer/competitions", nil, dhPublic)
+	require.Equal(t, http.StatusOK, code, body)
+	var list []json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(body), &list))
+	require.Len(t, list, 1)
+	assert.Zero(t, matchesOf(string(list[0])), "the public list")
+
+	// The organiser reads what is on disk.
+	code, body = w.do(t, http.MethodGet, "/api/viewer/competitions/"+pdrComp, nil, dhOrganiser)
+	require.Equal(t, http.StatusOK, code, body)
+	assert.Equal(t, 1, matchesOf(body), "the organiser's detail")
+}
+
 func TestPublicDrawReads_WrongPasswordIs401(t *testing.T) {
 	w := newPDRWorld(t)
 	matchID := w.drawMatch(t)

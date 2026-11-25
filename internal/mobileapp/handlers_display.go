@@ -99,12 +99,12 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 			if comp == nil {
 				continue
 			}
-			// A draft whose draw is hidden from this audience (bc-drpb) is
-			// answered as the same competition in setup, which has no match to
-			// run, so none of its draw is read. Only that is asked here: the
+			// A competition this audience reads as in setup (a draft hidden
+			// from it, bc-drpb, or one still in setup) has no match to run, so
+			// none of its draw is read. Only that is asked here: the
 			// names' mask view is built once a running match is found, since
 			// this feed is polled every second or two.
-			if names.drawHidden(comp, aud) {
+			if names.readsAsSetup(comp, aud) {
 				continue
 			}
 

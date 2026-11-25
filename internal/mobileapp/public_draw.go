@@ -25,3 +25,17 @@ func (p *publicNames) drawHidden(comp *state.Competition, aud audience) bool {
 	}
 	return comp.DrawHiddenIn(p.tournament())
 }
+
+// readsAsSetup reports whether a read for aud answers comp as a competition in
+// setup, none of its draw files read (maskView.drawHidden): a draw hidden from
+// aud (drawHidden), and any competition still in setup. A setup competition's
+// draw files are a draft with no status yet: the draw pipeline writes them
+// before the commit that makes the competition draw-ready and hidden, and a
+// draw it refuses leaves them behind. A setup competition holds no draw, so
+// the answer is the one its files would give if they were not there.
+func (p *publicNames) readsAsSetup(comp *state.Competition, aud audience) bool {
+	if aud.isOrganiser() || comp == nil {
+		return false
+	}
+	return state.CanGenerateDraw(comp.Status) || p.drawHidden(comp, aud)
+}

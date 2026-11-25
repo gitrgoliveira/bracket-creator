@@ -298,7 +298,7 @@ func TestViewerAggregator_StripsPreviewBracket(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "p"}))
-	comp := state.Competition{ID: "mixed", Name: "Mixed", Format: state.CompFormatMixed}
+	comp := state.Competition{ID: "mixed", Name: "Mixed", Format: state.CompFormatMixed, Status: state.CompStatusPools}
 	require.NoError(t, store.SaveCompetition(&comp))
 	require.NoError(t, store.SaveParticipants("mixed", nil))
 

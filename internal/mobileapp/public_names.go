@@ -106,12 +106,12 @@ func (p *publicNames) tournament() *state.Tournament {
 }
 
 // view is the mask view for comp and aud: the names aud may read, and whether
-// aud may see comp's draw (drawHidden, judged whether or not names are
+// aud may read comp's draw (readsAsSetup, judged whether or not names are
 // hidden). The error is the mask's build error (a file that could not be
 // read); the view is still usable and fails closed, so a caller logs the
 // error and serves the view.
 func (p *publicNames) view(comp *state.Competition, aud audience) (maskView, error) {
-	draw := p.drawHidden(comp, aud)
+	draw := p.readsAsSetup(comp, aud)
 	if !p.hides(comp) || aud.revealsAll(comp.ID) {
 		return maskView{drawHidden: draw}, nil
 	}

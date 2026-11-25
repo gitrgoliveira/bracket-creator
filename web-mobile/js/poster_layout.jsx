@@ -107,6 +107,18 @@ function PosterCode({ address, placement, level, fits, logoKey }) {
 //   poster      one entry of posterList(tournament)
 //   choices     posterChoices(...), or a draft's; read from the tournament when absent
 //   logoKey     cache key for the logo address (see logoURL)
+// A sponsor file that fails to load would print as a broken-image icon: hide it,
+// and the whole strip when it was the last one showing (as SponsorStrip does).
+// The strip is keyed on its file list, so a new list remounts it clean.
+function hideFailedSponsor(e) {
+  const logo = e.currentTarget;
+  logo.style.display = "none";
+  const strip = logo.parentElement;
+  if (strip && [...strip.children].every((c) => c.style.display === "none")) {
+    strip.style.display = "none";
+  }
+}
+
 export function Poster({ tournament, poster, choices, logoKey }) {
   const t = tournament || {};
   const c = choices || posterChoices(t, poster);
@@ -160,6 +172,7 @@ export function Poster({ tournament, poster, choices, logoKey }) {
         </div>
         {sponsors.length > 0 && (
           <div
+            key={sponsors.map((s) => s.file).join("|")}
             className="poster__sponsors"
             role="complementary"
             aria-label="Sponsors"
@@ -167,7 +180,13 @@ export function Poster({ tournament, poster, choices, logoKey }) {
             style={{ "--poster-sponsors": sponsors.length }}
           >
             {sponsors.map((s) => (
-              <img key={s.file} className="poster__sponsor" src={"/api/sponsors/" + s.file} alt={s.name || "Sponsor"} />
+              <img
+                key={s.file}
+                className="poster__sponsor"
+                src={"/api/sponsors/" + s.file}
+                alt={s.name || "Sponsor"}
+                onError={hideFailedSponsor}
+              />
             ))}
           </div>
         )}

@@ -144,6 +144,22 @@ describe('the Posters page saves through updateTournament with its options', () 
     expect(outboxRefusal(refusal('tournament_changed'))).toBe(false);
   });
 
+  it('a refusal after the organiser moved to Edit tournament is not the form\'s own late refusal', async () => {
+    queueOnce();
+    // The save is made from the Posters page, but the view the refusal finds is
+    // Edit tournament (AdminApp reads view.kind for its ref first, for the page
+    // after), and the page, no longer shown, does not claim it.
+    let reads = 0;
+    const view = { get kind() { return reads++ === 0 ? 'editTournament' : 'posters'; } };
+    const app = window.AdminApp({
+      tournament: tournament(), onUpdate, onLogout: vi.fn(), onViewerMode: vi.fn(), onPasswordChange: vi.fn(),
+      tweaks: {}, password: 'pw', view, setView: vi.fn(), showToast, authConfig: { mode: 'file' },
+    });
+    await app.props.onSave({ tournamentVersion: 'v1', posters: {} }, { onRefusal: () => false });
+    const outboxRefusal = window.API.updateTournament.mock.calls[0][2].onRefusal;
+    expect(outboxRefusal(refusal('tournament_changed'))).toBe(false);
+  });
+
   it('a save discarded from the held writes tells the page it did not land', async () => {
     const settled = queueOnce();
     const onSettled = vi.fn();

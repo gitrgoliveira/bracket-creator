@@ -1,5 +1,5 @@
 import React from 'react';
-import { render } from '@testing-library/react';
+import { render, fireEvent } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 import jsQR from 'jsqr';
 import { Poster, codePath } from '../../poster_layout.jsx';
@@ -38,6 +38,17 @@ describe('Poster sponsor strip', () => {
     const root = draw(base, viewer);
     expect(root.querySelector('.poster__sponsors')).toBeNull();
     expect(root.querySelector('.poster__sponsor')).toBeNull();
+  });
+
+  it('hides a sponsor file that fails to load, and the strip when none is left', () => {
+    const root = draw({ ...base, sponsors: sponsors(2) }, viewer);
+    const logos = root.querySelectorAll('img.poster__sponsor');
+    fireEvent.error(logos[0]);
+    expect(logos[0].style.display).toBe('none');
+    expect(logos[1].style.display).not.toBe('none');
+    expect(root.querySelector('.poster__sponsors').style.display).not.toBe('none');
+    fireEvent.error(logos[1]);
+    expect(root.querySelector('.poster__sponsors').style.display).toBe('none');
   });
 
   it('draws no strip when the poster hides its sponsors', () => {

@@ -819,7 +819,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
               return true;
             }
             // The page that made the save claims it first, when it is still there.
-            if (opts.onRefusal && opts.onRefusal(e)) return true;
+            // A save the page made is never the Edit tournament form's: when the
+            // page is gone, the outbox's alert tells it.
+            if (opts.onRefusal) return !!opts.onRefusal(e);
             // The form, when open now, says it itself (with what was typed kept);
             // else the outbox's alert does.
             if (!mountedRef.current || viewKindRef.current !== "editTournament") return false;

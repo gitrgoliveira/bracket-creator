@@ -111,7 +111,13 @@ func (p *publicNames) tournament() *state.Tournament {
 // read); the view is still usable and fails closed, so a caller logs the
 // error and serves the view.
 func (p *publicNames) view(comp *state.Competition, aud audience) (maskView, error) {
-	draw := p.readsAsSetup(comp, aud)
+	return p.viewWithDraw(comp, aud, p.readsAsSetup(comp, aud))
+}
+
+// viewWithDraw is view for a caller that judged readsAsSetup itself, so it can
+// judge it before the names part and then build the names only when it needs
+// them, on the answer it already acted on.
+func (p *publicNames) viewWithDraw(comp *state.Competition, aud audience, draw bool) (maskView, error) {
 	if !p.hides(comp) || aud.revealsAll(comp.ID) {
 		return maskView{drawHidden: draw}, nil
 	}

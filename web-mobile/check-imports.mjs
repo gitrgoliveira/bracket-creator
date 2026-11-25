@@ -213,6 +213,8 @@ const CHECK_MODULES = [
   'patch.jsx',
   'pause_list.jsx',
   'pool_ids.jsx',
+  'poster_layout.jsx',
+  'posters_model.jsx',
   'public_names_fields.jsx',
   'published_height.jsx',
   'qr.jsx',

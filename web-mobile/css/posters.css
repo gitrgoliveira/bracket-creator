@@ -1,0 +1,256 @@
+/* posters.css: the venue poster and its print sheet (bc-qrps).
+ *
+ * One layout for the preview and for paper. Every size inside a poster is in cqw,
+ * a hundredth of the poster's own width (it is a size container), so the preview
+ * at any width and the printed page are the same picture, and a print dialog's
+ * "fit to page" or A3 scale never reflows it. posters_model.jsx owns the sizes
+ * that matter to scanning and passes them in as custom properties:
+ *   --poster-code        the code's side (with its quiet zone)
+ *   --poster-letter      the court letter's height
+ *   --poster-logo-above  the logo's height when it sits above the code
+ * The paper and the code are fixed white and black, in light and dark mode. */
+
+.poster {
+  position: relative;
+  container-type: inline-size;
+  aspect-ratio: 210 / 297;
+  width: 100%;
+  overflow: hidden;
+  background: #fff;
+  color: #111;
+  color-scheme: light;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15), 0 2px 10px rgba(0, 0, 0, 0.12);
+}
+
+.poster,
+.poster * {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.poster__sheet {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.poster__band {
+  flex: none;
+  padding: 2cqw 5cqw;
+  text-align: center;
+  background: var(--poster-primary);
+  color: var(--poster-band-ink);
+}
+
+.poster__tournament {
+  display: block;
+  font-size: 4.6cqw;
+  font-weight: 700;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+/* The body takes what the band and the sponsor strip leave and spreads its
+ * pieces evenly, so a poster without a call to action or sponsors has no hole. */
+.poster__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-evenly;
+  gap: 0.6cqw;
+  padding: 0.6cqw 6cqw;
+  text-align: center;
+}
+
+.poster__court {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.poster__court-label {
+  font-size: 3.2cqw;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--poster-primary);
+}
+
+/* The largest element of a court poster, taller than its code. */
+.poster__court-letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--poster-letter);
+  font-size: calc(var(--poster-letter) * 1.35);
+  font-weight: 800;
+  line-height: 0.74;
+  color: var(--poster-primary);
+}
+
+.poster__titles {
+  flex: none;
+  max-width: 88cqw;
+}
+
+.poster__heading {
+  margin: 0;
+  font-weight: 800;
+  line-height: 1.12;
+  color: var(--poster-primary);
+  overflow-wrap: anywhere;
+}
+
+.poster__cta {
+  margin: 0.8cqw 0 0;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #222;
+  overflow-wrap: anywhere;
+}
+
+/* A long heading or call to action is set smaller, so the longest the server
+ * allows (80 and 120 characters) still fits. */
+.poster--viewer .poster__heading--short { font-size: 6.4cqw; }
+.poster--viewer .poster__heading--medium { font-size: 4.8cqw; }
+.poster--viewer .poster__heading--long { font-size: 3.8cqw; }
+.poster--viewer .poster__cta--short { font-size: 3.8cqw; }
+.poster--viewer .poster__cta--medium { font-size: 3.2cqw; }
+.poster--viewer .poster__cta--long { font-size: 2.8cqw; }
+
+.poster--court .poster__heading--short { font-size: 4.6cqw; }
+.poster--court .poster__heading--medium { font-size: 3.8cqw; }
+.poster--court .poster__heading--long { font-size: 3cqw; }
+.poster--court .poster__cta--short { font-size: 3.2cqw; }
+.poster--court .poster__cta--medium { font-size: 2.8cqw; }
+.poster--court .poster__cta--long { font-size: 2.3cqw; }
+
+.poster__logo-above {
+  flex: none;
+  display: block;
+  height: var(--poster-logo-above);
+  width: auto;
+  max-width: 60cqw;
+  object-fit: contain;
+}
+
+/* The code: a square of the size the model sets. The SVG fills it. */
+.poster__code {
+  position: relative;
+  flex: none;
+  width: var(--poster-code);
+  aspect-ratio: 1;
+  background: #fff;
+}
+
+.poster__code-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  shape-rendering: crispEdges;
+}
+
+/* The centre logo, placed in percentages of the code by the layout. */
+.poster__logo-centre {
+  position: absolute;
+  display: block;
+  object-fit: contain;
+}
+
+.poster__code-warning {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 4cqw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0.6cqw dashed #9b1c1c;
+  font-size: 3cqw;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #7a1212;
+  background: #fff;
+}
+
+.poster__address {
+  flex: none;
+  max-width: 84cqw;
+  margin: 0;
+  font-size: 2.2cqw;
+  line-height: 1.2;
+  color: #333;
+  overflow-wrap: anywhere;
+}
+
+/* The strip: one row of logos of one height, spread evenly; a single sponsor
+ * sits in the middle and is never stretched. Each logo's width is capped so any
+ * count from 1 to 6 fits on the row. */
+.poster__sponsors {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-evenly;
+  gap: 2cqw;
+  padding: 1.6cqw 5cqw 2cqw;
+  border-top: 0.3cqw solid #d8d8d8;
+}
+
+.poster__sponsor {
+  flex: 0 1 auto;
+  display: block;
+  height: 8cqw;
+  width: auto;
+  max-width: calc((90cqw - 2cqw * (var(--poster-sponsors) - 1)) / var(--poster-sponsors));
+  object-fit: contain;
+}
+
+/* ---- print -------------------------------------------------------------- */
+
+/* The print root is built only to print: it never shows on the page. */
+.poster-print-root { display: none; }
+
+@page {
+  size: A4 portrait;
+  margin: 10mm;
+}
+
+@media print {
+  /* styles.css pins the page to the viewport height and clips the overflow,
+   * which would print a multi-page job as its first page. */
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Nothing of the app prints but the posters: no topbar, menu, choices or
+   * warnings. */
+  body.printing-posters > *:not(.poster-print-root) { display: none !important; }
+  body.printing-posters .poster-print-root { display: block; }
+
+  /* A piece of the Posters page that must never reach paper. */
+  .poster-no-print { display: none !important; }
+
+  /* Each poster fills one sheet, sized by the smaller of the page's sides, so a
+   * browser that ignores @page size, or a dialog with larger margins, still fits
+   * it on one page. */
+  .poster-print-root .poster {
+    width: min(100%, calc(100vh * 210 / 297));
+    margin: 0 auto;
+    box-shadow: none;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* One poster per sheet, with no blank sheet after the last. */
+  .poster-print-root .poster + .poster {
+    break-before: page;
+    page-break-before: always;
+  }
+}

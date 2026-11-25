@@ -713,8 +713,12 @@ async function _drawVisibilityWrite(id, password, publish) {
     }
     return normalizeCompetitionDetail(await res.json());
 }
-export function publishDraw(id, password) { return _drawVisibilityWrite(id, password, true); }
-export function unpublishDraw(id, password) { return _drawVisibilityWrite(id, password, false); }
+export function publishDraw(id, password) {
+    return _drawVisibilityWrite(id, password, true);
+}
+export function unpublishDraw(id, password) {
+    return _drawVisibilityWrite(id, password, false);
+}
 
 // The plan and the restore take the same fields, decisions included: the plan
 // applies them, so a copy name already used shows before the password.

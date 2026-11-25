@@ -278,7 +278,8 @@ export const competitionsApi = {
         }
         _forgetShownMatches(id);
     },
-    publishDraw, unpublishDraw,
+    publishDraw,
+    unpublishDraw,
     // quarantineBracket: POST /competitions/:id/bracket/quarantine. The way out
     // of a bracket.json that will not parse, which otherwise blocks every score
     // write for that competition. Renames the broken file aside (it is NEVER

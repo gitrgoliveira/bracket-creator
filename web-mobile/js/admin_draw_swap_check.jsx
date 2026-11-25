@@ -61,6 +61,12 @@ export function drawPlaceLabel(place, bracket, { withPosition = false } = {}) {
   return '';
 }
 
+// effectiveFormat: a competition's format as the server reads it
+// (Competition.EffectiveFormat): a config with no format key is a knockout.
+export function effectiveFormat(comp) {
+  return (comp && comp.format) || 'knockout';
+}
+
 // drawEntrants: every competitor the draw holds, with the place a swap names
 // them by, grouped as the draw groups them: by pool for a pools draw
 // ({pool, position}, 1-based, the pool's own order), by first-round match for
@@ -70,7 +76,7 @@ export function drawPlaceLabel(place, bracket, { withPosition = false } = {}) {
 // competition's roster by id; a pool's player carries it from pools.csv.
 export function drawEntrants(comp, pools, bracket) {
   const groups = [];
-  if (comp && comp.format === 'knockout') {
+  if (effectiveFormat(comp) === 'knockout') {
     const seedOf = new Map((comp.players || []).filter((p) => p && p.id && p.seed > 0).map((p) => [p.id, p.seed]));
     const first = (bracket && bracket.rounds && bracket.rounds[0]) || [];
     first.forEach((m, mi) => {

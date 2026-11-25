@@ -1197,7 +1197,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// The colour a decision names is whoever holds it now: a writer that saw
 	// other competitors in this match (a draw swap since) is refused, like a
 	// score write that names the old pairing.
-	if kcdgOpts.SeenSidesDiffer(sideAID, sideBID) {
+	if kcdgOpts.Seen.Differ(sideAID, sideBID) {
 		return nil, nil, ErrMatchSideMismatch
 	}
 

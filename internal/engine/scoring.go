@@ -123,12 +123,20 @@ func reconcileSides(result *state.MatchResult, stored storedSides) (mismatch boo
 	return mismatch
 }
 
-// SeenSidesDiffer says the competitors the writer saw (SeenSideAID/BID) are not
-// the ones the match stores. A side the writer named no id for, or the match
-// stores none for (an unresolved feeder, a bye), is not judged.
-func (o ForceOptions) SeenSidesDiffer(storedAID, storedBID string) bool {
-	return (o.SeenSideAID != "" && storedAID != "" && o.SeenSideAID != storedAID) ||
-		(o.SeenSideBID != "" && storedBID != "" && o.SeenSideBID != storedBID)
+// SeenSides are the competitors a decision's writer saw in the match
+// (request-only, never stored). A decision names a side by colour alone, so
+// after the draw review swapped two competitors it would land on whoever now
+// holds that colour; a seen id that differs from the stored one is
+// ErrMatchSideMismatch, exactly as a score write naming the old pairing is.
+// Empty means the writer named none, which is not judged.
+type SeenSides struct{ AID, BID string }
+
+// Differ says the competitors the writer saw are not the ones the match
+// stores. A side the writer named no id for, or the match stores none for (an
+// unresolved feeder, a bye), is not judged.
+func (s SeenSides) Differ(storedAID, storedBID string) bool {
+	return (s.AID != "" && storedAID != "" && s.AID != storedAID) ||
+		(s.BID != "" && storedBID != "" && s.BID != storedBID)
 }
 
 // adoptCurrentSideName replaces a payload side name that differs from the
@@ -375,13 +383,8 @@ type ForceOptions struct {
 	// Session is the client's event session, carried with Basis onto the
 	// baseline (bc-evts S8 b) so the basis's Seq arm can count its events.
 	Session string
-	// SeenSideAID and SeenSideBID are the competitors a decision's writer saw
-	// in the match (request-only, never stored). A decision names a side by
-	// colour alone, so after the draw review swapped two competitors it would
-	// land on whoever now holds that colour; a seen id that differs from the
-	// stored one is ErrMatchSideMismatch, exactly as a score write naming the
-	// old pairing is. Empty means the writer named none, which is not judged.
-	SeenSideAID, SeenSideBID string
+	// Seen is the pairing a decision's writer saw (see SeenSides).
+	Seen SeenSides
 	// ReopenReason is the reason a decision that ends a match reopened with no
 	// reason keeps as the match's correction reason. It rides on the write
 	// itself, so the baseline the write leaves in the score event log holds it:

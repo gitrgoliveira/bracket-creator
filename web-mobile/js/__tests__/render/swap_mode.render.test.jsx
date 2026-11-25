@@ -269,6 +269,13 @@ describe('Swap competitors on Bracket (preview)', () => {
     expect(document.querySelector('.running-panel')).toBeNull();
   });
 
+  it('is offered on a knockout whose config names no format, as the server reads it', async () => {
+    const { format, ...noFormat } = knockout;
+    await mountBracket({ c: noFormat });
+    await turnOn();
+    expect(targets()).toHaveLength(4);
+  });
+
   it('is not offered on the bracket of a pools + knockout draw, whose places are not competitors', async () => {
     await mountBracket({ c: mixed });
     expect(screen.queryByTestId('swap-mode-on')).toBeNull();

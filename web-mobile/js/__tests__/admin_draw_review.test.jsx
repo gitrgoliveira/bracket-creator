@@ -22,6 +22,12 @@ describe('which competitions the card reviews', () => {
     expect(reviewsDraw({ format: 'swiss' })).toBe(false);
     expect(reviewsDraw(null)).toBe(false);
   });
+
+  it('reads a config with no format as a knockout, as the server does', () => {
+    expect(reviewsDraw({})).toBe(true);
+    expect(reviewsDraw({ format: '' })).toBe(true);
+    expect(drawEntrants({ format: '' }, [], { rounds: [[{ sideA: { id: 'a', name: 'A' }, sideB: { id: 'b', name: 'B' } }]] })[0].entrants).toHaveLength(2);
+  });
 });
 
 describe('the Can first meet cell', () => {

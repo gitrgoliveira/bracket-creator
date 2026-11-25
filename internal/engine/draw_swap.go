@@ -329,8 +329,9 @@ func foughtMatch(tx state.StoreTx, compID string, snap swapSnapshot) (string, er
 
 // planSwap works the swap out on copies of snap's draw. It is pure: the
 // transaction saves what it returns, the dry run only answers it. Refusals,
-// in order: SwapNotSupported, SwapNoDraw, SwapDrawStarted, SwapInvalid,
-// SwapSameCompetitor, SwapNotInDraw, SwapDrawChanged.
+// in order: SwapNotSupported, SwapNoDraw, SwapDrawStarted, SwapInvalid (a
+// place that is not exactly one shape), SwapSameCompetitor, SwapInvalid again
+// (two sides naming one place), SwapNotInDraw, SwapDrawChanged.
 func planSwap(snap swapSnapshot, req SwapRequest) (swapPlan, error) {
 	comp := snap.comp
 	if !CompetitionDrawsBracket(comp.EffectiveFormat()) {

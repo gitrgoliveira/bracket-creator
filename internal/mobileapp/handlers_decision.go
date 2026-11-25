@@ -269,7 +269,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// correction guard) and surfaces the reopened downstream match
 			// ids so they can be broadcast below.
 			fo := engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream, ConfirmLots: req.ConfirmLots,
-				SeenSideAID: req.SideAID, SeenSideBID: req.SideBID}
+				Seen: engine.SeenSides{AID: req.SideAID, BID: req.SideBID}}
 			if snap.ReopenPending {
 				// The reason is part of the result group: it goes on the
 				// write itself, so the baseline the write leaves holds it.
@@ -514,7 +514,7 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 		if m == nil || m.Status != state.MatchStatusScheduled {
 			return nil
 		}
-		if (engine.ForceOptions{SeenSideAID: req.SideAID, SeenSideBID: req.SideBID}).SeenSidesDiffer(m.SideAID, m.SideBID) {
+		if (engine.SeenSides{AID: req.SideAID, BID: req.SideBID}).Differ(m.SideAID, m.SideBID) {
 			writeErr = engine.ErrMatchSideMismatch
 			return nil
 		}

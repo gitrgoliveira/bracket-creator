@@ -20,14 +20,14 @@
 
 import { competitionHasRecordedResult } from './recorded_result.jsx';
 import {
-  DrawSwapCheck, drawEntrants, drawPlaceLabel, poolLabel, competitorLabel, meetingRoundName, meetingPhrase, swapDoneToast,
+  DrawSwapCheck, effectiveFormat, drawEntrants, drawPlaceLabel, poolLabel, competitorLabel, meetingRoundName, meetingPhrase, swapDoneToast,
 } from './admin_draw_swap_check.jsx';
 
 const { useState, useEffect } = React;
 
 // reviewsDraw: the formats whose draw the card reviews, the ones with a bracket.
 export function reviewsDraw(comp) {
-  return !!comp && (comp.format === 'mixed' || comp.format === 'knockout');
+  return !!comp && (effectiveFormat(comp) === 'mixed' || effectiveFormat(comp) === 'knockout');
 }
 
 // canFirstMeet: the "Can first meet" cell of one summary row: its first line,

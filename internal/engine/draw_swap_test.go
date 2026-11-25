@@ -598,13 +598,13 @@ func TestSwapDrawPlaces_Refusals(t *testing.T) {
 
 // A decision names a side by colour alone (kiken, fusenpai, fusensho, hantei),
 // so what refuses one after a swap is the competitors its writer saw
-// (ForceOptions.SeenSideAID/BID), not the score payload's own sides.
+// (ForceOptions.Seen), not the score payload's own sides.
 func TestSwapDrawPlaces_StaleDecisionIsRefused(t *testing.T) {
 	assertRefused := func(t *testing.T, eng *Engine, store *state.Store, compID, matchID string, seenA, seenB string) {
 		t.Helper()
 		for _, decision := range []string{"kiken", "fusenpai", "fusensho"} {
 			_, _, err := eng.RecordDecisionWithOptions(compID, matchID, decision, "aka", "", nil,
-				ForceOptions{SeenSideAID: seenA, SeenSideBID: seenB}, serverNowMs())
+				ForceOptions{Seen: SeenSides{AID: seenA, BID: seenB}}, serverNowMs())
 			assert.ErrorIs(t, err, ErrMatchSideMismatch, decision)
 		}
 		statuses, err := store.LoadCompetitorStatus(compID)
@@ -654,7 +654,7 @@ func TestSwapDrawPlaces_StaleDecisionIsRefused(t *testing.T) {
 		drawDojoComp(t, eng, store, compID, state.CompFormatKnockout, 3, uniqueDojos(8))
 		m0 := loadBracket(t, store, compID).Rounds[0][0]
 		_, _, err := eng.RecordDecisionWithOptions(compID, m0.ID, "kiken-voluntary", "aka", "", nil,
-			ForceOptions{SeenSideAID: m0.SideAID, SeenSideBID: m0.SideBID}, serverNowMs())
+			ForceOptions{Seen: SeenSides{AID: m0.SideAID, BID: m0.SideBID}}, serverNowMs())
 		require.NoError(t, err)
 	})
 }

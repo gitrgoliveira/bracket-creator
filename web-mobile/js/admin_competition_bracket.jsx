@@ -5,10 +5,10 @@
 
 import { realIppons } from './result_slot.jsx';
 import { writeKeepsEditorOpen } from './write_result.jsx';
-import { holdsUnsaved, confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY } from './unsaved_entries.jsx';
+import { confirmLeave } from './unsaved_entries.jsx';
 import { competitionHasRecordedResult } from './recorded_result.jsx';
 import { reviewsDraw } from './admin_draw_review.jsx';
-import { DrawSwapCheck, drawEntrants, drawPlaceLabel, swapDoneToast } from './admin_draw_swap_check.jsx';
+import { DrawSwapCheck, effectiveFormat, drawEntrants, drawPlaceLabel, swapDoneToast } from './admin_draw_swap_check.jsx';
 import { acceptTap } from './tap_guard.jsx';
 import { useEscapeToClose } from './ui.jsx';
 const { useState, useEffect, useRef, useMemo } = React;
@@ -232,7 +232,7 @@ RunningMatchPanel.displayName = "RunningMatchPanel";
 // competitors), a knockout-only draw on its bracket.
 export function swapModeAvailable(c, tab, poolMatches, bracket) {
   if (!c || c.status !== 'draw-ready' || !reviewsDraw(c)) return false;
-  if (c.format !== (tab === 'bracket' ? 'knockout' : 'mixed')) return false;
+  if (effectiveFormat(c) !== (tab === 'bracket' ? 'knockout' : 'mixed')) return false;
   return !competitionHasRecordedResult(poolMatches, bracket);
 }
 
@@ -393,7 +393,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   // panel, so over unsaved entries it asks first, as choosing another match does.
   const swapMode = useSwapCompetitors({
     c, tab: 'bracket', pools: null, poolMatches: null, bracket, password,
-    beforeTurnOn: async () => !holdsUnsaved(editorUnsavedRef) || confirmDiscardUnsaved(editorUnsavedRef, LEAVE_MATCH_ANYWAY),
+    beforeTurnOn: () => confirmLeave(editorUnsavedRef),
     onTurnOn: () => setSelected(null),
   });
   const matchMeta = (matchId) => {
@@ -420,8 +420,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     return <EmptyState icon="settings" title="Bracket not generated yet" message={previewMode ? "Bracket not available for this format preview." : "Start the competition to build the bracket."} />;
   }
   const select = async (m, ri, mi) => {
-    if (selected && selected.matchId !== m.id && holdsUnsaved(editorUnsavedRef)
-      && !(await confirmDiscardUnsaved(editorUnsavedRef, LEAVE_MATCH_ANYWAY))) return;
+    if (selected && selected.matchId !== m.id && !(await confirmLeave(editorUnsavedRef))) return;
     setSelected({ matchId: m.id, ri, mi });
   };
   // Look up the selected match by ID rather than [ri][mi] index. The

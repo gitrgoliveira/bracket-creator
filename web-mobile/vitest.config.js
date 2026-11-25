@@ -48,15 +48,6 @@ const tabInstances = () => ({
 // project includes it, so a file is in exactly one of them wherever it sits.
 const NODE_TEST_GLOB = '**/*.node.test.*';
 const makePlugins = () => [tabInstances(), react({ include: /\.(js|jsx)$/, jsxRuntime: 'classic' })];
-const sharedResolve = {
-  alias: {
-    // qr.jsx is imported as ./qr.js in admin_shell.jsx because esbuild's
-    // non-bundling transform preserves import specifiers verbatim and the
-    // compiled output in dist/ is qr.js. Vitest needs to resolve the .js
-    // specifier back to the .jsx source.
-    './qr.js': path.resolve(__dirname, 'js/qr.jsx'),
-  },
-};
 
 // The pool is vmThreads, set on each project below: an inline project does not
 // inherit the root `test` block. Isolation and file order stay at vitest's own
@@ -95,7 +86,6 @@ export default defineConfig({
     projects: [
       {
         plugins: makePlugins(),
-        resolve: sharedResolve,
         test: {
           pool: POOL,
           name: 'unit',
@@ -112,7 +102,6 @@ export default defineConfig({
       },
       {
         plugins: makePlugins(),
-        resolve: sharedResolve,
         test: {
           pool: POOL,
           name: 'node',
@@ -127,7 +116,6 @@ export default defineConfig({
       },
       {
         plugins: makePlugins(),
-        resolve: sharedResolve,
         test: {
           pool: POOL,
           name: 'render',

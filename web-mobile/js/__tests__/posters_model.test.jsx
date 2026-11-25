@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import {
   POSTER_RULES,
+  POSTER_SIZES,
   posterList,
   posterAddress,
   posterChoices,
@@ -166,10 +167,23 @@ describe('logoPlacement', () => {
     expect(logoPlacement({ ...base, publicURL: LONG }, viewer).placement).toBe('above');
   });
 
+  it('does not present a chosen Above as a refused centre', () => {
+    const t = { ...base, publicURL: LONG, posters: { viewer: { logo: 'above' } } };
+    expect(logoPlacement(t, viewer)).toMatchObject({ placement: 'above', level: 'M', centreAvailable: false, centreRefusedSentence: '' });
+  });
+
   it('knows an address that fits no code at all', () => {
     const t = { ...base, publicURL: TOO_LONG };
     expect(codeFits(posterAddress(t, viewer))).toBe(false);
     expect(logoPlacement(t, viewer).placement).toBe('above');
+  });
+});
+
+describe('POSTER_SIZES', () => {
+  it('keeps the court code over 8 cm between the A4 print margins, under a taller letter', () => {
+    const printWidthMm = 210 - 2 * 10;
+    expect((POSTER_SIZES.courtCode / 100) * printWidthMm).toBeGreaterThanOrEqual(80);
+    expect(POSTER_SIZES.courtLetter).toBeGreaterThan(POSTER_SIZES.courtCode);
   });
 });
 

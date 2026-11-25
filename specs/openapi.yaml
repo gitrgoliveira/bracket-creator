@@ -9835,14 +9835,12 @@ components:
         courts:
           type: object
           description: >
-            One entry per court poster, keyed by court label (one non-blank
-            character). An entry for a court the tournament no longer has is
-            kept and valid, and is not shown. At most 32 entries that are not
-            empty (twice the court limit); empty entries are dropped before
-            they are counted.
-          propertyNames:
-            minLength: 1
-            maxLength: 1
+            One entry per court poster, keyed by court label. A key that
+            holds any choice must be one non-blank character; an empty entry
+            may have any key and is dropped before it is counted or stored.
+            An entry for a court the tournament no longer has is kept and
+            valid, and is not shown. At most 32 entries that are not empty
+            (twice the court limit).
           additionalProperties:
             $ref: '#/components/schemas/PosterChoices'
     PosterChoices:
@@ -9854,8 +9852,8 @@ components:
           maxLength: 80
           description: >
             Heading printed under the band. Empty prints the default, "Follow
-            the tournament live" on the viewer home poster and "Shiaijo
-            <label>" on a court poster. At most 80 characters after trimming.
+            the tournament live" on the viewer home poster and "Follow this
+            court live" on a court poster, under the court's letter. At most 80 characters after trimming.
         callToAction:
           type: string
           maxLength: 120

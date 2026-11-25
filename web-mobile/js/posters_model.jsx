@@ -32,13 +32,18 @@ export const POSTER_RULES = Object.freeze({
 // Sizes in cqw, a hundredth of the poster's width, so the preview and the paper
 // are one layout at any width and A3 "fit to page" scales without reflow. The
 // court letter is the largest element of a court poster (taller than its code),
-// and the court code stays over 8 cm wide on A4.
+// and the court code stays over 8 cm wide on A4 (43 of the 190 mm between the
+// print margins is 82 mm). The court sizes are the largest that still let a
+// court poster at every limit the server allows (a two-line tournament name, the
+// logo above the code, the longest heading and call to action, six sponsors)
+// fit its sheet: measured in a browser at A4, with the sponsor strip clear of
+// the address by a few millimetres. Raise one only after measuring that again.
 export const POSTER_SIZES = Object.freeze({
   viewerCode: 62,
-  courtCode: 44,
-  courtLetter: 46,
+  courtCode: 43,
+  courtLetter: 44,
   viewerLogoAbove: 15,
-  courtLogoAbove: 6.5,
+  courtLogoAbove: 5.5,
 });
 
 // A code is drawn with this many white modules around it (the QR standard's quiet
@@ -132,7 +137,8 @@ export const codeFits = (address) => qrFits(address);
 //   no logo uploaded          -> offered false, no logo, level M
 //   centre (chosen or default) and the address fits level H -> centre, level H
 //   otherwise                 -> above, level M, and when Centre was refused
-//                                for length, the sentence that says why
+//                                for length, the sentence that says why (never
+//                                for an organiser who chose Above)
 // `centreAvailable` tells the page whether to offer Centre at all.
 export function logoPlacement(t, poster, choices) {
   const offered = !!(t && t.theme && t.theme.hasLogo);
@@ -141,13 +147,15 @@ export function logoPlacement(t, poster, choices) {
   }
   const c = choices || posterChoices(t, poster);
   const centreAvailable = qrFits(posterAddress(t, poster), { level: "H" });
-  const placement = c.logo !== "above" && centreAvailable ? "centre" : "above";
+  const wantsCentre = c.logo !== "above";
+  const placement = wantsCentre && centreAvailable ? "centre" : "above";
   return {
     offered,
     placement,
     level: placement === "centre" ? "H" : "M",
     centreAvailable,
-    centreRefusedSentence: centreAvailable ? "" : CENTRE_TOO_LONG_SENTENCE,
+    // Only a Centre the organiser asked for (or left as the default) was refused.
+    centreRefusedSentence: wantsCentre && !centreAvailable ? CENTRE_TOO_LONG_SENTENCE : "",
   };
 }
 
@@ -217,10 +225,10 @@ export function bandTextColour(hex) {
   return onWhite >= onDark ? BAND_INK_LIGHT : BAND_INK_DARK;
 }
 
-// logoURL: the one logo address a poster draws. The logo route is cached and the
-// tournament's version does not change when a logo is replaced, so the page
-// passes `key`, a value fixed when it opened (the page reloads the tournament
-// then), and a replaced logo never prints stale.
+// logoURL: the one logo address a poster draws. The logo route answers
+// no-cache, so a browser revalidates it, but the tournament's version does not
+// change when a logo is replaced, so the page also passes `key`, a value fixed
+// when it opened, and a replaced logo never prints stale from a cache between.
 export function logoURL(key) {
   const base = "/api/branding/logo";
   return key === undefined || key === null || key === "" ? base : base + "?v=" + encodeURIComponent(String(key));

@@ -199,14 +199,14 @@
   align-items: center;
   justify-content: space-evenly;
   gap: 2cqw;
-  padding: 1.6cqw 5cqw 2cqw;
+  padding: 1.2cqw 5cqw 1.4cqw;
   border-top: 0.3cqw solid #d8d8d8;
 }
 
 .poster__sponsor {
   flex: 0 1 auto;
   display: block;
-  height: 8cqw;
+  height: 6.5cqw;
   width: auto;
   max-width: calc((90cqw - 2cqw * (var(--poster-sponsors) - 1)) / var(--poster-sponsors));
   object-fit: contain;

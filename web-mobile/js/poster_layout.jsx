@@ -19,6 +19,7 @@ import {
   logoPadModules,
   logoPlacement,
   logoURL,
+  paperInkColour,
   posterAddress,
   posterChoices,
   posterPrimary,
@@ -119,6 +120,7 @@ export function Poster({ tournament, poster, choices, logoKey }) {
 
   const style = {
     "--poster-primary": primary,
+    "--poster-ink": paperInkColour(primary),
     "--poster-band-ink": bandTextColour(primary),
     "--poster-code": (isCourt ? POSTER_SIZES.courtCode : POSTER_SIZES.viewerCode) + "cqw",
     "--poster-letter": POSTER_SIZES.courtLetter + "cqw",

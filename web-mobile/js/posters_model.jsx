@@ -165,16 +165,42 @@ export function logoPadModules(size) {
 // The band's colour: the tournament's primary colour, or the app's own.
 export const posterPrimary = (t) => (t && t.theme && t.theme.primaryColor) || BRANDING_DEFAULTS.primaryColor;
 
-// WCAG relative luminance of a #rgb or #rrggbb colour; null when not one.
-function luminance(hex) {
+// The [r, g, b] channels (0 to 255) of a #rgb or #rrggbb colour; null when not one.
+function channels(hex) {
   let h = textOf(hex).trim().replace(/^#/, "");
   if (/^[0-9a-f]{3}$/i.test(h)) h = h.replace(/./g, "$&$&");
   if (!/^[0-9a-f]{6}$/i.test(h)) return null;
-  const lin = [0, 2, 4].map((i) => {
-    const v = parseInt(h.slice(i, i + 2), 16) / 255;
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+}
+
+// WCAG relative luminance of a #rgb or #rrggbb colour; null when not one.
+function luminance(hex) {
+  const rgb = channels(hex);
+  if (rgb === null) return null;
+  const lin = rgb.map((c) => {
+    const v = c / 255;
     return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
   });
   return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+}
+
+// The WCAG contrast large bold text needs.
+const PAPER_INK_CONTRAST = 3;
+
+// paperInkColour: the colour of the text set on the white paper (the court
+// label and letter, the heading). `hex` itself when it reads on white;
+// otherwise the same hue darkened, 10% at a time, until it does. A value that
+// is not a colour is returned as it is.
+export function paperInkColour(hex) {
+  const rgb = channels(hex);
+  if (rgb === null) return hex;
+  const onWhite = (c) => 1.05 / (luminance(c) + 0.05);
+  if (onWhite(hex) >= PAPER_INK_CONTRAST) return hex;
+  for (let step = 1; ; step++) {
+    const keep = Math.max(0, 1 - step / 10);
+    const darker = "#" + rgb.map((c) => Math.round(c * keep).toString(16).padStart(2, "0")).join("");
+    if (onWhite(darker) >= PAPER_INK_CONTRAST) return darker;
+  }
 }
 
 export const BAND_INK_LIGHT = "#ffffff";

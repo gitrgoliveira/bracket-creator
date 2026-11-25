@@ -755,7 +755,9 @@ func adminTournamentCopy(t *state.Tournament, verifier PasswordVerifier) *state.
 // already is the stored settings is not stale: it is the resend of one that
 // landed while its answer was lost, and refusing it would tell a device its
 // own earlier save was somebody else's change. A body carrying a different
-// password is a change, so it is judged by its version like any other.
+// password is a change, so it is judged by its version like any other. A
+// body that leaves posters out is judged with the stored block, as the save
+// will keep it.
 func staleTournamentSave(current *state.Tournament, body *state.Tournament, from string) bool {
 	if current == nil {
 		return false
@@ -764,8 +766,10 @@ func staleTournamentSave(current *state.Tournament, body *state.Tournament, from
 	if stored == from {
 		return false
 	}
+	kept := *body
+	kept.Posters = keptPosters(current, body.Posters)
 	changesPassword := body.Password != "" && body.Password != current.Password
-	return changesPassword || state.TournamentVersion(body) != stored
+	return changesPassword || state.TournamentVersion(&kept) != stored
 }
 
 // keptPosters is the posters block a tournament save writes: the body's block,

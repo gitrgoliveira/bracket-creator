@@ -8,6 +8,8 @@
  *   --poster-code        the code's side (with its quiet zone)
  *   --poster-letter      the court letter's height
  *   --poster-logo-above  the logo's height when it sits above the code
+ *   --poster-ink         the colour of the text set on the white paper, the
+ *                        primary colour darkened until it reads
  * The paper and the code are fixed white and black, in light and dark mode. */
 
 .poster {
@@ -77,7 +79,7 @@
   font-weight: 700;
   letter-spacing: 0.3em;
   text-transform: uppercase;
-  color: var(--poster-primary);
+  color: var(--poster-ink);
 }
 
 /* The largest element of a court poster, taller than its code. */
@@ -89,7 +91,7 @@
   font-size: calc(var(--poster-letter) * 1.35);
   font-weight: 800;
   line-height: 0.74;
-  color: var(--poster-primary);
+  color: var(--poster-ink);
 }
 
 .poster__titles {
@@ -101,7 +103,7 @@
   margin: 0;
   font-weight: 800;
   line-height: 1.12;
-  color: var(--poster-primary);
+  color: var(--poster-ink);
   overflow-wrap: anywhere;
 }
 

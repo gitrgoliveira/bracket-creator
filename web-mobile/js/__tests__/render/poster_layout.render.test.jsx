@@ -69,6 +69,14 @@ describe('Poster sizes', () => {
     const light = draw({ ...base, theme: { primaryColor: '#ffd60a' } }, viewer).querySelector('.poster').style;
     expect(light.getPropertyValue('--poster-band-ink')).toBe('#111111');
   });
+
+  it('sets the text on the paper in a darker ink when the primary colour is light', () => {
+    const style = draw({ ...base, theme: { primaryColor: '#ffd60a' } }, courtB).querySelector('.poster').style;
+    expect(style.getPropertyValue('--poster-primary')).toBe('#ffd60a');
+    const ink = style.getPropertyValue('--poster-ink');
+    expect(ink).toMatch(/^#[0-9a-f]{6}$/);
+    expect(ink).not.toBe('#ffd60a');
+  });
 });
 
 describe('Poster text', () => {

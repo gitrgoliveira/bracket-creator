@@ -165,6 +165,31 @@ func TestTournamentPostersSaveFromAnOlderCopyIsRefused(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 
+// The Edit tournament form sends no posters key: the resend of its save that
+// landed is judged with the stored block, so it is not stale, while a real
+// change from an older copy still is.
+func TestTournamentResendWithoutPostersIsNotStale(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	savePostersTournament(t, store, nil)
+	w := versionDo(t, r, "PUT", "/api/tournament", postersSaveBody(tournamentVersionOf(t, r), map[string]any{
+		"courts": map[string]any{"A": map[string]any{"heading": "Main court"}},
+	}))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	kept := storedPosters(t, store)
+	require.NotNil(t, kept)
+
+	w = versionDo(t, r, "PUT", "/api/tournament", postersSaveBody("stale", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, kept, storedPosters(t, store))
+
+	body := postersSaveBody("stale", nil)
+	body["name"] = "Renamed"
+	w = versionDo(t, r, "PUT", "/api/tournament", body)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Equal(t, "tournament_changed", decodeMap(t, w)["code"])
+	assert.Equal(t, kept, storedPosters(t, store))
+}
+
 // The setup form re-POSTs the tournament without the block: it keeps the
 // stored poster text, and a POST that sends a block is judged like the PUT.
 func TestTournamentRePostKeepsThePostersBlock(t *testing.T) {

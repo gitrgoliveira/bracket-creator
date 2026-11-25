@@ -11,6 +11,7 @@ import {
   logoPadModules,
   codeFits,
   bandTextColour,
+  paperInkColour,
   posterPrimary,
   posterSponsors,
   withChoice,
@@ -207,6 +208,41 @@ describe('bandTextColour', () => {
   it('uses the app colour when the theme sets none', () => {
     expect(posterPrimary(base)).toBe('#1d3557');
     expect(posterPrimary({ theme: { primaryColor: '#c1121f' } })).toBe('#c1121f');
+  });
+});
+
+describe('paperInkColour', () => {
+  const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const contrastOnWhite = (hex) => {
+    const [r, g, b] = rgb(hex).map((c) => {
+      const v = c / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 1.05 / (0.2126 * r + 0.7152 * g + 0.0722 * b + 0.05);
+  };
+
+  it('keeps a dark primary colour as it is', () => {
+    expect(paperInkColour('#1d3557')).toBe('#1d3557');
+  });
+
+  it('darkens a light colour until it reads on white, keeping its hue', () => {
+    const ink = paperInkColour('#ffd60a');
+    expect(ink).toMatch(/^#[0-9a-f]{6}$/);
+    expect(ink).not.toBe('#ffd60a');
+    expect(contrastOnWhite(ink)).toBeGreaterThanOrEqual(3);
+    const [r, , b] = rgb(ink);
+    expect(r).toBeGreaterThanOrEqual(b);
+  });
+
+  it('darkens white into a colour that reads', () => {
+    const ink = paperInkColour('#ffffff');
+    expect(ink).toMatch(/^#[0-9a-f]{6}$/);
+    expect(contrastOnWhite(ink)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('returns a value that is not a colour as it is', () => {
+    expect(paperInkColour('red')).toBe('red');
+    expect(paperInkColour('')).toBe('');
   });
 });
 

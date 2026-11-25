@@ -3,7 +3,7 @@
 // out so the foundation can be reused and the modal file stays focused on the
 // two stateful editors. See web-mobile/admin_split_plan.md.
 
-const { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback } = React;
+const { useState, useEffect, useRef, useMemo, useLayoutEffect } = React;
 
 import { DAIHYOSEN_POSITION, scoreRowMatchName, scoreRowMatchLabel } from './pool_ids.jsx';
 import { Icon } from './icon.jsx';
@@ -35,6 +35,7 @@ import { isOlderRunningCopy } from './patch.jsx';
 // BarredMatchNotice is a separate leaf (imports only ineligible_match.jsx +
 // write_result.jsx): re-exported below, see that file's header for why.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
+import { useMatchHeldWrite } from './held_writes_panel.jsx';
 import {
   UNSAVED_ENTRIES_DISCARDED, REOPEN_ANYWAY, QUEUE_AND_REOPEN_ANYWAY, ADD_REP_BOUT_ANYWAY,
   REMOVE_REP_BOUT_ANYWAY, LEAVE_MATCH_ANYWAY, recordDecisionAnyway, unsavedDiscardDialog,
@@ -55,62 +56,6 @@ const MAX_IPPONS_PER_SIDE = 2;
 function isBoutDecided(aPts, bPts) {
   return (aPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE
       || (bPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE;
-}
-
-// HeldWriteDiscard: the way past a result held on this device that the server
-// keeps refusing (a 5xx on every retry). Rendered inside a score editor's
-// pending banner, it shows nothing until the queue reports that this match's
-// held write has crossed the server-error threshold, then offers to discard
-// that write, and only it, after a confirm (copy owned by write_result.jsx).
-// It never blocks another write (each queued write is sent on its own), but
-// without this the only way to stop it was signing out, which discards every
-// held result. `onDiscarded` lets the editor drop its pending banner.
-// useMatchHeldWrite: what this device still holds for one match: `held`,
-// any write at all (a running update, a result, a decision), and `stuck`, one
-// the server keeps refusing. Re-read on every sync status change and every
-// change of the held counts, which include the failing count, so a second
-// write crossing the threshold, a write landing, and a discard made from the
-// topbar's list all reach it. The editors' pending banner, its line
-// (HeldWriteNotice) and its Discard read it.
-export function useMatchHeldWrite(compId, matchId, match = null) {
-  const api = window.API;
-  // The match the editor shows names its held writes, and its teams' (H5).
-  if (match && api && compId && typeof api.noteShownMatch === 'function') api.noteShownMatch(compId, match);
-  // `held` is null when this page has no queue to ask (the editors' render
-  // tests stub window.API without one): unknown, so nothing is cleared.
-  // `blocker` is the write of another kind this match waits for that the
-  // server keeps refusing (a team member's add; stage 3 review 4, G2), or null.
-  // `stuck` and `blocker` come from ONE read of the queue (heldWriteState,
-  // stage 3 review 5, H2); a page whose API has only the two older questions
-  // asks them.
-  const read = useCallback(() => {
-    const asks = !!(api && compId && matchId);
-    const state = asks && typeof api.heldWriteState === 'function' ? api.heldWriteState(compId, matchId) : null;
-    return {
-      held: asks && typeof api.hasHeldWrite === 'function' ? api.hasHeldWrite(compId, matchId) : null,
-      stuck: state ? !!state.keepsFailing
-        : !!(asks && typeof api.heldWriteKeepsFailing === 'function' && api.heldWriteKeepsFailing(compId, matchId)),
-      blocker: (state ? state.blocker
-        : (asks && typeof api.heldWriteBlocker === 'function' && api.heldWriteBlocker(compId, matchId))) || null,
-    };
-  }, [api, compId, matchId]);
-  const [state, setState] = useState(read);
-  const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
-  useEffect(() => {
-    const refresh = () => {
-      if (!mountedRef.current) return;
-      const next = read();
-      const blockerKey = (s) => (s.blocker ? s.blocker.key : '');
-      setState((prev) => (prev.held === next.held && prev.stuck === next.stuck && blockerKey(prev) === blockerKey(next) ? prev : next));
-    };
-    refresh();
-    const offs = [];
-    if (typeof window.subscribeSyncStatus === 'function') offs.push(window.subscribeSyncStatus(refresh));
-    if (typeof window.subscribeUnsentWrites === 'function') offs.push(window.subscribeUnsentWrites(refresh));
-    return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
-  }, [read]);
-  return state;
 }
 
 // useClearPendingWhenNothingHeld: the editors' pending banner goes once this
@@ -412,6 +357,14 @@ export function HeldWriteNotice({ compId, matchId, res, match = null }) {
   return <span>{queuedNotice(res, { keepsFailing: stuck, blockedBy: blocker })}</span>;
 }
 
+// HeldWriteDiscard: the way past a result held on this device that the server
+// keeps refusing (a 5xx on every retry). Rendered inside a score editor's
+// pending banner, it shows nothing until the queue reports that this match's
+// held write has crossed the server-error threshold, then offers to discard
+// that write, and only it, after a confirm (copy owned by write_result.jsx).
+// It never blocks another write (each queued write is sent on its own), but
+// without this the only way to stop it was signing out, which discards every
+// held result. `onDiscarded` lets the editor drop its pending banner.
 export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = false, match = null }) {
   const api = window.API;
   const { stuck, blocker } = useMatchHeldWrite(compId, matchId, match);
@@ -1314,7 +1267,14 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
 // (the Up Next lineup panel); without it a nameless placement had no way out.
 // `onListPick` is told of a pick made by tapping a row of the open list (an
 // option or "+ Add"), never of a typed commit, Enter, the clear button or a
-// click outside: only that pick closes the list under the finger.
+// click outside: only that pick closes the list under the finger. It is handed
+// the list's box as drawn when the pick was made (null when there is none), so
+// a host can guard just that area against the pick's bounce rather than every
+// control near it. The box is `{ anchor, left, right, top, bottom }`, its edges
+// relative to `anchor` (the box's own root, which stays mounted once the list
+// closes): a host reads `anchor.getBoundingClientRect()` when a tap comes, so
+// the area moves with the sheet if it scrolled in between. A box in screen
+// coordinates covered whatever the scroll brought under it (the walk's S3).
 // The name list is absolutely placed under its input. It opens down when the room
 // below fits the list, else toward the larger room, and caps its height to that
 // room. The room is bounded by the viewport (the visual one, which the iPad
@@ -1542,6 +1502,15 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
     }
   };
 
+  // The list's box as drawn now, relative to this box's root, for onListPick
+  // (the area a pick's bounce lands in).
+  const listBox = () => {
+    if (!listRef.current || !ref.current) return null;
+    const list = listRef.current.getBoundingClientRect();
+    const at = ref.current.getBoundingClientRect();
+    return { anchor: ref.current, left: list.left - at.left, right: list.right - at.left, top: list.top - at.top, bottom: list.bottom - at.top };
+  };
+
   const fielded = !value && !numberLabel && !!fieldedLabel;
   // A nameless member the box holds reads its number alone, in ink like a name.
   const numberedOnly = !value && !!numberLabel;
@@ -1599,7 +1568,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
           {matches.map((entry, i) => (
             <button type="button" key={entry.isObject ? (entry.raw?.id || entry.raw?.index) : entry.name}
               className={`pmf__option ${i === active ? "pmf__option--active" : ""}`}
-              onMouseDown={(e) => e.preventDefault()} onClick={() => { onListPick?.(); commitEntry(entry); }}>
+              onMouseDown={(e) => e.preventDefault()} onClick={() => { onListPick?.(listBox()); commitEntry(entry); }}>
               {entry.isObject ? (
                 <>
                   <span className="pmf__opt-label">{entry.label}</span>
@@ -1613,7 +1582,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
           {canAddNew && (
             <button type="button"
               className={`pmf__option lineup-name__add ${active === matches.length ? "pmf__option--active" : ""}`}
-              onMouseDown={(e) => e.preventDefault()} onClick={() => { onListPick?.(); commit(q); }}>
+              onMouseDown={(e) => e.preventDefault()} onClick={() => { onListPick?.(listBox()); commit(q); }}>
               <span className="pmf__opt-name">+ Add “{q}”</span>
             </button>
           )}

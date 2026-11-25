@@ -122,7 +122,9 @@ info:
     the bouts without the representative bout the match has (a sheet a moment behind an
     add made elsewhere) keeps the stored row, scored or not, unless it finishes the match,
     which is refused with 409 `daihyosen_added`. It carries only what the competitors saw: a match
-    `decision` that is empty, `fought` or `hikiwake`, a numbered bout `decision` that is
+    `decision` that is empty, `fought`, `hikiwake` or, in a kachinuki competition,
+    `kachinuki-exhaustion` (the End match write, whose winner the server works out
+    from the scored bouts), a numbered bout `decision` that is
     one of those or `fusensho`, and a representative-bout `decision` that is empty or
     `daihyosen` (a draw, a kiken, a fusenpai, or a fusensho there would decide the encounter). Any
     other decision, or the `Ht` judges'-decision mark on a numbered bout, is refused
@@ -930,6 +932,20 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           description: Registration is not available for this competition (officiated tournament, unknown or team competition).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  code:
+                    type: string
+                    enum: [team_competition]
+                    description: |
+                      Present only when the competition is a team competition,
+                      which is entered by the organizer: a team size or a team
+                      kind. Absent for the other 404 causes.
         '500':
           $ref: '#/components/responses/InternalError'
     post:
@@ -967,7 +983,21 @@ paths:
         '400':
           description: Invalid id or body, a blank name or dojo, or a field too long.
         '404':
-          description: Registration is not available for this competition.
+          description: Registration is not available for this competition. A team competition answers `code` `team_competition`, as the GET does.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  code:
+                    type: string
+                    enum: [team_competition]
+                    description: |
+                      Present only when the competition is a team competition,
+                      which is entered by the organizer: a team size or a team
+                      kind. Absent for the other 404 causes.
         '409':
           description: Registration is closed, or this name and dojo are already registered.
         '413':

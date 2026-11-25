@@ -50,7 +50,7 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 		}
 
 		if comp.IsTeam() {
-			c.JSON(http.StatusNotFound, gin.H{"error": "registration is not available for this competition"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "registration is not available for this competition", "code": "team_competition"})
 			return
 		}
 
@@ -91,7 +91,7 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 		}
 
 		if comp.IsTeam() {
-			c.JSON(http.StatusNotFound, gin.H{"error": "registration is not available for this competition"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "registration is not available for this competition", "code": "team_competition"})
 			return
 		}
 

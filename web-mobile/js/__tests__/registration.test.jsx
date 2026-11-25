@@ -56,6 +56,33 @@ describe('RegistrationForm', () => {
     });
   });
 
+  describe('metadata error (404: team_competition)', () => {
+    it('says teams are entered by the organizer when the 404 carries the team code', async () => {
+      global.fetch = vi.fn(() =>
+        Promise.resolve({
+          status: 404, ok: false,
+          json: () => Promise.resolve({ error: 'registration is not available for this competition', code: 'team_competition' }),
+        })
+      );
+      runtime.mount(RegistrationForm, { compId: 'test-comp' });
+      await vi.waitFor(() => {
+        const text = collectText(runtime.currentTree());
+        expect(text).toContain('Teams are entered by the tournament organizer. Ask them to add your team.');
+        expect(text).not.toContain('not available');
+      });
+    });
+
+    it('keeps the general sentence for a 404 with any other code', async () => {
+      global.fetch = vi.fn(() =>
+        Promise.resolve({ status: 404, ok: false, json: () => Promise.resolve({ error: 'x', code: 'other' }) })
+      );
+      runtime.mount(RegistrationForm, { compId: 'test-comp' });
+      await vi.waitFor(() => {
+        expect(collectText(runtime.currentTree())).toContain('Registration is not available for this competition.');
+      });
+    });
+  });
+
   describe('registration closed (competition past setup)', () => {
     it('shows closed message when status is not setup', async () => {
       global.fetch = vi.fn(() =>
@@ -144,6 +171,40 @@ describe('RegistrationForm', () => {
       await vi.waitFor(() => {
         const text = collectText(runtime.currentTree());
         expect(text).toContain("You're registered");
+      });
+    });
+  });
+
+  describe('POST 404: team_competition', () => {
+    it('says teams are entered by the organizer when the POST 404 carries the team code', async () => {
+      global.fetch = vi.fn((url, opts) => {
+        if (!opts || opts.method !== 'POST') {
+          return Promise.resolve({
+            status: 200,
+            ok: true,
+            json: () => Promise.resolve({ id: 'c1', name: 'Open', status: 'setup', withZekkenName: false }),
+          });
+        }
+        return Promise.resolve({
+          status: 404,
+          ok: false,
+          json: () => Promise.resolve({ error: 'registration is not available for this competition', code: 'team_competition' }),
+        });
+      });
+
+      runtime.mount(RegistrationForm, { compId: 'c1' });
+      await vi.waitFor(() => {
+        expect(collectText(runtime.currentTree())).toContain('Full name');
+      });
+      const findInputByPlaceholder = (ph) => findInTree(runtime.currentTree(),
+        n => n.type === 'input' && n.props?.placeholder === ph);
+      findInputByPlaceholder('e.g. Alice Tanaka').props.onChange({ target: { value: 'Alice' } });
+      findInputByPlaceholder('e.g. Gyokusen').props.onChange({ target: { value: 'Dojo' } });
+      const form = findInTree(runtime.currentTree(), n => n.type === 'form');
+      await form.props.onSubmit({ preventDefault: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(collectText(runtime.currentTree())).toContain('Teams are entered by the tournament organizer. Ask them to add your team.');
       });
     });
   });

@@ -64,14 +64,16 @@ export function queuedWritesOf(compID, kinds) {
 // of the queue (stage 3 review 5, H2: the two asked apart scanned and
 // sorted it at every step of the walk): `keepsFailing`, whether a write
 // of the match or one it waits on keeps failing, and `blocker`, that
-// write when it is another base's (heldWriteBlocker), else null.
+// write when it is another base's (heldWriteBlocker), else null; and
+// `refused`, whether the match's own write is one the server refuses
+// (`keepsFailing` also holds for a write on a wait cycle, which is no refusal).
 function heldWriteState(compID, matchID) {
     const base = _revKey(compID, matchID);
     const index = _queueIndex();
     const own = index.byBase.get(base) || [];
     // The match's own write is the one the server keeps refusing: that
     // is what the banner says, and what its Discard discards.
-    if (own.some(([, d]) => _refusedByServer(d))) return { keepsFailing: true, blocker: null };
+    if (own.some(([, d]) => _refusedByServer(d))) return { keepsFailing: true, refused: true, blocker: null };
     // Otherwise the first write of ANOTHER base it waits on that keeps
     // failing, walked through its own entries (one of them on a wait
     // cycle, H1, is passed through to the write of the other match on it).
@@ -79,9 +81,9 @@ function heldWriteState(compID, matchID) {
     const walk = _newWalk();
     for (const [key] of own) {
         const found = _blockerOf(key, stuck, walk, index);
-        if (found) return { keepsFailing: true, blocker: _heldWriteItem(found, _writeQueue.get(found)) };
+        if (found) return { keepsFailing: true, refused: false, blocker: _heldWriteItem(found, _writeQueue.get(found)) };
     }
-    return { keepsFailing: own.some(([, d]) => _keepsFailing(d)), blocker: null };
+    return { keepsFailing: own.some(([, d]) => _keepsFailing(d)), refused: false, blocker: null };
 }
 
 // heldWriteBlocker: the write of ANOTHER base this match's writes wait on
@@ -127,6 +129,14 @@ export const outboxApi = {
         // change or lineup save of the match is not one.
         return _entriesFor(_revKey(compID, matchID)).some(([, d]) => isFinishedResultWrite(d));
     },
+    // hasPendingResultWrite: the same question for a RESULT only, a finished
+    // score write or a decision, never a representative bout change (which is
+    // counted with the results but leaves the match running with its score
+    // still open). The public card reads it: "Result entered on this phone"
+    // must not claim a result for a queued representative bout add.
+    hasPendingResultWrite(compID, matchID) {
+        return _entriesFor(_revKey(compID, matchID)).some(([, d]) => isFinishedResultWrite(d) && d.kind !== 'daihyosen');
+    },
     // The way past a held write the server keeps refusing (a 5xx on every
     // retry, past the server-error notice threshold). It holds back no other
     // write, but it is retried for as long as the page is open, keeps the
@@ -137,7 +147,7 @@ export const outboxApi = {
     // Whether this device still holds ANY write for the match (a running
     // update, a result, a decision): the editors' pending banner stays while
     // one does and goes when none is left, landed or discarded
-    // (useMatchHeldWrite, admin_scoring_shared.jsx).
+    // (useMatchHeldWrite, held_writes_panel.jsx).
     hasHeldWrite(compID, matchID) {
         // Only a write that already failed a pass (or came back from storage)
         // is held: a Finish on its first send is not "Not sent yet" (bc-evts).

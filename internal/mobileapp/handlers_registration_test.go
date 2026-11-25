@@ -188,6 +188,7 @@ func TestRegistration_GET_TeamComp_Returns404(t *testing.T) {
 	w := doGetMeta(r, compID)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Contains(t, w.Body.String(), "not available")
+	assert.JSONEq(t, `{"error":"registration is not available for this competition","code":"team_competition"}`, w.Body.String())
 }
 
 // A team competition is one with a team kind or a team size (Competition.IsTeam),
@@ -206,10 +207,12 @@ func TestRegistration_TeamSizeWithoutKind_Returns404(t *testing.T) {
 	w := doGetMeta(r, compID)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Contains(t, w.Body.String(), "not available")
+	assert.Contains(t, w.Body.String(), `"code":"team_competition"`)
 
 	w = doRegister(r, compID, map[string]any{"name": "Alice", "dojo": "Dojo"})
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Contains(t, w.Body.String(), "not available")
+	assert.Contains(t, w.Body.String(), `"code":"team_competition"`)
 	assert.Equal(t, 0, spy.count())
 }
 
@@ -229,6 +232,7 @@ func TestRegistration_POST_TeamComp_Returns404(t *testing.T) {
 	})
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Contains(t, w.Body.String(), "not available")
+	assert.JSONEq(t, `{"error":"registration is not available for this competition","code":"team_competition"}`, w.Body.String())
 	assert.Equal(t, 0, spy.count())
 }
 

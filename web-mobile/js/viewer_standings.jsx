@@ -33,6 +33,7 @@ import { teamNameMark } from './match_scoreboard.jsx';
 import { barredNameMark } from './barred_chip.jsx';
 import { Icon } from './icon.jsx';
 import { engiShape } from './engi_entry.jsx';
+import { isTeamCompetition } from './competition_shape.jsx';
 
 const { useState, useMemo } = React;
 const EmptyState = window.EmptyState;
@@ -310,7 +311,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
     return () => { cancelled = true; };
   }, [c.id, c.status, poolMatchesSig, ranksTick]);
 
-  const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
+  const isTeam = isTeamCompetition(competition);
   const isEngi = !!(competition && competition.engi);
   const isSolo = engiShape(competition) === "solo";
   const isCompleted = c.status === "completed";
@@ -843,7 +844,7 @@ export function qualifiersForPool(competition, pool) {
 // component off the SAME public payload, so the audience gate cannot live on
 // the server; it lives here, and only the admin callers pass it.
 export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick, highlightPlayers, showDataIssues }) {
-  const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
+  const isTeam = isTeamCompetition(competition);
   // Engi-Kyogi (kata competition): flag-count scoring. Standings show
   // Victories (V) and total Flags columns only.
   const isEngi = !!(competition && competition.engi);

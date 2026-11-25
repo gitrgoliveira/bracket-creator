@@ -85,6 +85,14 @@ describe('the outbox counts only finished results as results (R5)', () => {
         expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
     });
 
+    it('a queued representative bout add is no result for the public card, though the editors count it', async () => {
+        API.recordDaihyosen('c1', 'm1', 'pw', 0);
+        expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
+        expect(API.hasPendingResultWrite('c1', 'm1')).toBe(false);
+        API.recordDecision('c1', 'm1', { decision: 'fusensho', decisionBy: 'a' }, 'pw');
+        expect(API.hasPendingResultWrite('c1', 'm1')).toBe(true);
+    });
+
     it('a held court move that lands raises no "results sent" alert', async () => {
         const alerts = [];
         mod.subscribeQueueAlert((a) => alerts.push(a));

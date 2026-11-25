@@ -426,6 +426,9 @@ func (s *Store) WithCourtExclusivityLock(fn func() error) error {
 func (s *Store) getFileCache(compID, filename string) *fileCache {
 	c, _ := s.compCache.LoadOrStore(compID, &compCache{})
 	cc := c.(*compCache)
+	if f, ok := cc.files.Load(filename); ok {
+		return f.(*fileCache)
+	}
 	fresh := &fileCache{}
 	if filename == "config.md" {
 		fresh.storeWrites = &s.configWrites

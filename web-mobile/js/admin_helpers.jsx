@@ -1,7 +1,8 @@
 // Pure helpers shared across the admin layer.
 // No JSX, no React deps. See web-mobile/admin_split_plan.md.
 
-// write_result.jsx is a leaf with no imports, so this cannot form a cycle.
+// write_result.jsx reaches only first_result_confirm.jsx and the recorded_result.jsx
+// leaf behind it, so this cannot form a cycle.
 import { BRONZE_MATCH_ID } from './write_result.jsx';
 import { bronzeFeederSemis } from './bronze_feeders.jsx';
 import { compareDmy } from './date_order.jsx';

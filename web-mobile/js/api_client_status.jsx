@@ -70,8 +70,8 @@ export function _tellRefusal(info, alert) {
     _notifyQueueAlert(alert);
 }
 
-// The "did this write land?" predicates live in write_result.jsx, a leaf with
-// no imports, so that admin_scoring_shared.jsx can import the same rule without
+// The "did this write land?" predicates live in write_result.jsx, a leaf (its
+// one import is the first_result_confirm.jsx leaf), so that admin_scoring_shared.jsx can import the same rule without
 // importing THIS module (api_client is script-tagged; a module both
 // script-tagged and ES-imported loads twice and splits its singleton write
 // queue). EVERY consumer imports that leaf directly — this module included —

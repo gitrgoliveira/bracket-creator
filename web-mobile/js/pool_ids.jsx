@@ -1,6 +1,8 @@
 // pool_ids.jsx: canonical parser for pool-match ids. A leaf that imports only
-// write_result.jsx and side_cell.jsx (each a leaf with no imports, for
-// scoreRowMatchLabel's matchLabel and scoreRowMatchName's sideWord), so both
+// write_result.jsx and side_cell.jsx (for scoreRowMatchLabel's matchLabel and
+// scoreRowMatchName's sideWord; write_result.jsx reaches only
+// first_result_confirm.jsx and the recorded_result.jsx leaf behind it,
+// side_cell.jsx only icon.jsx), so both
 // display_helpers.jsx and admin_pools.jsx can import it without pulling a real transitive import chain into either:
 // admin_pools.jsx otherwise relies on window globals rather than ESM
 // imports, so a leaf this close to dependency-free keeps its module graph

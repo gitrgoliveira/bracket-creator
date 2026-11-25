@@ -59,7 +59,9 @@ import {
   finishButtonLabel,
   armedFinishLabel,
   editorMetaText,
+  confirmFirstResultFor,
 } from './admin_scoring_shared.jsx';
+import { firstResultAsks } from './first_result_confirm.jsx';
 import { teamDraftTaps } from './draft_taps.jsx';
 // bc-evts stage 5: a running team match is scored by tap events, one per
 // scoring gesture, handed to the outbox (API.recordTap).
@@ -1130,6 +1132,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // representative-bout change the sheet does not save first).
   const unsavedRef = useRef(false);
   const repDiscardAskingRef = useRef(false);
+  // The first-result question a representative-bout add that starts the match asks.
+  const repFirstResultAskingRef = useRef(false);
   // What Discard entries does here (R1, stage 5 review 8): the draft goes at
   // once, a kept one through its owner as its own Discard does.
   const discardUnsavedRef = useRef(() => {});
@@ -3812,6 +3816,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
       }, () => { repDiscardAskingRef.current = false; });
       return;
     }
+    // bc-drev D4 b: a change that saves the sheet first starts a queued match,
+    // the first result of a drawn competition. Asked BEFORE anything below is
+    // shown or queued, so a Not yet adds nothing and starts nothing, and an
+    // add never reaches the outbox ahead of an answer the operator has not
+    // given. Only when it asks is anything awaited.
+    if (preSave && !change.firstResultAsked && firstResultAsks(m.compId)) {
+      if (repFirstResultAskingRef.current) return;
+      repFirstResultAskingRef.current = true;
+      confirmFirstResultFor(m, true).then((go) => {
+        repFirstResultAskingRef.current = false;
+        if (go && mountedRef.current) runRepBoutChange({ ...change, firstResultAsked: true });
+      }, () => { repFirstResultAskingRef.current = false; });
+      return;
+    }
     setEditorErr("");
     // The change puts a finished match back to running on this sheet: its own
     // status write, so no draft is kept as if another device had reopened it.
@@ -5465,6 +5483,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   // _notifyScoreSuperseded (api_client_status.jsx) deliberately stays
                   // silent for. Start match is an explicit operator tap, not
                   // an autosave, so check the awaited result directly.
+                  // bc-drev D4 b: the first result of a drawn competition asks
+                  // BEFORE the owner shows the start, so a Not yet leaves the
+                  // board as it was (Start still offered, the match scheduled)
+                  // and nothing is begun. Only when it asks is anything awaited.
+                  if (firstResultAsks(m.compId) && !(await confirmFirstResultFor(m, true))) return;
                   const startPatch = buildPatch("running");
                   // bc-strt: the owner shows the start at once, with the bouts
                   // it carries (a pre-match draft rides on it), until the feed

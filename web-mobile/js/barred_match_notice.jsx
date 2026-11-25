@@ -8,8 +8,8 @@
 // A DELIBERATE LEAF: imports only ineligible_match.jsx, write_result.jsx,
 // unsaved_entries.jsx, first_result_confirm.jsx and pool_ids.jsx, leaves themselves (see
 // their headers for why; write_result.jsx's one import is first_result_confirm.jsx, whose
-// one import is the recorded_result.jsx leaf, and pool_ids.jsx reaches only side_cell.jsx
-// and icon.jsx). admin_scoring_shared.jsx re-exports this component so the editors'
+// one import is the recorded_result.jsx leaf, and pool_ids.jsx reaches only write_result.jsx
+// (above), side_cell.jsx and icon.jsx). admin_scoring_shared.jsx re-exports this component so the editors'
 // existing `from './admin_scoring_shared.jsx'` import lists need no change,
 // but admin_shiaijo.jsx and admin_schedule_score_editor.jsx import it
 // directly from here. Importing it via admin_scoring_shared.jsx from either

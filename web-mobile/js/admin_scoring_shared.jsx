@@ -28,7 +28,7 @@ import { isTeamDefaultWinDecision } from './team_default_credit.jsx';
 import { struckIppons, realIppons } from './result_slot.jsx';
 import { acceptTap, useArmedConfirm } from './tap_guard.jsx';
 import { useLatestRef } from './latest_ref.jsx';
-import { FIRST_RESULT_CANCELLED } from './first_result_confirm.jsx';
+import { firstResultAsks, confirmFirstResult, FIRST_RESULT_CANCELLED } from './first_result_confirm.jsx';
 // bc-evts: the board of a running match (tapBoardOf) is the server's copy with
 // this device's pending taps folded on, by the JS replay port.
 import { applyPending, assignMarks, APPLIED, BOUT_REMOVED, BOUT_REMOVED_MESSAGE } from './score_events.jsx';
@@ -821,6 +821,18 @@ function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeri
   });
 }
 
+// confirmFirstResultFor: the first-result question (first_result_confirm.jsx)
+// for `match`, named as the operator's rows name it. An editor asks it BEFORE
+// it shows its own start or opens another question over unsaved entries, so a
+// Not yet leaves the board and the entries as they were. Callers ask it only
+// when firstResultAsks(match.compId), so a write that asks nothing still goes
+// out in the same tick. `starts` tells a Start from a result.
+function confirmFirstResultFor(match, starts = false) {
+  return confirmFirstResult({
+    confirmDialog: window.confirmDialog, compId: match.compId, label: scoreRowMatchName(match), starts,
+  });
+}
+
 // makeSubmitDecision builds the kiken/fusenpai decision submit handler shared by
 // ScoreEditorModal and TeamScoreEditorModal. The two modals had byte-identical
 // copies of this, so it lives here once. The returned closure:
@@ -885,6 +897,17 @@ function makeSubmitDecision({
 }) {
   const submit = async (kind, { decisionBy, decisionReason }) => {
     let encho = enchoPeriodCount;
+    // bc-drev D4 b: asked BEFORE the unsaved entries' question, so a Not yet
+    // never discards what the editor holds (BarredMatchNotice does the same).
+    // attemptScoreWrite asks no more once the operator has agreed.
+    if (firstResultAsks(match.compId)) {
+      const go = await confirmFirstResultFor(match);
+      if (!mountedRef.current) return;
+      if (!go) {
+        setDecisionErr(FIRST_RESULT_CANCELLED);
+        return;
+      }
+    }
     if (holdsUnsaved(unsaved)) {
       const go = await confirmDiscardUnsaved(unsaved, recordDecisionAnyway(kind), onDiscard);
       if (!go || !mountedRef.current) return;
@@ -2855,6 +2878,7 @@ export {
   buildDecisionBody,
   submitDecisionRequest,
   makeSubmitDecision,
+  confirmFirstResultFor,
   nextEnchoPeriod,
   prevEnchoPeriod,
   initialEnchoPeriodsForMatch,

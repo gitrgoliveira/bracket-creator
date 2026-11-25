@@ -390,6 +390,21 @@ export function useCourtStart({
             if (inFlight.key !== matchKey(m)) refuseTap(m, "starting");
             return;
         }
+        // The pick would record the competition's first result. Asked first, so
+        // a Not yet never discards the entries the editor holds. Asked once:
+        // agreed, the owner asks no more for this competition, and the pick is
+        // judged again from the top on the court as it is then (the question
+        // waits on the operator, as the unsaved entries' one below does).
+        if (m.status === "scheduled" && !isStartedSnapshot(m) && firstResultAsks(m.compId)) {
+            const go = await confirmFirstResult({
+                confirmDialog: window.confirmDialog, compId: m.compId, label: scoreRowMatchName(m), starts: true,
+            });
+            if (!go || !mountedRef.current) return;
+            const latest = latestRef.current;
+            const fresh = latest.allMatches.find((x) => matchKey(x) === matchKey(m));
+            if (fresh) await latest.pickMatch(fresh, asked);
+            return;
+        }
         // A pick that puts another match in the editor asks first over its
         // unsaved entries (R1). The court may move while the operator answers
         // (another device finishes the running bout, a start lands), so the
@@ -398,20 +413,6 @@ export function useCourtStart({
         // review 9, m3).
         if (!asked && selectedMatch && matchKey(selectedMatch) !== matchKey(m) && holdsUnsaved(editorUnsavedRef)) {
             if (!(await leaveEditorConfirmed())) return;
-            const latest = latestRef.current;
-            const fresh = latest.allMatches.find((x) => matchKey(x) === matchKey(m));
-            if (fresh) await latest.pickMatch(fresh, true);
-            return;
-        }
-        // The pick would record the competition's first result. Asked once:
-        // agreed, the owner asks no more for this competition, and the pick is
-        // judged again from the top on the court as it is then (the question
-        // waits on the operator, as the one above does).
-        if (m.status === "scheduled" && !isStartedSnapshot(m) && firstResultAsks(m.compId)) {
-            const go = await confirmFirstResult({
-                confirmDialog: window.confirmDialog, compId: m.compId, label: scoreRowMatchName(m), starts: true,
-            });
-            if (!go || !mountedRef.current) return;
             const latest = latestRef.current;
             const fresh = latest.allMatches.find((x) => matchKey(x) === matchKey(m));
             if (fresh) await latest.pickMatch(fresh, true);

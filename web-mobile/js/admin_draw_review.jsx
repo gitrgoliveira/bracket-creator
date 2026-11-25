@@ -51,8 +51,8 @@ export function pairText(row) {
 // can say about it.
 export function stuckSentence(stuck) {
   const m = stuck.meeting || {};
-  if (m.samePool) return `${stuck.dojo}: no swap takes them out of ${poolLabel(m.samePool)} without making another dojo meet earlier.`;
-  return `${stuck.dojo}: no swap brings their ${meetingRoundName(m.earliest)} meeting later without making another dojo meet earlier.`;
+  if (m.samePool) return `${stuck.dojo}: no suggested swap takes them out of ${poolLabel(m.samePool)} without making another dojo meet earlier.`;
+  return `${stuck.dojo}: they can first meet in the ${meetingRoundName(m.earliest)}, and no suggested swap moves that later without making another dojo meet earlier.`;
 }
 
 // improvementSentence: one pair a suggestion keeps apart longer.

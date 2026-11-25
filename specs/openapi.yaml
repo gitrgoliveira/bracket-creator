@@ -2772,7 +2772,7 @@ paths:
         `improves` lists the pairs a suggestion helps, before and after;
         `byes` lists the first-round byes a knockout-only swap hands over.
         `stuck` lists the dojos with a pair that shares a pool or can meet
-        before the final which no swap keeps apart for longer, with that
+        before the final which none of the listed suggestions keeps apart for longer, with that
         dojo's earliest summary row. Seeded competitors are never suggested.
 
         Recomputed from the stored draw on every request and never stored.
@@ -2784,7 +2784,7 @@ paths:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
         '200':
-          description: The suggestions and the dojos no swap helps, possibly empty.
+          description: The suggestions and the dojos none of them helps, possibly empty.
           content:
             application/json:
               schema:

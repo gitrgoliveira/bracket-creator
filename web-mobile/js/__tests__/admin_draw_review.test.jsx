@@ -65,9 +65,9 @@ describe('the suggestions', () => {
 
   it('words a stuck dojo by its earliest meeting', () => {
     expect(stuckSentence({ dojo: 'Team Pi', meeting: { earliest: meet('r0-m1', 0) } }))
-      .toBe('Team Pi: no swap brings their Quarterfinals meeting later without making another dojo meet earlier.');
+      .toBe('Team Pi: they can first meet in the Quarterfinals, and no suggested swap moves that later without making another dojo meet earlier.');
     expect(stuckSentence({ dojo: 'Team Pi', meeting: { samePool: 'Pool A' } }))
-      .toBe('Team Pi: no swap takes them out of Pool A without making another dojo meet earlier.');
+      .toBe('Team Pi: no suggested swap takes them out of Pool A without making another dojo meet earlier.');
   });
 });
 

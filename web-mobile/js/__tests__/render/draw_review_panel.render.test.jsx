@@ -111,7 +111,7 @@ describe('the Draw review card', () => {
     expect(item.textContent).toContain('Team Omega: share Pool A → earliest Semifinals.');
     expect(item.textContent).toContain('Nobody else meets earlier.');
     expect(screen.getByTestId('swap-stuck').textContent)
-      .toBe('Team Pi: no swap brings their Quarterfinals meeting later without making another dojo meet earlier.');
+      .toBe('Team Pi: they can first meet in the Quarterfinals, and no suggested swap moves that later without making another dojo meet earlier.');
   });
 
   it('opens the check for a suggestion with the places the server gave', async () => {

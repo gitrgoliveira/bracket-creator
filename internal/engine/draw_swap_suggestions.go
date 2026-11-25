@@ -58,8 +58,8 @@ type SwapSuggestion struct {
 }
 
 // StuckDojo is a dojo with a pair that shares a pool or can meet before the
-// final, which no swap keeps apart for longer without bringing another pair
-// of dojo-mates together earlier. Meeting is the dojo's earliest summary row.
+// final, which no returned suggestion keeps apart for longer without bringing
+// another pair of dojo-mates together earlier. Meeting is the dojo's earliest summary row.
 type StuckDojo struct {
 	Dojo    string      `json:"dojo"`
 	Meeting DojoMeeting `json:"meeting"`
@@ -151,8 +151,8 @@ func pairIDs(a, b string) [2]string {
 // earliest meeting they fix (a shared pool first), then by how much later it
 // becomes, then by how many pairs improve, then by the two ids, and at most
 // maxSwapSuggestions are returned. Stuck lists, in summary order, every dojo
-// with a pair that shares a pool or meets before the final that no candidate
-// keeps apart for longer, quoting the earliest such pair.
+// with a pair that shares a pool or meets before the final that no returned
+// suggestion keeps apart for longer, quoting the earliest such pair.
 func SuggestSwaps(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, roster []domain.Player) SwapSuggestions {
 	out := SwapSuggestions{Suggestions: []SwapSuggestion{}, Stuck: []StuckDojo{}}
 	if comp == nil || comp.Status != state.CompStatusDrawReady || !CompetitionDrawsBracket(comp.EffectiveFormat()) {
@@ -170,7 +170,6 @@ func SuggestSwaps(comp *state.Competition, pools []helper.Pool, bracket *state.B
 		gain       meetingRank
 	}
 	var found []ranked
-	helped := map[[2]string]bool{}
 	n := len(s.entrants)
 	for x := 0; x < n; x++ {
 		for y := x + 1; y < n; y++ {
@@ -182,7 +181,6 @@ func SuggestSwaps(comp *state.Competition, pools []helper.Pool, bracket *state.B
 			sug := SwapSuggestion{A: s.side(x), B: s.side(y), Improves: make([]SwapImprovement, len(improves)), Byes: s.byes(x, y)}
 			for i, imp := range improves {
 				sug.Improves[i] = imp.SwapImprovement
-				helped[pairIDs(imp.Before.A.ID, imp.Before.B.ID)] = true
 			}
 			found = append(found, ranked{suggestion: sug, fixed: fixed, gain: gain})
 		}
@@ -205,6 +203,15 @@ func SuggestSwaps(comp *state.Competition, pools []helper.Pool, bracket *state.B
 	})
 	for i := 0; i < len(found) && i < maxSwapSuggestions; i++ {
 		out.Suggestions = append(out.Suggestions, found[i].suggestion)
+	}
+
+	// A pair counts as helped only by a suggestion the organiser is shown: one
+	// that only a swap past the cap helps would otherwise appear in neither list.
+	helped := map[[2]string]bool{}
+	for _, sug := range out.Suggestions {
+		for _, imp := range sug.Improves {
+			helped[pairIDs(imp.Before.A.ID, imp.Before.B.ID)] = true
+		}
 	}
 
 	listed := map[string]bool{}

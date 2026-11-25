@@ -269,7 +269,7 @@ A draw-ready competition is already listed on the shiai-jo operator views, since
 
 A **Pools + Knockout** or **Knockout only** competition whose draw is ready shows a **Draw review** card on its **Overview**. It answers the question the desk is asked most often once the draw is out: when do two competitors from the same dojo meet? If a pairing is wrong, you can swap two competitors there and then, without discarding the draw. League and Swiss competitions have no card.
 
-![The Draw review card: the Dojo separation table with one row per pair of dojo-mates and the round where they can first meet, then Change the draw (optional) with the app's suggestions and the two pickers for your own swap.](../../screenshots/mobile-draw-review.png)
+![The Draw review card: the Dojo separation table with one row per pair of dojo-mates and the round where they can first meet, then Change the draw (optional) with a line for each dojo that no suggested swap helps and the two pickers for your own swap.](../../screenshots/mobile-draw-review.png)
 
 #### Dojo separation
 
@@ -284,7 +284,7 @@ A dojo of three gives three rows, one for each pair. When no two competitors sha
 
 The second section, **Change the draw (optional)**, is there for when a pairing is wrong. It is a separate step: you can read the summary and start without touching it.
 
-The app first suggests up to five swaps of two unseeded competitors that keep dojo-mates apart for longer. A suggestion is offered only when no other pair of dojo-mates would meet earlier because of it, and each one says what it changes and that nobody else meets earlier. The draw already keeps dojos apart as well as it can, so the list is often empty and reads "No swap keeps dojo-mates apart for longer." A dojo that no swap can help is named, with the reason.
+The app first suggests up to five swaps of two unseeded competitors that keep dojo-mates apart for longer. A suggestion is offered only when no other pair of dojo-mates would meet earlier because of it, and each one says what it changes and that nobody else meets earlier. The draw already keeps dojos apart as well as it can, so the list is often empty and reads "No swap keeps dojo-mates apart for longer." A dojo that none of the suggested swaps can help is named, with the reason.
 
 Below the suggestions, **Or pick your own swap** has two lists, **Competitor** and **Swap with**, grouped by pool or by first-round match. Each competitor is listed with their number, name and dojo, and a seeded competitor carries their seed. Pick two different competitors and click **Check this swap**.
 

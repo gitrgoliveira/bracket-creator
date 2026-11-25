@@ -304,6 +304,26 @@ func TestSwapSuggestions_StuckDojo(t *testing.T) {
 	assert.Empty(t, got.Stuck)
 }
 
+func TestSwapSuggestions_AHelpPastTheCapIsNeitherSuggestedNorHidden(t *testing.T) {
+	// Eight dojos each hold a first-round match to themselves, so far more than
+	// maxSwapSuggestions swaps help. Omega's pair is helped only by swaps that
+	// rank below the cap: the card shows none of them, so the dojo must be
+	// listed as stuck rather than left out of both lists.
+	roster := koRoster("A", "A", "B", "B", "Omega", "Omega", "C", "C", "D", "D", "E", "E", "F", "F", "G", "G")
+	got := SuggestSwaps(drawReady(state.CompFormatKnockout), nil, koDraw(roster), roster)
+	require.Len(t, got.Suggestions, maxSwapSuggestions)
+	for _, sug := range got.Suggestions {
+		for _, imp := range sug.Improves {
+			assert.NotEqual(t, "Omega", imp.Dojo, "no shown suggestion helps Omega")
+		}
+	}
+	var stuck []string
+	for _, st := range got.Stuck {
+		stuck = append(stuck, st.Dojo)
+	}
+	assert.Contains(t, stuck, "Omega")
+}
+
 func TestSwapSuggestions_StuckDojoNamesThePairNoSwapHelps(t *testing.T) {
 	// Omega holds slots 0, 2, 4 and 5. Swaps can move the pair at 4 and 5
 	// apart, but none helps the pair at slots 0 and 2, which meet in the

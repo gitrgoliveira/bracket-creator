@@ -15,6 +15,7 @@ import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 import { Icon } from './icon.jsx';
 import { andList } from './list_phrase.jsx';
 import { engiShape } from './engi_entry.jsx';
+import { drawHiddenFromPublic, PUBLIC_DRAW_PREPARING, publicDrawPreparingMessage } from './draw_visibility.jsx';
 
 const { useState, useMemo, useRef } = React;
 const StatusBadge = window.StatusBadge;
@@ -24,6 +25,10 @@ const EmptyState = window.EmptyState;
 // Lazy callable: window.hasBothSides is set by admin_helpers.js which loads
 // AFTER viewer scripts. By the time any React render runs, it is defined.
 const hasBothSides = (m) => window.hasBothSides(m);
+
+// The matches of a draft the public may not see yet: none, as for a
+// competition still in setup (one array, so the memos below hold).
+const NO_MATCHES = [];
 
 // bracketRoundsContain: is this match id drawn INSIDE BracketTree? The bronze
 // (3rd-place) knockout is a sibling of bracket.rounds and is rendered below the
@@ -43,6 +48,15 @@ const bracketRoundsContain = (bracket, id) =>
 export function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, authed, onEditCompetition, tweaks, activeTab, onTabChange, paceLookup }) {
   const c = competition;
   const isEngi = !!(c && c.engi);
+  // bc-drpb: a draft whose draw the public may not see yet reads as a
+  // competition in setup here: Overview with the "Draw being prepared" card
+  // (and Swiss's Standings), no Pools, League or Bracket tab, no matches. The
+  // server already answers the public that way; the organiser's own read
+  // still carries the draw, and this page shows what the public sees. Judged
+  // on every render, so a publish or unpublish refetch brings the tabs back or
+  // takes them away with no reload, and the clamp below moves a reader on a
+  // gone tab to Overview.
+  const drawPreparing = drawHiddenFromPublic(tournament, c);
 
   // Deps enumerate the primitive c.* fields this memo (and teamMatchTypeFor(c)
   // via compMatches, which the linter can't see into) actually reads,
@@ -79,8 +93,8 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     [c.id, c.name, c.kind, c.teamSize, c.format, isEngi, c.teamMatchType, c.config?.teamMatchType, c.status]
   );
   const allMatches = useMemo(
-    () => compMatchesForCompetition(matchConfig, { pools, poolMatches, bracket }),
-    [matchConfig, pools, poolMatches, bracket]
+    () => (drawPreparing ? NO_MATCHES : compMatchesForCompetition(matchConfig, { pools, poolMatches, bracket })),
+    [drawPreparing, matchConfig, pools, poolMatches, bracket]
   );
 
   // mp-xhaa: the schedule filter and bracket/pool highlight are driven by the
@@ -217,8 +231,9 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // draw-ready is NOT pre-start for the purposes of showing pool/bracket
   // structure: the draw has been generated and the payload already includes
   // pools + bracket data returned unconditionally by handlers_viewer.go.
-  // Only setup (no draw yet) is treated as pre-start.
-  const isPreStart = !c.status || c.status === "setup";
+  // Only setup (no draw yet) is treated as pre-start, and a draft the public
+  // may not see yet (drawPreparing above), which reads as setup.
+  const isPreStart = !c.status || c.status === "setup" || drawPreparing;
   const hasPools = !isPreStart && !!pools && pools.length > 0;
   const hasBracket = !isPreStart && !!derivedBracket && derivedBracket.rounds && derivedBracket.rounds.length > 0;
   // T192 (FR-050e): Swiss competitions surface a dedicated standings
@@ -354,7 +369,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               reads "League", so the badge is pure redundancy. Other statuses
               (Knockout / Completed) still carry information, so keep those. */}
           {!(c.status === "pools" && c.format === "league") && (
-            <StatusBadge status={c.status} showRunningDot format={c.format} />
+            <StatusBadge status={c.status} showRunningDot format={c.format} drawPreparing={drawPreparing} />
           )}
           {authed && onEditCompetition && (
             <button type="button" className="viewer__admin-pill" onClick={() => onEditCompetition(c.id)}><Icon name="pen" size={12} />Edit</button>
@@ -550,6 +565,22 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   if (!c.status || c.status === "setup") {
     return (
       <EmptyState icon="hourglass" title="Not started yet" message={`${startsAt}Check back when the competition begins.`} style={{ padding: 32 }} />
+    );
+  }
+
+  // draw-ready, hidden (bc-drpb): the draw exists but the public may not see
+  // it yet, so the card says so rather than pointing at tabs that are not
+  // there.
+  if (drawHiddenFromPublic(tournament, c)) {
+    return (
+      <EmptyState
+        icon="eye-off"
+        title={PUBLIC_DRAW_PREPARING}
+        message={publicDrawPreparingMessage(c)}
+        className="draw-preparing-card"
+        data-testid="draw-preparing-card"
+        style={{ padding: 32 }}
+      />
     );
   }
 

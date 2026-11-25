@@ -1792,6 +1792,79 @@ a:hover {
   border-color: var(--line);
 }
 
+/* ---------- Draw visibility (bc-drpb) ----------
+   A generated draw starts hidden from the public pages until it is published
+   or the competition starts (draw_visibility.jsx owns the rule and the words).
+   Every class the screens need lives here. */
+
+/* The public status badge of a hidden draft: "Draw being prepared". A dashed
+   hairline marks it as not yet settled; the organiser's badge keeps
+   .badge--draw-ready. */
+.badge--draw-preparing {
+  background: var(--slate-50);
+  color: var(--ink-2);
+  border-color: var(--line);
+  border-style: dashed;
+}
+
+/* The draw preview header's hint line under its buttons, with the eye or the
+   crossed-out eye before it. */
+.draw-visibility-hint {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 46ch;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-3);
+  text-align: right;
+}
+.draw-visibility-hint svg {
+  flex: none;
+  margin-top: 1px;
+}
+.draw-visibility-hint--hidden {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.draw-visibility-hint--published {
+  color: var(--ok-ink);
+}
+
+/* The dashboard card's line: the crossed-out eye and "Hidden from the
+   public", or the open eye and "Public". */
+.draw-visibility-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.draw-visibility-line svg {
+  flex: none;
+}
+.draw-visibility-line--hidden {
+  color: var(--ink-2);
+}
+.draw-visibility-line--public {
+  color: var(--ok-ink);
+}
+
+/* The public competition page's "Draw being prepared" card (an EmptyState
+   with this class), and the watchlist's line for a hidden draft. */
+.draw-preparing-card {
+  max-width: 36rem;
+  margin: 24px auto;
+}
+.draw-preparing-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
 /* Base dot carries a neutral fill so a bare `.dot` is visible. Without it the
    one un-modified use (the dashboard's "Currently running" heading) rendered an
    8px hole. `.dot--running` overrides the colour below. */

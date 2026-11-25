@@ -194,6 +194,7 @@ const CHECK_MODULES = [
   'document_versions.jsx',
   'draft_estimate.jsx',
   'draft_taps.jsx',
+  'draw_visibility.jsx',
   'duration.jsx',
   'engi_entry.jsx',
   'held_writes_panel.jsx',

@@ -283,6 +283,11 @@ export function reopenBody(reason, force, forceCourt, confirmFinished, confirmLo
 // /api/viewer/court/:court/matches into the flattened, normalized competition shape
 // the UI consumes (config fields hoisted, players + matches normalized). Shared
 // so both endpoints stay in lockstep.
+//
+// `drawHidden` (bc-drpb) is a field of the config, not a sibling, so the
+// `...c` spread carries it: the server stamps it on its copy of the
+// competition for every audience. Read it only through drawHiddenFromPublic
+// (draw_visibility.jsx).
 export function normalizeViewerCompItem(item) {
     const c = item.config || item;
     return normalizeCompetitionDetail({
@@ -687,6 +692,30 @@ export function _backupFilename(res) {
     // The server always names the archive: `attachment; filename="<name>.zip"`.
     return /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition'))[1];
 }
+// Publish draw and Unpublish (bc-drpb): POST /api/competitions/:id/publish-draw
+// or /unpublish-draw, organiser-only, no body. A direct write like Generate and
+// Discard draw, not an outbox door: two devices racing, the later arrival
+// wins, and a competition already in the asked state answers 200 with nothing
+// changed. Resolves the competition record as stored; a refusal (409
+// `draw_not_ready`, `draw_visibility_self_run`) throws the server's sentence
+// with its code on the Error, so the header can tell one from another.
+async function _drawVisibilityWrite(id, password, publish) {
+    const route = publish ? 'publish-draw' : 'unpublish-draw';
+    const res = await _directFetch(`/api/competitions/${encodeURIComponent(id)}/${route}`, {
+        method: 'POST',
+        headers: { 'X-Tournament-Password': password },
+    });
+    if (!res.ok) {
+        const body = (await res.json().catch(() => null)) || {};
+        const e = new Error(body.error || (publish ? 'The draw was not published' : 'The draw was not hidden'));
+        if (body.code) e.code = body.code;
+        throw e;
+    }
+    return normalizeCompetitionDetail(await res.json());
+}
+export function publishDraw(id, password) { return _drawVisibilityWrite(id, password, true); }
+export function unpublishDraw(id, password) { return _drawVisibilityWrite(id, password, false); }
+
 // The plan and the restore take the same fields, decisions included: the plan
 // applies them, so a copy name already used shows before the password.
 export function _restoreForm({ file, from, only, undo, decisions }) {

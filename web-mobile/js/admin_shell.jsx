@@ -14,6 +14,7 @@ import { whenConfirmed } from './unsaved_entries.jsx';
 import { downloadBlob } from './blob_download.jsx';
 import { Icon } from './icon.jsx';
 import { andList } from './list_phrase.jsx';
+import { confirmStartHiddenDraw, drawHiddenFromPublic, drawVisibilityCardLine, drawVisibilityIcon } from './draw_visibility.jsx';
 
 const { useState, useMemo, useEffect, useRef, useLayoutEffect } = React;
 
@@ -848,6 +849,21 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
     && c.kind !== "team"
     && (!c.status || c.status === "setup");
 
+  // Who can see a draft's draw (bc-drpb): a draw-ready card says it under its
+  // details, the crossed-out eye and "Hidden from the public" or the open eye
+  // and "Public". Not in a self-run tournament, whose draws are public as soon
+  // as they are made. draw_visibility.jsx owns the rule and the words.
+  const showDrawVisibility = c.status === "draw-ready" && !(tournament && tournament.mode === "self-run");
+  const drawHidden = drawHiddenFromPublic(tournament, c);
+
+  // Start on a hidden draft asks first (the same confirm as the draw preview
+  // header's, confirmStartHiddenDraw); Cancel leaves it hidden and not
+  // started. Any other start goes at once, in the same tap.
+  const start = () => {
+    if (!drawHidden) { onStart(); return; }
+    confirmStartHiddenDraw(tournament, c).then((ok) => { if (ok) onStart(); });
+  };
+
   return (
     <>
       <div
@@ -875,6 +891,14 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
                 courts.length > 0 ? `Shiaijo ${andList(courts)}` : "",
               ].filter(Boolean).join(", ")}
             </div>
+            {showDrawVisibility && (
+              <div
+                className={`draw-visibility-line ${drawHidden ? "draw-visibility-line--hidden" : "draw-visibility-line--public"}`}
+                data-testid="card-draw-visibility"
+              >
+                <Icon name={drawVisibilityIcon(tournament, c)} size={12} />{drawVisibilityCardLine(tournament, c)}
+              </div>
+            )}
           </div>
           <StatusBadge status={c.status} format={c.format} />
         </div>
@@ -893,7 +917,7 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
             <button
               type="button"
               className="btn btn--primary btn--sm btn--full"
-              onClick={(e) => { e.stopPropagation(); onStart(); }}
+              onClick={(e) => { e.stopPropagation(); start(); }}
               disabled={!!startBlocker}
             >Start competition</button>
           )}

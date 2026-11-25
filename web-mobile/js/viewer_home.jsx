@@ -10,6 +10,7 @@ import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } fr
 import { mirrorWatchlistParam } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 import { Icon } from './icon.jsx';
+import { drawHiddenFromPublic } from './draw_visibility.jsx';
 
 const { useState, useMemo, useRef, useEffect } = React;
 const StatusBadge = window.StatusBadge;
@@ -538,7 +539,9 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
                               ].filter(Boolean).join(", ")}
                             </div>
                           </div>
-                          <StatusBadge status={c.status} showRunningDot format={c.format} />
+                          {/* A draft the public may not see yet reads "Draw being
+                              prepared" (bc-drpb, draw_visibility.jsx). */}
+                          <StatusBadge status={c.status} showRunningDot format={c.format} drawPreparing={drawHiddenFromPublic(t, c)} />
                         </div>
                         {c.status && c.status !== "setup" && c.status !== "draw-ready" && total > 0 && (
                           <div className="vlist-item__progress">

@@ -20,6 +20,10 @@ import { Icon } from './icon.jsx';
 import { andList } from './list_phrase.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor } from './queued_writes_wait.jsx';
+import {
+  drawHiddenFromPublic, drawPublishedDraft, drawVisibilityIcon, confirmStartHiddenDraw, discardPublishedDrawMessage,
+  DRAW_HIDDEN_HINT, DRAW_PUBLISHED_HINT, PUBLISH_DRAW_LABEL, UNPUBLISH_DRAW_LABEL, DRAW_PUBLISHED_TOAST, DRAW_UNPUBLISHED_TOAST,
+} from './draw_visibility.jsx';
 export { formatCompMinutes } from './admin_competition_settings.jsx';
 export { buildRunningIpponResult, loadScoreboardPoints } from './admin_competition_bracket.jsx';
 export {
@@ -57,6 +61,12 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const [generating, setGenerating] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  // Whether the public may see this draft's draw (bc-drpb). A self-run
+  // tournament shows every draw as soon as it is made, so it offers no
+  // Publish draw or Unpublish, no visibility hint and no visibility confirm.
+  const selfRun = t.mode === "self-run";
+  const drawHidden = drawHiddenFromPublic(t, c);
   // localStatus lets AdminSettings report an invalidation immediately so the
   // page-header StatusBadge flips without waiting for the SSE refresh.
   // Cleared automatically when the prop status changes (SSE arrives).
@@ -177,7 +187,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const discardDraw = async () => {
-    if (!(await window.confirmDialog({ message: `Discard the generated draw for "${c.name}"? The pools/bracket will be removed so you can edit participants and settings, then generate a new draw.`, confirmLabel: "Discard draw", danger: true }))) return;
+    // A draw the public has already seen warns that it has, and that the next
+    // draw starts hidden; a hidden one keeps the plain confirm.
+    const seen = !selfRun && drawPublishedDraft(t, c);
+    const ask = seen
+      ? { message: discardPublishedDrawMessage(c.name), confirmLabel: "Discard draw", cancelLabel: "Cancel", danger: true }
+      : { message: `Discard the generated draw for "${c.name}"? The pools/bracket will be removed so you can edit participants and settings, then generate a new draw.`, confirmLabel: "Discard draw", danger: true };
+    if (!(await window.confirmDialog(ask))) return;
     setDiscarding(true);
     try {
       await window.API.discardDraw(c.id, password);
@@ -198,6 +214,32 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       if (mountedRef.current) showToast(e.message, "error");
     } finally {
       if (mountedRef.current) setDiscarding(false);
+    }
+  };
+
+  // Publish draw / Unpublish (bc-drpb): flips whether the public sees this
+  // draft. A direct organiser write; no confirm, since the hint line says the
+  // draw is hidden and Unpublish undoes a Publish. The header keeps its busy
+  // state until the refetch has brought the new state back, so the button
+  // never offers the step just taken. A refusal (the draft was started or
+  // discarded elsewhere meanwhile) says the server's sentence and refetches.
+  const toggleDrawVisibility = async () => {
+    const publish = drawHidden;
+    setPublishing(true);
+    try {
+      if (publish) await window.API.publishDraw(c.id, password);
+      else await window.API.unpublishDraw(c.id, password);
+      if (!mountedRef.current) return;
+      await onRefreshCompetition?.();
+      if (!mountedRef.current) return;
+      showToast(publish ? DRAW_PUBLISHED_TOAST : DRAW_UNPUBLISHED_TOAST);
+    } catch (e) {
+      console.error(publish ? "Publish draw failed:" : "Unpublish draw failed:", e);
+      if (!mountedRef.current) return;
+      showToast(e.message, "error");
+      if (e.code) onRefreshCompetition?.();
+    } finally {
+      if (mountedRef.current) setPublishing(false);
     }
   };
 
@@ -275,7 +317,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // A start from setup draws, so it waits as Generate draw does; a start of a
   // drawn competition draws nothing and goes at once.
   const start = () => {
-    if (c.status === "draw-ready") { startNow(false); return; }
+    if (c.status === "draw-ready") {
+      // A hidden draft asks first: starting makes its draw public at once. A
+      // published one starts in the same tick, as before.
+      if (!drawHidden) { startNow(false); return; }
+      confirmStartHiddenDraw(t, c).then((ok) => { if (ok && mountedRef.current) startRef.current(false); });
+      return;
+    }
     setDrawWaitFor("start");
     checkInWait.run((opts) => startRef.current(!!(opts && opts.anyway)));
   };
@@ -310,7 +358,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // Block section/competition navigation while a draw mutation is in-flight:
   // the in-flight transition changes which sections are valid and discardDraw's
   // fallback uses the section captured at call time (see the side-nav below).
-  const navBusy = generating || starting || discarding || completing;
+  const navBusy = generating || starting || discarding || completing || publishing;
   // canComplete: show "Complete competition" only once the competition is
   // actually running (not setup/draw-ready/completed/invalid) AND its
   // bracket exists with every real match, including the single-3rd bronze
@@ -496,12 +544,25 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                     {discarding && <span className="spinner" />}
                     {discarding ? "Discarding…" : "Discard draw"}
                   </button>
+                  {!selfRun && (
+                    <button type="button" className="btn btn--ghost" onClick={toggleDrawVisibility} disabled={navBusy} data-testid="draw-visibility-toggle">
+                      {publishing ? <span className="spinner" /> : <Icon name={drawHidden ? "eye" : "eye-off"} size={14} />}
+                      {publishing ? (drawHidden ? "Publishing…" : "Hiding…") : (drawHidden ? PUBLISH_DRAW_LABEL : UNPUBLISH_DRAW_LABEL)}
+                    </button>
+                  )}
                   <button type="button" className="btn btn--primary" onClick={(e) => leaving(start)(e)} disabled={navBusy}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition"}
                   </button>
                 </div>
-                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated. Preview below, then start. To change it, discard and edit first.</div>
+                {selfRun ? (
+                  <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated. Preview below, then start. To change it, discard and edit first.</div>
+                ) : (
+                  <div className={`draw-visibility-hint draw-visibility-hint--${drawHidden ? "hidden" : "published"}`} data-testid="draw-visibility-hint">
+                    <Icon name={drawVisibilityIcon(t, c)} size={13} />
+                    <span>{drawHidden ? DRAW_HIDDEN_HINT : DRAW_PUBLISHED_HINT}</span>
+                  </div>
+                )}
               </div>
             )}
             {canComplete && (

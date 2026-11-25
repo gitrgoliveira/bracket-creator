@@ -164,6 +164,10 @@ type historyEntry struct {
 	payload string
 	typ     EventType
 	compID  string
+	// draws is whether the event carries draw content (sseEventSpec.carriesDraw):
+	// judged on the payload, so an event that names no match is not withheld
+	// while its competition's draft is hidden.
+	draws bool
 	// masked is the shared memo of the event's competition judgement and
 	// public projection, computed by the first stream that needs it and
 	// reused by every other one, so a masked event is marshalled once per
@@ -444,7 +448,8 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 		typ:     eventType,
 	}
 	spec, known := sseEventCatalogue[eventType]
-	if known && spec.judgesCompetition() {
+	entry.draws = spec.carriesDraw(entry.payload)
+	if known && spec.judgesCompetition(entry.draws) {
 		// A masked event is judged on its competition's names, a draw event
 		// on its competition's draw (bc-drpb), so both record the
 		// competition they name.
@@ -456,7 +461,7 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 			slog.Warn("mobile-app: an event judged on its competition names none; it is sent without its data", "type", eventType, "seq", seq)
 		}
 	}
-	if h.names != nil && (!known || spec.class != sseEventPasses || spec.draw) {
+	if h.names != nil && (!known || spec.class != sseEventPasses || entry.draws) {
 		entry.selfRun = &selfRunJudgement{}
 	}
 	if eventType == EventTournamentUpdated && h.names != nil && !h.closed && h.holdsRevealStreamLocked() {

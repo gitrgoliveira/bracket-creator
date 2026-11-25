@@ -77,6 +77,32 @@ func TestHubProject_HiddenDraftWithholdsDrawEvents(t *testing.T) {
 	}
 }
 
+// A competitor status or a lineup that names no match (a withdrawal before the
+// draw starts, a team's starting lineup, a team member added or renamed)
+// carries nothing of the draw, so it reaches the public as broadcast while the
+// draft is hidden, as the public reads of it still answer.
+func TestHubProject_HiddenDraftPassesMatchlessStatusAndLineup(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesShown)
+	h := hubWithNames(f)
+	setDraft(t, &f, true)
+	matchless := map[string]func(){
+		"status": func() {
+			h.Broadcast(EventCompetitorStatusUpdated, gin.H{"competitionId": "juniors", "status": gin.H{
+				"playerId": pnAlice, "status": "withdrawn",
+			}})
+		},
+		"lineup": func() {
+			h.Broadcast(EventLineupUpdated, lineupUpdatedPayload("juniors", "team-1", ""))
+		},
+	}
+	for name, broadcast := range matchless {
+		broadcast()
+		e := lastEntry(t, h)
+		assert.False(t, e.draws, name)
+		assert.Equal(t, e.payload, h.project(e, &sseSubscriber{}), "matchless %s passes", name)
+	}
+}
+
 // Events that carry no draw still reach the public as broadcast while the
 // draft is hidden, draw_visibility_changed among them (the public pages
 // refetch on it), and are never judged on the competition.

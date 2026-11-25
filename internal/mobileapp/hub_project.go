@@ -78,18 +78,62 @@ const (
 // lineup saved for a match, a Swiss round's match count) of the competition
 // it names (data.competitionId): while that competition's draw is hidden from
 // the public (publicNames.drawHidden), every stream but the organiser's is
-// sent it with no data, whatever its class (bc-drpb).
+// sent it with no data, whatever its class (bc-drpb). drawIf narrows draw to
+// the events whose data it accepts: a withdrawal before the draw starts, or a
+// team member added or renamed, names no match and carries nothing of the draw,
+// so the public pages still hear of it.
 type sseEventSpec struct {
-	class sseEventClass
-	mask  func(data map[string]json.RawMessage, v maskView) error
-	draw  bool
+	class  sseEventClass
+	mask   func(data map[string]json.RawMessage, v maskView) error
+	draw   bool
+	drawIf func(data map[string]json.RawMessage) bool
 }
 
-// judgesCompetition reports whether an event of this spec is judged on the
-// competition it names: a masked event for its names, a draw event for its
-// draw. Broadcast records the competition for these and the self-run memo.
-func (spec sseEventSpec) judgesCompetition() bool {
-	return spec.class == sseEventMasked || spec.draw
+// carriesDraw reports whether the event whose marshalled envelope is payload
+// carries draw content: its type is marked draw and, when the spec narrows it,
+// its data passes drawIf. A payload that cannot be read carries it, so it is
+// withheld rather than sent.
+func (spec sseEventSpec) carriesDraw(payload string) bool {
+	if !spec.draw {
+		return false
+	}
+	if spec.drawIf == nil {
+		return true
+	}
+	var env struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(payload), &env); err != nil {
+		return true
+	}
+	return spec.drawIf(env.Data)
+}
+
+// statusNamesMatch is the drawIf of competitor_status_updated: the status
+// record names a match.
+func statusNamesMatch(data map[string]json.RawMessage) bool {
+	var st struct {
+		MatchID string `json:"matchId"`
+	}
+	if err := json.Unmarshal(data["status"], &st); err != nil {
+		return true
+	}
+	return st.MatchID != ""
+}
+
+// lineupNamesMatch is the drawIf of lineup_updated: the lineup was saved for a
+// match (lineupUpdatedPayload sets matchId only then).
+func lineupNamesMatch(data map[string]json.RawMessage) bool {
+	_, ok := data["matchId"]
+	return ok
+}
+
+// judgesCompetition reports whether an event of this spec, which carries draw
+// content or not (carriesDraw), is judged on the competition it names: a masked
+// event for its names, a draw event for its draw. Broadcast records the
+// competition for these and the self-run memo.
+func (spec sseEventSpec) judgesCompetition(carriesDraw bool) bool {
+	return spec.class == sseEventMasked || carriesDraw
 }
 
 // sseEventCatalogue classifies EVERY event type the hub sends; a type missing
@@ -105,7 +149,7 @@ var sseEventCatalogue = map[EventType]sseEventSpec{
 	EventCompetitionCompleted:    {class: sseEventPasses},
 	EventTournamentUpdated:       {class: sseEventPasses},
 	EventScheduleUpdated:         {class: sseEventPasses},
-	EventCompetitorStatusUpdated: {class: sseEventPasses, draw: true}, // a player id, a reason code and the match it names
+	EventCompetitorStatusUpdated: {class: sseEventPasses, draw: true, drawIf: statusNamesMatch}, // a player id, a reason code and, once drawn, the match it names
 	EventParticipantsUpdated:     {class: sseEventPasses},
 	EventPasswordReset:           {class: sseEventPasses}, // an originator id, or nothing
 	// Free text the organiser typed: shown to everyone as typed (E6; the
@@ -114,7 +158,7 @@ var sseEventCatalogue = map[EventType]sseEventSpec{
 	EventDrawGenerated:      {class: sseEventPasses},
 	EventDrawDiscarded:      {class: sseEventPasses},
 	EventBracketQuarantined: {class: sseEventPasses},
-	EventLineupUpdated:      {class: sseEventPasses, draw: true}, // competition, team and match ids
+	EventLineupUpdated:      {class: sseEventPasses, draw: true, drawIf: lineupNamesMatch}, // competition, team and, for a match's lineup, match ids
 	EventResyncRequired:     {class: sseEventPasses},
 	// Swiss never hides names (Q-swiss), and the event carries counts only,
 	// but a round's match count is the draw's shape.
@@ -162,7 +206,7 @@ func eventCompetitionID(data any, payload []byte) string {
 // self-run tournament (which hides no names and shows every draw, so every
 // stream is sent every event as it always was), and for a competition that
 // shows names or whose names sub may see; a masked copy otherwise. A draw
-// event (sseEventSpec.draw) of a competition whose draw is hidden from sub
+// event (historyEntry.draws) of a competition whose draw is hidden from sub
 // (publicNames.drawHidden) is sent with no data, judged first, before the
 // event's class, the names option or a reveal link count: a hidden draft is
 // the public's competition in setup, whose events carry nothing to show.
@@ -175,7 +219,7 @@ func (h *Hub) project(e *historyEntry, sub *sseSubscriber) string {
 		return e.payload
 	}
 	spec, known := sseEventCatalogue[e.typ]
-	if known && spec.class == sseEventPasses && !spec.draw {
+	if known && spec.class == sseEventPasses && !e.draws {
 		return e.payload
 	}
 	if e.inSelfRun(names) {
@@ -191,7 +235,7 @@ func (h *Hub) project(e *historyEntry, sub *sseSubscriber) string {
 	if comp == nil {
 		return withoutData(e)
 	}
-	if spec.draw && names.drawHidden(comp, sub.aud) {
+	if e.draws && names.drawHidden(comp, sub.aud) {
 		return withoutData(e)
 	}
 	if spec.class == sseEventPasses || !hides {

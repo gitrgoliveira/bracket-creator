@@ -291,6 +291,12 @@ type pdlFrame struct {
 
 func (f pdlFrame) hasData() bool { return len(f.Data) > 0 && string(f.Data) != "null" }
 
+// carriesDraw is whether the event, as the organiser's stream carries it,
+// carries draw content (sseEventSpec.carriesDraw).
+func (f pdlFrame) carriesDraw() bool {
+	return sseEventCatalogue[f.Type].carriesDraw(fmt.Sprintf(`{"data":%s}`, f.Data))
+}
+
 func (f pdlFrame) competitionID() string {
 	var probe struct {
 		CompetitionID string `json:"competitionId"`
@@ -335,12 +341,12 @@ func (w *pdlWorld) checkStream(t *testing.T, name, body string, organiser map[in
 	}
 	frames := pdlFrames(t, body)
 	for seq, f := range frames {
-		if sseEventCatalogue[f.Type].draw && w.isHidden(f.competitionID()) {
+		if f.carriesDraw() && w.isHidden(f.competitionID()) {
 			t.Errorf("the %s stream was sent %s (seq %d) of the hidden draft %s with its data: %s", name, f.Type, seq, f.competitionID(), f.Data)
 		}
 	}
 	for seq, of := range organiser {
-		if !sseEventCatalogue[of.Type].draw || !w.isHidden(of.competitionID()) {
+		if !of.carriesDraw() || !w.isHidden(of.competitionID()) {
 			continue
 		}
 		f, ok := frames[seq]

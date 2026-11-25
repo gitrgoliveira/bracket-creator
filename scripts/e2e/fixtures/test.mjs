@@ -34,6 +34,9 @@ export { isCoarse };
 //               its page closed first stands in for the code, the rest still
 //               matching (a body missing for any other reason, a timeout or a
 //               failed read on a page still open, never does)
+//   codeField   which field of the body holds that code: `error` (the
+//               default, the sentence most refusals carry) or `code`, for an
+//               answer whose `error` sentence is shared with other refusals
 //   request     which request was refused (method and body), for an entry that
 //               is about one kind of write only
 //   whileOffline  only while the page's context is offline (or just back)
@@ -97,10 +100,11 @@ const CONSOLE_ALLOWLIST = [
     request: (r) => !!r && r.method === 'PUT' && writeStatus(r.postData) === 'completed',
   },
   {
-    reason: 'The self-run registration link of a TEAM competition (spec FR11): the page asks for the registration form of a competition whose teams the organiser enters, and the server answers 404 team_competition on both the GET and the POST. The collector reads the body\'s `error` sentence, since `code` is the same refusal\'s second field.',
+    reason: 'The self-run registration link of a TEAM competition (spec FR11): the page asks for the registration form of a competition whose teams the organiser enters, and the server answers 404 team_competition on both the GET and the POST. Matched on the body\'s `code`, since its `error` sentence is also what the other 404 branches of the registration routes answer.',
     text: /^Failed to load resource: the server responded with a status of 404 \(Not Found\)$/,
     url: /\/api\/register\/competitions\/[^/]+$/,
-    code: /^registration is not available for this competition$/,
+    code: /^team_competition$/,
+    codeField: 'code',
   },
   {
     reason: 'The self-run registration link after the draw (spec FR11): registering for a competition whose draw exists is refused 409 and the page says registration is closed.',
@@ -125,9 +129,9 @@ const CONSOLE_ALLOWLIST = [
   },
 ];
 
-// The `error` field of a refusal body; read with a pattern, since the body is
-// kept only in part.
-const refusalCode = (body) => (/"error"\s*:\s*"([^"]+)"/.exec(body || '') || [])[1] || null;
+// A string field (`error` unless a rule names another) of a refusal body; read
+// with a pattern, since the body is kept only in part.
+const refusalCode = (body, field = 'error') => (new RegExp(`"${field}"\\s*:\\s*"([^"]+)"`).exec(body || '') || [])[1] || null;
 // The `status` a score write carries (its postData is JSON), or null.
 const writeStatus = (postData) => {
   try {
@@ -142,7 +146,7 @@ const writeStatus = (postData) => {
 const closedBeforeBody = (e) => e.body === null && e.bodyMissing === 'page-closed' && !!e.request;
 const allowed = (e) => e.kind === 'console' && CONSOLE_ALLOWLIST.find((r) => r.text.test(e.text)
   && (!r.url || r.url.test(e.url || ''))
-  && (!r.code || r.code.test(refusalCode(e.body) || '') || (r.codeUnreadable && closedBeforeBody(e)))
+  && (!r.code || r.code.test(refusalCode(e.body, r.codeField) || '') || (r.codeUnreadable && closedBeforeBody(e)))
   && (!r.request || r.request(e.request))
   && (!r.whileOffline || e.offline));
 
@@ -378,7 +382,7 @@ export const test = base.extend({
       const rule = allowed(e);
       // An entry let through for want of a body says so, in place of the
       // matched-code reason: nobody checked the code.
-      const unread = rule && rule.code && !rule.code.test(refusalCode(e.body) || '');
+      const unread = rule && rule.code && !rule.code.test(refusalCode(e.body, rule.codeField) || '');
       if (unread) testInfo.annotations.push({ type: 'console-allowed-unread', description: describeEntry(e) });
       console.log(`CONSOLE ${JSON.stringify({ test: testInfo.title, allowed: rule ? (unread ? ALLOWED_UNREAD_REASON : rule.reason) : null, ...e })}`);
     }

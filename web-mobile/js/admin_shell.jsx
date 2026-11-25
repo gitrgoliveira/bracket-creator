@@ -423,7 +423,7 @@ function AllWinnersModal({ comps, onClose }) {
   );
 }
 
-function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenCalendar, onOpenScoreEditor, onOpenImport, onOpenBackup, onOpenShiaijo, onOpenRegistration, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
+function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenCalendar, onOpenScoreEditor, onOpenImport, onOpenBackup, onOpenPosters, onOpenShiaijo, onOpenRegistration, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
   const t = tournament;
   const comps = t.competitions || NO_COMPETITIONS;
   // Whether "Start all" has anything to offer, answered by the same helper the
@@ -570,6 +570,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
               <button type="button" className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
               <button type="button" className="btn" onClick={onOpenImport}>Import from folder</button>
               <button type="button" className="btn" onClick={onOpenBackup}>Backup and restore</button>
+              {onOpenPosters && <button type="button" className="btn" onClick={onOpenPosters}>Posters</button>}
             </div>
           </div>
         ) : (<>
@@ -651,6 +652,13 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div style={{ fontWeight: 600, marginTop: 4 }}>Backup and restore</div>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>Save or restore tournament data</div>
           </button>
+          {onOpenPosters && (
+            <button type="button" className="tcard tcard--add" onClick={onOpenPosters}>
+              <div style={{ color: "var(--ink-3)" }}><Icon name="printer" size={28} /></div>
+              <div style={{ fontWeight: 600, marginTop: 4 }}>Posters</div>
+              <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>QR codes to print for the venue</div>
+            </button>
+          )}
         </div>
         </>)}
         {window.VersionFooter && <window.VersionFooter />}

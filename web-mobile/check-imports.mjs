@@ -134,6 +134,7 @@ const CHECK_MODULES = [
   'admin_competition_overview.jsx',
   'admin_competition_swiss.jsx',
   'admin_pools.jsx',
+  'admin_posters.jsx',
   'admin_registration_desk.jsx',
   'admin_schedule.jsx',
   'admin_schedule_export.jsx',

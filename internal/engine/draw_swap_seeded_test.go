@@ -82,7 +82,7 @@ type slotTime struct{ court, at string }
 // scheduleOf maps each bracket match id to its court and time.
 func scheduleOf(b *state.Bracket) map[string]slotTime {
 	out := map[string]slotTime{}
-	for _, m := range bracketMatches(b) {
+	for _, m := range state.BracketMatchesInDrawOrder(b) {
 		out[m.ID] = slotTime{m.Court, m.ScheduledAt}
 	}
 	return out
@@ -91,7 +91,7 @@ func scheduleOf(b *state.Bracket) map[string]slotTime {
 // sides maps each bracket match id to its two side labels.
 func sides(b *state.Bracket) map[string][2]string {
 	out := map[string][2]string{}
-	for _, m := range bracketMatches(b) {
+	for _, m := range state.BracketMatchesInDrawOrder(b) {
 		out[m.ID] = [2]string{m.SideA, m.SideB}
 	}
 	return out
@@ -101,10 +101,10 @@ func sides(b *state.Bracket) map[string][2]string {
 // fight in the other.
 func toPlayChanged(a, b *state.Bracket) bool {
 	before := map[string]bool{}
-	for _, m := range bracketMatches(a) {
+	for _, m := range state.BracketMatchesInDrawOrder(a) {
 		before[m.ID] = toPlay(m)
 	}
-	for _, m := range bracketMatches(b) {
+	for _, m := range state.BracketMatchesInDrawOrder(b) {
 		if before[m.ID] != toPlay(m) {
 			return true
 		}
@@ -139,7 +139,7 @@ func TestSwapDrawPlaces_SeededSwapRebuildsTheKnockout(t *testing.T) {
 	stored, err := store.LoadBracket(compID)
 	require.NoError(t, err)
 	var moved string
-	for _, m := range bracketMatches(stored) {
+	for _, m := range state.BracketMatchesInDrawOrder(stored) {
 		if toPlay(m) {
 			m.ScheduledAt, m.QueuePosition, moved = "17:45", 9, m.ID
 			break
@@ -253,7 +253,7 @@ func TestSwapDrawPlaces_SeededSwapThatMovesAByeReschedules(t *testing.T) {
 
 	assert.Equal(t, scheduleOf(freshPreview(t, eng, store, compID)), scheduleOf(after), "the new schedule whole")
 	seen := map[slotTime]string{}
-	for _, m := range bracketMatches(after) {
+	for _, m := range state.BracketMatchesInDrawOrder(after) {
 		if !toPlay(m) || m.ScheduledAt == "" {
 			continue
 		}

@@ -616,10 +616,10 @@ func (p *swapPlan) seededSwap(snap swapSnapshot, req SwapRequest, source DrawSou
 // Either way a match keeps its stored change stamps, which only grow.
 func keepBracketSchedule(stored, rebuilt *state.Bracket) (rescheduled bool) {
 	before := map[string]*state.BracketMatch{}
-	for _, m := range bracketMatches(stored) {
+	for _, m := range state.BracketMatchesInDrawOrder(stored) {
 		before[m.ID] = m
 	}
-	after := bracketMatches(rebuilt)
+	after := state.BracketMatchesInDrawOrder(rebuilt)
 	same := len(after) == len(before)
 	for _, m := range after {
 		if old, ok := before[m.ID]; !ok || toPlay(old) != toPlay(m) {
@@ -643,24 +643,6 @@ func keepBracketSchedule(stored, rebuilt *state.Bracket) (rescheduled bool) {
 // a dead slot, which the build marks completed.
 func toPlay(m *state.BracketMatch) bool {
 	return m.Status == state.MatchStatusScheduled
-}
-
-// bracketMatches lists every match of b, its rounds and the bronze, for
-// writing in place.
-func bracketMatches(b *state.Bracket) []*state.BracketMatch {
-	if b == nil {
-		return nil
-	}
-	var out []*state.BracketMatch
-	for ri := range b.Rounds {
-		for mi := range b.Rounds[ri] {
-			out = append(out, &b.Rounds[ri][mi])
-		}
-	}
-	if b.ThirdPlaceMatch != nil {
-		out = append(out, b.ThirdPlaceMatch)
-	}
-	return out
 }
 
 // describe fills the answer's account of what the plan does: where each

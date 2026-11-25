@@ -28,7 +28,6 @@ package mobileapp
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"maps"
 	"net/http"
@@ -350,7 +349,7 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !ok {
 			return
 		}
-		v, comp, ok := publicReadExisting(c, names, comps, compID)
+		v, _, ok := publicReadExisting(c, names, comps, compID)
 		if !ok {
 			return
 		}
@@ -366,10 +365,12 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 			TeamID: teamID, CompetitionID: compID, MatchID: matchID,
 			Positions: req.Positions, MemberIDs: req.MemberIDs,
 		}
+		// A draft whose draw is hidden from the caller is answered as the same
+		// competition in setup (bc-drpb), by the engine's own setup answer.
 		var places map[domain.Position]string
 		var err error
 		if v.drawHidden {
-			places, err = fieldedPlacesAsSetup(comp, form)
+			places, err = eng.KachinukiFieldedPlacesBeforeDraw(compID, form)
 		} else {
 			places, err = eng.KachinukiFieldedPlaces(compID, teamID, matchID, form)
 		}
@@ -407,21 +408,19 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 			c.JSON(http.StatusBadRequest, gin.H{"error": "match ID is required"})
 			return
 		}
-		v, comp, ok := publicReadViewOf(c, names, compID)
+		v, ok := publicReadView(c, names, compID)
 		if !ok {
 			return
 		}
 		// The engine reads config.md once and answers an unknown competition or
 		// match with a NotFoundError naming which, so the handler reads nothing
 		// of its own and answers with that error's own words. A hidden draw's
-		// match is one setup does not hold (kachinukiRosterAsSetup).
-		var roster engine.KachinukiRoster
-		var err error
+		// match is one setup does not hold (engine.KachinukiRosterBeforeDraw).
+		rosterOf := eng.KachinukiRoster
 		if v.drawHidden {
-			err = kachinukiRosterAsSetup(comp, matchID)
-		} else {
-			roster, err = eng.KachinukiRoster(compID, matchID)
+			rosterOf = eng.KachinukiRosterBeforeDraw
 		}
+		roster, err := rosterOf(compID, matchID)
 		var notFound *engine.NotFoundError
 		switch {
 		case errors.As(err, &notFound):
@@ -437,35 +436,6 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 			})
 		}
 	})
-}
-
-// fieldedPlacesAsSetup is the fielded-lineup read's answer for a draft whose
-// draw is hidden from the caller: the answer engine.KachinukiFieldedPlaces
-// gives the same competition in setup, where no match is held. A competition
-// that is not kachinuki fills nothing; a kachinuki one still refuses a form
-// position its team size has no place for, then fills nothing for the match
-// it does not hold.
-func fieldedPlacesAsSetup(comp *state.Competition, form domain.TeamLineup) (map[domain.Position]string, error) {
-	places := map[domain.Position]string{}
-	if !comp.IsKachinuki() {
-		return places, nil
-	}
-	if err := form.ValidatePositions(comp.TeamSize); err != nil {
-		return nil, err
-	}
-	return places, nil
-}
-
-// kachinukiRosterAsSetup is the kachinuki roster read's refusal for a draft
-// whose draw is hidden from the caller: the one engine.KachinukiRoster gives
-// the same competition in setup, where no match is held. A competition that
-// is not kachinuki is engine.ErrNotKachinuki; a kachinuki one does not find
-// the match.
-func kachinukiRosterAsSetup(comp *state.Competition, matchID string) error {
-	if !comp.IsKachinuki() {
-		return engine.ErrNotKachinuki
-	}
-	return &engine.NotFoundError{Msg: fmt.Sprintf("match %s not found", matchID)}
 }
 
 // publicReadView judges a public read's caller and gives the mask view of

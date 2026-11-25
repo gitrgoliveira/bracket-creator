@@ -35,6 +35,7 @@ import (
 // three endpoints actually call.
 type LeagueTiebreakEngine interface {
 	LeagueTiebreakCandidates(compID string) ([]engine.TiedGroup, error)
+	LeagueTiebreakCandidatesBeforeDraw(compID string) ([]engine.TiedGroup, error)
 	GenerateLeagueTiebreakMatches(compID string, tiedTeamIDs []string) ([]state.MatchResult, error)
 }
 
@@ -239,15 +240,12 @@ func registerPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 		if !ok {
 			return
 		}
+		// A hidden draw is answered as setup, which has no tie to break.
+		candidatesOf := eng.LeagueTiebreakCandidates
 		if v.drawHidden {
-			// A hidden draw is answered as setup, which has no tie to break.
-			answer := gin.H{"candidates": leagueTiebreakGroupsJSON(nil)}
-			stampNamesHidden(answer, v)
-			c.JSON(http.StatusOK, answer)
-			return
+			candidatesOf = eng.LeagueTiebreakCandidatesBeforeDraw
 		}
-
-		candidates, err := eng.LeagueTiebreakCandidates(id)
+		candidates, err := candidatesOf(id)
 		if err != nil {
 			// LeagueTiebreakCandidates calls CalculatePoolStandings, which reads
 			// overrides.json (computeStandingsFrom). A corrupt file is an

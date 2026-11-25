@@ -186,6 +186,38 @@ func (f formInForce) inForce(teamID, matchID string) InForceLineup {
 	return f.inForceReader.inForce(teamID, matchID)
 }
 
+// KachinukiFieldedPlacesBeforeDraw is KachinukiFieldedPlaces as the same
+// competition answers in setup, where no match is held: a competition that is
+// not kachinuki fills nothing, and a kachinuki one still refuses a form
+// position its team size has no place for, then fills nothing for the match it
+// does not hold. A public read of a draft whose draw is hidden from its caller
+// answers it (bc-drpb), so the hidden draw shows in no difference.
+func (e *Engine) KachinukiFieldedPlacesBeforeDraw(compID string, form domain.TeamLineup) (map[domain.Position]string, error) {
+	_, places, err := e.kachinukiFieldedSetup(compID, form)
+	return places, err
+}
+
+// kachinukiFieldedSetup is the part of the fielded read that needs no match:
+// the competition (an unknown one is a NotFoundError), the empty map every
+// answer without a place to fill gives, and, for a kachinuki competition, the
+// refusal of a form position its team size has no place for. The map is nil
+// with an error.
+func (e *Engine) kachinukiFieldedSetup(compID string, form domain.TeamLineup) (*state.Competition, map[domain.Position]string, error) {
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if comp == nil {
+		return nil, nil, notFoundErrorf("competition %s not found", compID)
+	}
+	if comp.IsKachinuki() {
+		if err := form.ValidatePositions(comp.TeamSize); err != nil {
+			return nil, nil, err
+		}
+	}
+	return comp, map[domain.Position]string{}, nil
+}
+
 // KachinukiFieldedPlaces answers, for the lineup panel (bc-kno1, operator
 // decisions D2 and D3), the places of form that the server would fill by member
 // number if form were the lineup of the team with participant id teamID at
@@ -203,19 +235,9 @@ func (f formInForce) inForce(teamID, matchID string) InForceLineup {
 // lookup cannot read, is returned as an error: over lineups it could not read
 // the server fills nothing, so an answer would promise a fill it never makes.
 func (e *Engine) KachinukiFieldedPlaces(compID, teamID, matchID string, form domain.TeamLineup) (map[domain.Position]string, error) {
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
-		return nil, err
-	}
-	if comp == nil {
-		return nil, notFoundErrorf("competition %s not found", compID)
-	}
-	places := map[domain.Position]string{}
-	if !comp.IsKachinuki() {
-		return places, nil
-	}
-	if err := form.ValidatePositions(comp.TeamSize); err != nil {
-		return nil, err
+	comp, places, err := e.kachinukiFieldedSetup(compID, form)
+	if err != nil || !comp.IsKachinuki() {
+		return places, err
 	}
 	located, err := e.findTeamMatch(compID, matchID)
 	if err != nil {

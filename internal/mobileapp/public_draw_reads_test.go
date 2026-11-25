@@ -207,34 +207,6 @@ func TestPublicDrawReads_WrongPasswordIs401(t *testing.T) {
 	}
 }
 
-func TestFieldedPlacesAsSetup(t *testing.T) {
-	kachi := &state.Competition{TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki}
-	fixed := &state.Competition{TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed}
-	tooFar := domain.TeamLineup{Positions: map[domain.Position]string{domain.PositionNumbered(9): "X"}}
-
-	places, err := fieldedPlacesAsSetup(fixed, tooFar)
-	require.NoError(t, err)
-	assert.Empty(t, places, "a competition that is not kachinuki fills nothing")
-	assert.NotNil(t, places)
-
-	_, err = fieldedPlacesAsSetup(kachi, tooFar)
-	require.Error(t, err, "a kachinuki form position the team size has no place for is refused, as in setup")
-
-	places, err = fieldedPlacesAsSetup(kachi, domain.TeamLineup{})
-	require.NoError(t, err)
-	assert.Empty(t, places)
-	assert.NotNil(t, places)
-}
-
-func TestKachinukiRosterAsSetup(t *testing.T) {
-	err := kachinukiRosterAsSetup(&state.Competition{TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed}, "Pool A-0")
-	assert.ErrorIs(t, err, engine.ErrNotKachinuki)
-	err = kachinukiRosterAsSetup(&state.Competition{TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki}, "Pool A-0")
-	var notFound *engine.NotFoundError
-	require.ErrorAs(t, err, &notFound)
-	assert.Equal(t, "match Pool A-0 not found", notFound.Error())
-}
-
 // TestPublicDrawReads_HiddenSwissDraftStandingsAreAsBeforeItsDraw pins the
 // Swiss standings read: three entrants, so round 1 gives one of them a bye the
 // engine counts as a win while draw-ready. The public reads one zero row per

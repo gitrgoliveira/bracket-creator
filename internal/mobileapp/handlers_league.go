@@ -38,17 +38,17 @@ func registerPublicLeagueHandlers(r *gin.RouterGroup, eng *engine.Engine, names 
 		if !ok {
 			return
 		}
-		v, comp, ok := publicReadViewOf(c, names, id)
+		v, ok := publicReadView(c, names, id)
 		if !ok {
 			return
 		}
-		if v.drawHidden && comp.Format == state.CompFormatLeague {
-			// A hidden draw is answered as setup: a league before its draw
-			// has no standings. Any other competition is the engine's 404.
-			c.JSON(http.StatusOK, []state.PlayerStanding{})
-			return
+		// A hidden draw is answered as setup: a league before its draw has no
+		// standings (engine.LeagueStandingsBeforeDraw).
+		standingsOf := eng.LeagueStandings
+		if v.drawHidden {
+			standingsOf = eng.LeagueStandingsBeforeDraw
 		}
-		standings, err := eng.LeagueStandings(id)
+		standings, err := standingsOf(id)
 		if err != nil {
 			respondEngineError(c, err)
 			return

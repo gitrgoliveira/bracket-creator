@@ -244,9 +244,13 @@ competitor number can change and the identity underneath it cannot. It is derive
 way on both sides: the public surfaces receive a team's members on the viewer payload and
 compose the label themselves, rather than reading a stored string.
 
-Two rules govern member names. Within one team the names must be unique: a name is how an
-organiser picks a member, and the winner-stays-on format has to tell two teammates apart.
-Members of different teams may share a name freely. The member list is not a starting line-up, so
+Two rules govern member names:
+
+- Within one team the names must be unique: a name is how an organiser picks a member, and the
+    winner-stays-on format has to tell two teammates apart.
+- Members of different teams may share a name freely.
+
+The member list is not a starting line-up, so
 it may hold more members than the competition's team size. The extra entries are the
 replacements an organiser can field. The team size only fixes how many positions a
 round has.
@@ -301,11 +305,15 @@ removal from an older release carries none and is ordered as it lands. The lineu
 in force at that time. What it held before then is still kept as a record, marked with that
 time, beside any lineup saved for the match afterwards. So a match lineup that carried positions
 from it while it was in force keeps them, whatever arrives before or after the removal. Each
-change is kept in one record only. A change made before the removal belongs to the lineup it
-took away, even one that arrives after it. A change made after it is the match's own lineup
-again, even one that arrived before it. A removal that found nothing to take away is still
-kept, as its time alone. So a change made before it that arrives later is taken away by it.
-Discarding a draw removes these records with the draw's lineups.
+change is kept in one record only:
+
+- A change made before the removal belongs to the lineup it took away, even one that arrives
+    after it.
+- A change made after it is the match's own lineup again, even one that arrived before it.
+
+A removal that found nothing to take away is still kept, as its time alone. So a change made
+before it that arrives later is taken away by it. Discarding a draw removes these records with
+the draw's lineups.
 
 When a kachinuki match starts, the lineup in force there for each team is kept as that match's
 own lineup record. The record is marked with the time of the write that started it (`startedAt`)
@@ -313,11 +321,14 @@ and the lineup it was taken from (`startedFrom`: an earlier match's id, or empty
 starting lineup). It is taken only by the write that moves the match out of the queue, inside
 that write's transaction. So a write refused, or any write after the start, never takes one.
 When the team had no lineup, the record is empty. It is the lineup in force at the start's
-time, read the same way as a first save's carried positions. A change made before the start
-reaches it whenever the save arrives. A change made after the start never does, even one that
-arrived before it. A change to an earlier match's own lineup, made before the start, that the
-match would have carried at its start reaches it too. That record is the match's alone. A later
-match never carries it, so it goes on carrying the starting lineup or an earlier match's own
+time, read the same way as a first save's carried positions:
+
+- A change made before the start reaches it whenever the save arrives.
+- A change made after the start never does, even one that arrived before it.
+- A change to an earlier match's own lineup, made before the start, that the match would have
+    carried at its start reaches it too.
+
+That record is the match's alone. A later match never carries it, so it goes on carrying the starting lineup or an earlier match's own
 lineup exactly as before. A match sent back to the queue still holding the bouts it was fought
 on has started, so starting it again takes no record. An organiser's save of the match's own
 lineup makes the record the organiser's own lineup, its other positions still carried from the
@@ -329,17 +340,29 @@ record, or of the organiser's lineup that replaced it. That fighter is read once
 empty places are filled by member number, as described next.
 
 A kachinuki team fights in member number order wherever its lineup names nobody. The lineup a
-match fields for a team is its own lineup record, else, while the match has not started, the
-lineup in force there, else an empty lineup. Each empty place of it, in fighting order, takes
+match fields for a team is the first of these that applies:
+
+1. Its own lineup record.
+2. While the match has not started, the lineup in force there.
+3. An empty lineup.
+
+Each empty place of it, in fighting order, takes
 the team member with the lowest index from 1 to the team size that the lineup does not already
 hold at another place. A member with no name fills a place like any other. A reserve, a member
 whose index is above the team size, fills no place, though a reserve placed in the lineup
 fights where it is placed. So a team with no lineup at all fields its members 1 to the team
 size in that order, and a lineup that names only some places keeps them and has the rest filled.
 The filling is worked out every time it is read and never stored, because carrying a lineup
-rebuilds every position of the record and would wipe a stored filling. The first bout's
-fighters, the next fighter Record bout pairs against the winner, the kachinuki roster, the
-Kachinuki Detail export and the lineup panel all read the same filling. When `team-members.yaml`
+rebuilds every position of the record and would wipe a stored filling. Each of these reads the
+same filling:
+
+- The first bout's fighters.
+- The next fighter Record bout pairs against the winner.
+- The kachinuki roster.
+- The Kachinuki Detail export.
+- The lineup panel.
+
+When `team-members.yaml`
 cannot be read, no place is filled; when `lineups.yaml` cannot be read, no team fields anyone.
 Each is logged as an error naming the file, and the kachinuki roster read answers with a
 warning sentence saying so, so that the operator adds each bout's pairing by hand.
@@ -353,9 +376,13 @@ a match as the match's own, else the round lineup with the highest round at or b
 match's round, else the highest round. So a lineup saved for one match applied to that match
 alone. Such lineups are converted into this form rather than read under that rule. A lineup
 stored under a team's name is stored under the team's id when exactly one team has that name.
-A legacy team is one with a lineup for round 1 or later. It can also be one that, when the app
-first settles the competition, holds a lineup saved for a match of the current draw that seats
-it by participant id. `config.md` records that list at the first settlement
+A legacy team is one of two kinds:
+
+- A team with a lineup for round 1 or later.
+- A team that, when the app first settles the competition, holds a lineup saved for a match of
+    the current draw that seats it by participant id.
+
+`config.md` records that list at the first settlement
 (`round_lineups_legacy`), so a lineup saved for a match afterwards never makes a team legacy.
 At every match a legacy team is seated in by participant id, it is given a lineup of its own
 equal to the one v2.1.1 showed there. Where v2.1.1 showed none (no round lineup and no lineup
@@ -588,8 +615,14 @@ draws shiro on the left.
 **A pool bout's id carries its number in the playing order.** A pool or league bout is
 `<pool name>-<n>`. The draw gives `n` after it has put the pool's bouts in the order they
 are played (a league is reordered so nobody fights twice in a row). So `Pool A-0` is the
-first bout played. Every surface names a bout by this number: the court console's "Match 1
-of 6", the server's messages, the scores list and the printed workbook. Moving a bout in a
+first bout played. Every surface names a bout by this number:
+
+- The court console's "Match 1 of 6".
+- The server's messages.
+- The scores list.
+- The printed workbook.
+
+Moving a bout in a
 court's queue changes when it is played, not its number. A draw made by an earlier release
 may hold a league whose ids were given before the reorder. Its bouts keep their numbers, and
 every surface shows the same one.
@@ -624,8 +657,13 @@ each. The winner's member id
 stays with the bout. After a merge it always names one of the two picked members (or is
 empty). When a pick changes under it, it is worked out again from the side that won. A pick
 is a member of the team seated on its side. A knockout match can be given another team on
-a side (a winner corrected upstream, a slot taken back to its placeholder, a qualifier
-repainted). When it is, that side's pick is therefore cleared and dated at that moment, later
+a side, for example in these ways:
+
+- A winner corrected upstream.
+- A slot taken back to its placeholder.
+- A qualifier repainted.
+
+When it is, that side's pick is therefore cleared and dated at that moment, later
 than the pick had been. The write that made the old pick, replayed from a queue, is then kept in the match's
 history instead of seating the old team's member on the new team. A side whose team does not
 change (the same winner stored again, or the team only renamed) keeps its pick. A side taken
@@ -640,8 +678,12 @@ and are never interchangeable.
 The cost of the pattern is this model's sharpest edge. A name
 and its id are stored as two fields, or in a lineup's case as two maps keyed by the same
 position, so nothing in the storage forces a writer to set both. A record with a name and
-no id is therefore representable, and does occur. It occurs in rows written before the id
-existed, and in rows whose name could not be resolved to exactly one person. The app treats
+no id is therefore representable, and does occur. It occurs in two kinds of row:
+
+- Rows written before the id existed.
+- Rows whose name could not be resolved to exactly one person.
+
+The app treats
 such a row as unrepaired rather than as a fault. It repairs what it can when it loads the file,
 and falls back to the name for that row alone. Making the pair a single value instead of two
 fields would remove the state entirely. The cost would be rewriting every stored file, which is
@@ -649,12 +691,14 @@ why it has not been done.
 
 **A knockout slot remembers the draw.** A bracket match repeats the scheduling and audit
 fields a pool match carries, so a knockout match is scheduled, corrected and reopened the same
-way. Two things are its own. For a knockout fed by pools, it keeps what the draw wrote in each
-slot before any pool finished. That is how a qualifier reaches the slot the draw gave it
-without the draw being recomputed. For a knockout drawn without pools, the bracket keeps the
-order the competitors were drawn in, which is what their competitor numbers count. A
-competition with pools numbers its entrants at the pool draw instead, so it stores no second
-order.
+way. Two things are its own:
+
+- For a knockout fed by pools, it keeps what the draw wrote in each slot before any pool
+    finished. That is how a qualifier reaches the slot the draw gave it without the draw being
+    recomputed.
+- For a knockout drawn without pools, the bracket keeps the order the competitors were drawn
+    in, which is what their competitor numbers count. A competition with pools numbers its
+    entrants at the pool draw instead, so it stores no second order.
 
 ### Match status and decision
 
@@ -756,7 +800,13 @@ In `tournament.md`, YAML front matter stores the tournament settings, among them
 
 In `competitions/<id>/config.md`, YAML front matter stores competition configuration: `name`, `date`, `start_time`, `courts`, `kind`, `format`, `status`, rules and match durations, `expected_participants`, and format-specific options. The `expected_participants` field is an optional integer (0 to 1024, absent means 0) representing the organiser's expected entry count (expected teams in team competitions) for setup schedule estimation. It needs no migration because no earlier release wrote the key.
 
-The `engi_solo` field is an optional boolean (absent means false) that decides, in an engi (kata) competition, whether each side is one competitor (solo kata, such as iaido) or a pair. False means pairs, entered as `Name 1 - Name 2` in the one name column; true means one name per row. Either way an engi side is a single participant, and its name is stored whole. The forms ask it as Competitors per side, Single competitors or Two competitors (pairs), with neither picked until the organiser chooses. Creating an engi competition, or a settings save that turns engi on, must send the request's `engiSolo` key and is refused without it. A settings save that leaves the key out on a competition already engi keeps the stored value. The field is stored only beside `engi: true`. Creating a competition without engi, or a settings save that turns engi off, writes it as false, which leaves the key out. It changes which names the roster takes and the standings header, never scoring, the draw or a stored result. Like `engi`, it cannot change once a draw is generated (discard the draw to change it). It is part of the competition's `configVersion`, hashed only when true, so a competition saved before the field existed keeps the version it had. It needs no migration: an absent key reads as pairs, which is what every earlier engi competition was.
+The `engi_solo` field is an optional boolean (absent means false) that decides, in an engi (kata) competition, whether each side is one competitor (solo kata, such as iaido) or a pair. False means pairs, entered as `Name 1 - Name 2` in the one name column; true means one name per row. Either way an engi side is a single participant, and its name is stored whole. The forms ask it as Competitors per side, Single competitors or Two competitors (pairs), with neither picked until the organiser chooses. The field is stored only beside `engi: true`. Writes treat the key in three ways:
+
+- Creating an engi competition, or a settings save that turns engi on, must send the request's `engiSolo` key and is refused without it.
+- A settings save that leaves the key out on a competition already engi keeps the stored value.
+- Creating a competition without engi, or a settings save that turns engi off, writes it as false, which leaves the key out.
+
+It changes which names the roster takes and the standings header, never scoring, the draw or a stored result. Like `engi`, it cannot change once a draw is generated (discard the draw to change it). It is part of the competition's `configVersion`, hashed only when true, so a competition saved before the field existed keeps the version it had. It needs no migration: an absent key reads as pairs, which is what every earlier engi competition was.
 
 Three optional fields in `config.md` control competitor name visibility on the public pages (`public_names`, `reveal_until`, and `reveal_secret`). None of them needs a migration, because no earlier release wrote the keys. The `public_names` field selects what the public pages (viewer, court boards, overlay, and live event stream) show for the competition's competitors:
 
@@ -769,11 +819,32 @@ Exactly one kind of link is active at a time (there is no combined option). Team
 
 The `reveal_until` field sets when the reveal links stop revealing. It is written as a local date and time `YYYY-MM-DDTHH:MM` and read in the server's time zone like every schedule time. When it is absent, links expire at the end of the tournament. That is one hour after the tournament's closing time on its last day, or 01:00 the morning after the last day when no closing time is set. With no `reveal_until` and no readable tournament date, there is no expiry to work out, and the links reveal nothing (the names stay hidden). Expiry is judged on every read, so moving `reveal_until` later makes the same links work again. The field is part of `configVersion`.
 
-The `reveal_secret` field holds 32 random bytes as lowercase hex. The server mints it the first time `public_names` moves to `person` or `competition`, and keeps it for the competition's whole life. So switching links off and on again gives back the same links. Keys are never stored. A competition key is the hex HMAC-SHA256 of the secret over the label `competition`. A competitor key is the hex HMAC-SHA256 of the secret over `competitor:` followed by the participant id (a malformed secret fails closed and yields no keys). The secret is never sent to a browser (it is not in any JSON), and it is not part of `configVersion`. A settings save cannot set or change it. Anyone holding a copy of `config.md` can derive the links, so treat a backup archive like the tournament password. A plain restore and a `--replace` restore keep the archive's secret, so the same links keep working. A `--copy` restore and the in-app competition copy mint a new secret instead. Minting a secret changes the competition's backup fingerprint, so one extra scheduled backup copy is taken that day.
+The `reveal_secret` field holds 32 random bytes as lowercase hex. The server mints it the first time `public_names` moves to `person` or `competition`, and keeps it for the competition's whole life. So switching links off and on again gives back the same links. Keys are never stored. Each is worked out from the secret:
 
-The `roster_shuffled` field is an optional boolean (absent means false) recording that the competitor list was shuffled at least once with **Shuffle unseeded** on the Participants tab. The Export & print tab reads it to warn that a draw places competitors in list order while the list was never shuffled. The server sets it only when a competition save carries `rosterShuffled: true` and a roster, and only after that roster has been saved. A refused roster records nothing, creating a competition never sets it, and a settings save neither sets nor clears it. Once set it stays set, through a discarded draw and later roster edits. It is not a setting, so it is left out of the competition's `configVersion` and a shuffle never makes an open Settings page stale. It needs no migration: an absent key reads as "not recorded as shuffled", which is all that can be said of a file an earlier release wrote, since nothing recorded a shuffle before. A backup or a restore carries `config.md` as it is, and a shuffle counts as a change to it for the scheduled backup's fingerprint.
+- A competition key is the hex HMAC-SHA256 of the secret over the label `competition`.
+- A competitor key is the hex HMAC-SHA256 of the secret over `competitor:` followed by the participant id.
 
-The settings versions are not stored. `tournamentVersion` (over the fields a tournament save writes, never the password) and `awardsVersion` (over a competition's fighting-spirit awards list) are content hashes computed when they are served. They work like a competition's `configVersion` (the version its settings save sends back), so nothing is added to `tournament.md` or `config.md`. A save sends back the version it was made from, and a stale one is refused with the current copy.
+A malformed secret fails closed and yields no keys. The secret is never sent to a browser (it is not in any JSON), and it is not part of `configVersion`. A settings save cannot set or change it. Anyone holding a copy of `config.md` can derive the links, so treat a backup archive like the tournament password. Restores and copies treat the secret in two ways:
+
+- A plain restore and a `--replace` restore keep the archive's secret, so the same links keep working.
+- A `--copy` restore and the in-app competition copy mint a new secret instead.
+
+Minting a secret changes the competition's backup fingerprint, so one extra scheduled backup copy is taken that day.
+
+The `roster_shuffled` field is an optional boolean (absent means false) recording that the competitor list was shuffled at least once with **Shuffle unseeded** on the Participants tab. The Export & print tab reads it to warn that a draw places competitors in list order while the list was never shuffled. The server sets it only when a competition save carries `rosterShuffled: true` and a roster, and only after that roster has been saved. No other write sets it:
+
+- A refused roster records nothing.
+- Creating a competition never sets it.
+- A settings save neither sets nor clears it.
+
+Once set it stays set, through a discarded draw and later roster edits. It is not a setting, so it is left out of the competition's `configVersion` and a shuffle never makes an open Settings page stale. It needs no migration: an absent key reads as "not recorded as shuffled", which is all that can be said of a file an earlier release wrote, since nothing recorded a shuffle before. A backup or a restore carries `config.md` as it is, and a shuffle counts as a change to it for the scheduled backup's fingerprint.
+
+The settings versions are not stored. These are content hashes computed when they are served:
+
+- `tournamentVersion`, over the fields a tournament save writes, never the password.
+- `awardsVersion`, over a competition's fighting-spirit awards list.
+
+They work like a competition's `configVersion` (the version its settings save sends back), so nothing is added to `tournament.md` or `config.md`. A save sends back the version it was made from, and a stale one is refused with the current copy.
 
 A `participants.csv` row ends with an optional check-in marker, and the marker carries the
 stamp of the check-in change that set it, so the later of two taps on one competitor wins
@@ -805,9 +876,13 @@ is how an operator removes one, and there is nothing to attach either way.
 
 The seed list stores the participant's own id alongside the name and dojo, and once a row
 carries that id it is the one thing a seed is matched to its participant by. The name and dojo
-are kept for two other jobs. They are what an older reader that has never heard of the id
-column still matches by. They are also the fallback for a row the id column has not reached
-yet, matched by name and dojo together. Both are needed because two competitors may share a
+are kept for two other jobs:
+
+- They are what an older reader that has never heard of the id column still matches by.
+- They are the fallback for a row the id column has not reached yet, matched by name and dojo
+    together.
+
+Both are needed because two competitors may share a
 name across dojos, and a file that stored only the name could not say which of them the rank
 belonged to.
 A row without a dojo still matches by name alone when that name is unique in the roster, and
@@ -928,25 +1003,30 @@ and the app never reads that file again. Check the data the error names, then de
 log written by an earlier version records nothing about its files, so it is replayed as before.
 Its files are still read first, so the checks below apply to it too.
 
-If a log, or a file a log names, cannot be read at startup (its permissions or the disk refuse
-it), the app does not start, and names the file. Fix access to that file and start again. The log
-then replays as usual, still checked against its files. If a file a log names lies outside the
-data folder, the log was written while the data folder had another path (the folder was moved or
-renamed). The app does not start and says so. Start it with the folder the log was written under
-(the path the error names), or move the log out of `.wal/` to leave its change unapplied. A log
-that names no competition's folder and cannot be applied stops startup the same way, for the same
-cause. This version takes the data folder's full path at startup. So for a log it wrote, naming
-the same folder by a relative or an absolute path never causes this. A path that goes through a
-link to the folder counts as another path. A log an earlier version wrote may name its files
-relative to the folder the app was started from. The error then says that, and quotes the
-relative path as the log records it (the log file the error names, as `<id>.json`, lists those paths). The cure is
-to start the app from the folder that path is relative to, the folder that holds its first folder (or to move the log out of `.wal/`). A log whose content is damaged, so that it
-is not a log any version can read, holds nothing that can be applied. At startup it is renamed to
-end in `.invalid` and kept in `.wal/`, and the other logs replay as usual. One error is logged
-saying that a change saved just before the restart may not have landed. Check the last results entered
-before the restart and enter again any that is missing. The renamed file is never read again, and
-the next startup does not report it. If it cannot be renamed, the app does not start. A backup
-leaves a damaged log alone; only startup renames it.
+Three faults with a log are handled at startup:
+
+- If a log, or a file a log names, cannot be read at startup (its permissions or the disk refuse
+    it), the app does not start, and names the file. Fix access to that file and start again. The
+    log then replays as usual, still checked against its files.
+- If a file a log names lies outside the data folder, the log was written while the data folder
+    had another path (the folder was moved or renamed). The app does not start and says so. Start
+    it with the folder the log was written under (the path the error names), or move the log out
+    of `.wal/` to leave its change unapplied. A log that names no competition's folder and cannot
+    be applied stops startup the same way, for the same cause. This version takes the data
+    folder's full path at startup. So for a log it wrote, naming the same folder by a relative or
+    an absolute path never causes this. A path that goes through a link to the folder counts as
+    another path. A log an earlier version wrote may name its files relative to the folder the app
+    was started from. The error then says that, and quotes the relative path as the log records it
+    (the log file the error names, as `<id>.json`, lists those paths). The cure is to start the
+    app from the folder that path is relative to, the folder that holds its first folder (or to
+    move the log out of `.wal/`).
+- A log whose content is damaged, so that it is not a log any version can read, holds nothing
+    that can be applied. At startup it is renamed to end in `.invalid` and kept in `.wal/`, and
+    the other logs replay as usual. One error is logged saying that a change saved just before
+    the restart may not have landed. Check the last results entered before the restart and enter
+    again any that is missing. The renamed file is never read again, and the next startup does
+    not report it. If it cannot be renamed, the app does not start. A backup leaves a damaged log
+    alone; only startup renames it.
 
 If committing a log fails, the log is removed, so a change reported as failed never lands later.
 If the log cannot be removed, or the log is committed but writing its files then fails, the change
@@ -1027,10 +1107,17 @@ The numbers match the steps in the diagram:
 * **13 and 14.** The store releases the lock and answers the caller.
 
 **Concurrent writes are merged, never dropped.** A match result is split into groups of
-fields that change together. The groups are the scoreline, the verdict (status, winner,
-decision and the notes that describe it), the overtime, the engi flags and the representative
-players. Each side's fighter picked for a representative bout is a group too (one group per
-side), and so is each bout of a team match on its own. A write names the groups it changes, and each group records
+fields that change together:
+
+- The scoreline.
+- The verdict (status, winner, decision and the notes that describe it).
+- The overtime.
+- The engi flags.
+- The representative players.
+- Each side's fighter picked for a representative bout (one group per side).
+- Each bout of a team match, on its own.
+
+A write names the groups it changes, and each group records
 the time of the last change applied to it. A change applies only when it was made no earlier
 than the stored change to the same group. So two operators changing different things both
 land, whatever order their writes arrive in. For example, one records the overtime while
@@ -1080,9 +1167,12 @@ the stored result is not applied, and the history says that the next round was a
 fought, or has already started.
 
 A finish that would leave a knockout match without a winner is refused as invalid, and the
-match keeps the result it had. The operator resolves the tie first: in a team match with a
-representative bout, or with overtime on the final kachinuki bout; in an individual match with
-overtime (encho) or a judges' decision (hantei). An engi finish whose flag total is not 1, 3
+match keeps the result it had. The operator resolves the tie first:
+
+- In a team match, with a representative bout, or with overtime on the final kachinuki bout.
+- In an individual match, with overtime (encho) or a judges' decision (hantei).
+
+An engi finish whose flag total is not 1, 3
 or 5 is refused too. It is a wrong flag count, so the whole panel's flags are entered.
 
 An out of order running write from the same device session (an older save arriving after a
@@ -1098,18 +1188,29 @@ knowing what happened in between.
 
 **Every write and every tap is kept in the match's history.** Each match has an append only
 history file in the competition's `history/` folder, one line per write that reached it and one
-per tap. A line records when the change was made, when the server received it, and which
-endpoint it came through (a tap's is `event`). It also records the groups it changed and, for
-each, whether it was applied or held, with the held values. A `requeue` line written by a court move also holds `court`, the shiai-jo the
+per tap. A line records:
+
+- When the change was made.
+- When the server received it.
+- Which endpoint it came through (a tap's is `event`).
+- The groups it changed and, for each, whether it was applied or held, with the held values.
+
+A `requeue` line written by a court move also holds `court`, the shiai-jo the
 match was moved to. A tap's line also holds the tap and what became of it (applied, recorded in a
 finish that had seen it, capped, turned away because the match was finished, and so on). A tap
 whose fate changes later, because a finish made before it arrives afterwards, gets a second line
 saying so. A held group that says exactly what is already stored (for example "no overtime"
 over a match with none) is no loss. So it is recorded as unchanged and its value is not kept.
-When a rule held changes rather than their times, the line also says why. It may be an older
-revision of the same running board, or the match was already finished. It may be an engi result
-whose flags and winner are kept together, a representative bout that was removed, or a next
-round that was already fought or has already started. The history is written in the same
+When a rule held changes rather than their times, the line also says why. The reason is one of
+these:
+
+- An older revision of the same running board.
+- A match that was already finished.
+- An engi result whose flags and winner are kept together.
+- A representative bout that was removed.
+- A next round that was already fought or has already started.
+
+The history is written in the same
 transaction as the match, so the two land together or not at all. A write refused
 outright (an invalid payload, the wrong competitors) leaves no line. Reopening, requeueing,
 overriding a winner and the other server actions that change a result write their own line.
@@ -1118,15 +1219,24 @@ reuses the match ids.
 
 **Score events use per-match event sourcing.** Each match has an append only score event log
 stored at `competitions/<id>/events/<matchId>.jsonl`. The log consists of JSON lines, each
-stamped with format version `"v": 1`. Each line is either an event line (a scoring tap such as
-an ippon, foul, encho, or flag) or a baseline line (the state left by a non-tap write such as
-a finish, decision, correction, or migration). The pattern is explicitly per-match event sourcing
+stamped with format version `"v": 1`. Each line is one of two kinds:
+
+- An event line: a scoring tap such as an ippon, foul, encho, or flag.
+- A baseline line: the state left by a non-tap write such as a finish, decision, correction, or
+    migration.
+
+The pattern is explicitly per-match event sourcing
 (the match is rebuilt by replaying its log in timestamp order) with a client-side transactional
 outbox. The app uses no message broker. Offline tablets hold the queue, and order comes from when
 a tap was made, not when it arrived. The app is one binary that keeps its data in files.
 
-A tap is one event with its own id, the device's session and a sequence number within it, and
-the time it was made. The device sends taps in batches to the match's score events endpoint.
+A tap is one event, and it carries:
+
+- Its own id.
+- The device's session, and a sequence number within it.
+- The time it was made.
+
+The device sends taps in batches to the match's score events endpoint.
 The server answers every batch with one outcome per tap, even for a tap it did not apply,
 so a device never has to retry a tap that no retry can fix. Sending a tap again with the same
 id is harmless: the server recognises it and logs it once. Taps from different devices
@@ -1198,11 +1308,15 @@ overwriting it.
 
 The comparison only holds if the two clocks agree, so a timestamp that is far enough in the
 future to be impossible is refused and reported rather than trusted or quietly discarded.
-Both of the alternatives lose work. Trusting it lets that one write beat every later result
-until real time catches up with the stamp, which freezes the match for the whole of that
-window. Discarding it makes the write count as unstamped, and an unstamped write always
-applies, so the device with the wrong clock overwrites a newer result recorded elsewhere and
-nobody is told. A few seconds ahead is ordinary and is accepted, since a device learns the
+Both of the alternatives lose work:
+
+- Trusting it lets that one write beat every later result until real time catches up with the
+    stamp, which freezes the match for the whole of that window.
+- Discarding it makes the write count as unstamped, and an unstamped write always applies, so
+    the device with the wrong clock overwrites a newer result recorded elsewhere and nobody is
+    told.
+
+A few seconds ahead is ordinary and is accepted, since a device learns the
 server time over the network and a little drift is normal. Beyond that the device is told
 its clock is wrong and nothing is written. The app resyncs its clock, re-stamps the queued write
 and sends it again by itself. Sending it again is safe precisely because the refused write
@@ -1219,11 +1333,13 @@ the match or overwrite a newer result with nobody told.
 
 When a queued write is refused for a wrong clock, the app learns the server time again and
 rebuilds the stamp before retrying it, and does so again on every later retry. It does this two ways and keeps whichever answer is
-older. The first way reads the moment the result was entered and adds the freshly learned
-offset. That is right so long as the device clock has not moved in between. The second way
-measures how long the result has been waiting on a steadily ticking timer that a clock
-correction cannot move, and subtracts that from the current server time. That is right even if
-the clock was corrected, but can understate the wait if the device slept.
+older:
+
+- The first way reads the moment the result was entered and adds the freshly learned offset.
+    That is right so long as the device clock has not moved in between.
+- The second way measures how long the result has been waiting on a steadily ticking timer that
+    a clock correction cannot move, and subtracts that from the current server time. That is
+    right even if the clock was corrected, but can understate the wait if the device slept.
 
 Keeping the older answer is a deliberate safety choice rather than a coin toss. Too old, and
 this result can only lose a comparison it might have won, which costs the operator a re-entry
@@ -1237,8 +1353,12 @@ or to a second tab. If the clock is corrected across a reload, the rebuilt stamp
 again and the result refused a second time. It is then kept, never dropped. It stays queued and
 held, and the operator is told once that this device's clock is wrong. It is re-stamped and sent
 again on every retry until it lands. While it is held, the writes of the same match queued
-behind it wait for it. So the operator either fixes the device clock, or discards the held write
-and enters the result again from a device whose clock is right. The held write can be discarded
+behind it wait for it. So the operator does one of two things:
+
+- Fixes the device clock.
+- Discards the held write and enters the result again from a device whose clock is right.
+
+The held write can be discarded
 from its score editor or from the list of held writes.
 
 ### When a file is wrong
@@ -1248,15 +1368,23 @@ edit is itself wrong. Two things can be wrong, and they behave differently: a si
 will not parse, and a whole file that will not parse.
 
 **A wrong cell degrades, and the file keeps loading.** A malformed cell falls back to its
-documented default and never fails the row it lives in or the load the row belongs to. A team
-match's sub-bout cell that will not parse as JSON loads as an empty encounter rather than
-aborting the read. A seed row missing its rank or name, or too short to hold them, is skipped
-rather than guessed. A number that will not parse is left at the column's documented default,
-and a negative count is clamped to zero. One bad cell cannot stop a tournament. Two cases go
-further and discard data outright, because there is nothing safe to default to. A legacy
-judges'-decision flag with no attributable winner is dropped rather than guessed onto a side.
-A hand-edited bracket file carrying both a legacy score string and the current ippon
-arrays keeps the arrays and clears the string.
+documented default and never fails the row it lives in or the load the row belongs to. For
+example:
+
+- A team match's sub-bout cell that will not parse as JSON loads as an empty encounter rather
+    than aborting the read.
+- A seed row missing its rank or name, or too short to hold them, is skipped rather than
+    guessed.
+- A number that will not parse is left at the column's documented default, and a negative count
+    is clamped to zero.
+
+One bad cell cannot stop a tournament. Two cases go further and discard data outright, because
+there is nothing safe to default to:
+
+- A legacy judges'-decision flag with no attributable winner is dropped rather than guessed onto
+    a side.
+- A hand-edited bracket file carrying both a legacy score string and the current ippon arrays
+    keeps the arrays and clears the string.
 
 **A degraded cell is kept, not overwritten.** The results file is rewritten in full every time
 any match in it is scored. A cell that read as empty would otherwise be written back as

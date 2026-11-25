@@ -36,19 +36,36 @@ Self-run mode does not hide competitor names. The competitors run their own matc
 
 Self-run mode has no check-in. The **Check-in tracking** setting and the **Registration desk** are not offered. The server refuses every check-in request, and the draw includes every participant on the roster. A competition keeps the check-in setting it was saved with, but a self-run tournament ignores it.
 
-Competitors can name the fighters in a team match from its score sheet, without the password. A team member picked for a bout, or a typed name, is saved with that match. A typed name fills in a team member who has no name yet, or adds a new one. Two changes stay with the organiser: the lineup of a match that has finished, and the name of a team member who already has one.
+Competitors can name the fighters in a team match from its score sheet, without the password. A team member picked for a bout, or a typed name, is saved with that match. A typed name fills in a team member who has no name yet, or adds a new one. Two changes stay with the organiser:
 
-Competitors also run the representative bout (daihyosen) of a tied knockout team match from its score sheet, while the match is in progress. They add it, score it like any other bout, and remove one added by mistake while it is still unscored. Once the match has finished, adding or removing its representative bout stays with you. A kachinuki match has no representative bout. A tied pairing that must produce a result is settled by encho on that same bout (refer to [Scoring a kachinuki encounter](team-tournaments.md#scoring-a-kachinuki-encounter)). A judges' decision (hantei) stays with the organiser, on the representative bout as on every other bout. The public score sheet does not offer one. Once you record one, the public score sheet shows that bout as decided. A competitor can finish the match on it but cannot change or clear it.
+- The lineup of a match that has finished.
+- The name of a team member who already has one.
+
+Competitors also run the representative bout (daihyosen) of a tied knockout team match from its score sheet, while the match is in progress. They can:
+
+- Add it.
+- Score it like any other bout.
+- Remove one added by mistake while it is still unscored.
+
+Once the match has finished, adding or removing its representative bout stays with you. A kachinuki match has no representative bout. A tied pairing that must produce a result is settled by encho on that same bout (refer to [Scoring a kachinuki encounter](team-tournaments.md#scoring-a-kachinuki-encounter)). A judges' decision (hantei) stays with the organiser, on the representative bout as on every other bout. The public score sheet does not offer one. Once you record one, the public score sheet shows that bout as decided. A competitor can finish the match on it but cannot change or clear it.
 
 A competitor's taps on the public score sheet are sent as they are made, in batches when several are waiting, exactly as an organiser's are. They are kept on the device and sent in order if the connection drops. There is no save step to forget. Once a match has finished, the sheet takes no further change from a competitor. A tap on a finished match is refused with "This match result has already been reported. Contact the tournament organizer to correct it." Changing a finished result stays with the organiser's **Correct**.
 
-Results in self-run mode carry a provenance label. A score entered without a password is tagged "self-reported". A score entered by an authenticated operator is tagged "admin". Officiated mode always produces "admin" results.
+Results in self-run mode carry a provenance label:
+
+- A score entered without a password is tagged "self-reported".
+- A score entered by an authenticated operator is tagged "admin".
+
+Officiated mode always produces "admin" results.
 
 Refer to the [Competitor self-run guide](../competitors/self-run.md) for the attendee-facing workflow.
 
 ## Admin authentication mode
 
-Authentication mode controls how the admin password is stored and verified. There are two options: file mode (the default, suited for local or trusted-network events) and locked mode (recommended for internet-reachable deployments).
+Authentication mode controls how the admin password is stored and verified. There are two options:
+
+- File mode, the default, suited for local or trusted-network events.
+- Locked mode, recommended for internet-reachable deployments.
 
 ### File mode
 

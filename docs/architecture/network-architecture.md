@@ -1,8 +1,11 @@
 # Network architecture
 
-How traffic flows between browsers and the tournament app: HTTPS termination at a reverse
-proxy, plain HTTP to the app, real-time updates over Server-Sent Events (SSE), and the
-client-side resilience that keeps it working on flaky venue Wi-Fi.
+How traffic flows between browsers and the tournament app:
+
+- HTTPS termination at a reverse proxy;
+- plain HTTP to the app;
+- real-time updates over Server-Sent Events (SSE);
+- the client-side resilience that keeps it working on flaky venue Wi-Fi.
 
 > Related: [Software architecture](software-architecture.md) · [Infrastructure architecture](infrastructure-architecture.md)
 
@@ -61,28 +64,46 @@ flowchart TB
 ```
 
 - **REST**: score, decision, and lineup writes, config, and participants. Every scoring tap is
-  an event: a point, a foul, an overtime period, an engi flag, a team bout's tie or fusensho, a
-  fighter named for a bout, a representative pick, or the representative bout's judges' decision.
-  Taps are sent to `POST /api/competitions/{id}/matches/{mid}/score-events`, in a batch of at
-  most 64 from one device session. The server appends each event to the match's event log. It
-  replays the log in the order the taps were made, and answers 200 with one outcome per event.
-  The handler refuses the batch as a whole with 401 (a wrong password, checked before the body
-  is read), 400 (a malformed batch) or 404 (an unknown competition or match).
-  The answer also lists the `gaps`: the sequence numbers of that session's taps the server never
-  received. It carries the match as stored, with two fields that every later copy of the match
-  carries too. `eventSeqs` holds, per device session, the highest tap number the log holds.
-  `turnedAway` holds each device tap the log holds that the server does not apply now, with its
-  outcome. Finishes, decisions, starts, reopens, sends back to the queue and corrections are
-  whole writes, such as `PUT /api/competitions/{id}/matches/{mid}/score`. They also enter the
-  match's log, and every device stamps them with the time they were made. Only some writes go
-  through the device's outbox (§4): the rule-bound writes (the taps, the whole writes of a
-  match, lineups, team members, reinstatements and pool rank orders), check-in, court calls, the
-  tournament settings and the fighting-spirit awards. Other setup edits are direct calls that
-  are not kept for later, such as the password change, competition settings, the roster, seeds,
-  the draw and import. Auth is handled through the `X-Tournament-Password` header (two modes,
-  §5; self-run mode allows unauthenticated scoring). Every response carries the `X-App-Build`
-  header naming the git commit of the server build (or `unknown`). Clients use it to detect
-  when a new server build is running.
+  an event, one of these:
+
+    - a point;
+    - a foul;
+    - an overtime period;
+    - an engi flag;
+    - a team bout's tie or fusensho;
+    - a fighter named for a bout;
+    - a representative pick;
+    - the representative bout's judges' decision.
+
+    Taps are sent to `POST /api/competitions/{id}/matches/{mid}/score-events`, in a batch of at
+    most 64 from one device session. The server appends each event to the match's event log. It
+    replays the log in the order the taps were made, and answers 200 with one outcome per event.
+    The handler refuses the batch as a whole with one of these:
+
+    - 401 for a wrong password, checked before the body is read;
+    - 400 for a malformed batch;
+    - 404 for an unknown competition or match.
+
+    The answer also lists the `gaps`: the sequence numbers of that session's taps the server never
+    received. It carries the match as stored, with two fields that every later copy of the match
+    carries too:
+
+    - `eventSeqs` holds, per device session, the highest tap number the log holds.
+    - `turnedAway` holds each device tap the log holds that the server does not apply now, with
+      its outcome.
+
+    Finishes, decisions, starts, reopens, sends back to the queue and corrections are
+    whole writes, such as `PUT /api/competitions/{id}/matches/{mid}/score`. They also enter the
+    match's log, and every device stamps them with the time they were made. Only some writes go
+    through the device's outbox (§4): the rule-bound writes (the taps, the whole writes of a
+    match, lineups, team members, reinstatements and pool rank orders), check-in, court calls, the
+    tournament settings and the fighting-spirit awards. Other setup edits are direct calls that
+    are not kept for later, such as the password change, competition settings, the roster, seeds,
+    the draw and import. Auth is handled through the `X-Tournament-Password` header (two modes,
+    §5; self-run mode allows unauthenticated scoring). Every response carries the `X-App-Build`
+    header naming the git commit of the server build (or `unknown`). Clients use it to detect
+    when a new server build is running.
+
 - **SSE**: one stream per client carrying `match_updated`, `competition_started`,
   `competition_completed`, `competitor_status_updated`, `participants_updated`,
   `tournament_updated`, `schedule_updated`, `lineup_updated`, `draw_generated`, `draw_discarded`,
@@ -168,12 +189,14 @@ is never only in the memory of a page. The outbox sends a match's entries in the
 made, until the server confirms each. The confirmation is idempotent, because a tap carries its
 own id and a repeated id is recognised and logged once.
 
-There is deliberately **no message broker** between them. The queue that matters is on the
-tablet, because the tablet is the part that goes offline. A broker in the venue or the cloud
-would hold nothing the tablet does not already hold. The order that matters is when each tap was
-made, which the replay restores from the tap's own stamp. A queue that preserved arrival order
-would therefore add nothing. And the app is one binary that keeps its data in files. A broker
-would be a second system to install, secure and keep running at a tournament for no gain.
+There is deliberately **no message broker** between them, for three reasons:
+
+- The queue that matters is on the tablet, because the tablet is the part that goes offline. A
+  broker in the venue or the cloud would hold nothing the tablet does not already hold.
+- The order that matters is when each tap was made, which the replay restores from the tap's
+  own stamp. A queue that preserved arrival order would therefore add nothing.
+- The app is one binary that keeps its data in files. A broker would be a second system to
+  install, secure and keep running at a tournament for no gain.
 
 Only a confirmed write ever empties the queue. A write that cannot be confirmed is never
 dropped in silence. It is handled in one of these ways:
@@ -372,10 +395,13 @@ flowchart TB
     reopen --> rf["Refetch<br/>(jittered)"]
 ```
 
-The SSE liveness checks: a watchdog armed when the stream connects (not only on `onopen`)
-closes and reopens a stream that has carried no message or heartbeat for 35 s. The browser's
-`online` event and a `visibilitychange` to visible both force a reconnect. A tab shown again
-also refetches at once, and any stream that reopens after a loss refetches, jittered.
+The stream has these liveness checks:
+
+- A watchdog armed when the stream connects (not only on `onopen`) closes and reopens a stream
+  that has carried no message or heartbeat for 35 s.
+- The browser's `online` event and a `visibilitychange` to visible both force a reconnect.
+- A tab shown again also refetches at once.
+- Any stream that reopens after a loss refetches, jittered.
 
 Key client mechanisms (all in `web-mobile/js/api_client.jsx` and its `api_client_*.jsx` modules, plus consumers):
 
@@ -410,17 +436,63 @@ Each entry belongs to one owner:
 - a court call (a clear of every court call has a queue of its own);
 - the tournament settings.
 
-A flush pass sends the entries of each owner strictly in the order they were made (their stamp, then the order they were stored). An entry may not land: offline, a 5xx that keeps coming back, a sign-in it waits for, or an entry it must follow. That entry ends its turn for the pass. It holds back the later entries of the same match, team, competitor, competition, court call or the tournament settings. So a write made after another on the same device never reaches the server first. The others go on.
+A flush pass sends the entries of each owner strictly in the order they were made (their stamp, then the order they were stored). An entry may not land, for one of these reasons:
+
+- the device is offline;
+- a 5xx keeps coming back;
+- it waits for a sign-in;
+- it waits for an entry it must follow.
+
+That entry ends its turn for the pass. It holds back the later entries of the same match, team, competitor, competition, court call or the tournament settings. So a write made after another on the same device never reaches the server first. The others go on.
 
 Consecutive taps of one device session go as one batch of at most 64. A tap is idempotent by its event id: sent twice, it is logged once and answered as a duplicate, so a lost answer is harmless.
 
-Some writes are taken in the order they arrive: a court move, a time change, a lineup save, a match lineup's removal, a reinstatement, a pool rank order and a team member's rename or cleared name. So each carries a write id, and the server answers a late duplicate as recorded without applying it again. A team member's add carries the id the device made for the member. The same add sent again is answered with the member as stored. A reopen, a send back to the queue, a queue-it-and-reopen, a kachinuki bout's removal and a representative bout's add or removal each carry a write id too. The match's score log keeps that id, so a late duplicate of any of them is also answered as recorded. A lineup save's positions are still ordered by when each was changed (`changedAt`). A match lineup's removal is ordered by when it was made (`removedAt`). So a late copy of an earlier save never puts an older value back.
+Some writes are taken in the order they arrive:
 
-A later running update never takes the place of a queued Finish or decision. A decision and a score for the same match are both kept, and a tap never folds into anything. A score write folds into the score write queued just before it, when that one has not been sent, naming every group either changed. That covers a running update into a running update, and a Finish into either, as when the editor re-sends a held Finish. A lineup save folds too: it joins a queued save of the same lineup. That save then names every position either changed, with the later value where both changed one. A tournament settings save or an awards save that has not been sent yet takes the place of a queued save of the same document.
+- a court move;
+- a time change;
+- a lineup save;
+- a match lineup's removal;
+- a reinstatement;
+- a pool rank order;
+- a team member's rename or cleared name.
 
-A check-in carries the tap's stamp and the later tap wins (`superseded` otherwise). A court call carries the id the device made, so a resend is answered `recorded`. A settings or awards save carries the version it was made from. A stale one is refused 409 with the current copy, and one whose body is already the stored document is answered 200. A refusal on replay is always reported, never taken as success.
+So each carries a write id, and the server answers a late duplicate as recorded without applying it again. A team member's add carries the id the device made for the member. The same add sent again is answered with the member as stored. These writes each carry a write id too:
 
-Every tab of the app shares the stored outbox. A tab saving its queue merges into it: it adds its own writes, keeps the newer copy where two tabs hold the same entry, and removes only the writes it settled. Each tab also takes up the writes another tab stores. A write queued in a tab that then closes is therefore still sent by a tab left open. Only one tab sends a match's writes at a time (and likewise a team's lineup, a court call or the tournament settings). A tab takes a lease for that match for the length of its send. It gives the lease up when the send ends or its page closes. Where the browser has Web Locks the lease is a lock, which the browser frees as soon as its tab closes or crashes. Elsewhere (an older browser, or the app reached over plain http by its network address) the lease is a timed note in browser storage. The tab renews it every 2 s while it sends, and another tab may take it over 6 s after its last renewal, so a crashed tab gives it up. A tab that finds the match leased waits for the release, then sends what is left. So a write two tabs hold is sent once, and a match's writes go in one tab's order. A send repeated in rare cases, such as two tabs taking a lease in the same instant, is still harmless. The server orders writes by their stamps and recognises a repeated id (refer to [Order of writes](#order-of-writes)).
+- a reopen;
+- a send back to the queue;
+- a queue-it-and-reopen;
+- a kachinuki bout's removal;
+- a representative bout's add or removal.
+
+The match's score log keeps that id, so a late duplicate of any of them is also answered as recorded. A lineup save's positions are still ordered by when each was changed (`changedAt`). A match lineup's removal is ordered by when it was made (`removedAt`). So a late copy of an earlier save never puts an older value back.
+
+A later running update never takes the place of a queued Finish or decision. A decision and a score for the same match are both kept, and a tap never folds into anything. Three kinds of write do combine with one queued before them:
+
+- A score write folds into the score write queued just before it, when that one has not been sent, naming every group either changed. That covers a running update into a running update, and a Finish into either, as when the editor re-sends a held Finish.
+- A lineup save joins a queued save of the same lineup. That save then names every position either changed, with the later value where both changed one.
+- A tournament settings save or an awards save that has not been sent yet takes the place of a queued save of the same document.
+
+The outbox writes that are not about a match are judged this way:
+
+- A check-in carries the tap's stamp and the later tap wins (`superseded` otherwise).
+- A court call carries the id the device made, so a resend is answered `recorded`.
+- A settings or awards save carries the version it was made from. A stale one is refused 409 with the current copy, and one whose body is already the stored document is answered 200.
+
+A refusal on replay is always reported, never taken as success.
+
+Every tab of the app shares the stored outbox. A tab saving its queue merges into it:
+
+- it adds its own writes;
+- it keeps the newer copy where two tabs hold the same entry;
+- it removes only the writes it settled.
+
+Each tab also takes up the writes another tab stores. A write queued in a tab that then closes is therefore still sent by a tab left open. Only one tab sends a match's writes at a time (and likewise a team's lineup, a court call or the tournament settings). A tab takes a lease for that match for the length of its send. It gives the lease up when the send ends or its page closes. The lease takes one of two forms:
+
+- Where the browser has Web Locks the lease is a lock, which the browser frees as soon as its tab closes or crashes.
+- Elsewhere (an older browser, or the app reached over plain http by its network address) the lease is a timed note in browser storage. The tab renews it every 2 s while it sends, and another tab may take it over 6 s after its last renewal, so a crashed tab gives it up.
+
+A tab that finds the match leased waits for the release, then sends what is left. So a write two tabs hold is sent once, and a match's writes go in one tab's order. A send repeated in rare cases, such as two tabs taking a lease in the same instant, is still harmless. The server orders writes by their stamps and recognises a repeated id (refer to [Order of writes](#order-of-writes)).
 
 ### Order of writes
 

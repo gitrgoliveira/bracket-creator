@@ -30,7 +30,14 @@ A kiken, fusenpai, or fusensho awards the winner the match points without a tech
 
 To undo a per-bout fusensho, tap the pressed **Fusensho** button again. The circles are removed and any point already scored stays. To correct a point the other side scored, tap that mark to remove it: the fusensho stays. **Fusensho** cannot be given to a side whose opponent has already won the bout with two points. The button is greyed out, and tapping it shows why. Clear those points first if the bout was not really won, undoing that opponent's own fusensho first if it has one.
 
-When a kiken, fusenpai, or fusensho decides a regular team match, every bout that has no result yet is also credited to the other team. Each of those bouts is 2-0: one individual victory and two points, the same figures a fusensho bout scores. This shows up wherever the match does: the individual victories and points totals, the standings, the bout rows, and the exported workbook. Bouts already fought keep their own results. Kachinuki encounters are unaffected, because they end on whichever bout the operator chooses, not on every position being filled.
+When a kiken, fusenpai, or fusensho decides a regular team match, every bout that has no result yet is also credited to the other team. Each of those bouts is 2-0: one individual victory and two points, the same figures a fusensho bout scores. This shows up wherever the match does:
+
+- the individual victories and points totals
+- the standings
+- the bout rows
+- the exported workbook
+
+Bouts already fought keep their own results. Kachinuki encounters are unaffected, because they end on whichever bout the operator chooses, not on every position being filled.
 
 ## Hikiwake
 
@@ -64,7 +71,13 @@ Everything else is a result, written beside the competitor it names:
 - **Fus.** next to a no-show
 - **Fus.** also next to the winner when the match itself was decided by a fusensho
 
-A match decided by hantei after a tied overtime reads **M Ht (E) K**, with the winner's mark on the winner's side of the centre. A team encounter shows its team totals in the score cell instead, so its marks sit where they happened. A bout's own mark appears on that bout's row wherever the bouts are shown, such as the score editor, the match's page on the public viewer and the court display. That mark is **X**, **(E)**, or **Ht** for a representative bout decided by the judges. A decision that settles the encounter is marked beside the team on the bracket and wherever the match is listed:
+A match decided by hantei after a tied overtime reads **M Ht (E) K**, with the winner's mark on the winner's side of the centre. A team encounter shows its team totals in the score cell instead, so its marks sit where they happened. A bout's own mark appears on that bout's row wherever the bouts are shown, such as:
+
+- the score editor
+- the match's page on the public viewer
+- the court display
+
+That mark is **X**, **(E)**, or **Ht** for a representative bout decided by the judges. A decision that settles the encounter is marked beside the team on the bracket and wherever the match is listed:
 
 - **Kiken** beside a team that withdrew
 - **Fus.** beside a team that did not appear
@@ -102,7 +115,11 @@ Chusen is the last resort when tied teams have played a round of daihyosen and t
 
 In a pool before a knockout, a daihyosen can be saved as a draw. It then shows a notice on the Pools tab, with **Fight it again** to play the bout once more. Once you record a chusen, the notice says your lots decide it, and the drawn bout no longer holds the pool. You can still use **Fight it again** or **Open bout** after that. The app first says the bout's result will replace the lots you entered for that place. It goes on only when you choose **Replace the lots**.
 
-When chusen is required, the **Pools** tab (labelled **League** for league competitions) shows a **"Chusen (drawing lots) required"** panel listing the tied teams. Draw lots offline, enter each team's finishing position in the panel, and record it to settle the order and let the competition advance.
+When chusen is required, the **Pools** tab (labelled **League** for league competitions) shows a **"Chusen (drawing lots) required"** panel listing the tied teams. To settle the order and let the competition advance:
+
+1. Draw lots offline.
+2. Enter each team's finishing position in the panel.
+3. Record it.
 
 In a competition with pools and then a knockout, the panel can also appear after the knockout has started, when a corrected pool result leaves a tie that only chusen can settle. The knockout match that the tied place feeds waits until you record the positions.
 
@@ -121,7 +138,12 @@ The app never draws the lots for you, and it never starts another round without 
 
 ### A tie-breaker neither side can fight
 
-Both sides of a tie-breaker, competitors or teams, may have withdrawn earlier, in a league or in a pool. The court operator then records it with **Record as drawn (neither can fight)**, a draw nobody fought. That draw settles nothing, and the choice is yours. Enter lots for that pair, or tap **Fight it again** on the drawn bout's notice, which puts the bout back on its shiai-jo. There it waits until both can fight, which may never happen, since only an injury kiken can be reinstated. While they cannot, the court can record it as drawn again, and the lots are offered again. The app forces neither path. If the bouts already gave each of the two a place of their own, the draw decides nothing and nothing is owed for it. The others in the same tie who can still fight, for example a circle of three, are still offered another round or lots. Their next round counts.
+Both sides of a tie-breaker, competitors or teams, may have withdrawn earlier, in a league or in a pool. The court operator then records it with **Record as drawn (neither can fight)**, a draw nobody fought. That draw settles nothing, and the choice is yours:
+
+- Enter lots for that pair.
+- Tap **Fight it again** on the drawn bout's notice, which puts the bout back on its shiai-jo. There it waits until both can fight, which may never happen, since only an injury kiken can be reinstated. While they cannot, the court can record it as drawn again, and the lots are offered again.
+
+The app forces neither path. If the bouts already gave each of the two a place of their own, the draw decides nothing and nothing is owed for it. The others in the same tie who can still fight, for example a circle of three, are still offered another round or lots. Their next round counts.
 
 ### Change a chusen recorded in the wrong order
 
@@ -135,7 +157,15 @@ A kiken or fusenpai marks the competitor who withdrew or did not appear as ineli
 
 ### Matches after a competitor is barred
 
-A barred competitor's other scheduled matches cannot be started, so the app steers everyone around them instead of leaving a dead entry in the queue. They are skipped by **Up next**, **Finish + Start Next**, the shiai-jo display's next line, the lobby view, and on-deck alerts. That way nobody is nudged to warm up for a bout that cannot be fought. On the public schedule, the pools, and the bracket, the barred competitor's name carries a **Withdrawn** mark.
+A barred competitor's other scheduled matches cannot be started, so the app steers everyone around them instead of leaving a dead entry in the queue. They are skipped by:
+
+- **Up next**
+- **Finish + Start Next**
+- the shiai-jo display's next line
+- the lobby view
+- on-deck alerts
+
+That way nobody is nudged to warm up for a bout that cannot be fought. On the public schedule, the pools, and the bracket, the barred competitor's name carries a **Withdrawn** mark.
 
 On the court console queue, the Scores tab, and the score editor, the match instead carries a note explaining why, for example "Kyoto withdrew: record the fusensho." It also carries a button naming the opponent, for example **Record fusensho for Sato**. One tap records the match as a fusensho for the opponent, without touching the barred competitor's eligibility record. For an injury kiken, a **Reinstate** button naming the barred competitor sits alongside it, restoring eligibility so the match can be fought instead. Once recorded, the match reads, for example, "Recorded: Fusensho for Sato. Kyoto had withdrawn." It offers a **Clear fusensho** action in case it was recorded by mistake. **Clear fusensho** reopens the match:
 
@@ -153,7 +183,10 @@ If both competitors due to meet are already barred, neither can fight. In a pool
 - a later fusenpai still carrying the withdrawal forward
 - the competitor being barred by a separate match entirely, for example an injury kiken that was reinstated and then a fresh kiken recorded on a different match
 
-The box then says the competitor is still withdrawn because of another match. It says so even though the match you are looking at still shows the old withdrawal. The later matches that were given a fusensho or fusenpai keep their own decision. Reopen each of them individually. A later fusensho always reopens with **Clear fusensho**: to the queue if the competitor is still barred elsewhere, or straight to in progress if not. A later fusenpai shows **Clear fusenpai** alone and goes to the queue while the earlier withdrawal still bars the competitor. That bar can go because the earlier match was cleared or because the competitor was reinstated. Once it is gone, the same button reads **Clear fusenpai and reopen** and puts the match straight back in progress.
+The box then says the competitor is still withdrawn because of another match. It says so even though the match you are looking at still shows the old withdrawal. The later matches that were given a fusensho or fusenpai keep their own decision. Reopen each of them individually:
+
+- A later fusensho always reopens with **Clear fusensho**: to the queue if the competitor is still barred elsewhere, or straight to in progress if not.
+- A later fusenpai shows **Clear fusenpai** alone and goes to the queue while the earlier withdrawal still bars the competitor. That bar can go because the earlier match was cleared or because the competitor was reinstated. Once it is gone, the same button reads **Clear fusenpai and reopen** and puts the match straight back in progress.
 
 ## Correcting a withdrawal recorded by mistake
 

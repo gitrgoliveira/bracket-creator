@@ -16,9 +16,13 @@ competitions only and works with every format (knockout, pools then knockout,
 league and Swiss). It is locked once the draw is generated.
 
 When Engi is ticked, **Competitors per side** appears under it with two
-choices. **Single competitors** is one person per side, for a solo kata such as
-iaido. **Two competitors (pairs)** is two people per side. Neither is picked
-until you choose, and the competition cannot be created or saved until you pick
+choices:
+
+- **Single competitors** is one person per side, for a solo kata such as
+  iaido.
+- **Two competitors (pairs)** is two people per side.
+
+Neither is picked until you choose, and the competition cannot be created or saved until you pick
 one. An Engi competition created before this choice existed holds pairs, and
 shows **Two competitors (pairs)** picked. The choice is locked with Engi once
 the draw is generated. To change it before the competition starts, discard the
@@ -32,9 +36,12 @@ not check names then. Such rows do not stop the draw, but applying a pasted list
 that contains any is refused.
 
 Engi is its own setting, independent of **Naginata competition**. Ticking
-**Naginata competition** does two things: it adds the Sune ippon button, which
-engi bouts never use, and it unticks **Award two joint 3rd places**. That
-setting decides whether the division awards two joint 3rd places or a single
+**Naginata competition** does two things:
+
+- It adds the Sune ippon button, which engi bouts never use.
+- It unticks **Award two joint 3rd places**.
+
+The **Award two joint 3rd places** setting decides whether the division awards two joint 3rd places or a single
 one decided by a bronze match. Refer to
 [Third-place match](naginata.md#third-place-match). A naginata engi-kyogi
 division usually ticks **Naginata competition** as well, for the single 3rd
@@ -80,11 +87,20 @@ Name, Dojo
 
 With zekken names on, the zekken column holds the competitor's own zekken.
 
-Every place that takes a name checks it against this setting. That covers the paste box and
-CSV import, the Add and Edit forms, the registration desk and the public
-sign-up form. A pair typed as `Name 1 - Name 2` is refused. Before the draw the
-message tells you to pick **Two competitors (pairs)** in Settings. After the
-draw, and on the public sign-up form, it asks for one name. A pair competition
+Every place that takes a name checks it against this setting:
+
+- The paste box and CSV import.
+- The Add and Edit forms.
+- The registration desk.
+- The public sign-up form.
+
+A pair typed as `Name 1 - Name 2` is refused. The message depends on when and
+where:
+
+- Before the draw, it tells you to pick **Two competitors (pairs)** in Settings.
+- After the draw, and on the public sign-up form, it asks for one name.
+
+A pair competition
 refuses a row with only one name. A hyphen inside a name, such as `Jean-Paul
 Martin`, is fine. A row you edit and leave with its name unchanged is saved
 without this check. A row that no longer fits can therefore still have its dojo or

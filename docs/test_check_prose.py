@@ -268,6 +268,12 @@ class SentenceLengthTest(unittest.TestCase):
         text = words(30)[:-1] + ' reads "Reset the password." ' + words(30)
         self.assertEqual(self.rules(text), [])
 
+    def test_a_colon_ends_a_sentence_but_not_inside_a_word(self):
+        text = words(30)[:-1] + ": " + words(30).lower()
+        self.assertEqual(self.rules(text), [])
+        text = words(30)[:-1] + " at 10:30 on https://example.com " + words(11).lower()
+        self.assertEqual(self.rules(text), [(1, "long-sentence")])
+
     def test_an_abbreviation_does_not_end_a_sentence(self):
         text = words(20)[:-1] + " e.g. " + words(21).lower()
         self.assertEqual(self.rules(text), [(1, "long-sentence")])

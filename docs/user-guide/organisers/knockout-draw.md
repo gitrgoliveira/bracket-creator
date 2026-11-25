@@ -30,7 +30,12 @@ A pool with more members than the smallest pool in the competition sends one add
 
 The [oversized-pool bye priority](#byes) does not apply under this option. Being oversized earns a pool's winner no priority for an ordinary bye; the extra qualifier is the pool's compensation instead.
 
-Requires **Winners per pool** set to 1. It works at any size, including a competition on a single shiai-jo. Where there is more than one shiai-jo, the extra qualifier is drawn onto a neighbouring one. Where there is only one, it stays in that shiai-jo's bracket but in the opposite half from its own pool's winner. Either way the two qualifiers from the same pool cannot meet before the final, and the extra qualifier always fights in the first round.
+Requires **Winners per pool** set to 1. It works at any size, including a competition on a single shiai-jo:
+
+- Where there is more than one shiai-jo, the extra qualifier is drawn onto a neighbouring one.
+- Where there is only one, it stays in that shiai-jo's bracket but in the opposite half from its own pool's winner.
+
+Either way the two qualifiers from the same pool cannot meet before the final, and the extra qualifier always fights in the first round.
 
 ### Fit the knockout
 
@@ -42,7 +47,16 @@ Pool sizes are chosen so that pool winners, plus a handful of drafted second pla
 
 The drafted second places come from your **seeded pools, in seed order**. A pool larger than the minimum can also supply one when there are not enough seeds. Seeding therefore does more under this option than place your favourites. It decides which pools send a second qualifier, and it can change how the pools are cut. A drafted second place is always placed in the opposite half of the bracket from its own pool's winner. The two can only meet again in the final.
 
-Requires **Winners per pool** set to 1. Some entrant counts cannot be built this way. Most often this is an unseeded competition whose pools cannot supply the drafted second places the bracket needs. It also happens for a small set of counts at four shiai-jo where the drafts cannot be split across the two halves of the bracket. If your entrant count hits this, the app explains what's wrong. Seeding one or two more pools, adding or removing one entrant, or changing the shiai-jo count resolves it.
+Requires **Winners per pool** set to 1. Some entrant counts cannot be built this way:
+
+- Most often this is an unseeded competition whose pools cannot supply the drafted second places the bracket needs.
+- It also happens for a small set of counts at four shiai-jo where the drafts cannot be split across the two halves of the bracket.
+
+If your entrant count hits this, the app explains what's wrong. Any one of these resolves it:
+
+- Seed one or two more pools.
+- Add or remove one entrant.
+- Change the shiai-jo count.
 
 ### Worked examples: how many qualify
 
@@ -107,7 +121,10 @@ From two qualifiers per pool upwards, a competition on fewer than four shiai-jo 
 
 A one-shiai-jo competition and a two-shiai-jo one with the same pools and the same number of qualifiers therefore get the same draw. They have the same first-round matches and the same byes. Against four shiai-jo the match is close but not exact. Pools are allocated to shiai-jo before the draw is built, and that allocation does not always divide the same way. Six, ten or fourteen pools split five and five across two shiai-jo but three, three, two and two across four. That puts a different pool in the first half.
 
-Two things limit the splitting. A block is only split again while every block would still hold two competitors on average. A block left holding a single competitor gets a bye whatever the order in [Byes](#byes) says. A bye handed out by the shape of the split, rather than chosen, is not one the draw should be creating. And the splitting is done by repeated halving rather than by cutting the pool list into four in one go. That way the two halves of the draw stay the ones a two-shiai-jo competition would have.
+Two things limit the splitting:
+
+- A block is only split again while every block would still hold two competitors on average. A block left holding a single competitor gets a bye whatever the order in [Byes](#byes) says. A bye handed out by the shape of the split, rather than chosen, is not one the draw should be creating.
+- The splitting is done by repeated halving rather than by cutting the pool list into four in one go. That way the two halves of the draw stay the ones a two-shiai-jo competition would have.
 
 At **one qualifier per pool** nothing is split at all. Nothing crosses between shiai-jo when each pool sends up a single competitor. There is no partner structure to imitate, so each shiai-jo's block is left whole. That also lets the bye be chosen from every pool winner on that shiai-jo rather than from whichever half the split happened to leave with an odd number.
 
@@ -141,7 +158,12 @@ The draw avoids opening a knockout with two competitors from the same dojo. Afte
 
 This matters most for a **Knockout only** competition. There is no pool phase to separate dojo-mates beforehand, and the draw follows the order your roster is in. Rosters are usually entered a dojo at a time, and without this the first round can be almost entirely dojo against dojo.
 
-Two things it never does. It does not move a **seeded** competitor. Seed places are worked out from the ranks you set, and a shared dojo is not a reason to override them. It does not force an exchange that would create the same problem somewhere else. Where the draw is too tight to fix a pairing, the pairing stands. In a **Pools + Knockout** competition the pools have already spread each dojo. There is usually nothing left to correct by the time the bracket is drawn. Refer to [The pool draw](pool-draw.md) for how that spreading works.
+Two things it never does:
+
+- It does not move a **seeded** competitor. Seed places are worked out from the ranks you set, and a shared dojo is not a reason to override them.
+- It does not force an exchange that would create the same problem somewhere else. Where the draw is too tight to fix a pairing, the pairing stands.
+
+In a **Pools + Knockout** competition the pools have already spread each dojo. There is usually nothing left to correct by the time the bracket is drawn. Refer to [The pool draw](pool-draw.md) for how that spreading works.
 
 ## Competitor numbers
 

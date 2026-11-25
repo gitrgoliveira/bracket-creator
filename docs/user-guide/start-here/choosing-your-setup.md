@@ -1,6 +1,11 @@
 # Choosing your setup
 
-Two questions shape every tournament you run with bracket-creator. First, how digital your venue is. You might print and score on paper, keep one device per shiai-jo, or run fully on-screen scoreboards with real-time mobile pages. Second, who runs and scores the matches: trained staff behind an admin password (officiated) or competitors scoring their own bouts with no password required (self-run). You choose each one separately, with one constraint described under [Operating model](#operating-model).
+Two questions shape every tournament you run with bracket-creator:
+
+- How digital your venue is. You might print and score on paper, keep one device per shiai-jo, or run fully on-screen scoreboards with real-time mobile pages.
+- Who runs and scores the matches: trained staff behind an admin password (officiated) or competitors scoring their own bouts with no password required (self-run).
+
+You choose each one separately, with one constraint described under [Operating model](#operating-model).
 
 ## Digitisation level
 
@@ -12,7 +17,12 @@ How far you digitise determines which surfaces you use on the day. The same tool
 
 ## Operating model
 
-The operating model controls who can record scores and advance matches. In **officiated** mode, staff authenticate with the admin password and run every match. In **self-run** mode, competitors report their own results with no password. Refer to [Operating modes](../organisers/operating-modes.md) for the full rules on both models, including guidance on when to choose each one. Self-run needs the tournament app, so it requires at least the partially connected level. An officiated event can run at any level, including fully offline.
+The operating model controls who can record scores and advance matches:
+
+- In **officiated** mode, staff authenticate with the admin password and run every match.
+- In **self-run** mode, competitors report their own results with no password.
+
+Refer to [Operating modes](../organisers/operating-modes.md) for the full rules on both models, including guidance on when to choose each one. Self-run needs the tournament app, so it requires at least the partially connected level. An officiated event can run at any level, including fully offline.
 
 ## Choose by how you run the day
 

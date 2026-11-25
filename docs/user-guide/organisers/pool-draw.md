@@ -20,7 +20,12 @@ The draw itself is deterministic: the same entrants, in the same order, with the
 
 Where the differently sized pools end up on the sheet is decided by the shiai-jo arrangement in [Pools onto shiai-jo](#pools-onto-shiai-jo), not by size. Do not expect the larger pools to be listed first.
 
-Two settings are refused rather than drawn. A minimum pool size larger than the entrant count cannot form a single pool. A **Pools + Knockout** competition whose entrants would form only one pool is refused when you start it. One pool with a two-competitor final is a league in all but name. Both refusals name the entrant count and the pool size. Both are resolved the same way: reduce the pool size, add entrants, or change the format to League.
+Two settings are refused rather than drawn:
+
+- A minimum pool size larger than the entrant count cannot form a single pool.
+- A **Pools + Knockout** competition whose entrants would form only one pool is refused when you start it. One pool with a two-competitor final is a league in all but name.
+
+Both refusals name the entrant count and the pool size. Both are resolved the same way: reduce the pool size, add entrants, or change the format to League.
 
 The **Fit the knockout** qualifier option chooses its own pool count so that the qualifiers fill the bracket exactly. Refer to [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool). Which pool each competitor lands in still follows the rules in [Who lands in which pool](#who-lands-in-which-pool).
 
@@ -34,7 +39,14 @@ With more seeded ranks than pools, the extra seed takes the next pool with room 
 
 The dojo is the only thing the draw keeps apart. Sharing a name is not a conflict. Two competitors can share a name only when their dojos differ. A second entry with both the same name and the same dojo is refused as a duplicate of the same person. Namesakes are two different people, and they may fight in the same pool. The sheet tells them apart by dojo and by competitor number.
 
-Once every competitor has a pool, the draw examines the finished result and exchanges competitors between pools where that keeps dojos apart longer, and only then. An exchange is taken only when it helps. A dojo's first meeting against a pool's own winner may never get earlier because of one. Pool sizes never change, and a seeded competitor is never moved. Where a second qualifier's crossing is involved, described below, keeping that meeting apart is a best effort rather than a guarantee. An exchange may occasionally let one such meeting move earlier, when doing so still leaves every winner-path meeting the same or later. On a roster where no dojo can be kept apart any better, the pools come out exactly as placed.
+Once every competitor has a pool, the draw examines the finished result and exchanges competitors between pools where that keeps dojos apart longer, and only then. Every exchange keeps to these rules:
+
+- An exchange is taken only when it helps.
+- A dojo's first meeting against a pool's own winner may never get earlier because of one.
+- Pool sizes never change.
+- A seeded competitor is never moved.
+
+Where a second qualifier's crossing is involved, described below, keeping that meeting apart is a best effort rather than a guarantee. An exchange may occasionally let one such meeting move earlier, when doing so still leaves every winner-path meeting the same or later. On a roster where no dojo can be kept apart any better, the pools come out exactly as placed.
 
 ### Watch a draw being made
 
@@ -58,7 +70,10 @@ Setting seeds does not cost you any of this. Seeds take their places first, exac
 
 Keeping dojo-mates out of one pool is only half the job. Two members of one dojo in different pools can still be drawn to meet in the very first knockout match, if their pools feed neighbouring slots. Because every placement is made against the knockout tree, the draw pushes that first dojo-mate meeting as late as the bracket allows. In particular, it keeps that meeting out of the first round wherever any arrangement of the pools could.
 
-With two qualifiers per pool the second place crosses to a partner region. A crossed second meeting a dojo-mate there is chance the draw cannot rule out. It still makes a best effort. Where two pools serve a competitor equally well, the draw prefers the one whose crossing lands its qualifiers furthest from the rest of the dojo. Beyond that, the limits are the sheet's own arithmetic, and they are worth knowing at the desk. When a dojo's members qualify from pools that must feed neighbouring slots, because the pool counts leave no alternative, the early meeting stands. When several dojos compete for the same few well-separated pool pairs, not every dojo can have one. The draw then settles the contest in favour of as few early meetings as possible overall.
+With two qualifiers per pool the second place crosses to a partner region. A crossed second meeting a dojo-mate there is chance the draw cannot rule out. It still makes a best effort. Where two pools serve a competitor equally well, the draw prefers the one whose crossing lands its qualifiers furthest from the rest of the dojo. Beyond that, the limits are the sheet's own arithmetic, and they are worth knowing at the desk:
+
+- When a dojo's members qualify from pools that must feed neighbouring slots, because the pool counts leave no alternative, the early meeting stands.
+- When several dojos compete for the same few well-separated pool pairs, not every dojo can have one. The draw then settles the contest in favour of as few early meetings as possible overall.
 
 ## Pools onto shiai-jo
 

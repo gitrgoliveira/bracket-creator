@@ -56,7 +56,16 @@ Some organiser actions are sent directly and are not held for later:
 
 If the connection is down when you tap one of these, the app says "No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing." Once the connection is back, check the participant list, seed or settings you changed. Repeat the action only if the change is missing.
 
-Scores, lineups, check-in, announcements and court calls, tournament settings and fighting-spirit awards are held on the device instead. They are sent when the connection returns. A password change waits for tournament settings saves still held on this device. **Change the password now** asks you to confirm first.
+These changes are held on the device instead, and sent when the connection returns:
+
+- Scores.
+- Lineups.
+- Check-in.
+- Announcements and court calls.
+- Tournament settings.
+- Fighting-spirit awards.
+
+A password change waits for tournament settings saves still held on this device. **Change the password now** asks you to confirm first.
 
 ## Dashboard
 
@@ -66,7 +75,13 @@ The dashboard lists all competitions for the tournament. Each card shows the com
 
 ## Backup and restore
 
-Click **Backup and restore** on the dashboard to save or restore tournament data. Take a backup before the event starts, after each round finishes, and before a risky correction. You can download an archive of the entire tournament or an individual competition. You can also review restore plans before applying changes, and undo a restore if needed. The server also takes daily backup copies automatically when data changes.
+Click **Backup and restore** on the dashboard to save or restore tournament data. Take a backup at these times:
+
+- Before the event starts.
+- After each round finishes.
+- Before a risky correction.
+
+You can download an archive of the entire tournament or an individual competition. You can also review restore plans before applying changes, and undo a restore if needed. The server also takes daily backup copies automatically when data changes.
 
 Refer to [Backup and restore](backup-and-restore.md) for the complete guide on taking archives, making restore choices, and managing safety copies.
 
@@ -81,9 +96,16 @@ Open **Edit details** from the dashboard to fill in the public information your 
 - Contact entries
 - In an officiated tournament, **Competitor names on public pages**: what the public sees for a competitor's name, and the starting choice for new competitions. Saving a new choice also sets every competition except a Swiss one. You first confirm the list of competitions it will change. Refer to [Hide competitor names from the public](hide-competitor-names.md).
 
-Set the **Public URL** field to the externally reachable address of your app (for example, `https://my-tournament.example.com`). Setting this field enables QR codes on competitor tags and makes every shareable link work. The public URL also populates the public info page in the viewer and on spectator display screens.
+Set the **Public URL** field to the externally reachable address of your app (for example, `https://my-tournament.example.com`). Setting this field has three effects:
 
-Save closes the form at once. If the details were saved on another device after you opened them, the save is refused when it reaches the server. An alert then says "Tournament settings were not saved: they were changed on another device. Open them and save again." The app then shows the current details. You may have opened **Edit details** again by then. In that case the form says "Not saved: the tournament details changed somewhere else after you opened this page (another screen or device). Reload to see the current details, then make your change again." It keeps what you typed, and **Reload** shows the current details.
+- It enables QR codes on competitor tags.
+- It makes every shareable link work.
+- It populates the public info page in the viewer and on spectator display screens.
+
+Save closes the form at once. If the details were saved on another device after you opened them, the save is refused when it reaches the server. What you see then depends on whether you opened the form again:
+
+- If you did not, an alert says "Tournament settings were not saved: they were changed on another device. Open them and save again." The app then shows the current details.
+- If you have opened **Edit details** again by then, the form says "Not saved: the tournament details changed somewhere else after you opened this page (another screen or device). Reload to see the current details, then make your change again." It keeps what you typed, and **Reload** shows the current details.
 
 Lowering the number of shiai-jo is refused while a competition that has not finished still uses one you would remove. The alert names it. To go ahead, take that shiai-jo out of the competition's **Assigned shiaijo (courts)** first. That field locks once the draw is generated. Discard the draw to change it, or, once the competition has started, wait until it finishes.
 
@@ -106,9 +128,18 @@ While any competition hides competitor names, the announcement box carries a sho
 
 Posting the same text again while it is still showing replaces the banner rather than adding a second one. Viewers see one message, and its time starts again from the full duration.
 
-A court call, made with **Call to court** on the court console, is announced the same way. It disappears once the match starts, or is closed with a decision such as a fusensho, from any device. This works as long as the court console that made the call is still open, even if another console called the same match again meanwhile. If that console was closed or reloaded meanwhile, the call stays up until its five minutes run out.
+A court call, made with **Call to court** on the court console, is announced the same way. It disappears once the match starts, or is closed with a decision such as a fusensho, from any device. That depends on the court console that made the call:
 
-An announcement, a court call, a dismissal (the × beside an active announcement) or **Clear all** made while the connection is down is held on the device. It is sent when the connection returns, so there is no need to click **Send announcement** or **Call to court** again. A held announcement or call may be over by the time it arrives. The page that made it, if still open, then says "That announcement did not go out: its N minutes ran out before it reached the server." It says "court call" for a court call, whose time is always 5 minutes. You can send it again. A held call counts its time from the moment it was made. One with a little time left when it arrives shows for at least a minute so players can read it. A call you withdrew while it was still held is never shown. Calling the same match twice while offline still shows one banner.
+- If that console is still open, the call disappears, even if another console called the same match again meanwhile.
+- If that console was closed or reloaded meanwhile, the call stays up until its five minutes run out.
+
+An announcement, a court call, a dismissal (the × beside an active announcement) or **Clear all** made while the connection is down is held on the device. It is sent when the connection returns, so there is no need to click **Send announcement** or **Call to court** again. A held announcement or call follows these rules:
+
+- It may be over by the time it arrives. The page that made it, if still open, then says "That announcement did not go out: its N minutes ran out before it reached the server." It says "court call" for a court call, whose time is always 5 minutes. You can send it again.
+- A held call counts its time from the moment it was made.
+- One with a little time left when it arrives shows for at least a minute so players can read it.
+- A call you withdrew while it was still held is never shown.
+- Calling the same match twice while offline still shows one banner.
 
 ## Registration desk
 
@@ -128,9 +159,12 @@ A competition moves through three phases:
 
 The **Settings** tab offers the same controls as the form you used to create the
 competition, so anything you chose at creation you can revisit later. That
-includes **Competition type** (individual or team), **Format**, and, for
-**Pools + Knockout**, **Who fights whom** (refer to [Mixed](formats.md#mixed) for
-its two choices).
+includes:
+
+- **Competition type** (individual or team).
+- **Format**.
+- For **Pools + Knockout**, **Who fights whom** (refer to
+  [Mixed](formats.md#mixed) for its two choices).
 
 Three rules govern when a setting stops being editable:
 
@@ -170,7 +204,12 @@ On a drawn competition, a **Date** or **Start time** change moves its matches. R
 
 The competition **Settings** page has an **Assigned shiaijo (courts)** field listing every shiai-jo in the venue. Pick the ones this competition runs on. The number you pick is how many of its matches can run at the same time.
 
-Assign **1, 2, 4, 8 or 16 shiai-jo**. The knockout draw gives each shiai-jo its own block of the bracket, and the blocks merge in pairs. The count therefore has to halve cleanly all the way down. Being even is not enough on its own. Six blocks pair off into three, and three cannot pair off again, so 6 and 10 are refused just as 3, 5 and 7 are. When you pick a count the rule does not allow, the settings page names the counts to use instead. It always offers 1. A single shiai-jo is always allowed. Where a competition sends two or more qualifiers up from each pool, its bracket splits into two half-blocks that act as partner shiai-jo. The draw then has the same shape as a two-shiai-jo one. Where each pool sends up a single competitor, nothing crosses between shiai-jo, and the bracket is left whole. 16 is the highest, and it is also the most shiai-jo a tournament can have. Every shiai-jo you can add is therefore one a competition could be given. Refer to [The knockout draw](knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
+Assign **1, 2, 4, 8 or 16 shiai-jo**. The knockout draw gives each shiai-jo its own block of the bracket, and the blocks merge in pairs. The count therefore has to halve cleanly all the way down. Being even is not enough on its own. Six blocks pair off into three, and three cannot pair off again, so 6 and 10 are refused just as 3, 5 and 7 are. When you pick a count the rule does not allow, the settings page names the counts to use instead. It always offers 1. A single shiai-jo is always allowed. How its bracket splits depends on how many each pool sends up:
+
+- Where a competition sends two or more qualifiers up from each pool, its bracket splits into two half-blocks that act as partner shiai-jo. The draw then has the same shape as a two-shiai-jo one.
+- Where each pool sends up a single competitor, nothing crosses between shiai-jo, and the bracket is left whole.
+
+16 is the highest, and it is also the most shiai-jo a tournament can have. Every shiai-jo you can add is therefore one a competition could be given. Refer to [The knockout draw](knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
 
 **This is a rule about each competition, never about your venue.** A hall with three shiai-jo is completely normal, and nothing asks you to change it. What it means is that each competition there runs on 1 or 2 of the three, not that the third stands idle. Run the seniors on 2 shiai-jo and the juniors on the remaining 1 at the same time, and all three are busy. A five shiai-jo hall works the same way. Run one competition on 4 and another on 1, or two competitions of 2 alongside a third on 1.
 
@@ -190,7 +229,13 @@ So assign a count the competition can fill, and give the rest to another competi
 
 You can meet this after an upgrade, because the rule is newer than the data folder. A competition set up on 3, 5 or 6 shiai-jo before the rule existed keeps that allocation on disk. So does one whose data folder was edited by hand.
 
-Such a competition is not broken. It loads, and its matches and results are intact. It appears to spectators as usual, and its Settings page stays fully editable. Renaming it or changing anything else on that page still saves normally. The page carries a standing warning naming the counts to use instead.
+Such a competition is not broken:
+
+- It loads, and its matches and results are intact.
+- It appears to spectators as usual.
+- Its Settings page stays fully editable. Renaming it or changing anything else on that page still saves normally.
+
+The page carries a standing warning naming the counts to use instead.
 
 What you cannot do is draw or start it. **Generate draw** and **Start competition** are disabled with the reason shown. The app also refuses the same action from anywhere else. This lasts until you reassign its shiai-jo to 1, 2, 4, 8 or 16.
 
@@ -198,7 +243,10 @@ What you cannot do is draw or start it. **Generate draw** and **Start competitio
 
 For a **Pools + Knockout** competition with **Pool size is a** set to **minimum**, a **Knockout qualifiers** control appears alongside **Players per pool** and **Winners per pool**. It appears on both the competition create form and its Settings page. It offers three options: **Standard** (every pool sends the same number of qualifiers), **Oversized send +1**, and **Fit the knockout**. Refer to [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool) for what each one does, with worked examples.
 
-Selecting either of the two non-standard options sets **Winners per pool** to 1 and disables the field, because both require it. Switching back to Standard makes the field editable again. Below the options, a preview line updates as you adjust pool size and roster. It reads something like "34 pools -> 36 qualifiers -> 64-slot knockout (28 byes)" for whichever option is selected. On the create form the preview is a placeholder until the competition has participants. On the Settings page it previews against the real roster. There it is locked once the competition reaches `draw-ready`, alongside the rest of the pool configuration.
+Selecting either of the two non-standard options sets **Winners per pool** to 1 and disables the field, because both require it. Switching back to Standard makes the field editable again. Below the options, a preview line updates as you adjust pool size and roster. It reads something like "34 pools -> 36 qualifiers -> 64-slot knockout (28 byes)" for whichever option is selected. The preview depends on where you see it:
+
+- On the create form the preview is a placeholder until the competition has participants.
+- On the Settings page it previews against the real roster. There it is locked once the competition reaches `draw-ready`, alongside the rest of the pool configuration.
 
 ### Adding participants
 
@@ -209,11 +257,19 @@ The **Participant list** panel (labelled **Team list** for team competitions) co
 - Without display name: `Name, Dojo[, Dan grade]`
 - With display name (zekken): `Name, Zekken display name, Dojo[, Dan grade]`
 
-Click **Paste clipboard** to read a tab-separated selection from the clipboard and convert it automatically. Click **Apply changes** to save the list. The box clears once the list is saved. The box is for a new or replacement list, not a copy of the saved roster. Applying while a roster already exists asks you to confirm, because the new list replaces the current one. A competitor or team matched to one already on the roster, by name and dojo, keeps their id and seed. For a team, their team members and lineups are kept too. Anyone not in the new list is removed. While the competition is still in setup, a removed team's members and lineups are deleted with it.
+Click **Paste clipboard** to read a tab-separated selection from the clipboard and convert it automatically. Click **Apply changes** to save the list. The box clears once the list is saved. The box is for a new or replacement list, not a copy of the saved roster. Applying while a roster already exists asks you to confirm, because the new list replaces the current one. The new list is matched against the roster:
+
+- A competitor or team matched to one already on the roster, by name and dojo, keeps their id and seed. For a team, their team members and lineups are kept too.
+- Anyone not in the new list is removed. While the competition is still in setup, a removed team's members and lineups are deleted with it.
 
 Applying the list gives every competitor a participant id. The id is not shown on the row. The **Overview** names any competitor still without one. Competitor numbers come later: every competition numbers its competitors when the draw is generated. A pooled competition is numbered pool by pool, and a knockout-only one down the bracket. Nothing is shown before that. Refer to [Competitor numbers](pool-draw.md#competitor-numbers). A competition saved by an earlier version of the app may have a list with no ids. Its **Overview** then shows a notice naming the competitors: apply the list once to assign them. The draw does not run until every competitor has an id.
 
-Two more notices can appear on the **Overview** for the same reason, once a competition has drawn. The app tries to repair these automatically, behind the scenes, the next time it reads the competition's data. Saving the participant list again lets it try once more. It matches a pool member to a participant by name and dojo together. When the row records no dojo and only one competitor has that name, it matches by name alone. It matches a match side by name alone, because a match row only records a name. A notice remains only for a row it could not match this way:
+Two more notices can appear on the **Overview** for the same reason, once a competition has drawn. The app tries to repair these automatically, behind the scenes, the next time it reads the competition's data. Saving the participant list again lets it try once more. It matches in two ways:
+
+- It matches a pool member to a participant by name and dojo together. When the row records no dojo and only one competitor has that name, it matches by name alone.
+- It matches a match side by name alone, because a match row only records a name.
+
+A notice remains only for a row it could not match this way:
 
 - A notice naming pool members with no id. The app could not match that member to a participant on the current roster (for example, the roster changed after the draw was made). That competitor shows no competitor number. Regenerate the draw, while it is still draw-ready, to fix it.
 - A notice naming pool matches with no id on a side or a winner. The app could not match that side automatically, most often because two competitors share the same name. That match is not counted in the standings. Re-entering the result assigns a missing winner id. Regenerating the draw, while it is still draw-ready, restores a missing side id.
@@ -240,15 +296,26 @@ Click the pencil icon on any row to open the edit modal for that competitor. You
 
 Enable **Check-in tracking** in **Settings** for the competition. Competitors are checked in at the [Registration desk](#registration-desk), which works across every competition. The Ordering & seeding panel carries no check-in controls. Self-run mode has no check-in: the setting is not offered and the draw includes every participant on the roster ([operating modes](operating-modes.md)).
 
-The check-in rule is opt-in. When you click **Generate draw** and at least one participant is checked in, only checked-in participants join the draw. Unchecked participants are excluded, and their seeds are dropped. If nobody is checked in, everyone is included.
+The check-in rule is opt-in. When you click **Generate draw**:
+
+- If at least one participant is checked in, only checked-in participants join the draw. Unchecked participants are excluded, and their seeds are dropped.
+- If nobody is checked in, everyone is included.
 
 #### Checking in while the connection is down
 
 The desk keeps working when the venue connection drops. A tap on a competitor, or on **Check in all**, shows on the row at once and is held on the device. It is sent in the order you tapped when the connection returns. The bar at the top of every admin page counts what is still held, as it does for scores.
 
-Two desks can check in the same competitor. If one desk checked someone in and another desk then took the check-in back, the later tap wins. The losing tap may reach the server after the later one. That desk is then told in one line, for example "Aiko Tanaka was changed on another desk: now not checked in." Its row shows the result that stands. Otherwise its row updates.
+Two desks can check in the same competitor. If one desk checked someone in and another desk then took the check-in back, the later tap wins. The desk that made the losing tap sees one of two things:
 
-**Generate draw** waits for check-ins this device still holds, so the draw is made from the roster this device shows. Check-ins still held on a separate desk device are not counted. Check that the desk shows nothing held first. While any are held, the screen reads, for example, "Waiting for 3 check-ins to be sent. The draw is made once they arrive." The draw is made on its own when the last one arrives. Two buttons are offered meanwhile: **Cancel** leaves the competition in setup, and **Generate now anyway** makes the draw at once. Its confirmation says that the competitors whose check-ins have not arrived are left out of the draw. When the server holds no check-in for the competition, it says instead: "The server holds no check-in for this competition, so a draw made now includes every competitor." The same wait applies to **Start competition** on a competition that is still in setup, and to **Start all** on the dashboard. On both, the button reads **Start now anyway**. If the connection stays down, reconnect, or choose **Generate now anyway**. An item the server keeps refusing is named on the waiting screen with **Discard**.
+- If its tap reaches the server after the later one, that desk is told in one line, for example "Aiko Tanaka was changed on another desk: now not checked in." Its row shows the result that stands.
+- Otherwise its row updates.
+
+**Generate draw** waits for check-ins this device still holds, so the draw is made from the roster this device shows. Check-ins still held on a separate desk device are not counted. Check that the desk shows nothing held first. While any are held, the screen reads, for example, "Waiting for 3 check-ins to be sent. The draw is made once they arrive." The draw is made on its own when the last one arrives. Two buttons are offered meanwhile:
+
+- **Cancel** leaves the competition in setup.
+- **Generate now anyway** makes the draw at once. Its confirmation says that the competitors whose check-ins have not arrived are left out of the draw. When the server holds no check-in for the competition, it says instead: "The server holds no check-in for this competition, so a draw made now includes every competitor."
+
+The same wait applies to **Start competition** on a competition that is still in setup, and to **Start all** on the dashboard. On both, the button reads **Start now anyway**. If the connection stays down, reconnect, or choose **Generate now anyway**. An item the server keeps refusing is named on the waiting screen with **Discard**.
 
 ### Draw preview
 
@@ -288,7 +355,12 @@ Two or more competitors can be level on every ranking criterion. The app then sc
 
 A tie wholly below them gets no bout and shares its place.
 
-Until the bouts are scored, the tied competitors share one place, shown as **=2nd** for a tie over second place. The pool's qualifiers are not yet seated in the bracket. A tie that runs across the advancing line leaves none of them with the advancing mark. A tie inside the advancing places, such as two competitors level for first, reads **=1st** and keeps it. Once the bouts are scored, each takes their own place.
+Until the bouts are scored, the tied competitors share one place, shown as **=2nd** for a tie over second place. The pool's qualifiers are not yet seated in the bracket. Where the tie lies decides the advancing mark:
+
+- A tie that runs across the advancing line leaves none of them with the advancing mark.
+- A tie inside the advancing places, such as two competitors level for first, reads **=1st** and keeps it.
+
+Once the bouts are scored, each takes their own place.
 
 When the bouts do not settle it:
 
@@ -303,21 +375,23 @@ Pool finishers move into the knockout bracket on their own. As soon as a pool's 
 
 ![The Bracket tab of a knockout of ten competitors, part-way through. The first column holds only the two first-round bouts, M1 and M2; everyone else first appears in a quarterfinal. M1 to M4 are scored, each winner ticked and joined to the row they fill. Quarterfinal M5 is marked NOW, the winners of M3 and M4 already face each other in semifinal M7, and the Final waits for the winners of M7 and M8.](../../screenshots/knockout-bracket-in-play.png)
 
-For the four competition formats and the Swiss round-by-round flow, refer to [Formats](formats.md).
+Other pages cover the rest of match play:
 
-For team lineups and team scoring rules, refer to [Team tournaments](team-tournaments.md).
-
-For how to enter scores and navigate between matches, refer to [Score a match](../court-operators/scoring-a-match.md).
-
-For kiken, fusenpai, daihyosen, and other special decisions, refer to [Recording decisions](../court-operators/recording-decisions.md).
-
-For naginata divisions, refer to [Naginata](naginata.md); for a kata competition in any art, refer to [Engi](engi.md).
+- For the four competition formats and the Swiss round-by-round flow, refer to [Formats](formats.md).
+- For team lineups and team scoring rules, refer to [Team tournaments](team-tournaments.md).
+- For how to enter scores and navigate between matches, refer to [Score a match](../court-operators/scoring-a-match.md).
+- For kiken, fusenpai, daihyosen, and other special decisions, refer to [Recording decisions](../court-operators/recording-decisions.md).
+- For naginata divisions, refer to [Naginata](naginata.md); for a kata competition in any art, refer to [Engi](engi.md).
 
 ## Results and awards
 
 The public viewer shows a competition's podium when it finishes, and a provisional ranking while it is still in progress.
 
-A knockout or pools-then-knockout competition finishes when you tap **Complete competition** on its page. The button appears once every bracket match, the bronze match included when there is one, has been played. Completing cannot be undone. A league finishes by itself after its last match and any tie-breakers (refer to [Ties in a league](team-tournaments.md#ties-in-a-league)). A finished league can still be corrected, and the app warns first. If the correction leaves a new tie that needs a tie-breaker, the league goes back to match play. A Swiss competition has no **Complete competition** button. After its last round, its organiser page shows a **Competition complete** notice and a link to the final standings. The public viewer also shows those standings.
+How a competition finishes depends on its format:
+
+- A knockout or pools-then-knockout competition finishes when you tap **Complete competition** on its page. The button appears once every bracket match, the bronze match included when there is one, has been played. Completing cannot be undone.
+- A league finishes by itself after its last match and any tie-breakers (refer to [Ties in a league](team-tournaments.md#ties-in-a-league)). A finished league can still be corrected, and the app warns first. If the correction leaves a new tie that needs a tie-breaker, the league goes back to match play.
+- A Swiss competition has no **Complete competition** button. After its last round, its organiser page shows a **Competition complete** notice and a link to the final standings. The public viewer also shows those standings.
 
 The **Award two joint 3rd places** setting is on the competition's Settings tab. It controls whether a competition awards two joint 3rd places or decides a single one with a bronze match. It is on by default (the standard kendo convention). It applies to knockout, pools-then-knockout, and league competitions. It is not shown for Swiss, which has no bracket and no bronze match. Naginata competitions default the setting off (a single 3rd, decided by a bronze match). You can turn it back on for a naginata competition too. You can also turn it off for a kendo competition that needs a single 3rd, for example a selection event with one bronze medal. Refer to [Naginata](naginata.md#third-place-match) for the bronze match itself.
 
@@ -325,7 +399,10 @@ The **Award two joint 3rd places** setting is on the competition's Settings tab.
 - **Knockout with joint 3rds off**: a single 3rd place is decided by a bronze match.
 - **Pools + Knockout** (still in its pool phase): the viewer shows a provisional cross-pool ranking until the knockout decides the final places.
 
-Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text. These appear on the viewer for all spectators. Saving awards is an organiser action, so it needs the admin password in self-run mode too. Refer to [Operating modes](operating-modes.md#self-run-mode). If the awards were saved on another device after you opened them, your save is refused. The list says "Not saved: the awards changed somewhere else after you opened this list (another screen or device). Reload to see the current awards, then make your change again." It keeps what you typed, and **Reload** shows the current awards. If the list is closed by the time a held save is refused, an alert says "The fighting-spirit awards were not saved: they were changed on another device. Open them and save again."
+Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text. These appear on the viewer for all spectators. Saving awards is an organiser action, so it needs the admin password in self-run mode too. Refer to [Operating modes](operating-modes.md#self-run-mode). If the awards were saved on another device after you opened them, your save is refused:
+
+- If the list is still open, it says "Not saved: the awards changed somewhere else after you opened this list (another screen or device). Reload to see the current awards, then make your change again." It keeps what you typed, and **Reload** shows the current awards.
+- If the list is closed by the time a held save is refused, an alert says "The fighting-spirit awards were not saved: they were changed on another device. Open them and save again."
 
 **League competitions** derive the podium from final standings. Of the podium places, only 3rd can be shared. A tie for 1st or 2nd place is always settled by a tie-breaker with a winner. A tie for 3rd place follows **Award two joint 3rd places**. In an individual league the app schedules the ippon-shobu tie-breaker itself. In a team league you run it from the League tab. Refer to [Ties in a league](team-tournaments.md#ties-in-a-league) for the full rule and for lots, and to [Ties between competitors](engi.md#ties-between-competitors) for Engi.
 
@@ -340,13 +417,23 @@ Two Excel downloads are available from the competition's **Export & print** tab:
 - **Download blank template (.xlsx)**: always offered. An empty bracket workbook with linked formulas for hand scoring at events without a network connection. Once the draw is generated, it holds that draw, the same one Export PDFs prints. Checking someone in or out never changes a draw already generated.
 - **Download results (.xlsx)**: shown once a result is recorded, meaning a match is running or finished. A bye the draw resolved by itself does not count. A workbook with played scores, pool standings, winners, and decisions filled in. Covers pools, league, and knockout formats. Swiss competitions have no static bracket; follow the current standings instead.
 
-The results workbook keeps the scores and decisions as values. The pool standings (wins, losses, ties and points, or the team columns), the Rank column and the Ranking lists stay live formulas over those scores. You can therefore check the sheet against the app. Where the sheet's own rank would differ from the app's, the workbook writes the app's rank and ranking as values instead. A note beside the Ranking says why. That happens when a chusen, a tie-break bout or a representative bout decided the pool's order, or when competitors are level on every count. A pool decided by kiken, fusenpai or hantei is ranked by what the formulas count for that result. That can differ from the app, so check such a pool against the app.
+The results workbook keeps the scores and decisions as values. The pool standings (wins, losses, ties and points, or the team columns), the Rank column and the Ranking lists stay live formulas over those scores. You can therefore check the sheet against the app. Where the sheet's own rank would differ from the app's, the workbook writes the app's rank and ranking as values instead. A note beside the Ranking says why. That happens in two cases:
+
+- A chusen, a tie-break bout or a representative bout decided the pool's order.
+- Competitors are level on every count.
+
+A pool decided by kiken, fusenpai or hantei is ranked by what the formulas count for that result. That can differ from the app, so check such a pool against the app.
 
 Every Names to Print sheet opens with one page of three tags holding the competition's name. This holds in both workbooks and in the name sheets of Export PDFs. The tags are to cut out and glue on the scoreboard, one for each side. The competitors' name tags follow from the next page. A shiai-jo may have no Names to Print sheet, because nobody on it has a name to print (a shiai-jo that runs only knockout bouts). It gets no tags, and the blank template has none either.
 
 #### Before the draw
 
-A competition with no draw yet can still be downloaded. The tab says so, and the template it gives is blank. It holds only empty places, with no names, seeds or numbers. The places are in the layout the draw would print for that many entrants (the competition's pool size, qualifiers and courts, or the knockout bracket for knockout only). The number of places is the larger of two counts. One is the [**Expected participants**](#expected-participants-and-the-estimate-on-a-new-competition) set in the competition's Settings. The other is everyone registered, whether or not they are checked in. Type names into the workbook's data sheet and they flow through every sheet. The template is a layout to print or hand-fill, so it can differ from the draw you generate later. The draw may have a different number of competitors. It also places seeds and spreads dojos, which the blank layout cannot know.
+A competition with no draw yet can still be downloaded. The tab says so, and the template it gives is blank. It holds only empty places, with no names, seeds or numbers. The places are in the layout the draw would print for that many entrants (the competition's pool size, qualifiers and courts, or the knockout bracket for knockout only). The number of places is the larger of two counts:
+
+- The [**Expected participants**](#expected-participants-and-the-estimate-on-a-new-competition) set in the competition's Settings.
+- Everyone registered, whether or not they are checked in.
+
+Type names into the workbook's data sheet and they flow through every sheet. The template is a layout to print or hand-fill, so it can differ from the draw you generate later. The draw may have a different number of competitors. It also places seeds and spreads dojos, which the blank layout cannot know.
 
 ![The Export & print tab of a competition with no draw: a notice that only a blank template exists until the draw is generated, a warning that the list was never shuffled, and the Download blank template button.](../../screenshots/mobile-export-before-draw.png)
 
@@ -363,7 +450,12 @@ PDF exports (registration sheets, name sheets, competitor tags, pool and match s
 
 The lean container image omits LibreOffice and returns a clear message when a PDF is requested.
 
-**Export PDFs** prints a competition with no draw yet the same way as the blank template. It prints empty places, sized from the larger of the expected number of participants and everyone registered. Some competitions are left out of the booklet: one with no draw and fewer than two places to print, or one whose settings cannot form a draw. The dialog's warning box and the `SKIPPED-COMPETITIONS.txt` file in the download name it with the fix. An example fix is setting the expected number of participants in its Settings. Every other competition still prints.
+**Export PDFs** prints a competition with no draw yet the same way as the blank template. It prints empty places, sized from the larger of the expected number of participants and everyone registered. Some competitions are left out of the booklet:
+
+- One with no draw and fewer than two places to print.
+- One whose settings cannot form a draw.
+
+The dialog's warning box and the `SKIPPED-COMPETITIONS.txt` file in the download name it with the fix. An example fix is setting the expected number of participants in its Settings. Every other competition still prints.
 
 When the **Public URL** is set and competitors have assigned numbers, each printed tag includes a QR code. The code opens the viewer and adds that competitor to the scanner's watchlist. Refer to [Hosting](../install/hosting.md) for guidance on setting the public URL.
 
@@ -388,9 +480,18 @@ Refer to [Data model](../../architecture/data-model.md) for every file in the fo
 
 ## Tournament schedule
 
-Open **Tournament schedule** from the dashboard to configure timing for each competition. Set start times and the time per match, typed as minutes and seconds (for example `2:30`). Then click **Auto-schedule competition** to distribute all pool matches across the assigned shiai-jo automatically. The view shows an estimated end time per court based on match duration and the number of assigned matches.
+Open **Tournament schedule** from the dashboard to configure timing for each competition:
 
-Each competition can also set its own pool and knockout match durations on its **Settings** page. Type them as minutes and seconds, for example `2:30`. A whole number on its own is read as minutes, so `3` means three minutes. Leave a duration blank to use the default of 3:00. Clearing a duration you had set resets it to that default. Durations must fall between 1:00 and 60:00. A value outside that range is refused rather than quietly adjusted, because match duration drives the whole schedule.
+1. Set start times and the time per match, typed as minutes and seconds (for example `2:30`).
+2. Click **Auto-schedule competition** to distribute all pool matches across the assigned shiai-jo automatically.
+
+The view shows an estimated end time per court based on match duration and the number of assigned matches.
+
+Each competition can also set its own pool and knockout match durations on its **Settings** page:
+
+- Type them as minutes and seconds, for example `2:30`. A whole number on its own is read as minutes, so `3` means three minutes.
+- Leave a duration blank to use the default of 3:00. Clearing a duration you had set resets it to that default.
+- Durations must fall between 1:00 and 60:00. A value outside that range is refused rather than quietly adjusted, because match duration drives the whole schedule.
 
 A competition created before durations were measured in seconds is converted the first time it is opened, and its saved value carries over unchanged. Only a value above 60:00 is capped, which no realistic match setting reaches.
 
@@ -398,13 +499,30 @@ Changing a match duration never invalidates a generated draw. Pools, brackets an
 
 ### The estimate on the competition Overview
 
-The competition **Overview** has an **Est. duration** tile, for example *about 4h 08m*, with *Finishes about 13:38* under it. A strip below the tiles lists the time for each shiai-jo and the [pauses](#pauses) the estimate worked around. A pause the schedule skips, because it has no start time or no length yet, is named there too with the reason. So is a pause that matches go on through. If the finish falls after midnight, the tile says so.
+The competition **Overview** has an **Est. duration** tile, for example *about 4h 08m*, with *Finishes about 13:38* under it. A strip below the tiles lists:
 
-While the competition is in setup, the estimate uses the [expected number](#expected-participants-and-the-estimate-on-a-new-competition) until more people have registered than that. The tile says so, for example *For 40 expected participants (12 registered)*. When the competition uses check-in, that line counts people who have checked in. It then says *checked in* instead of *registered*. A competition in setup with no expected number, or with at least as many registrations as expected, shows no count. Once the draw is made, the finish comes from the match times the draw gave. The tile then reads *For the 18 participants in the draw*.
+- the time for each shiai-jo
+- the [pauses](#pauses) the estimate worked around
+- a pause the schedule skips, because it has no start time or no length yet, with the reason
+- a pause that matches go on through
+
+If the finish falls after midnight, the tile says so.
+
+The tile also says which count the estimate uses:
+
+- While the competition is in setup, the estimate uses the [expected number](#expected-participants-and-the-estimate-on-a-new-competition) until more people have registered than that. The tile says so, for example *For 40 expected participants (12 registered)*. When the competition uses check-in, that line counts people who have checked in. It then says *checked in* instead of *registered*.
+- A competition in setup with no expected number, or with at least as many registrations as expected, shows no count.
+- Once the draw is made, the finish comes from the match times the draw gave. The tile then reads *For the 18 participants in the draw*.
 
 ![The Overview of a competition in setup: the Est. duration tile reads about 1h 50m, finishes about 11:20, for 24 expected participants (0 registered), and the strip below lists the time for each shiai-jo and the opening ceremony and lunch pauses.](../../screenshots/mobile-overview-estimate.png)
 
-For a kachinuki (winner stays on) competition the number of bouts is not fixed, so the estimate is a range rather than a single figure. The tile is headed **Average est. duration**. A line under it reads, for example, *Best 2h 09m to worst 4h 28m*. Best is a clean sweep where one fighter wins every bout. Worst is the longest run, where each bout retires one fighter. The average sits between them. Use the worst figure for planning the day and the average for a realistic finish time.
+For a kachinuki (winner stays on) competition the number of bouts is not fixed, so the estimate is a range rather than a single figure. The tile is headed **Average est. duration**. A line under it reads, for example, *Best 2h 09m to worst 4h 28m*. The figures mean:
+
+- Best is a clean sweep where one fighter wins every bout.
+- Worst is the longest run, where each bout retires one fighter.
+- The average sits between them.
+
+Use the worst figure for planning the day and the average for a realistic finish time.
 
 ![The competition Overview for a kachinuki competition: the Average est. duration tile with the best to worst range and the finish time under it, and the strip of per-shiai-jo times and pauses below.](../../screenshots/kachinuki-estimate-range.png)
 
@@ -420,11 +538,30 @@ The **Schedule blocks** card on the tournament setup page lists the times when n
 
 ![The Schedule blocks card of a one-day tournament with two pauses, Opening ceremony at 09:00 for 30m and Lunch at 12:30 for 1h, each with its Matches stop for this pause box ticked and the times its matches stop, and the + Add a pause button.](../../screenshots/mobile-pause-editor.png)
 
-Every estimate and every new schedule works around the pauses whose **Matches stop for this pause** box is ticked. A match whose start time falls inside a pause moves to the end of that pause. A match that starts just before a pause is not shortened or moved, so it may run into the pause. Pauses that overlap count as one longer pause, and the row says so. A pause that ends after midnight is marked as such. The row of a pause the schedule skips says why, for example *Matches will not stop for this pause: give it a start time.* A competition that is already drawn keeps its match times when you add or change a pause. The card names the competitions affected. To re-time one of them, use **Auto-schedule competition**. You can also [move the competition](#moving-a-competition-on-the-calendar), which re-times its matches too.
+Every estimate and every new schedule works around the pauses whose **Matches stop for this pause** box is ticked:
 
-A tournament saved by an earlier version is converted when the server starts. A restored backup that still carries the old settings is converted as the restore finishes. Its lunch break becomes a **Lunch** pause at 12:00 on every day. Its opening ceremony becomes an **Opening ceremony** pause on each day that has a competition. That pause starts at the earliest start time of that day's competitions (09:00 for a competition with no start time). Its closing ceremony becomes a **Closing ceremony** pause with no start time. The schedule ignores it until you give it one under **Schedule blocks**. A length the app cannot read, such as `45 min`, gives a pause with no length. The pause is named with what you typed, for example *Opening ceremony (45 min)*. Matches do not stop for it until you give it a length such as `45m` under **Schedule blocks**, and you can rename it then. Competitions that are already drawn keep their match times. An estimate counts a closing ceremony only once that pause has a time. Every competition that starts during the opening ceremony waits for it to end.
+- A match whose start time falls inside a pause moves to the end of that pause.
+- A match that starts just before a pause is not shortened or moved, so it may run into the pause.
+- Pauses that overlap count as one longer pause, and the row says so.
 
-If the settings of one of the competitions cannot be read, the conversion waits. The lunch pause still applies. The opening and closing ceremonies are not listed under **Schedule blocks**, and no match waits for them. The [competition calendar](#competition-calendar) names that competition. Repair its `config.md` file, then restart the server, and the conversion runs again.
+A pause that ends after midnight is marked as such. The row of a pause the schedule skips says why, for example *Matches will not stop for this pause: give it a start time.* A competition that is already drawn keeps its match times when you add or change a pause. The card names the competitions affected. To re-time one of them, use **Auto-schedule competition**. You can also [move the competition](#moving-a-competition-on-the-calendar), which re-times its matches too.
+
+A tournament saved by an earlier version is converted when the server starts. A restored backup that still carries the old settings is converted as the restore finishes. The old settings become pauses:
+
+- The lunch break becomes a **Lunch** pause at 12:00 on every day.
+- The opening ceremony becomes an **Opening ceremony** pause on each day that has a competition. That pause starts at the earliest start time of that day's competitions (09:00 for a competition with no start time).
+- The closing ceremony becomes a **Closing ceremony** pause with no start time. The schedule ignores it until you give it one under **Schedule blocks**.
+- A length the app cannot read, such as `45 min`, gives a pause with no length. The pause is named with what you typed, for example *Opening ceremony (45 min)*. Matches do not stop for it until you give it a length such as `45m` under **Schedule blocks**, and you can rename it then.
+
+Competitions that are already drawn keep their match times. An estimate counts a closing ceremony only once that pause has a time. Every competition that starts during the opening ceremony waits for it to end.
+
+If the settings of one of the competitions cannot be read, the conversion waits:
+
+- The lunch pause still applies.
+- The opening and closing ceremonies are not listed under **Schedule blocks**, and no match waits for them.
+- The [competition calendar](#competition-calendar) names that competition.
+
+Repair its `config.md` file, then restart the server, and the conversion runs again.
 
 ### Expected participants and the estimate on a new competition
 
@@ -461,7 +598,13 @@ The calendar can also show the following:
 
 ### Moving a competition on the calendar
 
-Drag a competition's block to another day or start time. On a touch screen, press and hold the block first, then drag. Let go without dragging and the Move dialog opens. On a computer or a tablet you can also use the block's **Move** button, or press **M** while the block is focused. A phone shows no Move buttons: tap a block to open its competition. Every block is drawn at its real start and end, so a short one may show only its name. On a tablet, a block too short for its Move button has none. A move that makes two competitions overlap on a shiai-jo is warned about, not refused. A competition that is running or completed cannot be moved, and its block says so. A drawn competition also cannot move to a start that would carry matches past midnight.
+Drag a competition's block to another day or start time. Each kind of device adds its own way:
+
+- On a touch screen, press and hold the block first, then drag. Let go without dragging and the Move dialog opens.
+- On a computer or a tablet you can also use the block's **Move** button, or press **M** while the block is focused.
+- A phone shows no Move buttons: tap a block to open its competition.
+
+Every block is drawn at its real start and end, so a short one may show only its name. On a tablet, a block too short for its Move button has none. A move that makes two competitions overlap on a shiai-jo is warned about, not refused. A competition that is running or completed cannot be moved, and its block says so. A drawn competition also cannot move to a start that would carry matches past midnight.
 
 Pause times are drawn as bands across each day. A pause that the matches go on through is drawn lighter, and its band ends with *matches go on*. The time span in a block reads, for example, *09:30 to about 13:38* for an estimate or *14:15 to 16:02* for a draw. A block built from an expected number says so (*Estimate for 24 expected*).
 
@@ -471,11 +614,23 @@ The Move dialog lets you pick the day, the start time and the shiai-jo. Starts s
 
 ![The Move dialog for Women's Individual: the day, a start time of 11:00, shiai-jo A and B chosen, and the line Runs 11:00 to about 12:17, with Cancel and Move.](../../screenshots/mobile-calendar-move.png)
 
-A competition that is already drawn moves by day and start time only, and keeps its shiai-jo. Its matches move with it. Each match gets the time the draw would give it at the new day and start, in the same order. Nothing else about the pools, the bracket or the competitor numbers changes. Before you confirm, the message shows each shiai-jo's old and new times. Its matches at their new times may overlap another competition on a shared shiai-jo. The Move dialog then names that competition and the shiai-jo, as it does for a competition not drawn yet. You can still move it. Some matches may no longer have the times a fresh draw would give them. The cause can be a time you set by hand, a pause you added or changed, or another competition you moved. The message then says so, and those matches get new times too. If no match would change its time, the move is saved without asking. The competition and its matches are saved together, or not at all. Changing the **Date** or **Start time** in the competition's **Settings** does the same, with the same message before you save.
+A competition that is already drawn moves by day and start time only, and keeps its shiai-jo. Its matches move with it. Each match gets the time the draw would give it at the new day and start, in the same order. Nothing else about the pools, the bracket or the competitor numbers changes. Before you confirm, the message shows each shiai-jo's old and new times. Its matches at their new times may overlap another competition on a shared shiai-jo. The Move dialog then names that competition and the shiai-jo, as it does for a competition not drawn yet. You can still move it. Some matches may no longer have the times a fresh draw would give them. The cause can be one of these:
+
+- A time you set by hand.
+- A pause you added or changed.
+- Another competition you moved.
+
+The message then says so, and those matches get new times too. If no match would change its time, the move is saved without asking. The competition and its matches are saved together, or not at all. Changing the **Date** or **Start time** in the competition's **Settings** does the same, with the same message before you save.
 
 A drawn competition's move also waits for match time changes still held on this device, so none lands on the old day. Dragging a block on the calendar does not wait. It says "Not moved yet: 2 time changes made on this device are still being sent. Open Move to wait for them, or to move it now anyway." The **Move** dialog offers the wait. In the dialog, a screen titled "Waiting before the move" reads, for example, "Waiting for 2 time changes to be sent. The move is made once they arrive.", with **Cancel** and **Move now anyway**. The move is made on its own when the last one arrives. **Move now anyway** asks you to confirm first, because a time changed before the move may land on the old day.
 
-A drawn competition cannot move, on the calendar or from its **Settings**, to a start where some of its matches would run past midnight. That is because a match time cannot show the next day. The message says *At that start some matches would run past midnight, which a match time cannot show. Choose an earlier start. Nothing was changed.* It also cannot move onto a day where another competition plans a shared shiai-jo until after midnight. The message names that shiai-jo and competition. A drawn league's stored match order may no longer follow the draw's pattern, for example after you moved one of its matches to another shiai-jo. Such a league cannot be re-timed either, and the message says its match order could not be read back. In each case nothing is moved.
+A drawn competition cannot move, on the calendar or from its **Settings**, in these cases:
+
+- Some of its matches would run past midnight at the new start, because a match time cannot show the next day. The message says *At that start some matches would run past midnight, which a match time cannot show. Choose an earlier start. Nothing was changed.*
+- Another competition plans a shared shiai-jo until after midnight on the new day. The message names that shiai-jo and competition.
+- It is a league whose stored match order no longer follows the draw's pattern, for example after you moved one of its matches to another shiai-jo. Such a league cannot be re-timed, and the message says its match order could not be read back.
+
+In each case nothing is moved.
 
 ![The Move dialog for the drawn Men's Individual moved to 14:00: the line Overlaps Women's Individual on Shiaijo A and B. You can still move it, and below it the message that its 19 matches move, with each shiai-jo's new and old times.](../../screenshots/mobile-calendar-move-drawn-clash.png)
 
@@ -528,4 +683,15 @@ A match can be moved to another shiai-jo from these places:
 - The **Bracket** tab's running-match panel picker.
 - The court console, which has no court picker for the match running there.
 
-Moving a running match asks for confirmation first. Once confirmed, the match stops running and keeps its score. It goes first in the new shiai-jo's queue, ready to be started again there. Moving a waiting match places it last in that shiai-jo's queue. The place is set through the match's scheduled time. For first, that is one minute before the earliest waiting match there (or the same time, when that is 00:00). For last, it is one minute after the latest (or the same time, when that is 23:59). A match whose own time is already ahead of, or behind, all of them keeps it. Only waiting matches whose two competitors are known count: a knockout match still waiting for the matches that feed it does not. A pool bout always stays ahead of its own competition's knockout. The knockout moves later to follow the pools, though never past 23:59. Sometimes none of the waiting matches on that shiai-jo has a time. A waiting match moved there then loses its time and joins them at the end of the queue. A running match keeps its time and goes ahead of them. A finished match keeps its result and time and only changes shiai-jo. A waiting match that is moved back is placed last on the old shiai-jo rather than returning to its previous slot. To reorder it, use the up and down arrows on the court console, or edit the match's time on the schedule page. A running match moved by mistake can be started again on the new shiai-jo. You can also move it back (it is waiting by then, so it goes last) and start it from the queue. A move that reaches the server after the match was started on another device is refused with the reason. [Score a match](../court-operators/scoring-a-match.md) covers the refusals and the History line a move leaves.
+Moving a running match asks for confirmation first. What a move does depends on the match:
+
+- A running match, once confirmed, stops running and keeps its score. It goes first in the new shiai-jo's queue, ready to be started again there.
+- A waiting match is placed last in that shiai-jo's queue.
+- A finished match keeps its result and time and only changes shiai-jo.
+
+The place is set through the match's scheduled time:
+
+- For first, that is one minute before the earliest waiting match there (or the same time, when that is 00:00).
+- For last, it is one minute after the latest (or the same time, when that is 23:59).
+
+A match whose own time is already ahead of, or behind, all of them keeps it. Only waiting matches whose two competitors are known count: a knockout match still waiting for the matches that feed it does not. A pool bout always stays ahead of its own competition's knockout. The knockout moves later to follow the pools, though never past 23:59. Sometimes none of the waiting matches on that shiai-jo has a time. A waiting match moved there then loses its time and joins them at the end of the queue. A running match keeps its time and goes ahead of them. A waiting match that is moved back is placed last on the old shiai-jo rather than returning to its previous slot. To reorder it, use the up and down arrows on the court console, or edit the match's time on the schedule page. A running match moved by mistake can be started again on the new shiai-jo. You can also move it back (it is waiting by then, so it goes last) and start it from the queue. A move that reaches the server after the match was started on another device is refused with the reason. [Score a match](../court-operators/scoring-a-match.md) covers the refusals and the History line a move leaves.

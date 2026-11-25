@@ -29,11 +29,18 @@ For team tournaments (`--team-matches N`), each row is one team: the name column
 
 ## How names are stored
 
-Names and dojos are stored title-cased. The first letter of each word is upper-cased and nothing is lower-cased, so `kenshinkan` is stored as `Kenshinkan` and `BKA` stays `BKA`. A word that starts with a digit is kept exactly as typed, so `2nd dojo` is stored as `2nd Dojo` and `3RD` stays `3RD`. The rule applies on the command line, in the generated spreadsheet and in the tournament app. In the app it also covers team members' names, a fighter typed into a lineup, and the fighting-spirit award's recipient.
+Names and dojos are stored title-cased. The first letter of each word is upper-cased and nothing is lower-cased, so `kenshinkan` is stored as `Kenshinkan` and `BKA` stays `BKA`. A word that starts with a digit is kept exactly as typed, so `2nd dojo` is stored as `2nd Dojo` and `3RD` stays `3RD`. The rule applies on the command line, in the generated spreadsheet and in the tournament app. In the app it also covers:
+
+- Team members' names.
+- A fighter typed into a lineup.
+- The fighting-spirit award's recipient.
 
 Names saved by an earlier release are title-cased the same way when they are loaded. Since nothing is lower-cased, a dojo saved as `2Nd Dojo` keeps that spelling. A name an earlier release kept as pasted, such as `kenshinkan 2nd`, was shown then as `Kenshinkan 2Nd`. It is now spelled `Kenshinkan 2nd` in the participant list, the pools, the seeds and every match not yet fought.
 
-A match keeps the names it was recorded with once it has been fought or is under way. It also keeps them once it was sent back to the queue with points, fouls, flags or overtime already recorded.
+A match keeps the names it was recorded with in either of these cases:
+
+- It has been fought or is under way.
+- It was sent back to the queue with points, fouls, flags or overtime already recorded.
 
 ## Constraints
 

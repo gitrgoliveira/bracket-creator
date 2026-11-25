@@ -44,8 +44,13 @@ exports are tags, names and trees. `tournament-data/` holds the live state as Ma
 files. Operators are organisers and shiaijo operators on a tablet or desktop. Spectators
 include the competitors, on their phones.
 
-The same binary ships the CLI, the legacy one-shot Excel web form (`serve`), and the
-real-time tournament app (`mobile-app`). All web assets are embedded at build time, so there is
+The same binary ships three things:
+
+- the CLI;
+- the legacy one-shot Excel web form (`serve`);
+- the real-time tournament app (`mobile-app`).
+
+All web assets are embedded at build time, so there is
 nothing to install beyond the binary itself. Besides its live state, the tournament app exports
 a competition's results as an Excel workbook and prints PDFs on demand.
 
@@ -106,10 +111,15 @@ flowchart TB
     helper --> domain
 ```
 
-Each arrow is an import. The packages form these layers, top to bottom: entry (`main.go`, `cmd`,
-`resources`), presentation (`mobileapp`), orchestration (`export`, `engine`),
-persistence and output (`state`, `backup`, `excel`, `pdf`), and the core logic and models
-(`helper`, `domain`). Every package except `main.go` and `cmd` lives under `internal/`. The
+Each arrow is an import. The packages form these layers, top to bottom:
+
+1. entry (`main.go`, `cmd`, `resources`);
+2. presentation (`mobileapp`);
+3. orchestration (`export`, `engine`);
+4. persistence and output (`state`, `backup`, `excel`, `pdf`);
+5. the core logic and models (`helper`, `domain`).
+
+Every package except `main.go` and `cmd` lives under `internal/`. The
 diagram shows the main imports. Besides these:
 
 - `cmd` also imports `helper`, `excel`, `pdf` and `resources`;
@@ -206,11 +216,13 @@ handlers. It checks on startup and then every hour. It writes a copy to the data
 A clean shutdown takes one more copy when the tournament has changed since the newest one,
 however recent that is.
 
-Server hardening (constants in `cmd/mobile_app.go`): `ReadHeaderTimeout 10s`, `ReadTimeout 30s`,
-`IdleTimeout 120s`, `MaxHeaderBytes 1 MB`, **`WriteTimeout 0`** (SSE streams are infinite, so
-per-request cancellation runs through the request context). Graceful shutdown 30s with
-`Hub.Close` wired through `RegisterOnShutdown`. Every handler-spawned goroutine uses `safeGo`
-(Gin Recovery only catches the request goroutine).
+Server hardening (constants in `cmd/mobile_app.go`):
+
+- `ReadHeaderTimeout 10s`, `ReadTimeout 30s` and `IdleTimeout 120s`;
+- `MaxHeaderBytes 1 MB`;
+- **`WriteTimeout 0`** (SSE streams are infinite, so per-request cancellation runs through the request context);
+- graceful shutdown 30s, with `Hub.Close` wired through `RegisterOnShutdown`;
+- `safeGo` for every handler-spawned goroutine (Gin Recovery only catches the request goroutine).
 
 ## 5. Write path: recording a score (ACID + broadcast)
 
@@ -376,10 +388,12 @@ flowchart TB
     store --> out["Excel / PDF export<br/>(on demand)"]
 ```
 
-The draw can be made two ways. `POST /api/competitions/:id/generate-draw` makes it and leaves
-the competition draw-ready for review. `POST /api/competitions/:id/start` on a competition
-still in setup makes it and starts at once. A start on a draw-ready competition keeps the draw
-it has. Both draws run `runDrawPipeline` (`internal/engine/competition.go`), which picks one
+The draw can be made two ways:
+
+- `POST /api/competitions/:id/generate-draw` makes it and leaves the competition draw-ready for review.
+- `POST /api/competitions/:id/start` on a competition still in setup makes it and starts at once. A start on a draw-ready competition keeps the draw it has.
+
+Both draws run `runDrawPipeline` (`internal/engine/competition.go`), which picks one
 of four paths by format:
 
 - **Knockout:** direct elimination. `generateKnockout` (`internal/engine/bracket.go`) calls three `internal/helper` steps. `StandardSeeding` (`seed.go`) places the competitors, and `CreateBalancedTree` (`tree.go`) builds the binary tree. `NewKnockoutDraw` (`draw.go`) cuts it into per-shiaijo regions and pages, aiming for at most `MaxPlayersPerTree` (16) competitors on each tree page.
@@ -429,9 +443,13 @@ operator console and the display surface. Every surface talks to the server thro
 `api_client.jsx` (the `API` object, which it assembles from the member pieces
 `api_client_tournament.jsx`, `api_client_competitions.jsx`, `api_client_matches.jsx`,
 `api_client_teams.jsx`, `api_client_outbox.jsx` and the two event members in `api_client_events.jsx`).
-Its `api_client_*.jsx` modules make the requests
-(`api_client_requests.jsx`), consume the SSE stream (`api_client_events.jsx`) and hold the outbox
-(refer to [The outbox](#the-outbox)). The root shell and the operator console apply each SSE patch to the
+Its `api_client_*.jsx` modules do three jobs:
+
+- make the requests (`api_client_requests.jsx`);
+- consume the SSE stream (`api_client_events.jsx`);
+- hold the outbox (refer to [The outbox](#the-outbox)).
+
+The root shell and the operator console apply each SSE patch to the
 competition data they hold through `patch.jsx` (`applyPatch`). It also detects a gap in the
 event sequence (`checkSeqGap`) and triggers a resync. The modules around the outbox:
 

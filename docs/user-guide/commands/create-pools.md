@@ -65,7 +65,12 @@ bracket-creator create-pools \
 
 Being even is not enough on its own. With `-c 6` the six blocks pair off into three, but three cannot pair off again. One of them would then reach the final having fought a round fewer than the other two. `-c 6` and `-c 10` are therefore refused, just as `-c 3`, `-c 5` and `-c 7` are.
 
-A single shiai-jo is always allowed. With two or more qualifiers per pool (`-w 2` and above), `-c 1` splits its block into two halves that act as partner shiai-jo. The result is the same bracket shape as a `-c 2` run. With `-w 1`, nothing crosses between shiai-jo: the block stays whole, and each bye is chosen from every pool winner on it. 16 is the highest. It is also the most shiai-jo a tournament can have, so 32 is out of reach.
+A single shiai-jo is always allowed. What `-c 1` does depends on the qualifiers per pool:
+
+- With two or more qualifiers per pool (`-w 2` and above), `-c 1` splits its block into two halves that act as partner shiai-jo. The result is the same bracket shape as a `-c 2` run.
+- With `-w 1`, nothing crosses between shiai-jo: the block stays whole, and each bye is chosen from every pool winner on it.
+
+16 is the highest. It is also the most shiai-jo a tournament can have, so 32 is out of reach.
 
 The draw also never uses more shiai-jo than there are pools, because a shiai-jo with no pools of its own would own an empty block. When you ask for more, the count steps down to the largest allowed value that fits. The file is generated without an error: with 7 pools, `-c 8` produces a draw on 4 shiai-jo.
 
@@ -83,7 +88,12 @@ This is a per-tournament-file rule, not a rule about your venue. A hall with thr
 
 Higher values continue the same rotation, but a bracket has only four quarters. From the fifth qualifier per pool onward, two of a pool's qualifiers must share one.
 
-Byes follow from the size of each block, not the total field. A block with an even number of competitors gets none. A block with an odd number gets exactly one, awarded first to a seeded pool's winner. Refer to [The knockout draw](../organisers/knockout-draw.md) for the full rules and worked examples.
+Byes follow from the size of each block, not the total field:
+
+- A block with an even number of competitors gets none.
+- A block with an odd number gets exactly one, awarded first to a seeded pool's winner.
+
+Refer to [The knockout draw](../organisers/knockout-draw.md) for the full rules and worked examples.
 
 ## Extra qualifiers
 

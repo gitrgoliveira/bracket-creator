@@ -13,7 +13,15 @@ Matches count in their order: pool matches by their number in the pool, then the
 1. The lineup entered for that match.
 2. The latest lineup the team had before it: one entered for an earlier match of the team, or its **Starting lineup**.
 
-The lineup panel for a match says where the lineup it shows comes from: **Lineup for this match**, **Same as** the earlier match it is carried from, or **Starting lineup**. The score sheet, the viewer, the court display, the streaming overlay and the Kachinuki Detail sheet of the export all use the same lineup. In the panel, a box that holds a team member reads with the member's number, for example "T1.3 Sano", or "T1.3" alone while that member has no name yet. Before the draw gives the team a number, it reads "Slot 3 Sano".
+The lineup panel for a match says where the lineup it shows comes from: **Lineup for this match**, **Same as** the earlier match it is carried from, or **Starting lineup**. These other places use the same lineup as the panel:
+
+- the score sheet
+- the viewer
+- the court display
+- the streaming overlay
+- the Kachinuki Detail sheet of the export
+
+In the panel, a box that holds a team member reads with the member's number, for example "T1.3 Sano", or "T1.3" alone while that member has no name yet. Before the draw gives the team a number, it reads "Slot 3 Sano".
 
 A kachinuki team with no saved lineup fights in member number order: member 1 first, then each member up to the team size, whether or not the member has a name yet. A reserve fights only where you place them, in the lineup or on a bout. Number order never seats one. A saved lineup that leaves places empty has those places filled the same way, by the lowest-numbered member up to the team size that the lineup does not already place elsewhere. In the lineup panel of a kachinuki match, each empty place shows in amber the member who fights there if you change nothing, for example "T1.1 Ishida". Amber means the place is open to editing and holds that member by default. The default is only shown: nothing is saved until you pick someone, and picking a member replaces it. After each pick the panel works out the other defaults again, so they follow what you have chosen. While it is working them out, or if it cannot, an empty place shows a plain "Add player…" box. The panel tries again a few seconds later, up to three times. Typing a name over a default whose member has no name yet gives that member the name, so nobody new is added to the team. Fixed-order team matches keep an empty place as an empty box.
 
@@ -83,9 +91,14 @@ a team fields a replacement mid tournament.
 Each member shows as the team's competitor number followed by their position in
 the team, for example T10.1 and T10.2. These labels follow the team's number,
 so if you change a competition's number prefix the labels change with it. A
-label appears wherever the member's name does: the lineup panel, the score
-sheet, the viewer, the court display, the streaming overlay, and the bout detail
-sheet a winner-stays-on competition adds to its export.
+label appears wherever the member's name does:
+
+- the lineup panel
+- the score sheet
+- the viewer
+- the court display
+- the streaming overlay
+- the bout detail sheet a winner-stays-on competition adds to its export
 
 Before the draw a team has no number yet, so the Lineups page labels each
 position by its place in the order alone, Slot 1 upwards. A five-person team
@@ -112,8 +125,12 @@ Once the list arrives, the name picks its member, names a blank numbered place,
 or adds a member, as described under [Team members](#team-members), with no
 note.
 
-The list may not load, whatever the reason: a dropped connection, a list
-that does not arrive in time, or a team members file the server cannot read.
+The list may not load, whatever the reason:
+
+- a dropped connection
+- a list that does not arrive in time
+- a team members file the server cannot read
+
 In that case, the name you typed is saved in the lineup by that name alone, and nobody is
 added to the team. When a typed name was saved that way, one note says so:
 "Saved by name only: the team member list could not be loaded. Scores will
@@ -134,13 +151,15 @@ list in that place. Do this before the next **Record bout**.
 
 While the list cannot be loaded, the lineup panel shows a plain "Add player…"
 box in each empty place. The Lineups page shows the notice where the
-**Team members** list would be. Both say one of two things. When the list only failed to
-load: "The team member list could not be loaded, so the list is not shown. You
-can still type names and save the lineup; they are saved by name only." When
-the server cannot read the file: "The team members could not be read, so the
-list is not shown and no member can be added or renamed. You can still type
-names and save the lineup; they are saved by name only. The organiser needs to
-check team-members.yaml in the tournament data."
+**Team members** list would be. Both say one of two things:
+
+- When the list only failed to load: "The team member list could not be
+  loaded, so the list is not shown. You can still type names and save the
+  lineup; they are saved by name only."
+- When the server cannot read the file: "The team members could not be read,
+  so the list is not shown and no member can be added or renamed. You can
+  still type names and save the lineup; they are saved by name only. The
+  organiser needs to check team-members.yaml in the tournament data."
 
 A team's members are kept in `competitions/<competition id>/team-members.yaml`
 inside the data folder. That is the folder given with `--folder` or
@@ -164,7 +183,12 @@ competition will lose or change. Refer to
 
 ### Incomplete and uneven teams
 
-Team sizes are not fixed. A lineup can leave any position empty. Teams in the same competition can field different numbers of fighters. The app never blocks a save or disqualifies a team over a vacancy. Fill in as many positions as each team brings and save. You can edit a lineup at any time, including after the match has started. This lets you complete or adjust the order as a round is running. Every bout still needs a result or a decision. When only one team leaves a position empty, the court operator records a **Fusensho** for the team whose fighter is present. When both teams leave a position empty, the court operator records that bout as a **Tie**, which counts as an individual draw for both teams. An empty position also shows a box directly on its score sheet row, labelled with its own number. You can name the fighter there without leaving the bout you are scoring.
+Team sizes are not fixed. A lineup can leave any position empty. Teams in the same competition can field different numbers of fighters. The app never blocks a save or disqualifies a team over a vacancy. Fill in as many positions as each team brings and save. You can edit a lineup at any time, including after the match has started. This lets you complete or adjust the order as a round is running. Every bout still needs a result or a decision:
+
+- When only one team leaves a position empty, the court operator records a **Fusensho** for the team whose fighter is present.
+- When both teams leave a position empty, the court operator records that bout as a **Tie**, which counts as an individual draw for both teams.
+
+An empty position also shows a box directly on its score sheet row, labelled with its own number. You can name the fighter there without leaving the bout you are scoring.
 
 If your rules require a full team or set conditions on which positions may be left open, apply those off the app. The app treats the lineup you save as authoritative and scores against it.
 
@@ -234,7 +258,13 @@ A bout you add with **+ Add next bout manually** reaches the other devices with 
 
 The bouts you have already fought stay on screen as read-only rows above the current bout. The encounter reads like a regular team sheet, and you can check the winner-stays-on order at a glance.
 
-Just above the current bout, a short line shows each team's fighter on the shiai-jo, how many fighters its lineup has left after them, and who they are, next fighter first, for example "Shiro: T1.2 Ueda on, 1 left (T1.3 Sato) · Aka: T2.1 Kudo on, last fighter". Each fighter carries their team member number, as on the bout rows. The line is read from the lineup and the bouts recorded so far, the same reading the app pairs the next bout from. It is a guide only: it never ends the encounter, and you still decide when the encounter is over. A team with no lineup entered is read in [member number order](#team-lineups). The places a saved lineup leaves empty are filled in that order too.
+Just above the current bout, a short line shows for each team:
+
+- its fighter on the shiai-jo
+- how many fighters its lineup has left after them
+- who those fighters are, next fighter first
+
+For example: "Shiro: T1.2 Ueda on, 1 left (T1.3 Sato) · Aka: T2.1 Kudo on, last fighter". Each fighter carries their team member number, as on the bout rows. The line is read from the lineup and the bouts recorded so far, the same reading the app pairs the next bout from. It is a guide only: it never ends the encounter, and you still decide when the encounter is over. A team with no lineup entered is read in [member number order](#team-lineups). The places a saved lineup leaves empty are filled in that order too.
 
 While a bout is being fought, the line names both of its fighters as on, whatever the score. After **Record bout**, the fighter who lost goes off and the winner stays on, and after a draw both go off. Some cases read differently:
 
@@ -244,7 +274,11 @@ While a bout is being fought, the line names both of its fighters as on, whateve
 - **The team members or the lineups could not be read.** The score sheet shows a warning once for that match, and the server log names the file. With the lineups unreadable it reads "The lineups could not be read, so who fights next is not worked out. Add each bout's pairing by hand." Neither team then fields anyone. There is no line above the current bout, and **Record bout** records the bout you scored but adds no next pairing. With the team members unreadable, and a lineup that leaves a place to fill, it reads "Team members could not be read, so fighters are not seated by member number. Add each bout's pairing by hand." Then no place is filled by member number. **Record bout** brings in only the fighters a saved lineup names, and the line above the current bout lists only them. After a team with no saved lineup loses a bout, no pairing follows. Either way scoring carries on, and the line that a team has no fighters left never takes the place of the current bout. Use **+ Add next bout manually** to pick or type both fighters of a bout the app does not add. The first bout can be named by hand too once a lineup read has failed. With the team members unreadable, a name you type on the first bout is saved in the match's lineup by that name alone. Nobody is added to the team. The row under the bout says "Saved by name only: the team member list could not be loaded. Scores will still record normally." To repair the file, read the server log's error line: it names the competition and says why the file could not be read. Correct that file, or ask whoever runs the server to. Once the file can be read again, the next **Record bout** pairs by member number again. While the lineups cannot be read, the lineup panel of the match shows an error instead of the lineup, since it is the page that edits that file. For what the lineup panel, the Lineups page and the score sheet do with a typed name while the team members cannot be loaded, and where the file is, refer to [When the team member list cannot be loaded](#when-the-team-member-list-cannot-be-loaded).
 - **A tie leaves both teams with nobody.** The bout stays the current bout, in pools, leagues and knockouts alike, and the line names both of its fighters as on. **Encho** is there if you want the pair to fight on. **Record bout** is greyed out because nothing can follow it. **End match** decides the rest: a drawn encounter in a pool or league, held back in a knockout, which needs a winner. Scoring a point on that tie, or starting **Encho**, makes it a bout being fought again: both fighters stay on and **Record bout** records it anew.
 
-If the app adds a pairing you did not want, for example an extra bout after the encounter was really over, use **× Remove this bout** to take it back. It only removes a bout that has no score yet, so nothing you have recorded is lost. When the bout you remove is the pairing **Record bout** added, the bout before it becomes the current bout again, as if **Record bout** had not been pressed. The line above then names both of its fighters as on until you record it again. When you remove a bout you added with **+ Add next bout manually** after a team had nobody left, the sheet goes back to how it was before you added it. The recorded bout stays recorded and the line still names the team with nobody left. Editing a lineup in between does not change this. If the match's history does not show how the bout you removed was added, for example because that history could not be saved, the recorded bout stays recorded. Tap it to correct it.
+If the app adds a pairing you did not want, for example an extra bout after the encounter was really over, use **× Remove this bout** to take it back. It only removes a bout that has no score yet, so nothing you have recorded is lost. What happens next depends on how the bout was added:
+
+- When the bout you remove is the pairing **Record bout** added, the bout before it becomes the current bout again, as if **Record bout** had not been pressed. The line above then names both of its fighters as on until you record it again.
+- When you remove a bout you added with **+ Add next bout manually** after a team had nobody left, the sheet goes back to how it was before you added it. The recorded bout stays recorded and the line still names the team with nobody left. Editing a lineup in between does not change this.
+- If the match's history does not show how the bout you removed was added, for example because that history could not be saved, the recorded bout stays recorded. Tap it to correct it.
 
 ![The kachinuki score editor: the bouts already fought shown as read-only rows above the current bout (which carries the ippon buttons for each side), a muted line just above the current bout naming each team's fighter on, the fighters left and who is next, the × Remove this bout undo for a pairing added by mistake, and the Record bout and End match footer actions.](../../screenshots/kachinuki-scoring-buttons.png)
 
@@ -264,7 +298,15 @@ When the last bout is tied, the editor offers every legitimate way forward. You 
 
 There is no representative bout (daihyosen) in kachinuki. A tied pairing that must produce a result is settled by encho on that same bout, not by a separate rep bout.
 
-If you finish an encounter too early or record the wrong result, reopen it. Open the completed match and use **Reopen match**. A single tap returns the encounter to in progress with its bouts kept, so you can add or rescore bouts and end it again. An encounter that ended with a withdrawal or a no-show shows **Clear kiken and reopen** or **Clear fusenpai and reopen** instead, because reopening it also makes the withdrawn team eligible again. It states that beside the button, and one tap reopens the encounter. Refer to [Correcting a withdrawal recorded by mistake](../court-operators/recording-decisions.md#correcting-a-withdrawal-recorded-by-mistake). Neither button needs a reason, and nor does ending the encounter again, however you end it. In a knockout, reopening also rolls back the next-round slot that this result had filled. If that later match has already been played, the app names it and asks before going ahead. Confirming reopens it too, so it is fought and scored again. The editor names it once the reopen is done. A round after it that nobody has played yet stops showing its winner. If that later match is under way, the app refuses the reopen. Finish it or send it back to the queue first. In a pool of a competition that ends in a knockout, reopening is never refused because of the knockout. Instead, ending the encounter again with a result that changes who qualifies is checked then, as described in [Correct a pool result after the knockout has started](../court-operators/scoring-a-match.md#correct-a-pool-result-after-the-knockout-has-started).
+If you finish an encounter too early or record the wrong result, reopen it. Open the completed match and use **Reopen match**. A single tap returns the encounter to in progress with its bouts kept, so you can add or rescore bouts and end it again. An encounter that ended with a withdrawal or a no-show shows **Clear kiken and reopen** or **Clear fusenpai and reopen** instead, because reopening it also makes the withdrawn team eligible again. It states that beside the button, and one tap reopens the encounter. Refer to [Correcting a withdrawal recorded by mistake](../court-operators/recording-decisions.md#correcting-a-withdrawal-recorded-by-mistake). Neither button needs a reason, and nor does ending the encounter again, however you end it.
+
+In a knockout, reopening also rolls back the next-round slot that this result had filled:
+
+- If that later match has already been played, the app names it and asks before going ahead. Confirming reopens it too, so it is fought and scored again. The editor names it once the reopen is done.
+- A round after it that nobody has played yet stops showing its winner.
+- If that later match is under way, the app refuses the reopen. Finish it or send it back to the queue first.
+
+In a pool of a competition that ends in a knockout, reopening is never refused because of the knockout. Instead, ending the encounter again with a result that changes who qualifies is checked then, as described in [Correct a pool result after the knockout has started](../court-operators/scoring-a-match.md#correct-a-pool-result-after-the-knockout-has-started).
 
 Reopening keeps every bout that was fought. The bout log is preserved in full, including who fought each bout, the points scored, and any overtime. Nothing you have already recorded is lost. Reopening clears the finished-match verdict it is discarding: the winning team, the final score line, and any withdrawal or no-show recorded against the encounter.
 
@@ -272,7 +314,13 @@ Reopening is refused while another match is already running on the same court, b
 
 ![The score editor for a completed kachinuki match, showing the recorded bouts and the Reopen match button, the correction control for a kachinuki match that did not end with a withdrawal.](../../screenshots/kachinuki-reopen.png)
 
-The results workbook (**Export & print**, then **Download results (.xlsx)**) and the blank template (**Download blank template (.xlsx)**) include a **Kachinuki Detail** sheet with a section for every kachinuki encounter in the draw. Each section is titled with its match's name followed by (Kachinuki). A knockout section's name is the title of that match's block on the **Elimination Matches** sheet. For example, Round 2 - Match 3 there is Round 2 - Match 3 (Kachinuki) here. A side that is not decided yet reads as the match it comes from, for example M 3. Each section is laid out like a match on the **Elimination Matches** sheet: White (Shiro) on the left and Red (Aka) on the right, matching the scoreboard, each over its own team's name. Each bout row shows the bout number with who fought it and their lineup position (the position in the lineup the team fielded in that encounter), each side's score, and a tie or overtime in the centre column. The result mark (Fus., Kiken) sits beside the fighter it names. An encounter with recorded bouts lists exactly those bouts. An encounter with none yet gets empty numbered rows to fill in by hand. That includes every encounter in a blank template, whether downloaded before the draw or after it. Each such encounter gets one row for each bout it can take, which is twice the team size less one (9 rows for teams of five).
+The results workbook (**Export & print**, then **Download results (.xlsx)**) and the blank template (**Download blank template (.xlsx)**) include a **Kachinuki Detail** sheet with a section for every kachinuki encounter in the draw. Each section is titled with its match's name followed by (Kachinuki). A knockout section's name is the title of that match's block on the **Elimination Matches** sheet. For example, Round 2 - Match 3 there is Round 2 - Match 3 (Kachinuki) here. A side that is not decided yet reads as the match it comes from, for example M 3. Each section is laid out like a match on the **Elimination Matches** sheet: White (Shiro) on the left and Red (Aka) on the right, matching the scoreboard, each over its own team's name. Each bout row shows:
+
+- the bout number, with who fought it and their lineup position (the position in the lineup the team fielded in that encounter)
+- each side's score
+- a tie or overtime in the centre column
+
+The result mark (Fus., Kiken) sits beside the fighter it names. An encounter with recorded bouts lists exactly those bouts. An encounter with none yet gets empty numbered rows to fill in by hand. That includes every encounter in a blank template, whether downloaded before the draw or after it. Each such encounter gets one row for each bout it can take, which is twice the team size less one (9 rows for teams of five).
 
 The **Pool Matches** and **Elimination Matches** sheets give each kachinuki encounter the same number of bout rows, the 3rd-place match included. A result fills the bouts fought, in order, and leaves the rest empty. If an encounter fields reserves and runs to more bouts than that, those sheets show its first bouts and the Kachinuki Detail sheet lists them all.
 
@@ -290,8 +338,9 @@ In pools, league, and Swiss, team standings are resolved in this order:
 8. Points lost (fewer is better)
 
 In Swiss, two further tie-breaks apply after those eight criteria:
-head-to-head (the team that won the direct encounter ranks higher), then
-name order as the final deterministic fallback.
+
+1. Head-to-head (the team that won the direct encounter ranks higher)
+2. Name order, as the final deterministic fallback
 
 ![Team Swiss standings: a table with rank, team, and the full tie-break columns W, L, T, IV, IL, IT, PW, and PL, with a caption ranking by team wins, then IV, then PW, then head-to-head.](../../screenshots/swiss-standings-team.png)
 

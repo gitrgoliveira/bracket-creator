@@ -34,7 +34,8 @@ A last rule, ``long-sentence``, refuses a sentence over 40 words (house style
 is one idea per sentence), unless the sentence carries an exception comment
 with its reason: ``<!-- long-sentence: the reason -->``. An exception with no
 reason, or with no long sentence to cover, is ``long-sentence-exception``.
-Refer to ``check_sentence_length``.
+A colon ends a sentence for this count, as a full stop does. Refer to
+``check_sentence_length``.
 
 ``docs/dev-guide/code_of_conduct.md`` is skipped because it is third-party
 text (the Contributor Covenant) that this repo does not control the wording
@@ -393,6 +394,10 @@ QUOTATION_RE = re.compile(r'"[^"\n]*"|\u201c[^\u201d\n]*\u201d')
 # "e.g. the" and "v2.6.0" never split a sentence.
 WORD_ENDS_RE = re.compile(r"[.!?][\"')\]\u201d]*$")
 WORD_STARTS_RE = re.compile(r"[A-Z0-9\"'(\[\u201c]")
+# A colon ends a sentence whatever follows it ("two kinds: pools and a
+# knockout" counts as two), since no abbreviation ends in one. A colon inside
+# a word ("10:30", "https://") is not at its end and splits nothing.
+COLON_ENDS_RE = re.compile(r":[\"')\]\u201d]*$")
 
 
 def _one_word(m: re.Match[str]) -> str:
@@ -423,7 +428,8 @@ def iter_sentences(numbered_lines, markdown: bool):
         if skip:
             continue
         for word in _sentence_words(line):
-            if words and WORD_ENDS_RE.search(words[-1][1]) and WORD_STARTS_RE.match(word):
+            last = words[-1][1] if words else ""
+            if last and (COLON_ENDS_RE.search(last) or (WORD_ENDS_RE.search(last) and WORD_STARTS_RE.match(word))):
                 yield words
                 words = []
             words.append((lineno, word))

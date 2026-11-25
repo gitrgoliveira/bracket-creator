@@ -9,9 +9,24 @@ You can move a match to another shiai-jo from any of these:
 - the **Scores** tab row's court picker
 - the **Bracket** tab's running-match panel picker
 
-Moving a running match asks for confirmation first. It warns that the match is running and will stop. It also says that the score already saved is kept, so starting it again carries on from there. If any unsaved score entries are on screen, the prompt notes that they will be discarded. Once confirmed, the match stops running and keeps its score. It goes first in the new shiai-jo's queue, ready to be started again there. Its History records a line naming the shiai-jo it moved to. Moving a waiting match places it last in the new shiai-jo's queue and writes nothing to the History.
+Moving a running match asks for confirmation first. The prompt says:
 
-The place is set through the match's scheduled time. First is one minute before the earliest waiting match on that shiai-jo, or the same time when that is 00:00. Last is one minute after the latest, or the same time when that is 23:59. A match whose own time is already ahead of, or behind, all of them keeps it. Only waiting matches whose two competitors are known count: a knockout match still waiting for the matches that feed it does not. A pool bout always stays ahead of its own competition's knockout, which moves later to follow it, though never past 23:59. Where none of the waiting matches on that shiai-jo has a time, a waiting match moved there loses its time and joins them at the end of the queue. A running match moved there keeps its time and goes ahead of them. Where the shiai-jo has no waiting match, a moved match keeps its own time.
+- that the match is running and will stop
+- that the score already saved is kept, so starting it again carries on from there
+- that any unsaved score entries on screen will be discarded, when there are some
+
+Once confirmed, the match stops running and keeps its score. It goes first in the new shiai-jo's queue, ready to be started again there. Its History records a line naming the shiai-jo it moved to. Moving a waiting match places it last in the new shiai-jo's queue and writes nothing to the History.
+
+The place is set through the match's scheduled time:
+
+- First is one minute before the earliest waiting match on that shiai-jo, or the same time when that is 00:00.
+- Last is one minute after the latest, or the same time when that is 23:59.
+- A match whose own time is already ahead of, or behind, all of them keeps it.
+
+Only waiting matches whose two competitors are known count: a knockout match still waiting for the matches that feed it does not. A pool bout always stays ahead of its own competition's knockout, which moves later to follow it, though never past 23:59. Two cases have no times to go by:
+
+- Where none of the waiting matches on that shiai-jo has a time, a waiting match moved there loses its time and joins them at the end of the queue. A running match moved there keeps its time and goes ahead of them.
+- Where the shiai-jo has no waiting match, a moved match keeps its own time.
 
 A court console may have announced an active call to the shiai-jo for a waiting match. Moving that match brings the announcement down automatically while that console stays open. Moving a waiting match back to its previous shiai-jo places it last in the queue rather than restoring its old position. To reorder it, use the up and down arrows on the court console or edit the match's time on the schedule page. A running match moved by mistake can be started again on the new shiai-jo. You can also move it back and start it from the queue: it is now waiting, so it goes last.
 
@@ -84,11 +99,19 @@ Sometimes the app cannot check with the server:
 - the server does not answer in time
 - a finish, start, send back or court move made on this device has not reached the server yet
 
-In these cases it asks you instead. **Keep it running** leaves the match in progress as it is. **Send back and start** sends it back to the queue with its score and starts the one you picked. Tap **Keep it running** if you picked the wrong match. If the server then refuses the start, the match in progress waits in the Upcoming list with its score. Tap **Start match** on it to carry on.
+In these cases it asks you instead:
+
+- **Keep it running** leaves the match in progress as it is. Tap it if you picked the wrong match.
+- **Send back and start** sends it back to the queue with its score and starts the one you picked. If the server then refuses the start, the match in progress waits in the Upcoming list with its score. Tap **Start match** on it to carry on.
 
 In an engi match each flag is sent the moment you tap it once the match has started, so the flags are kept too.
 
-Another device may start a match you are scoring before it has started, or reopen a finished match you are correcting. What you entered is then kept on screen. A note says the match was started (or reopened) on another device and that your unsaved entries are still here. **Save** (tap it twice) adds your entries to the match as if you had scored them after the start. The other device's points stay as they are. Another device may also reopen a match that a withdrawal or a no-show decided. The editor then shows the reopened match with your entries on it, as **Save** adds them. The circles the withdrawal or no-show had given are gone, since they were never part of what you entered. If both devices scored the same point it counts twice: tap the extra mark to take it back. **Discard** drops your entries and shows the match as the server holds it. Finishing the match waits until you have picked one.
+Another device may start a match you are scoring before it has started, or reopen a finished match you are correcting. What you entered is then kept on screen. A note says the match was started (or reopened) on another device and that your unsaved entries are still here. Pick one:
+
+- **Save** (tap it twice) adds your entries to the match as if you had scored them after the start. The other device's points stay as they are. Another device may also reopen a match that a withdrawal or a no-show decided. The editor then shows the reopened match with your entries on it, as **Save** adds them. The circles the withdrawal or no-show had given are gone, since they were never part of what you entered. If both devices scored the same point it counts twice: tap the extra mark to take it back.
+- **Discard** drops your entries and shows the match as the server holds it.
+
+Finishing the match waits until you have picked one.
 
 The server may turn down a **Start match** tap, for example because the shiai-jo is busy, or because the match changed on another device. The editor then says so with the reason. It shows the match as not started again, with your entries still on screen, and offers **Start match** again. If another device started the match meanwhile, your entries are kept with the note described above, so you can save or discard them. The other device may finish the match, or send it back to the queue, before you pick. Your entries are then dropped, the editor shows the match as the server holds it, and a note says so.
 
@@ -124,7 +147,16 @@ If you have changed the board without saving, a tap that would replace your chan
 - adding or removing the representative bout on a finished team match
 - leaving the match, which includes **Close** and the previous and next match controls of the editor itself
 
-On the court console, leaving the match also means **Back to court**, **Correct** on another finished match, starting another match, switching to another shiai-jo from the title, the **Dashboard** link, **Public viewer** and **Sign out**. On a competition's page, while the bracket shows a match in the editor, leaving the match also means any of these:
+On the court console, leaving the match also means any of these:
+
+- **Back to court**
+- **Correct** on another finished match
+- starting another match
+- switching to another shiai-jo from the title
+- the **Dashboard** link
+- **Public viewer** or **Sign out**
+
+On a competition's page, while the bracket shows a match in the editor, leaving the match also means any of these:
 
 - choosing another match
 - any other section of the side menu
@@ -194,7 +226,10 @@ An item the server keeps refusing has a **Discard** button, which works the same
 
 Nothing you enter is thrown away. Changes are put in the order they were made, not the order they arrive. Each save says what it changed: the points, the result, the overtime, the flags, or one bout of a team match. If two courts changed the same match while one was offline, changes to different things both apply, for example one court's points and the other's overtime. Scoring taps (a point, a foul, a flag, an overtime period, or taking one back) are not compared with each other. Each is counted, so the taps of two courts add up. They add up only to the most a side can have: two points in an individual bout, five flags in an engi match. Two courts that both tap the same point count it twice, up to that limit. For the other changes, such as the result or a lineup, where both courts changed the same thing the more recent change applies. The other one is kept in the match's history rather than applied (refer to [Match history](#match-history)).
 
-The court whose change was kept rather than applied is told. When none of a save applied, a "Not applied" notice appears on the score editor and as an alert. It says that a newer change to the same thing was recorded first. It also says that this one was kept in the match's history, so nothing is lost. When you see it, check the match and its history before entering anything again. Do not simply re-enter your result: a fresh entry counts as the newest change and would replace the one that was recorded first. When only part of a save was kept, the rest applies as usual. A short note in the editor names what was kept, for example "Kept in the match's history, not applied: points. A newer change to the same thing was recorded first."
+The court whose change was kept rather than applied is told:
+
+- When none of a save applied, a "Not applied" notice appears on the score editor and as an alert. It says that a newer change to the same thing was recorded first. It also says that this one was kept in the match's history, so nothing is lost. When you see it, check the match and its history before entering anything again. Do not simply re-enter your result: a fresh entry counts as the newest change and would replace the one that was recorded first.
+- When only part of a save was kept, the rest applies as usual. A short note in the editor names what was kept, for example "Kept in the match's history, not applied: points. A newer change to the same thing was recorded first."
 
 A finished match keeps the result it was finished with. A point, foul, flag, or overtime period that reaches the server after the match was finished is not applied. It is kept in the match's history. This holds whichever of the two arrives first, because the changes are put in the order they were made. It also holds whether the finish came from your court or another. The score editor says "Not applied: this match is already finished, so this change was kept in the match's history. To change the result, tap Correct." When only part of the save was held, the note in the editor reads "The match is finished: to change the result, tap Correct." To change the result, use **Correct** (refer to [Correct a completed result](#correct-a-completed-result)), not further scoring. The first result recorded for a match stands in the same way. If a second court finishes the same match without having seen the first result, its finish is kept in the history and the first result stays.
 
@@ -208,15 +243,32 @@ This applies to a correction as well. A correction you save while offline is hel
 
 ## Team matches and kachinuki
 
-In a regular team match every bout is fought, so **Finish** does not record the encounter while a bout has no result. It names the bouts that still need one. Give each of them a score, a **Tie**, or a **Fusensho**. Every bout needs a result or a decision, whoever the lineups name. If only one team has a fighter for a position, record a **Fusensho** for that team. If neither team has a fighter for a position, record that bout as a **Tie**: it counts as an individual draw for both teams. **Save correction** follows the same rule.
+In a regular team match every bout is fought, so **Finish** does not record the encounter while a bout has no result. It names the bouts that still need one. Give each of them a score, a **Tie**, or a **Fusensho**. Every bout needs a result or a decision, whoever the lineups name:
 
-A team match that ended with a withdrawal (**Kiken** or **Fusenpai**) is the exception. When you correct a bout fought before the withdrawal, **Save correction** saves the bouts you enter. It keeps the withdrawal exactly as it was recorded: the same winner, and the same effect on the team's eligibility. The bouts nobody fought after the withdrawal are not left empty. They are credited to the other team, 2-0 each, exactly as a fusensho bout is scored. Refer to [Fusenpai and fusensho](recording-decisions.md#fusenpai-and-fusensho). An individual match corrected after a withdrawal works the same way. The withdrawn competitor's points you enter are saved, and the winner's circles for that decision and the withdrawal are kept. If the withdrawal itself was recorded against the wrong team, open **Withdrawal or no-show** in the same editor and record it again for the other team. If nobody withdrew, choose **Clear kiken and reopen** (or **Clear fusenpai and reopen**). The match goes back to in progress with the bouts already fought kept, and the team is eligible again. You then score the remaining bouts and finish it. For both fixes, refer to [Correcting a withdrawal recorded by mistake](recording-decisions.md#correcting-a-withdrawal-recorded-by-mistake).
+- If only one team has a fighter for a position, record a **Fusensho** for that team.
+- If neither team has a fighter for a position, record that bout as a **Tie**: it counts as an individual draw for both teams.
+
+**Save correction** follows the same rule.
+
+A team match that ended with a withdrawal (**Kiken** or **Fusenpai**) is the exception. When you correct a bout fought before the withdrawal, **Save correction** saves the bouts you enter. It keeps the withdrawal exactly as it was recorded: the same winner, and the same effect on the team's eligibility. The bouts nobody fought after the withdrawal are not left empty. They are credited to the other team, 2-0 each, exactly as a fusensho bout is scored. Refer to [Fusenpai and fusensho](recording-decisions.md#fusenpai-and-fusensho). An individual match corrected after a withdrawal works the same way. The withdrawn competitor's points you enter are saved, and the winner's circles for that decision and the withdrawal are kept.
+
+When the withdrawal itself is wrong, there are two fixes:
+
+- If it was recorded against the wrong team, open **Withdrawal or no-show** in the same editor and record it again for the other team.
+- If nobody withdrew, choose **Clear kiken and reopen** (or **Clear fusenpai and reopen**). The match goes back to in progress with the bouts already fought kept, and the team is eligible again. You then score the remaining bouts and finish it.
+
+For both fixes, refer to [Correcting a withdrawal recorded by mistake](recording-decisions.md#correcting-a-withdrawal-recorded-by-mistake).
 
 Kachinuki team encounters are scored one bout at a time. Score the current bout, then use **Record bout** to keep going: the winner stays on and the next pairing is added. Use **End match** instead to finish on the last scored bout. You decide when the encounter is over. End it when a team is out of fighters or when the other team's Taisho has been beaten.
 
 A team with no saved lineup fights in member number order. The first bout is member 1 of each team. **Record bout** pairs the winner with the loser's next member, whether or not those members have a name yet. A member without a name shows by number, for example "T1.2", and you can type the name over it on the bout. When a team has no fighters left, the line above the current bout says so, for example "Aka has no fighters left. End match finishes the encounter."
 
-If the team members or the lineups cannot be read, the sheet shows one warning for that match: "Team members could not be read, so fighters are not seated by member number. Add each bout's pairing by hand." or "The lineups could not be read, so who fights next is not worked out. Add each bout's pairing by hand." The first sentence shows only when a lineup leaves a place to fill. **Record bout** still records the bout you scored. With the lineups unreadable it adds no next pairing. With the team members unreadable it brings in only the fighters a saved lineup names. In that case, after a team with no saved lineup loses a bout, no pairing follows. Either way the line that a team has no fighters left never takes the place of the current bout. When no pairing follows, tap **+ Add next bout manually** and pick or type both fighters of the next bout. Tell the organiser that the file could not be read. If the bout you recorded names no fighter, the sheet says the score is saved but no pairing was added. Pick or type who fought and tap **Record bout** again, which records the bout. Then add the next one with **+ Add next bout manually**. Once the file can be read again, the next **Record bout** pairs by member number again.
+If the team members or the lineups cannot be read, the sheet shows one warning for that match. **Record bout** still records the bout you scored. The rest depends on what cannot be read:
+
+- With the team members unreadable, the warning is "Team members could not be read, so fighters are not seated by member number. Add each bout's pairing by hand." It shows only when a lineup leaves a place to fill. **Record bout** brings in only the fighters a saved lineup names. After a team with no saved lineup loses a bout, no pairing follows.
+- With the lineups unreadable, the warning is "The lineups could not be read, so who fights next is not worked out. Add each bout's pairing by hand." **Record bout** adds no next pairing.
+
+Either way the line that a team has no fighters left never takes the place of the current bout. When no pairing follows, tap **+ Add next bout manually** and pick or type both fighters of the next bout. Tell the organiser that the file could not be read. If the bout you recorded names no fighter, the sheet says the score is saved but no pairing was added. Pick or type who fought and tap **Record bout** again, which records the bout. Then add the next one with **+ Add next bout manually**. Once the file can be read again, the next **Record bout** pairs by member number again.
 
 On a tied bout you also decide what the tie means, according to the [kachinuki mode](../organisers/team-tournaments.md#kachinuki-modes) in force:
 
@@ -230,6 +282,12 @@ To fix a bout you have already recorded, tap its row: it reopens in place with t
 
 ![The kachinuki score editor: the one-line Kachinuki (winner stays on) note above the bout list, the bouts already fought shown as read-only rows above the current bout (which carries the ippon buttons for each side), a muted line just above the current bout naming each team's fighter on and the fighters left, the × Remove this bout undo, and the Record bout and End match footer actions.](../../screenshots/kachinuki-scoring-buttons.png)
 
-A fighter's name you type on the score sheet is matched against the team's member list. The sheet waits for that list first, for up to about 12 seconds. While it waits, the name stays in its box and **Close**, **Cancel**, **Prev** and **Next** are greyed out. On a regular team match, **Finish** (or **Save correction**) and the representative bout buttons are greyed out too. On a kachinuki match, **Record bout** and **End match** are greyed out too. Once the list arrives, the name picks its member, names a blank numbered place, or adds a member, as described under [Team members](../organisers/team-tournaments.md#team-members), with no note.
+A fighter's name you type on the score sheet is matched against the team's member list. The sheet waits for that list first, for up to about 12 seconds. While it waits, the name stays in its box and these are greyed out:
+
+- **Close**, **Cancel**, **Prev** and **Next**
+- on a regular team match, also **Finish** (or **Save correction**) and the representative bout buttons
+- on a kachinuki match, also **Record bout** and **End match**
+
+Once the list arrives, the name picks its member, names a blank numbered place, or adds a member, as described under [Team members](../organisers/team-tournaments.md#team-members), with no note.
 
 If the list cannot be loaded, for any reason, the name is saved in the match's lineup by that name alone. Nobody is added to the team. The row under the bout then says "Saved by name only: the team member list could not be loaded. Scores will still record normally." Keep scoring, and tell the organiser. Once the team members can be read again, fix each name saved by name only before the next **Record bout**. Pick the team member from the list in place of the name. For a person who is not a team member yet, type the name again on the bout instead. In a kachinuki match a name saved that way does not count as the member it names. Member number order can then seat that person a second time. Refer to [When the team member list cannot be loaded](../organisers/team-tournaments.md#when-the-team-member-list-cannot-be-loaded) for what the organiser checks.

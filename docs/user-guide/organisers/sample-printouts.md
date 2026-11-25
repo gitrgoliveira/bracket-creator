@@ -34,7 +34,12 @@ A booklet for competitors and coaches: the pool draw, then each shiai-jo's knock
 
 ### Full bracket
 
-Everything the tables need to run the day on paper: the pool draw, every pool's matches with a results table, every knockout match, and the trees. A4.
+Everything the tables need to run the day on paper. A4. It holds:
+
+- the pool draw
+- every pool's matches with a results table
+- every knockout match
+- the trees
 
 [![A pool matches page: the matches of pools C and D, each followed by its results table and ranking.](../../samples/pools-example-medium/print_full_bracket.png){ width="360" }](../../samples/pools-example-medium/print_full_bracket.pdf)
 
@@ -62,6 +67,11 @@ The pool draw, then each shiai-jo's knockout tree with its pools beside it. A4.
 
 ### Full bracket
 
-The pool draw, every team match with a numbered row for each of its five bouts, every knockout match, and the trees. A4.
+A4. It holds:
+
+- the pool draw
+- every team match, with a numbered row for each of its five bouts
+- every knockout match
+- the trees
 
 [![A pool matches page for pool B: three team matches, each with five numbered bout rows, then the team results table and the ranking.](../../samples/pools-example-medium-teams/print_full_bracket.png){ width="360" }](../../samples/pools-example-medium-teams/print_full_bracket.pdf)

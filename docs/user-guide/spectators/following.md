@@ -32,7 +32,13 @@ Tap a competition to see its schedule, standings, and bracket. Aka (red) and Shi
 
 ### Next up on each shiai-jo
 
-A shiai-jo has one queue, shared by every competition on it. The bout running now comes first, then the waiting bouts in the order of their printed start times, whichever competition they belong to. If two bouts show the same time, the competition that starts earlier goes first, then the draw order. A bout with no printed time comes after the timed ones. If a competitor withdrew or is barred from a bout, that bout takes no place in the queue.
+A shiai-jo has one queue, shared by every competition on it. Its order follows these rules:
+
+- The bout running now comes first.
+- The waiting bouts follow in the order of their printed start times, whichever competition they belong to.
+- If two bouts show the same time, the competition that starts earlier goes first, then the draw order.
+- A bout with no printed time comes after the timed ones.
+- If a competitor withdrew or is barred from a bout, that bout takes no place in the queue.
 
 So there is exactly one "Next up" bout per shiai-jo, and the same one appears everywhere:
 
@@ -67,7 +73,13 @@ You see the projected time wherever upcoming bouts appear:
 
 Every public screen shows the same time for a bout.
 
-The estimate refreshes every minute and as results arrive. It takes the time from the tournament server, not from your device's clock, and shows it in your device's time zone. A projected start is never earlier than now, nor earlier than when the running bout is expected to end. It is also at least one match slot after the previous waiting bout. If a bout runs long, the next bout shows the current time (for example ~10:52 at 10:52), moving on minute by minute.
+The estimate refreshes every minute and as results arrive. It takes the time from the tournament server, not from your device's clock, and shows it in your device's time zone. A projected start keeps to three limits:
+
+- It is never earlier than now.
+- It is never earlier than when the running bout is expected to end.
+- It is at least one match slot after the previous waiting bout.
+
+If a bout runs long, the next bout shows the current time (for example ~10:52 at 10:52), moving on minute by minute.
 
 Keep a few limits in mind:
 
@@ -81,7 +93,15 @@ Keep a few limits in mind:
 
 Once the draw for a competition has run, its competitors are numbered. The number starts with a short prefix that belongs to that competition, so "K12" and "M12" are two different people in two different draws. Swiss competitions are the exception and use no numbers at all.
 
-The same number identifies that competitor everywhere it appears. It is on their tag, on the pool or draw sheet, on the Names to Print cards and at the desk. It is also beside their name on screen, in the viewer and on the venue's display boards. Type it the way it is printed, prefix included:
+The same number identifies that competitor everywhere it appears:
+
+- On their tag.
+- On the pool or draw sheet.
+- On the Names to Print cards.
+- At the desk.
+- Beside their name on screen, in the viewer and on the venue's display boards.
+
+Type it the way it is printed, prefix included:
 
 - **The prefix on its own** brings up that whole draw. Type "K" and every K number is listed, along with anyone whose name or dojo happens to contain a "k". A prefix can carry digits of its own when the plain letter was already taken by another competition. "K02" is then a prefix like any other. Typing "K02" lists that whole draw, and "K" lists both.
 - **The prefix and the digits** finds that one competitor. "K12" finds K12, and not K120.
@@ -97,7 +117,13 @@ If someone is entered in more than one competition, they have a separate number 
 
 An organiser can choose to show competitor numbers instead of names on the public pages. In that competition every competitor reads as their number, such as K12, on the schedule, the standings, the bracket, the court displays and the live updates. Dojo names and team names stay visible, and the members of a team read as a label built from the team's number. The competitor-number search above is then the way to find someone: type the number, prefix included, as printed on their tag. A name typed into the search finds nobody in that competition, though a dojo still matches.
 
-If you hold a link from the organiser, open it to see names. A link on a competitor's tag shows that competitor's name, and a team's link shows the names of that team's members. A competition link, shown at the venue as a QR code, shows every name in the competition. Your phone keeps the link, so the names stay shown on that phone until the link stops working. The organiser sets when that happens. A link that has stopped says so and offers the competition by numbers. Open the link on a phone you trust, because it shows names to whoever uses that phone. Some competitions give no link at all, and show numbers only.
+If you hold a link from the organiser, open it to see names:
+
+- A link on a competitor's tag shows that competitor's name.
+- A team's link shows the names of that team's members.
+- A competition link, shown at the venue as a QR code, shows every name in the competition.
+
+Your phone keeps the link, so the names stay shown on that phone until the link stops working. The organiser sets when that happens. A link that has stopped says so and offers the competition by numbers. Open the link on a phone you trust, because it shows names to whoever uses that phone. Some competitions give no link at all, and show numbers only.
 
 Refer to [Hide competitor names from the public](../organisers/hide-competitor-names.md) for the organiser's side.
 

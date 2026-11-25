@@ -95,10 +95,10 @@ CI publishes **three images** to GHCR, each built for amd64 and arm64:
   vendor-frontend, esbuild) and adds shell completions and man pages. It publishes archives for
   Linux, macOS, and Windows (zip on Windows), one universal macOS binary in place of the two
   per-architecture ones, and deb, rpm, and apk packages.
-- Two jobs follow the release. **Smoke test Linux packages** installs the amd64 deb, rpm, and apk
-  and runs the binary. **Bump Homebrew formula** points the formula in the
-  `gitrgoliveira/homebrew-tap` repository at the new tag's source archive (the formula builds
-  from source).
+- Two jobs follow the release:
+    - **Smoke test Linux packages** installs the amd64 deb, rpm, and apk and runs the binary.
+    - **Bump Homebrew formula** points the formula in the `gitrgoliveira/homebrew-tap`
+      repository at the new tag's source archive (the formula builds from source).
 
 ## 2. Runtime composition (container + proxy + disk)
 
@@ -155,9 +155,11 @@ flowchart TB
 | **GCP Always Free** (`deploy/gcp/`) | Terraform; `e2-micro` + firewall + persistent disk + Caddy auto-HTTPS | club / regional events (~≤50–300 viewers) |
 | **Oracle Always Free** (`deploy/oracle/`) | Terraform; Ampere A1 (arm64, 12 GB RAM), 10 TB/month egress | large events (1000+ viewers) |
 
-- **Getting the binary.** Install it from the Homebrew tap (`gitrgoliveira/tap`, built from
-  source), from the deb, rpm, or apk package, or from a release archive, or build it with
-  `make go/build`.
+- **Getting the binary.** There are four ways to get it:
+    - install it from the Homebrew tap (`gitrgoliveira/tap`, built from source);
+    - install it from the deb, rpm, or apk package;
+    - install it from a release archive;
+    - build it with `make go/build`.
 - **Bare binary binding.** `mobile-app` listens on `localhost:8080` by default, which suits a
   TLS proxy on the same host. A proxy on another host, or devices on the venue LAN reaching the
   app directly, need `--bind 0.0.0.0` (or `BIND_ADDRESS`).
@@ -188,8 +190,15 @@ HTTP challenge needs port 80. SSH (22) is limited to `operator_cidrs` when you s
 all otherwise. Caddy answers on port 80 for the certificate challenge and redirects every other
 request to HTTPS.
 
-Terraform provisions the instance, network, and firewall, then installs Docker, prepares the
-data dir, writes the app + Caddy config, and starts the app. Reachable over HTTPS within minutes
+Terraform sets up the host in this order:
+
+1. It provisions the instance, network, and firewall.
+2. It installs Docker.
+3. It prepares the data dir.
+4. It writes the app + Caddy config.
+5. It starts the app.
+
+Reachable over HTTPS within minutes
 of `terraform apply`. `terraform destroy` removes everything (run it after the event).
 
 ### Venue connectivity: a four-court event
@@ -241,7 +250,12 @@ clients, comfortably within `SSE_MAX_CLIENTS`. Every real-time update still fans
   all**. Put a local TLS proxy in front for secure-context features, or serve plain HTTP on the LAN.
 
 **The network is the real fix.** Client resilience (offline write queue, SSE resync, silence
-watchdog) keeps the app usable across blips. For a smooth event, **wire the operator consoles** where you can. Put operators on a **dedicated AP** separate from spectator guest Wi-Fi. Prefer the **on-prem** pattern when the venue's internet is unreliable. **Drive each court's display from the operator's own machine over HDMI** so the scoreboard keeps moving even when the network does not (next section).
+watchdog) keeps the app usable across blips. For a smooth event:
+
+- **Wire the operator consoles** where you can.
+- Put operators on a **dedicated AP** separate from spectator guest Wi-Fi.
+- Prefer the **on-prem** pattern when the venue's internet is unreliable.
+- **Drive each court's display from the operator's own machine over HDMI** so the scoreboard keeps moving even when the network does not (next section).
 
 ### Keep the court scoreboard alive on the same machine (HDMI)
 

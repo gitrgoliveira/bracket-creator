@@ -99,7 +99,11 @@ bracket-creator mobile-app backup [flags]
 | `--out` | (none) | (required) | Output backup zip file path |
 | `--competition` | (none) | `""` | Competition ID to back up (leave it out to back up the whole tournament) |
 
-The backup command reads all competition files and tournament settings, strips the admin password from `tournament.md`, and writes the zip archive to `--out`.
+The backup command works in three steps:
+
+1. It reads all competition files and tournament settings.
+2. It strips the admin password from `tournament.md`.
+3. It writes the zip archive to `--out`.
 
 ### mobile-app restore
 
@@ -122,13 +126,29 @@ bracket-creator mobile-app restore FILE [flags]
 | `--lock-password` | (none) | `false` (or `$LOCK_PASSWORD=true`) | Handle the restored password as in locked mode: password comes from `TOURNAMENT_PASSWORD_HASH`, so `--password` is not needed |
 | `--allow-running` | (none) | `false` | Restore even when matches are running in a competition the restore replaces or removes |
 
-In file mode, a whole-tournament restore needs `--password` when the folder has no `tournament.md` yet, or its `tournament.md` has no admin password. The password lets you sign in to the restored tournament. `--lock-password` waives that requirement: the server you then start with `--lock-password` takes its password from `TOURNAMENT_PASSWORD_HASH`, which the restore command itself never reads. A folder with no `tournament.md` accepts only a whole-tournament archive: a competition archive, or `--only`, is refused until a tournament exists.
+In file mode, a whole-tournament restore needs `--password` in either of these cases:
 
-The command refuses a backup made by a later version of the app than the one running. It also refuses one made by a version it cannot be compared with, or by one older than it can bring up to date. In each case it changes nothing. A backup is restored only with the version that made it or a later one, safety copies included. Refer to [Which version can restore a backup](../organisers/backup-and-restore.md#which-version-can-restore-a-backup).
+- The folder has no `tournament.md` yet.
+- The folder's `tournament.md` has no admin password.
+
+The password lets you sign in to the restored tournament. `--lock-password` waives that requirement: the server you then start with `--lock-password` takes its password from `TOURNAMENT_PASSWORD_HASH`, which the restore command itself never reads. A folder with no `tournament.md` accepts only a whole-tournament archive: a competition archive, or `--only`, is refused until a tournament exists.
+
+The command refuses a backup in each of these cases, and changes nothing:
+
+- It was made by a later version of the app than the one running.
+- It was made by a version the command cannot be compared with.
+- It was made by a version older than the command can bring up to date.
+
+A backup is restored only with the version that made it or a later one, safety copies included. Refer to [Which version can restore a backup](../organisers/backup-and-restore.md#which-version-can-restore-a-backup).
 
 Each competition ID may appear in only one of `--replace`, `--copy`, `--keep`, and `--remove`. `--undo` cannot be combined with `--only` or with any of those four flags, and it refuses an archive that is not a `before-restore` safety copy.
 
-Before applying changes, the command evaluates a dry run plan. A competition may require a decision, such as replacing, copying or keeping an existing competition, or keeping or removing a competition missing from the backup. If any does, the command refuses and prints the choices for each, for example `mens-individual ("Mens Individual"): choose replace, copy or keep`. A competition only the backup holds needs no flag: it is added unless you pass `--keep` for it. With `--only`, or for a competition archive, `--keep` is not a choice for the competition restored, since keeping it would restore nothing.
+Before applying changes, the command evaluates a dry run plan. A competition may require a decision:
+
+- An existing competition can be replaced, copied or kept.
+- A competition missing from the backup can be kept or removed.
+
+If any competition does, the command refuses and prints the choices for each, for example `mens-individual ("Mens Individual"): choose replace, copy or keep`. A competition only the backup holds needs no flag: it is added unless you pass `--keep` for it. With `--only`, or for a competition archive, `--keep` is not a choice for the competition restored, since keeping it would restore nothing.
 
 After a restore, the command lists what it did with each competition: `Created:`, `Replaced:`, `Copied:`, `Kept:`, `Left out:` (a competition only the backup held, not added) and `Removed:`.
 

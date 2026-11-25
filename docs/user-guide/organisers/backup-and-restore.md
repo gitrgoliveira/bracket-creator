@@ -14,11 +14,24 @@ You can back up the entire tournament at once, or back up any single competition
 
 ## Which version can restore a backup
 
-A backup can be restored with the version of the app that made it or any later version. A later version brings the restored data up to date, as it does a data folder after an upgrade. A backup that a later version made is refused, since an earlier version cannot read what a later one may have written. Some builds have a version with no place in the release order, such as one built from a source branch. Such a build restores only backups that carry exactly its version. Its own backups restore only on a build with that same version. A Docker image built with uncommitted changes restores as the version it was built from. It restores that version's backups and earlier ones. Its own backups, however, restore only on a build with exactly its version. A backup made with a version older than this app can bring up to date (before 2.3.0, for this version) is refused too. The same holds for daily copies and safety copies.
+A backup can be restored with the version of the app that made it or any later version. A later version brings the restored data up to date, as it does a data folder after an upgrade. Other backups and builds follow these rules:
+
+- A backup that a later version made is refused, since an earlier version cannot read what a later one may have written.
+- Some builds have a version with no place in the release order, such as one built from a source branch. Such a build restores only backups that carry exactly its version. Its own backups restore only on a build with that same version.
+- A Docker image built with uncommitted changes restores as the version it was built from. It restores that version's backups and earlier ones. Its own backups, however, restore only on a build with exactly its version.
+- A backup made with a version older than this app can bring up to date (before 2.3.0, for this version) is refused too.
+
+The same holds for daily copies and safety copies.
 
 ## Automatic daily copies
 
-While it runs, the server checks when it starts and then once an hour. It takes a backup of the entire tournament when the newest daily copy is at least 24 hours old, there is none yet, or this version of the app cannot restore it:
+While it runs, the server checks when it starts and then once an hour. It takes a backup of the entire tournament in any of these cases:
+
+- The newest daily copy is at least 24 hours old.
+- There is no daily copy yet.
+- This version of the app cannot restore the newest daily copy.
+
+These rules also apply:
 
 - A daily copy is created only if something has changed since the newest daily copy. Backups you download and safety copies do not count. A newest daily copy that this version cannot restore counts as none. So after you go back to an earlier version, its first check takes a copy even when nothing has changed. A save that changes nothing, such as the same score sent twice, does not count as a change.
 - A copy is also taken when the app is closed normally, if something changed since the newest daily copy, or this version cannot restore that copy. A crash, a pulled plug, or a shutdown that runs past its time limit takes none.
@@ -163,7 +176,10 @@ Each copy shows its kind and the local time it was taken first, then its file na
 
 ## Using the command line when the server is stopped
 
-If the app will not start, or you need to restore data onto a new computer before starting the app there, use the command line.
+Use the command line in either of these cases:
+
+- The app will not start.
+- You need to restore data onto a new computer before starting the app there.
 
 Always stop the `mobile-app` server before running command-line backup or restore commands. The command-line tool reads and writes the tournament files directly on disk and cannot coordinate with a running server. If a competition has a change that could not be written to disk, the command refuses. Free disk space or fix the data folder's permissions, then run the command again. If that does not clear it, a folder the change names may have been removed outside the app. Restore that folder, or set aside the change's log file by renaming it so its name no longer ends in `.json`, as [Write guarantees](../../architecture/data-model.md#5-write-guarantees) explains. The lines the command prints above the refusal name that file.
 
@@ -195,7 +211,13 @@ bracket-creator mobile-app restore ./backup-2026.zip \
 
 In a whole-tournament restore, `--keep ID` leaves the folder as it is for that competition. One you already have is not replaced, and one only the backup holds is not added. Without the flag, a competition only the backup holds is added. The command prints `Kept:` and `Left out:` lines for them. With `--only`, `--keep` is not a choice.
 
-Add `--only ID` to restore one competition from a tournament archive. Add `--remove ID` to remove a competition that the backup does not hold. To undo a restore, add `--undo` with a `before-restore` file. The [mobile-app command reference](../commands/mobile-app.md#mobile-app-restore) lists every flag.
+Three more flags change what a restore does:
+
+- Add `--only ID` to restore one competition from a tournament archive.
+- Add `--remove ID` to remove a competition that the backup does not hold.
+- Add `--undo` with a `before-restore` file to undo a restore.
+
+The [mobile-app command reference](../commands/mobile-app.md#mobile-app-restore) lists every flag.
 
 Into a folder with no tournament yet, only a whole-tournament archive can be restored. You must also pass `--password` to set the admin password, unless you pass `--lock-password` because you will start the server in locked mode.
 

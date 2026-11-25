@@ -28,9 +28,17 @@ Self-run mode has no check-in. There is nothing to mark on the day, because the 
 
 ## Report your own score
 
-You can record your match result directly from the public viewer, without the admin password. A result you enter is tagged as self-reported; a result entered by an operator is tagged as admin.
+You can record your match result directly from the public viewer, without the admin password. Each result carries a tag:
 
-Only everyday match outcomes are available to self-reporters. Decisions that require an official ruling remain with the operator, and so do destructive actions such as deleting a competition or discarding a draw. For a full list of outcomes and what they mean, refer to [Recording decisions](../court-operators/recording-decisions.md).
+- A result you enter is tagged as self-reported.
+- A result entered by an operator is tagged as admin.
+
+Only everyday match outcomes are available to self-reporters. Two kinds of action remain with the operator:
+
+- Decisions that require an official ruling.
+- Destructive actions such as deleting a competition or discarding a draw.
+
+For a full list of outcomes and what they mean, refer to [Recording decisions](../court-operators/recording-decisions.md).
 
 When a knockout team match finishes level, you can add the representative bout ([daihyosen](../court-operators/recording-decisions.md#daihyosen)) from the score sheet. Score it like any other bout, then finish the match on the winner it decides. A kachinuki match has no representative bout. There, a tied pairing that must produce a result is settled by encho on that same bout (refer to [Scoring a kachinuki encounter](../organisers/team-tournaments.md#scoring-a-kachinuki-encounter)). A representative bout added by mistake can be removed while it is still unscored, until the match finishes. After that, only the organiser can add or remove one. The score sheet does not offer a judges' decision (hantei): that stays with the organiser, on the representative bout as on every other bout. When the organiser records one, the score sheet shows the representative bout as decided and you cannot change it. You can still finish the match on that decision.
 
@@ -38,7 +46,10 @@ In a team match you can also name each bout's fighters on the score sheet. Pick 
 
 ## If your result cannot be sent
 
-Your device may fail to send a result you entered, because there is no connection or the server keeps refusing it. The app then keeps the result on the device and sends it when it can. While that is so, a count of unsent results appears in the bottom-left corner of the public page. Nothing is shown while a result is simply being sent. Tap the count to see what is held and whether each item is waiting for the connection or being refused. An item the server keeps refusing has a Discard button. After you confirm, that item alone is discarded. You can then check the match and enter the result again if it is still needed. An item that is only waiting for the connection cannot be discarded; it is sent automatically when the connection returns.
+Your device may fail to send a result you entered, because there is no connection or the server keeps refusing it. The app then keeps the result on the device and sends it when it can. While that is so, a count of unsent results appears in the bottom-left corner of the public page. Nothing is shown while a result is simply being sent. Tap the count to see what is held and whether each item is waiting for the connection or being refused. The two kinds are handled differently:
+
+- An item the server keeps refusing has a Discard button. After you confirm, that item alone is discarded. You can then check the match and enter the result again if it is still needed.
+- An item that is only waiting for the connection cannot be discarded; it is sent automatically when the connection returns.
 
 ## Follow your matches and standings
 

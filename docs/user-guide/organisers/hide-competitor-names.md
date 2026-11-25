@@ -41,7 +41,13 @@ Links appear once you have saved a choice that has them.
 
 A person's link belongs to their place in the competition, not to their name. If you replace a competitor with a substitute in the **Participants** tab, the substitute takes over the same link. The link already given to the first competitor now shows the substitute's name. Hand the substitute their own copy and tell the first competitor their link has changed hands.
 
-Set a **Public URL** in the tournament details first. Without it, the printed tags carry no QR code and the competition's **Settings** do not offer one. A link you show or copy then points at the address of the device you are using, which other phones may not be able to open. The app warns you when it shows or copies a link without one.
+Set a **Public URL** in the tournament details first. Without it:
+
+- The printed tags carry no QR code.
+- The competition's **Settings** do not offer one.
+- A link you show or copy points at the address of the device you are using, which other phones may not be able to open.
+
+The app warns you when it shows or copies a link without one.
 
 A competitor who opens their link sees the competition with their own name shown. The phone keeps the link, so the name stays shown on that phone. A link that has stopped working, or one for a competition whose links you switched off, says so and offers the competition by numbers.
 
@@ -49,7 +55,12 @@ A competitor who opens their link sees the competition with their own name shown
 
 ## When the links stop working
 
-Links stop revealing names at the time in **Links stop working at**. Leave it empty and they stop one hour after the tournament's closing time on its last day, or at 01:00 the next morning when no closing time is set. That default needs the tournament's date. If the date has been cleared, the links reveal no names until you set the date or fill in **Links stop working at**. Moving the time later makes the same links work again, so a link you printed is never lost. Switching the links off and on again brings back the links you switched off, but not a link that has already expired. For that, move the time later.
+Links stop revealing names at the time in **Links stop working at**. Leave it empty and they stop at one of two times:
+
+- With a closing time set, they stop one hour after the tournament's closing time on its last day.
+- With no closing time set, they stop at 01:00 the next morning.
+
+That default needs the tournament's date. If the date has been cleared, the links reveal no names until you set the date or fill in **Links stop working at**. Moving the time later makes the same links work again, so a link you printed is never lost. Switching the links off and on again brings back the links you switched off, but not a link that has already expired. For that, move the time later.
 
 ## What this does not cover
 

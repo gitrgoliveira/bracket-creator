@@ -22,7 +22,13 @@ docker run -p 8080:8080 -v "$PWD/tournament-data:/tournament-data" \
 
 The app is available at `http://localhost:8080`.
 
-The container runs as a non-root user (UID 65534). On Linux hosts, create the folder and make it writable by that UID before the first run: `mkdir -p tournament-data && sudo chown 65534 tournament-data`. Without the `chown`, the container cannot write to the folder, and the app does not start. At startup it checks that it can write to the data folder and to every competition folder inside it. It names each folder it cannot write to. A file where one of those folders should be also stops it. So does a link inside the data folder that points out of it. A link written as an absolute path counts, wherever it points. The message says what to do: move the file away, or put the folder itself inside the data folder in place of the link. The data folder itself may be a link. The same check applies outside Docker, for example after copying a tournament folder from another machine or a read-only backup. To move a tournament to another machine, restoring a backup archive there is the supported route: refer to [Backup and restore](../organisers/backup-and-restore.md#using-the-command-line-when-the-server-is-stopped). If the folder does not exist, Docker creates it owned by root. If you created it with `mkdir`, it is owned by your login user, which is a different UID. Docker Desktop on macOS and Windows handles the permissions automatically.
+The container runs as a non-root user (UID 65534). On Linux hosts, create the folder and make it writable by that UID before the first run: `mkdir -p tournament-data && sudo chown 65534 tournament-data`. Without the `chown`, the container cannot write to the folder, and the app does not start. At startup it checks the data folder and every competition folder inside it. Each of these stops it:
+
+- A folder it cannot write to. The message names each such folder.
+- A file where one of those folders should be.
+- A link inside the data folder that points out of it. A link written as an absolute path counts, wherever it points.
+
+The message says what to do: move the file away, or put the folder itself inside the data folder in place of the link. The data folder itself may be a link. The same check applies outside Docker, for example after copying a tournament folder from another machine or a read-only backup. To move a tournament to another machine, restoring a backup archive there is the supported route: refer to [Backup and restore](../organisers/backup-and-restore.md#using-the-command-line-when-the-server-is-stopped). If the folder does not exist, Docker creates it owned by root. If you created it with `mkdir`, it is owned by your login user, which is a different UID. Docker Desktop on macOS and Windows handles the permissions automatically.
 
 Refer to the [hosting guide](hosting.md) for production deployments, and [operating modes](../organisers/operating-modes.md) for access control.
 
@@ -108,7 +114,13 @@ rm -f ${TAR_FILE}
 go install github.com/gitrgoliveira/bracket-creator@latest
 ```
 
-`go install` compiles from source rather than downloading a prebuilt binary. It builds the full binary, including the `serve` and `mobile-app` subcommands. The `serve` web UI works, because its assets are committed to the module. The `mobile-app` web UI renders blank, because its compiled JavaScript bundle and vendored runtime are build artifacts that are not checked in. The server says so at startup. A log line containing `front-end bundle is missing` means the binary was built without the bundle or its vendored runtime, not that the network is at fault. The Excel-generating CLI commands work normally. Use Docker, Homebrew, or a release binary if you need the tournament app.
+`go install` compiles from source rather than downloading a prebuilt binary. It builds the full binary, including the `serve` and `mobile-app` subcommands. Its parts do not all work:
+
+- The `serve` web UI works, because its assets are committed to the module.
+- The `mobile-app` web UI renders blank, because its compiled JavaScript bundle and vendored runtime are build artifacts that are not checked in. The server says so at startup. A log line containing `front-end bundle is missing` means the binary was built without the bundle or its vendored runtime, not that the network is at fault.
+- The Excel-generating CLI commands work normally.
+
+Use Docker, Homebrew, or a release binary if you need the tournament app.
 
 ## Build from source
 

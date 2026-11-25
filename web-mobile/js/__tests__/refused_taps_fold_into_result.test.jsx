@@ -51,8 +51,8 @@ const M2 = { id: 'm2', phase: 'bracket', matchNumber: 4, status: 'running', modi
 const tap = (letter = 'M', side = 'a') => ({ kind: 'ippon.add', pos: 0, side, letter });
 
 // A server that answers every tap with `tapAnswer(event, matchID)` and every
-// Finish 409 result_finalized; offline, every request fails as a dead network.
-function makeServer(tapAnswer) {
+// Finish with `finishRefusal` (409 result_finalized unless told otherwise); offline, every request fails as a dead network.
+function makeServer(tapAnswer, finishRefusal = { status: 409, body: { error: 'result_finalized', message: FINALIZED } }) {
     const server = { online: false };
     server.fetch = vi.fn((url, opts) => {
         const u = String(url);
@@ -69,9 +69,9 @@ function makeServer(tapAnswer) {
                 json: () => Promise.resolve({ outcomes, match: { id: matchID, scoreVersion: 9 } }),
             });
         }
-        const refusal = { error: 'result_finalized', message: FINALIZED };
+        const refusal = finishRefusal.body;
         return Promise.resolve({
-            ok: false, status: 409,
+            ok: false, status: finishRefusal.status,
             json: () => Promise.resolve(refusal),
             text: () => Promise.resolve(JSON.stringify(refusal)),
         });
@@ -83,8 +83,8 @@ const finalized = () => ({ outcome: 'refused', reason: 'result_finalized', messa
 
 // Queues `send` offline as a competitor (the empty password), brings the
 // server back and lets one send run; answers the words the operator reads.
-async function backOnline(send, tapAnswer = finalized) {
-    const server = makeServer(tapAnswer);
+async function backOnline(send, tapAnswer = finalized, finishRefusal) {
+    const server = makeServer(tapAnswer, finishRefusal);
     global.fetch = server.fetch;
     const mod = await import('../api_client.jsx');
     await flushMicrotasks();
@@ -117,6 +117,18 @@ describe('a refused offline result is told once, naming its match', () => {
     it('a refused Finish with no taps before it names its match too', async () => {
         const told = await backOnline((API) => finish(API, M1));
         expect(told).toEqual([`A result in Match 3 was refused by the server and cannot be saved. ${FINALIZED}`]);
+    });
+
+    it('a Finish refused for another reason leaves its match\'s taps their own message', async () => {
+        const REASON = 'Say why you are changing a finished result.';
+        const told = await backOnline(async (API) => {
+            API.recordTap('c1', 'm1', tap('M'), '', M1);
+            API.recordTap('c1', 'm1', tap('K'), '', M1);
+            await finish(API, M1);
+        }, finalized, { status: 400, body: { error: 'correction_reason_required', message: REASON } });
+        expect(told).toHaveLength(2);
+        expect(told).toContain(`2 taps were not applied in Match 3. ${FINALIZED}`);
+        expect(told.some((t) => t.startsWith('A result in Match 3 was refused by the server') && t.includes(REASON))).toBe(true);
     });
 
     it('only the taps of the refused result\'s match are folded: another match\'s taps are told, named', async () => {

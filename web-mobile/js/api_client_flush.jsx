@@ -38,7 +38,7 @@ import { createBaseLease, detectWebLocks } from './base_sender_lease.jsx';
 import {
     _tellRefusal, _notifyScoreSupersededEditor, _notifyScoreSupersededAlert, _heldForClosedMatch,
     _refusedByServer, _recomputeSyncStatus, SERVER_REJECTION_NOTICE_THRESHOLD, _endDiscardWhileOut,
-    _GONE_IS_DONE_KINDS, _tapPassFor, _noteRefusedResult, _notifyNotAppliedTaps, _whereOf,
+    _GONE_IS_DONE_KINDS, _noteRefusedResult, _notifyNotAppliedTaps, _whereOf,
 } from './api_client_status.jsx';
 import {
     TEAM_MEMBER_NOT_ADDED, TEAM_MEMBER_NOT_RENAMED, TEAM_MEMBER_NOT_CLEARED, _mintedAddAnswered, _mintedGate,
@@ -204,11 +204,11 @@ export function _wakeLeaseWaiters() {
 }
 
 // What one flush call has to tell (_runFlush). api_client_taps.jsx counts a
-// tap the server did not apply into `notApplied` and hands it over as
-// `lastNotApplied`, which the batch's view of the pass keeps, with its match,
-// in `notAppliedTaps` (_tapPassFor); `refusedResults` holds the matches whose
-// finished result this pass refused (_noteRefusedResult), so the end-of-pass
-// alert is told per match (_notifyNotAppliedTaps).
+// tap the server did not apply into `notApplied` and keeps it, with its match,
+// in `notAppliedTaps` (_noteNotAppliedTap); `refusedResults` holds the matches
+// whose finished result this pass refused because the match was closed
+// (_noteRefusedResult), so the end-of-pass alert is told per match
+// (_notifyNotAppliedTaps).
 function _newFlushPass() {
     return {
         superseded: 0, lastSuperseded: null, matchClosed: false,
@@ -493,7 +493,7 @@ async function _flushBase(base, list, pass, gen) {
                 i++;
             }
             if (batch.length === 0) { outcome = 'after'; break; }
-            outcome = await _sendTapBatch(base, batch, _tapPassFor(pass, batch));
+            outcome = await _sendTapBatch(base, batch, pass);
         } else {
             outcome = await _sendEntry(key, d, pass);
             i++;
@@ -869,9 +869,9 @@ async function _sendEntry(key, descriptor, pass) {
                     // bc-lww1: the operator's own entry, kept in the match's
                     // history, not applied. Said by the editor open on the
                     // match, else counted into the pass's one superseded alert.
-                    // A finished result held so is the one message of its
-                    // match: its refused taps are not told apart.
-                    _noteRefusedResult(pass, key, descriptor);
+                    // A finished result held for a closed match is the one
+                    // message of its match: its refused taps are not told apart.
+                    _noteRefusedResult(pass, key, descriptor, body);
                     const shown = _notifyScoreSupersededEditor(compID, matchID, body);
                     if (!shown) {
                         if (_heldForClosedMatch(body)) pass.matchClosed = true;
@@ -1000,10 +1000,11 @@ async function _sendEntry(key, descriptor, pass) {
     // the same way, so it leaves with it, and the operator is told once.
     const staleDocs = _staleDocumentSaves(key, descriptor, err);
     const claimed = [key, ...staleDocs.map(([k]) => k)].map((k) => _claimRefusal(k, err)).some(Boolean);
-    // A refused finished result is the one message of its match, whoever
-    // tells it: the taps of that match this pass refused are not told apart
-    // (decision q-f6-one-message).
-    _noteRefusedResult(pass, key, descriptor);
+    // A finished result refused because its match is closed is the one
+    // message of its match, whoever tells it: the taps of that match this
+    // pass refused are not told apart (decision q-f6-one-message). A refusal
+    // for another reason leaves them their own alert.
+    _noteRefusedResult(pass, key, descriptor, body);
     if (!claimed) {
         const refusal = _replayRefusal(body, kind === 'decision' && res.status === 409 ? 'conflict (409)' : `HTTP ${res.status}`);
         const matchWhere = matchID && !_NOT_MATCH_WRITE_KINDS.has(kind) ? _whereOf(descriptor) : '';

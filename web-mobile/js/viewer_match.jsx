@@ -426,6 +426,12 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
   useHeldWritesRefresh(() => bumpUnsent((n) => n + 1));
   const resultUnsent = !!(match && window.API && typeof window.API.hasPendingTerminalWrite === "function"
     && window.API.hasPendingTerminalWrite(compId, match.id));
+  // Worded from where the write stands (heldWriteState), as the editors' own
+  // banner is: one the server keeps refusing, or one waiting behind such a
+  // write of another match, is not waiting for the connection.
+  const unsentState = resultUnsent && typeof window.API.heldWriteState === "function"
+    ? window.API.heldWriteState(compId, match.id) : null;
+  const unsentRefused = !!(unsentState && (unsentState.keepsFailing || unsentState.blocker));
   const triggerRef = useRef(null);
   const trapRef = useRef(null);
   const modalRefCb = useCallback((node) => {
@@ -522,7 +528,9 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
           <div className="card" style={{ marginTop: 12, padding: 16 }}>
             {resultUnsent ? (
               <div data-testid="result-unsent" style={{ fontSize: 13, color: "var(--ink-2)" }}>
-                Result entered on this phone, not sent yet. It is sent when the connection returns.
+                {unsentRefused
+                  ? "Result entered on this phone, not sent yet. The server has not accepted it, and it is still being tried."
+                  : "Result entered on this phone, not sent yet. It is sent when the connection returns."}
               </div>
             ) : isFinalized ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-3)" }}>

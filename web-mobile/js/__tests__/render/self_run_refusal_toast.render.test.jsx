@@ -84,7 +84,7 @@ afterEach(() => {
 
 const match = () => ({
   id: 'm1', compId: 'c1', compName: 'Comp', status: 'running',
-  phase: 'pool', poolName: 'Pool 1', court: 'A',
+  phase: 'bracket', matchNumber: 2, court: 'A',
   sideA: { id: 'p1', name: 'Yamada' },
   sideB: { id: 'p2', name: 'Tanaka' },
 });
@@ -112,8 +112,8 @@ describe('a refused result on the public score sheet', () => {
     const shown = toast.toastSnapshot();
     expect(shown, 'the refusal is told').not.toBeNull();
     expect(shown.type).toBe('error');
-    expect(shown.message.endsWith(SENTENCE), 'the server\'s own sentence closes it').toBe(true);
-    expect(shown.message).not.toContain('Re-enter it');
+    expect(shown.message, 'the match is named and the server\'s own sentence closes it').toBe(
+      `A result in Match 2 was refused by the server and cannot be saved. ${SENTENCE}`);
     expect(toast.queuedToastCount(), 'told once').toBe(0);
     expect(alertSpy, 'no window.alert').not.toHaveBeenCalled();
     logWarn.mockRestore();

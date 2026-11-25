@@ -11,10 +11,12 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { installWindowStubs } from '../helpers/stub_globals.js';
 
 const WAITING = 'Result entered on this phone, not sent yet. It is sent when the connection returns.';
+const REFUSED = 'Result entered on this phone, not sent yet. The server has not accepted it, and it is still being tried.';
 
 const listeners = { sync: new Set(), unsent: new Set() };
 const subscribeTo = (set) => (fn) => { set.add(fn); return () => set.delete(fn); };
 const pending = { value: false };
+const held = { keepsFailing: false, blocker: null };
 
 const STUBBED_GLOBALS = {
   ScoreEditorModal: () => <div data-testid="probe-score-editor" />,
@@ -26,6 +28,7 @@ const STUBBED_GLOBALS = {
     fetchCompetitionDetails: vi.fn().mockResolvedValue(null),
     recordScore: vi.fn(),
     hasPendingTerminalWrite: vi.fn((compId, matchId) => pending.value && compId === 'c1' && matchId === 'm1'),
+    heldWriteState: vi.fn(() => ({ ...held })),
   },
 };
 
@@ -41,6 +44,8 @@ afterAll(() => restoreGlobals());
 
 beforeEach(() => {
   pending.value = false;
+  held.keepsFailing = false;
+  held.blocker = null;
   listeners.sync.clear();
   listeners.unsent.clear();
   STUBBED_GLOBALS.API.hasPendingTerminalWrite.mockClear();
@@ -68,6 +73,22 @@ describe('the public match card while a finished result waits on this phone', ()
     expect(screen.getByText(WAITING)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Report result' })).toBeNull();
     expect(STUBBED_GLOBALS.API.hasPendingTerminalWrite).toHaveBeenCalledWith('c1', 'm1');
+  });
+
+  it('does not blame the connection for a result the server keeps refusing', async () => {
+    pending.value = true;
+    held.keepsFailing = true;
+    await mount();
+    expect(screen.getByText(REFUSED)).toBeTruthy();
+    expect(screen.queryByText(WAITING)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Report result' })).toBeNull();
+  });
+
+  it('says the same for a result waiting behind a refused write of another match', async () => {
+    pending.value = true;
+    held.blocker = { key: 'k', kind: 'score' };
+    await mount();
+    expect(screen.getByText(REFUSED)).toBeTruthy();
   });
 
   it('offers Report result, with no waiting line, when nothing is waiting', async () => {

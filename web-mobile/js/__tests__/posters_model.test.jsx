@@ -18,6 +18,7 @@ import {
   withChoice,
   normalisePosters,
   postersChanged,
+  postersTooLong,
   textLength,
   logoURL,
   CENTRE_TOO_LONG_SENTENCE,
@@ -275,6 +276,19 @@ describe('logoURL', () => {
   it('versions the logo address with the key the page was opened with', () => {
     expect(logoURL('17')).toBe('/api/branding/logo?v=17');
     expect(logoURL(undefined)).toBe('/api/branding/logo');
+  });
+});
+
+describe('postersTooLong', () => {
+  const heading = (n) => 'x'.repeat(n);
+  it('is false at the limits, counted after trimming and in characters', () => {
+    expect(postersTooLong({})).toBe(false);
+    expect(postersTooLong({ viewer: { heading: '  ' + heading(POSTER_RULES.headingMaxLength) + '  ' } })).toBe(false);
+    expect(postersTooLong({ viewer: { callToAction: '\u{1F600}'.repeat(POSTER_RULES.callToActionMaxLength) } })).toBe(false);
+  });
+  it('is true when any poster passes a limit', () => {
+    expect(postersTooLong({ viewer: { heading: heading(POSTER_RULES.headingMaxLength + 1) } })).toBe(true);
+    expect(postersTooLong({ courts: { B: { callToAction: heading(POSTER_RULES.callToActionMaxLength + 1) } } })).toBe(true);
   });
 });
 

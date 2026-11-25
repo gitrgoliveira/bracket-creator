@@ -212,6 +212,53 @@
   object-fit: contain;
 }
 
+/* ---- the Posters page --------------------------------------------------- */
+
+.posters-picker {
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+/* The choices beside the preview; the preview drops under them on a phone. */
+.posters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.posters-save-row,
+.posters-print-row {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.posters-save-row {
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.posters-print-row {
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.posters-logo-field {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.posters-address {
+  overflow-wrap: anywhere;
+}
+
+.posters-preview {
+  max-width: 480px;
+  width: 100%;
+}
+
 /* ---- print -------------------------------------------------------------- */
 
 /* The print root is built only to print: it never shows on the page. */

@@ -123,6 +123,13 @@ describe('the poster list and the choices', () => {
     expect(screen.getByText(/too long to carry a logo in the middle of the code/)).toBeInTheDocument();
   });
 
+  it('does not say the centre was refused when the organiser chose Above', () => {
+    mount(base({ publicURL: 'https://' + 'a'.repeat(130) + '.example.org', posters: { viewer: { logo: 'above' } } }));
+    expect(screen.getByLabelText('Logo in the centre of the code')).toBeDisabled();
+    expect(screen.getByLabelText('Logo above the code')).toBeChecked();
+    expect(screen.queryByText(/too long to carry a logo in the middle of the code/)).toBeNull();
+  });
+
   it('offers no sponsor switch without sponsors', () => {
     mount(base({ sponsors: [] }));
     expect(screen.queryByLabelText('Show sponsors')).toBeNull();
@@ -235,6 +242,53 @@ describe('Save', () => {
     await tap('Save');
     await act(async () => { saves[0].opts.onSettled(null); });
     expect(status()).toBe('Unsaved changes');
+  });
+});
+
+describe('what counts as unsaved', () => {
+  it('a save the outbox holds is not an unsaved entry: leaving does not warn and a reload is not stopped', async () => {
+    mount();
+    type(headingBox(), 'Scan me');
+    await tap('Save');
+    // No onSettled yet: the write is queued (offline) or in flight.
+    expect(status()).toBe('Saving');
+    const ev = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(window.confirmDialog).not.toHaveBeenCalled();
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('a held save the server then refuses is unsaved again, and leaving asks', async () => {
+    mount();
+    type(headingBox(), 'Scan me');
+    await tap('Save');
+    await act(async () => { saves[0].opts.onRefusal(new Error('The server refused it.')); });
+    expect(status()).toBe('Unsaved changes');
+    await tap('Back');
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('text over a limit', () => {
+  it('disables Save and says why until the text is shortened', async () => {
+    mount();
+    type(headingBox(), 'x'.repeat(POSTER_RULES.headingMaxLength + 1));
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByTestId('posters-too-long')).toBeInTheDocument();
+    type(headingBox(), 'x'.repeat(POSTER_RULES.headingMaxLength));
+    expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
+    expect(screen.queryByTestId('posters-too-long')).toBeNull();
+    await tap('Save');
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds for a poster that is not the one on screen, and for the call to action', () => {
+    mount();
+    type(ctaBox(), 'y'.repeat(POSTER_RULES.callToActionMaxLength + 1));
+    fireEvent.click(screen.getByRole('button', { name: 'Shiaijo B' }));
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 });
 

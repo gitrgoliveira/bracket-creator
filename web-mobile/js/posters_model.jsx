@@ -279,6 +279,15 @@ export function postersChanged(a, b) {
   return JSON.stringify(sortKeys(normalisePosters(a))) !== JSON.stringify(sortKeys(normalisePosters(b)));
 }
 
+// postersTooLong: does any poster's heading or call to action pass its maximum
+// (counted once trimmed, as the server judges it)? Such a block cannot be saved.
+export function postersTooLong(posters) {
+  const { viewer, courts } = normalisePosters(posters);
+  return [viewer, ...Object.values(courts || {})].some((e) =>
+    e && (textLength(e.heading) > POSTER_RULES.headingMaxLength
+      || textLength(e.callToAction) > POSTER_RULES.callToActionMaxLength));
+}
+
 function sortKeys(v) {
   if (!v || typeof v !== "object") return v;
   return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])]));

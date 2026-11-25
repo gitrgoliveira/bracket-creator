@@ -9849,22 +9849,22 @@ components:
       properties:
         heading:
           type: string
-          maxLength: 80
           description: >
             Heading printed under the band. Empty prints the default, "Follow
             the tournament live" on the viewer home poster and "Follow this
-            court live" on a court poster, under the court's letter. At most 80 characters after trimming.
+            court live" on a court poster, under the court's letter. The server
+            trims it first, then allows at most 80 characters.
         callToAction:
           type: string
-          maxLength: 120
           description: >
-            Optional line printed under the heading; empty prints nothing. At
-            most 120 characters after trimming.
+            Optional line printed under the heading; empty prints nothing. The
+            server trims it first, then allows at most 120 characters.
         logo:
           type: string
-          enum: ['', centre, above]
           description: >
-            Where the tournament logo goes when one is uploaded. Empty is the
+            Where the tournament logo goes when one is uploaded: empty, `centre`
+            or `above`, after trimming (the server refuses any other value).
+            Empty is the
             default (in the centre of the code when the address fits, else
             above it), `centre` puts it in the middle of the code, `above`
             above the code.

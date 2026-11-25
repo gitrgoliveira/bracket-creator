@@ -17,7 +17,6 @@
 
 import { Poster } from "./poster_layout.jsx";
 import {
-  CENTRE_TOO_LONG_SENTENCE,
   POSTER_RULES,
   defaultHeading,
   logoPlacement,
@@ -26,12 +25,14 @@ import {
   posterChoices,
   posterList,
   postersChanged,
+  postersTooLong,
   textLength,
   withChoice,
 } from "./posters_model.jsx";
 import { isNonPublicOrigin } from "./viewer_utils.jsx";
 import { confirmDiscardUnsaved } from "./unsaved_entries.jsx";
 import { Icon } from "./icon.jsx";
+import { useLatestRef } from "./latest_ref.jsx";
 
 const { useState, useEffect, useRef } = React;
 
@@ -86,7 +87,8 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState(null);
   const [selectedKey, setSelectedKey] = useState("viewer");
-  const [printList, setPrintList] = useState(null);
+  // The print in progress: its posters and the print root they are drawn into.
+  const [printJob, setPrintJob] = useState(null);
   // Fixed when the page opens: a logo replaced before then never prints stale
   // from a cache (logoURL).
   const [logoKey] = useState(() => Date.now());
@@ -96,15 +98,13 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
   // The version the next save is made against: the one read, then each landed
   // save's answer.
   const versionRef = useRef(t.tournamentVersion);
-  const tournamentRef = useRef(t);
-  tournamentRef.current = t;
+  const tournamentRef = useLatestRef(t);
   const saveSeqRef = useRef(0);
-  const printNodeRef = useRef(null);
+  const printingRef = useRef(false);
   const leavingRef = useRef(false);
 
   const dirty = postersChanged(draft, savedBlock);
-  const dirtyRef = useRef(dirty);
-  dirtyRef.current = dirty;
+  const dirtyRef = useLatestRef(dirty);
 
   // A reload or a closed tab with unsaved changes gets the browser's prompt.
   useEffect(() => {
@@ -136,6 +136,8 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
   const address = posterAddress(t, selected);
   const showAddressWarning = !String(t.publicURL || "").trim() && isNonPublicOrigin(window.location.origin);
 
+  const tooLong = postersTooLong(draft);
+
   const change = (patch) => setDraft((d) => withChoice(d, selected, patch, t.courts));
 
   // save: the whole draft as one settings save. `again` (after a refusal made
@@ -143,8 +145,11 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
   // holds, so the other device's other settings are kept and only the poster
   // block is the operator's.
   const save = async (again) => {
+    if (tooLong) return;
     const block = normalisePosters(draft);
     if (!again && !postersChanged(block, savedBlock)) { setRefusal(null); return; }
+    const prior = savedBlock;
+    let turnedBack = false;
     if (again) versionRef.current = tournamentRef.current.tournamentVersion;
     const id = ++saveSeqRef.current;
     setRefusal(null);
@@ -154,6 +159,8 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
       await onSave({ tournamentVersion: versionRef.current, posters: block }, {
         onRefusal: (e) => {
           if (!mountedRef.current) return false;
+          turnedBack = true;
+          setSavedBlock(prior);
           if (latest()) setSaving(false);
           setRefusal(e && e.code === "tournament_changed"
             ? { changed: true, message: POSTERS_CHANGED_ELSEWHERE }
@@ -164,11 +171,17 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
           if (!mountedRef.current) return;
           if (saved) {
             if (saved.tournamentVersion) versionRef.current = saved.tournamentVersion;
-            setSavedBlock(block);
+          } else {
+            turnedBack = true;
+            setSavedBlock(prior);
           }
           if (latest()) setSaving(false);
         },
       });
+      // The save is in the outbox, which sends it whenever the link allows, so
+      // it is no longer an unsaved entry: leaving does not warn about it. A
+      // refusal or a discard later turns the block back (above).
+      if (mountedRef.current && !turnedBack) setSavedBlock(block);
     } catch (e) {
       if (!mountedRef.current) return;
       if (latest()) setSaving(false);
@@ -179,19 +192,19 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
   // Print: the chosen posters, from the draft, into a print root of their own
   // under <body>, which the print sheet alone shows on paper.
   const print = (posters) => {
-    if (printNodeRef.current) return;
+    if (printingRef.current) return;
+    printingRef.current = true;
     const node = document.createElement("div");
     node.className = "poster-print-root";
     document.body.appendChild(node);
-    printNodeRef.current = node;
     document.body.classList.add(PRINTING_CLASS);
-    setPrintList(posters);
+    setPrintJob({ node, posters });
   };
   useEffect(() => {
-    if (!printList) return undefined;
-    const node = printNodeRef.current;
+    if (!printJob) return undefined;
+    const { node } = printJob;
     let live = true;
-    const finish = () => { if (mountedRef.current) setPrintList(null); };
+    const finish = () => { if (mountedRef.current) setPrintJob(null); };
     window.addEventListener("afterprint", finish);
     decodeImages(node, PRINT_DECODE_WAIT_MS).then(() => { if (live) window.print(); });
     return () => {
@@ -199,9 +212,9 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
       window.removeEventListener("afterprint", finish);
       document.body.classList.remove(PRINTING_CLASS);
       if (node && node.parentNode) node.parentNode.removeChild(node);
-      printNodeRef.current = null;
+      printingRef.current = false;
     };
-  }, [printList]);
+  }, [printJob]);
 
   const status = saving ? POSTER_STATUS.saving : dirty ? POSTER_STATUS.unsaved : POSTER_STATUS.saved;
   const idBase = "poster-" + selected.key.replace(/[^A-Za-z0-9]/g, "-");
@@ -229,7 +242,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
           </div>
         )}
 
-        <div className="seg" role="group" aria-label="Poster" style={{ flexWrap: "wrap", marginBottom: 16 }}>
+        <div className="seg posters-picker" role="group" aria-label="Poster">
           {list.map((p) => (
             <button
               key={p.key}
@@ -243,15 +256,20 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 300px), 1fr))", gap: 24, alignItems: "start" }}>
+        <div className="posters-grid">
           <div className="card">
             <div className="card__body">
-              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-                <button type="button" className="btn btn--primary" onClick={() => save(!!(refusal && refusal.changed))}>
+              <div className="posters-save-row">
+                <button type="button" className="btn btn--primary" disabled={tooLong} onClick={() => save(!!(refusal && refusal.changed))}>
                   {refusal && refusal.changed ? "Save again" : "Save"}
                 </button>
                 <span role="status" aria-live="polite" data-testid="posters-status">{status}</span>
               </div>
+              {tooLong && (
+                <div className="field__hint field__hint--error" data-testid="posters-too-long">
+                  A heading or call to action is over its limit, so it cannot be saved. Shorten it first.
+                </div>
+              )}
               {refusal && (
                 <div className="alert alert--error" role="alert" data-testid="posters-refusal">{refusal.message}</div>
               )}
@@ -283,7 +301,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
               </div>
 
               {lp.offered && (
-                <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
+                <fieldset className="field posters-logo-field">
                   <legend className="field__label">Logo</legend>
                   <label className="checkbox">
                     <input
@@ -306,7 +324,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                     />
                     Logo above the code
                   </label>
-                  {!lp.centreAvailable && <div className="field__hint field__hint--warn">{CENTRE_TOO_LONG_SENTENCE}</div>}
+                  {lp.centreRefusedSentence && <div className="field__hint field__hint--warn">{lp.centreRefusedSentence}</div>}
                 </fieldset>
               )}
 
@@ -319,13 +337,13 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                 </div>
               )}
 
-              <div className="field__hint" style={{ overflowWrap: "anywhere" }}>The code opens {address}</div>
+              <div className="field__hint posters-address">The code opens {address}</div>
 
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
-                <button type="button" className="btn" onClick={() => print([selected])} disabled={!!printList}>
+              <div className="posters-print-row">
+                <button type="button" className="btn" onClick={() => print([selected])} disabled={!!printJob}>
                   <Icon name="printer" /> Print this poster
                 </button>
-                <button type="button" className="btn" onClick={() => print(list)} disabled={!!printList}>
+                <button type="button" className="btn" onClick={() => print(list)} disabled={!!printJob}>
                   <Icon name="printer" /> Print all posters
                 </button>
               </div>
@@ -333,16 +351,16 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
             </div>
           </div>
 
-          <div data-testid="posters-preview" style={{ maxWidth: 480, width: "100%" }}>
+          <div className="posters-preview" data-testid="posters-preview">
             <Poster tournament={draftT} poster={selected} choices={choices} logoKey={logoKey} />
           </div>
         </div>
       </div>
-      {printList && printNodeRef.current && window.ReactDOM.createPortal(
-        printList.map((p) => (
+      {printJob && window.ReactDOM.createPortal(
+        printJob.posters.map((p) => (
           <Poster key={p.key} tournament={draftT} poster={p} choices={posterChoices(draftT, p)} logoKey={logoKey} />
         )),
-        printNodeRef.current,
+        printJob.node,
       )}
     </div>
   );

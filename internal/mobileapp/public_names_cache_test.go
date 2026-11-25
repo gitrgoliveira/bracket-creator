@@ -225,9 +225,9 @@ func TestNameMaskCache_AHiddenDraftsMaskHasNoDrawNumbers(t *testing.T) {
 }
 
 // A competition in setup holds no draw: the draft files a refused draw leaves
-// behind give no number (numberingApplies asks DrawSourceFor, which is none in
-// setup), as readsAsSetup answers it, so a hidden name reads "?" until the
-// draw commits.
+// behind give no number (the mask's build skips the draw files in setup, by the
+// rule readsAsSetup states), so a hidden name reads "?" until the draw
+// commits.
 func TestNameMaskCache_ASetupCompetitionsMaskHasNoDrawNumbers(t *testing.T) {
 	f := newPNFixture(t, state.PublicNamesHidden)
 	setDraft(t, &f, false)

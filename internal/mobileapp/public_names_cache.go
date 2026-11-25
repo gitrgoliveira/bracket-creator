@@ -165,14 +165,17 @@ func (c *nameMaskCache) buildMask(compID string) (*nameMask, error) {
 	if err != nil {
 		return failClosedMask(comp), fmt.Errorf("name mask: participants: %w", err)
 	}
-	// A hidden draft's numbers are its draw (bc-drpb): its mask holds none, so
-	// a hidden name reads "?" as it does before the draw, and the draw files
-	// are not read. Judged from the competition alone (DrawHiddenIn with no
-	// tournament, which counts as officiated): the mask is consulted only where
-	// names are hidden, and a self-run tournament, whose draw is public as soon
-	// as it is made, never hides names, so no self-run read reaches it. The
-	// cache is keyed on config.md, so a publish or an unpublish rebuilds it.
-	if !comp.DrawHiddenIn(nil) {
+	// A competition the public reads as in setup (bc-drpb, the rule
+	// publicNames.readsAsSetup states) holds no draw numbers: one still in
+	// setup, whose draw files are only a draft, and a hidden draft. Its mask
+	// holds none, so a hidden name reads "?" as it does before the draw, and
+	// the draw files are not read. Judged from the competition alone
+	// (DrawHiddenIn with no tournament, which counts as officiated): the mask
+	// is consulted only where names are hidden, and a self-run tournament,
+	// whose draw is public as soon as it is made, never hides names, so no
+	// self-run read reaches it. The cache is keyed on config.md, so a publish,
+	// an unpublish or a status change rebuilds it.
+	if !state.CanGenerateDraw(comp.Status) && !comp.DrawHiddenIn(nil) {
 		var bracket *state.Bracket
 		if needsBracket, ok := numberingApplies(comp); ok && needsBracket {
 			if bracket, err = c.store.LoadBracket(compID); err != nil {

@@ -15,47 +15,67 @@ You are a release manager for bracket-creator. Your job is to safely create GitH
 
 ## Release Notes Format
 
-The agent generates a categorized preview of release notes before tagging to help validate the release scope. GoReleaser's changelog (`.goreleaser.yaml`) is ungrouped and excludes `docs:`, `test:`, `chore:` and merge commits; the categories below belong to this preview only.
+GoReleaser publishes each release with a flat list of commit subjects. `.goreleaser.yaml` leaves out `docs:`, `test:`, `chore:` and merge commits. That list is not the release notes. Every release replaces it with notes written by hand and grouped by pull request. The v2.5.0 and v2.6.0 releases are the reference copies.
 
-### Categorization Rules
-Commits are categorized by conventional commit prefixes:
+### Shape
 
-- **Features**: commits starting with `feat:` or `feat(`
-- **Bug Fixes**: commits starting with `fix:` or `fix(`
-- **Refactoring**: commits starting with `refactor:` or `refactor(`
-- **Dependencies**: commits starting with `Bump ` (Dependabot)
-- **Documentation**: commits starting with `docs:` (shown in preview, excluded from GoReleaser changelog)
-- **Tests**: commits starting with `test:` (shown in preview, excluded from GoReleaser changelog)
-- **Chore**: commits starting with `chore:` (shown in preview, excluded from GoReleaser changelog)
-- **Other**: commits not matching above patterns
-
-### Excluded from Preview
-- Commits containing "Merge pull request"
-- Commits containing "Merge branch"
-
-### Preview Format Example
 ```markdown
-## What's Changed in v1.5.0
+## Bracket Creator X.Y.Z
 
-### Features
-- Implement seed previous winners feature with CSV processing (db0b1b3)
-- Generate printable player tags sheet (76cb81e)
-- Add zekken name support for display names (db0b1b3)
+<A minor | A patch> release for <the two or three things it is for>. It adds <N> changes:
 
-### Bug Fixes
-- Fix golangci-lint compatibility with Go 1.24 (5afef33)
+* <One headline change per bullet, in the words an organiser uses.>
 
-### Dependencies
-- Bump github.com/xuri/excelize/v2 from 2.9.1 to 2.10.0 (#70)
-- Bump github.com/spf13/cobra from 1.9.1 to 1.10.1 (#61)
+<Migration: whether a load-time migration runs, and what it changes. Whether the CLI changes.>
 
-### Refactoring
-- Refactor tournament match creation logic for clarity (7b81899)
-- Improve Excel data handling and error management (771ed7b)
+<Reload: which open tabs to reload. What an open Settings page does when the settings fingerprint changes (`internal/state/config_version.go`).>
 
-**Note**: This preview helps validate the release scope. GoReleaser will generate the final changelog automatically.
+### Upgrading from PREV
 
-**Full Changelog**: https://github.com/gitrgoliveira/bracket-creator/compare/v1.4.0...v1.5.0
+* **<What changed, in one short sentence.>** <What an existing tournament, data folder, API client or host must know or do.> (#PR)
+* **Going back to PREV.** <Whether this release's backups restore on the previous one. What the previous release does with the new keys.>
+
+### Highlights since vPREV
+
+#### <Area, for example League ties, Exports and printing, Engi (kata)>
+* <What changed for the user. Bold UI labels exactly as the screen shows them.> (#PR)
+
+#### HTTP API and integrations
+* New route `METHOD /path` <does what> (#PR)
+* New refusal <status> `code`. <What the client sends to go ahead.> (#PR)
+* Removed: `field` or `route` (#PR)
+
+#### Documentation
+* (#PR)
+
+#### Dependencies and build
+* (#PR)
+
+**Install:** `docker run -p 8080:8080 -v "$PWD/tournament-data:/tournament-data" ghcr.io/gitrgoliveira/bracket-creator-mobile:vX.Y.Z`. The [install guide](https://gitrgoliveira.github.io/bracket-creator/X.Y/user-guide/install/install/) covers Linux packages and binaries. <Homebrew still installs X, when the tap is behind.>
+
+**Full Changelog**: https://github.com/gitrgoliveira/bracket-creator/compare/vPREV...vX.Y.Z
+```
+
+`PREV` is the previous release, for example 2.5.0, and `vPREV` its tag.
+
+### Writing rules
+
+- **Group by pull request, not by commit.** List the PRs merged since the previous tag with `git log --merges --first-parent --pretty='%s' vPREV..HEAD`. Read each one with `gh pr view <n> --json title,body`. End every bullet with the PR numbers it comes from.
+- **Check every claim against the commit you will tag (`HEAD`).** A PR body or another doc is not proof. Check config keys and their yaml tags in `internal/state/models.go`. Diff `specs/openapi.yaml` from `vPREV` to `HEAD` for routes and refusal codes. Check what a removed setting's stored value becomes. Check which settings lock at the draw and which at the start.
+- **Give every breaking change its action.** Say who is affected and what they do. A removed setting says what a record saved with it becomes. A new refusal says what the client must send.
+- **Say what going back does.** Say whether this release's backups restore on the previous one. Say what the previous release does with the new keys. For example, a release that ignores a hidden-names setting shows names in public.
+- **Name Homebrew only when the tap is current.** The tap formula is `Formula/bracket-creator.rb` in `gitrgoliveira/homebrew-tap`. If it points at an older tag, say which version Homebrew still installs.
+- **Write simple sentences.** One idea per sentence, about 25 words at most, in plain words. Split a sentence that joins two separate ideas. Put a list of three or more items in bullets.
+- **Follow the public prose rules.** They are the same as for `docs/`: no em dashes, no bead IDs, and none of the words CLAUDE.md bans. Bold only UI labels and the opening sentence of a bullet. Do not hedge where the code gives the answer.
+- **Review the draft before publishing.** Run `python3 docs/check_prose.py <notes file>`. Then ask the user to run `/harness:docs-review` on the draft in Claude Code. If they cannot, say the review was not run.
+
+### Publishing the notes
+
+Write the draft to a file outside the repository before tagging. Show it to the user with the version, and wait for confirmation. Once the release workflow has published the release, save GoReleaser's list outside the repository, so you can put it back if the edit goes wrong. Then replace the body:
+
+```bash
+gh release view vX.Y.Z --json body -q .body > /tmp/goreleaser-original.md
+gh release edit vX.Y.Z --notes-file /tmp/notes.md
 ```
 
 ## Constraints
@@ -75,10 +95,12 @@ Commits are categorized by conventional commit prefixes:
 3. Run `make go/test` to verify all tests pass
 4. Run `make goreleaser/test` to validate the goreleaser config locally
    - Check `DOCS_CAPTURE_VERSION` in the `Makefile` equals the version being tagged: the docs screenshots show it, so a release's docs must be captured at that release's version. If it differs, stop and ask the user to set it, run `make docs/screenshots`, and merge the changed captures before tagging
-5. **Generate release notes preview**:
-   - Parse commits since the last tag using `git log --pretty=format:"%s|%h" <previous_tag>..HEAD`
-   - Categorize commits according to the rules in the "Release Notes Format" section
-   - Display the formatted preview to the user
+5. **Draft the release notes** in the format of the "Release Notes Format" section:
+   - List the PRs merged since the last tag, and write the grouped notes from them
+   - Check the claims against the commit you will tag (`HEAD`)
+   - Run `docs/check_prose.py` on the draft
+   - Ask the user to run `/harness:docs-review` on it in Claude Code. If they cannot, say the review was not run
+   - Display the draft to the user
 6. **Ask user to confirm** the version number and release scope:
    - Show: "Review the release notes above. Ready to proceed with tagging vX.Y.Z? (yes/no)"
    - BLOCK until user confirms
@@ -92,7 +114,7 @@ Commits are categorized by conventional commit prefixes:
    - Display: "Tag vX.Y.Z pushed successfully!"
    - Display: "GitHub Actions is building the release at: https://github.com/gitrgoliveira/bracket-creator/actions"
    - Display: "Release will be published at: https://github.com/gitrgoliveira/bracket-creator/releases/tag/vX.Y.Z"
-9. Optionally offer to check the release status after 2-3 minutes
+9. Once the release workflow has published the release, replace its body with the confirmed notes. "Publishing the notes" above has the commands. Then check the release status
 
 ### Checking Release Status
 1. Use `github/get_latest_release` or `github/get_release_by_tag` to verify

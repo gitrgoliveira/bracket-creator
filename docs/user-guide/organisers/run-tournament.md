@@ -73,7 +73,7 @@ Set the **Public URL** field to the externally reachable address of your app (fo
 
 Save closes the form at once. If the details were saved on another device after you opened them, the save is refused when it reaches the server, and an alert says "Tournament settings were not saved: they were changed on another device. Open them and save again." The app then shows the current details. If you have opened **Edit details** again by then, the form says "Not saved: the tournament details changed somewhere else after you opened this page (another screen or device). Reload to see the current details, then make your change again.", keeps what you typed, and **Reload** shows the current details.
 
-Lowering the number of shiai-jo is refused while a competition that has not finished still uses one you would remove; the alert names it. To go ahead, take that shiai-jo out of the competition's **Assigned shiaijo (courts)** first. That field locks once the draw is generated: discard the draw to change it, or, once the competition has started, wait until it finishes.
+Lowering the number of shiai-jo is refused while an unfinished competition still uses one you would remove. The alert names the competition. To go ahead, take that shiai-jo out of the competition's **Assigned shiaijo (courts)** first. That field locks once the draw is generated, so discard the draw to change it. A started competition keeps the field locked for good. The refusal lifts once that competition finishes. If a bout still to be fought was moved onto that shiai-jo, move it to another one first.
 
 !!! note
     For guidance on making the app reachable over the internet, refer to [Hosting](../install/hosting.md).
@@ -131,8 +131,9 @@ Three rules govern when a setting stops being editable:
   **Players per pool**, **Winners per pool**, **Knockout qualifiers**,
   **Team size** and **Assigned shiaijo (courts)**. The pools being fought were
   drawn with them, and changing **Winners per pool** mid-pools would change who
-  goes through. The competition's shiai-jo stay as drawn until it finishes; to
-  run a bout on another one, move the bout
+  goes through. These settings stay locked after the competition finishes, because its
+  results and exports come from that draw. The competition's shiai-jo stay as
+  drawn. To run a bout on another one, move the bout
   ([Moving matches between shiai-jo](#moving-matches-between-shiai-jo)).
 - **Once participants are loaded**, the competition type locks separately and
   earlier than everything else. Individual and team rosters are not

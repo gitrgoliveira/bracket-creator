@@ -48,7 +48,7 @@ export const POSTER_SIZES = Object.freeze({
   // the strip takes the space the rest of the poster leaves, so a poster with a
   // short heading gets large logos, and fewer sponsors get taller ones. At the
   // longest text the server allows the strip keeps its floor, sponsorMin.
-  sponsorMax: Object.freeze([22, 18, 15, 13, 11.5, 10]),
+  sponsorMax: Object.freeze([26, 22, 18, 15, 13, 11]),
   sponsorMin: 6.5,
 });
 

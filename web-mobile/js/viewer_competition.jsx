@@ -542,10 +542,14 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
       .filter(Boolean)
   );
 
+  // The start sentence of the two pre-start cards, left out when the
+  // competition has no start time (bc-nost: it read "Starts at .").
+  const startsAt = c.startTime ? `Starts at ${c.startTime}. ` : "";
+
   // setup: no draw yet: plain "not started" message.
   if (!c.status || c.status === "setup") {
     return (
-      <EmptyState icon="hourglass" title="Not started yet" message={`Starts at ${c.startTime}. Check back when the competition begins.`} style={{ padding: 32 }} />
+      <EmptyState icon="hourglass" title="Not started yet" message={`${startsAt}Check back when the competition begins.`} style={{ padding: 32 }} />
     );
   }
 
@@ -562,7 +566,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
       <EmptyState
         icon="clipboard-list"
         title="Draw is ready"
-        message={`Starts at ${c.startTime}. ${tabHint}`}
+        message={`${startsAt}${tabHint}`}
         style={{ padding: 32 }}
       />
     );

@@ -30,6 +30,7 @@ import {
 } from './ineligible_match.jsx';
 import { notLandedBanner, notSavedText, writeDidNotLand, queuedNotice } from './write_result.jsx';
 import { holdsUnsaved, confirmDiscardUnsaved, recordDecisionAnyway } from './unsaved_entries.jsx';
+import { seenSideIds } from './competitor_identity.jsx';
 import { firstResultAsks, confirmFirstResult, FIRST_RESULT_CANCELLED } from './first_result_confirm.jsx';
 import { scoreRowMatchName } from './pool_ids.jsx';
 
@@ -96,7 +97,7 @@ export function BarredMatchNotice({ match, password, onDone, unsaved = false, on
       const seen = match.modifiedAt || 0;
       // bc-evts: the decision is the outbox's and reads as landed at once; a
       // refusal the outbox brings back later is put back on this notice.
-      const res = await window.API.recordDecision(match.compId, match.id, seen > 0 ? { ...body, seenModifiedAt: seen } : body, pw, {
+      const res = await window.API.recordDecision(match.compId, match.id, { ...body, ...seenSideIds(match), ...(seen > 0 ? { seenModifiedAt: seen } : {}) }, pw, {
         seen: match.scoreVersion || 0,
         onRefusal: (e) => {
           if (!mountedRef.current) return false;

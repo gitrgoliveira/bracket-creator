@@ -1194,6 +1194,12 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	}
 	sideA, sideB := prior.SideA, prior.SideB
 	sideAID, sideBID := prior.SideAID, prior.SideBID
+	// The colour a decision names is whoever holds it now: a writer that saw
+	// other competitors in this match (a draw swap since) is refused, like a
+	// score write that names the old pairing.
+	if kcdgOpts.SeenSidesDiffer(sideAID, sideBID) {
+		return nil, nil, ErrMatchSideMismatch
+	}
 
 	// The decision's write is built FIRST, from prior alone, so it can be
 	// judged by the merge before anything else judges it (below).

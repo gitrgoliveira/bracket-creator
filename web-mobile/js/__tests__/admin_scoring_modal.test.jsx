@@ -1163,15 +1163,16 @@ describe('item 7: non-points decisions advance to next match', () => {
     // bc-hlck: the decision is never stamped older than the match it was
     // recorded on; the body carries that match's stamp for recordDecision,
     // which floors by it and never sends it. A match with no stamp adds
-    // nothing, so the body is as it always was.
+    // nothing. Either body names the competitors the editor showed (bc-drev:
+    // a draw swap since refuses the write).
     it('the body carries the stamp of the match the decision was recorded on', async () => {
       const submit = makeSubmitDecision({ match: { ...makeMatch('m-s'), modifiedAt: 1_700_000_000_000 }, enchoPeriodCount: 0, password: 'pw', ...makeSetters(), onClose: vi.fn() });
       await submit('fusenpai', { decisionBy: 'shiro', decisionReason: '' });
-      expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-s', { decision: 'fusenpai', decisionBy: 'shiro', seenModifiedAt: 1_700_000_000_000 }, 'pw', expect.objectContaining({ onRefusal: expect.any(Function) }));
+      expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-s', { decision: 'fusenpai', decisionBy: 'shiro', sideAId: 'pa', sideBId: 'pb', seenModifiedAt: 1_700_000_000_000 }, 'pw', expect.objectContaining({ onRefusal: expect.any(Function) }));
       window.API.recordDecision.mockClear();
       const plain = makeSubmitDecision({ match: makeMatch('m-p'), enchoPeriodCount: 0, password: 'pw', ...makeSetters(), onClose: vi.fn() });
       await plain('fusenpai', { decisionBy: 'shiro', decisionReason: '' });
-      expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-p', { decision: 'fusenpai', decisionBy: 'shiro' }, 'pw', expect.objectContaining({ onRefusal: expect.any(Function) }));
+      expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-p', { decision: 'fusenpai', decisionBy: 'shiro', sideAId: 'pa', sideBId: 'pb' }, 'pw', expect.objectContaining({ onRefusal: expect.any(Function) }));
     });
 
     // Stage 6 review 8 (M4): the court console reads the decision this device

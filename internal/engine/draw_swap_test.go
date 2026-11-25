@@ -596,6 +596,69 @@ func TestSwapDrawPlaces_Refusals(t *testing.T) {
 
 // --- stale writes -------------------------------------------------------------
 
+// A decision names a side by colour alone (kiken, fusenpai, fusensho, hantei),
+// so what refuses one after a swap is the competitors its writer saw
+// (ForceOptions.SeenSideAID/BID), not the score payload's own sides.
+func TestSwapDrawPlaces_StaleDecisionIsRefused(t *testing.T) {
+	assertRefused := func(t *testing.T, eng *Engine, store *state.Store, compID, matchID string, seenA, seenB string) {
+		t.Helper()
+		for _, decision := range []string{"kiken", "fusenpai", "fusensho"} {
+			_, _, err := eng.RecordDecisionWithOptions(compID, matchID, decision, "aka", "", nil,
+				ForceOptions{SeenSideAID: seenA, SeenSideBID: seenB}, serverNowMs())
+			assert.ErrorIs(t, err, ErrMatchSideMismatch, decision)
+		}
+		statuses, err := store.LoadCompetitorStatus(compID)
+		require.NoError(t, err)
+		assert.Empty(t, statuses, "a refused decision bars nobody")
+		comp, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusDrawReady, comp.Status, "a refused decision does not start the competition")
+		history, err := store.LoadMatchHistory(compID, matchID)
+		require.NoError(t, err)
+		assert.Empty(t, history, "a refused decision leaves no history line")
+	}
+
+	t.Run("pool match", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "stale-decision-pool"
+		drawDojoComp(t, eng, store, compID, state.CompFormatMixed, 3, uniqueDojos(6))
+		pools := loadSwapPools(t, store, compID)
+		a, b := poolSwapSide(pools, 0, 0), poolSwapSide(pools, 1, 0)
+		var loaded state.MatchResult
+		for _, m := range loadSwapMatches(t, store, compID) {
+			if m.SideAID == a.ID || m.SideBID == a.ID {
+				loaded = m
+				break
+			}
+		}
+		require.NotEmpty(t, loaded.ID)
+		_, err := eng.SwapDrawPlaces(compID, SwapRequest{A: a, B: b})
+		require.NoError(t, err)
+		assertRefused(t, eng, store, compID, loaded.ID, loaded.SideAID, loaded.SideBID)
+	})
+
+	t.Run("bracket match", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "stale-decision-ko"
+		drawDojoComp(t, eng, store, compID, state.CompFormatKnockout, 3, uniqueDojos(8))
+		before := loadBracket(t, store, compID)
+		m0, m1 := before.Rounds[0][0], before.Rounds[0][1]
+		_, err := eng.SwapDrawPlaces(compID, SwapRequest{A: SwapSide{ID: m0.SideAID, Place: swapSlot(0)}, B: SwapSide{ID: m1.SideAID, Place: swapSlot(2)}})
+		require.NoError(t, err)
+		assertRefused(t, eng, store, compID, m0.ID, m0.SideAID, m0.SideBID)
+	})
+
+	t.Run("a writer that saw the current pairing is judged as before", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		const compID = "stale-decision-current"
+		drawDojoComp(t, eng, store, compID, state.CompFormatKnockout, 3, uniqueDojos(8))
+		m0 := loadBracket(t, store, compID).Rounds[0][0]
+		_, _, err := eng.RecordDecisionWithOptions(compID, m0.ID, "kiken-voluntary", "aka", "", nil,
+			ForceOptions{SeenSideAID: m0.SideAID, SeenSideBID: m0.SideBID}, serverNowMs())
+		require.NoError(t, err)
+	})
+}
+
 // TestSwapDrawPlaces_StaleWritesAreRefused pins FR11: a device that loaded a
 // match before the swap and sends a start or a result after it (a queued
 // offline write included) names the old pairing, so the engine refuses it as

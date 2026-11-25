@@ -862,10 +862,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			if errors.Is(engErr, engine.ErrMatchSideMismatch) {
 				// The payload named competitors that differ from the stored
 				// pairing, refuse rather than rewrite match identity.
-				c.JSON(http.StatusConflict, gin.H{
-					"error":   "side_mismatch",
-					"message": "The submitted competitors don't match this match's pairing. Check the score sheet and try again.",
-				})
+				respondSideMismatch(c)
 				return
 			}
 			var ineligErr *engine.IneligibleCompetitorError

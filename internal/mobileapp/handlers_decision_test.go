@@ -344,6 +344,52 @@ func TestDecisionHandler_DownstreamKnockoutPlayed_ForceReturns200(t *testing.T) 
 	assert.Empty(t, b.Rounds[1][0].Winner, "the reopened match's stale verdict was cleared")
 }
 
+// TestDecisionHandler_StaleSides_409 pins that a decision from a writer that
+// saw other competitors in the match than it stores now (a draw swap since) is
+// refused 409 side_mismatch and writes nothing, while one that names the
+// current pairing, or none, is judged as before.
+func TestDecisionHandler_StaleSides_409(t *testing.T) {
+	post := func(t *testing.T, r http.Handler, compID string, body DecisionRequest) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/api/competitions/"+compID+"/matches/m-r1-0/decision", bytes.NewBuffer(raw))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("a stale pairing is refused and nothing is written", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		defer os.RemoveAll(tempDir)
+		compID := "stale-sides-decision"
+		seedKcdgBracket(t, store, compID)
+
+		w := post(t, r, compID, DecisionRequest{Decision: "kiken-voluntary", DecisionBy: "aka", SideAID: "swapped-in", SideBID: "bob", ForceDownstreamReopen: true})
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "side_mismatch", resp["error"])
+
+		b, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Equal(t, "Alice", b.Rounds[0][0].Winner, "a refused decision changes nothing")
+		statuses, err := store.LoadCompetitorStatus(compID)
+		require.NoError(t, err)
+		assert.Empty(t, statuses, "a refused decision bars nobody")
+	})
+
+	t.Run("the current pairing is judged as before", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		defer os.RemoveAll(tempDir)
+		compID := "current-sides-decision"
+		seedKcdgBracket(t, store, compID)
+
+		w := post(t, r, compID, DecisionRequest{Decision: "kiken-voluntary", DecisionBy: "aka", SideAID: "alice", SideBID: "bob", ForceDownstreamReopen: true})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	})
+}
+
 // TestDecisionHandler_ExactReplay_CarriesCourt is a Finding 5 (bc-cse review
 // of PR #453) regression test: a knockout match's decision answer must name
 // its court whether it is a fresh write or an exact replay of one already

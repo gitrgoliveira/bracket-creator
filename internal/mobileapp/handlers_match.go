@@ -679,10 +679,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				return
 			}
 			if errors.Is(err, engine.ErrMatchSideMismatch) {
-				c.JSON(http.StatusConflict, gin.H{
-					"error":   "side_mismatch",
-					"message": "The submitted competitors don't match this match's pairing. Check the score sheet and try again.",
-				})
+				respondSideMismatch(c)
 				return
 			}
 			// bc-kcdg: correcting this match would change an already-propagated

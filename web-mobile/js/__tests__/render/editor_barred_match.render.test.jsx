@@ -91,6 +91,7 @@ describe('a scheduled barred match shows BarredMatchNotice instead of Start (bc-
     await act(async () => { fireEvent.click(btn); });
     expect(window.API.recordDecision).toHaveBeenCalledWith('comp1', 'm-r1-0', {
       decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Tanaka withdrawn',
+      sideAId: 'p1', sideBId: 'p2',
     }, 'secret', expect.objectContaining({ onRefusal: expect.any(Function) }));
   });
 
@@ -102,7 +103,7 @@ describe('a scheduled barred match shows BarredMatchNotice instead of Start (bc-
     await act(async () => { fireEvent.click(screen.getByTestId('barred-match-record-fusensho')); });
     expect(window.API.recordDecision).toHaveBeenCalledWith('comp1', 'm-r1-0', {
       decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Tanaka withdrawn',
-      seenModifiedAt: 1_700_000_000_000,
+      sideAId: 'p1', sideBId: 'p2', seenModifiedAt: 1_700_000_000_000,
     }, 'secret', expect.objectContaining({ onRefusal: expect.any(Function) }));
   });
 
@@ -181,6 +182,7 @@ describe('both sides barred (bc-cse)', () => {
     await act(async () => { fireEvent.click(btn); });
     expect(window.API.recordDecision).toHaveBeenCalledWith('comp1', 'Pool 1-0', {
       decision: 'hikiwake', decisionReason: 'auto: Kyoto and Osaka withdrawn',
+      sideAId: 'team-kyoto', sideBId: 'team-osaka',
     }, 'secret', expect.objectContaining({ onRefusal: expect.any(Function) }));
   });
 

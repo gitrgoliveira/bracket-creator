@@ -75,6 +75,16 @@ type selfRunRefusal struct {
 	message string
 }
 
+// respondSideMismatch answers a write that named other competitors than the
+// match stores (a draw swap since the writer loaded it): 409 side_mismatch,
+// the one body PUT /score, the correction door and POST /decision share.
+func respondSideMismatch(c *gin.Context) {
+	c.JSON(http.StatusConflict, gin.H{
+		"error":   "side_mismatch",
+		"message": "The submitted competitors don't match this match's pairing. Check the score sheet and try again.",
+	})
+}
+
 func (r *selfRunRefusal) Error() string { return r.code }
 
 // body is the response body: the code and the sentence.

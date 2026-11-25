@@ -19,7 +19,7 @@ import {
   courtBusyMessage, courtBusyReopenWarning, heldWriteDiscardLabel, heldWriteDiscardConfirm, queuedNotice,
   tapNotAppliedText, tapOutcomeQuiet, writePending, writeWasRefused,
 } from './write_result.jsx';
-import { sameCompetitor } from './competitor_identity.jsx';
+import { sameCompetitor, seenSideIds } from './competitor_identity.jsx';
 import { sideWord, sideWithColour } from './side_cell.jsx';
 import { sideMarks, defaultWinMaru } from './bracket.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
@@ -783,6 +783,9 @@ function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCoun
   // The match the decision was recorded on (bc-hlck): recordDecision floors
   // the stamp by it and never sends it.
   if (opts.seenModifiedAt > 0) body.seenModifiedAt = opts.seenModifiedAt;
+  // The competitors the editor showed: a draw swap since refuses the write.
+  if (opts.sideAId) body.sideAId = opts.sideAId;
+  if (opts.sideBId) body.sideBId = opts.sideBId;
   return body;
 }
 
@@ -920,7 +923,7 @@ function makeSubmitDecision({
     try {
       const updated = await submitDecisionRequest(
         match.compId, match.id, kind, { decisionBy, decisionReason }, encho, password,
-        { seenModifiedAt: match.modifiedAt || 0, seenScoreVersion: (seenScoreVersion !== undefined ? seenScoreVersion : match.scoreVersion) || 0 },
+        { ...seenSideIds(match), seenModifiedAt: match.modifiedAt || 0, seenScoreVersion: (seenScoreVersion !== undefined ? seenScoreVersion : match.scoreVersion) || 0 },
       );
       if (!mountedRef.current) {
         // The host read the decision from the outbox as it was queued, and

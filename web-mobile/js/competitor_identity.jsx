@@ -41,6 +41,20 @@ export function idOf(x) {
   return (x && typeof x === "object" ? x.id : "") || "";
 }
 
+// seenSideIds: the competitors a match shows, as the {sideAId, sideBId} a
+// decision write carries so the server can refuse one made on a pairing a draw
+// swap has since changed. A side with no id (a bye, an unresolved feeder) is
+// left out, and the server judges nothing for it. Reads the resolved side
+// object, else the flat id some payloads carry.
+export function seenSideIds(match) {
+  const out = {};
+  const a = idOf(match && match.sideA) || (match && match.sideAId) || "";
+  const b = idOf(match && match.sideB) || (match && match.sideBId) || "";
+  if (a) out.sideAId = a;
+  if (b) out.sideBId = b;
+  return out;
+}
+
 export function nameOf(x) {
   return (x && typeof x === "object" ? x.name : x) || "";
 }

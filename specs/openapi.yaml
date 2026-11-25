@@ -6014,6 +6014,18 @@ paths:
                   description: >
                     Free-text operator note. Optional, a reopened match
                     included.
+                sideAId:
+                  type: string
+                  description: >
+                    Optional, request-only. The participant id of side A as the
+                    writer saw it. A decision names a side by colour alone, so
+                    when the draw review has swapped competitors since the
+                    writer loaded the match, an id that differs from the stored
+                    one is refused 409 `side_mismatch` and nothing is written.
+                    Omitted means no side is judged.
+                sideBId:
+                  type: string
+                  description: Same as `sideAId`, for side B.
                 encho:
                   $ref: '#/components/schemas/EnchoMetadata'
                 confirmLots:

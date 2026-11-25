@@ -13,6 +13,7 @@ import {
 } from './api_client_clock.jsx';
 // bc-evts S2: the build this page runs against the server's, and the reload rule.
 import { noteServerBuild } from './app_version.jsx';
+import { forgetFirstResultAgreement } from './first_result_confirm.jsx';
 import { _tellTurnedAway } from './api_client_taps.jsx';
 import { _forgetShownMatches, _forgetAllShownMatches } from './api_client_status.jsx';
 import { _fetchJson, readHeaders, readsEveryName, setReadAudience, noteRefusedCredential } from './api_client_requests.jsx';
@@ -295,6 +296,9 @@ function _openSource(url) {
         if (parsed && parsed.type === 'heartbeat' && parsed.hello) noteServerBuild(parsed.build);
         if (parsed && (parsed.type === 'draw_generated' || parsed.type === 'draw_discarded')) {
             _forgetShownMatches(parsed.data && parsed.data.competitionId);
+            // An agreement to start the competition was given for the draw
+            // as it stood: a draw made again, swapped or discarded asks again.
+            forgetFirstResultAgreement(parsed.data && parsed.data.competitionId);
         }
         if (parsed && (parsed.type === 'tournament_updated' || parsed.type === 'password_reset')) _forgetAllShownMatches();
         // A push of a match names the taps the server turned away since their

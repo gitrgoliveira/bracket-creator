@@ -65,15 +65,18 @@ export function drawPlaceLabel(place, bracket, { withPosition = false } = {}) {
 // them by, grouped as the draw groups them: by pool for a pools draw
 // ({pool, position}, 1-based, the pool's own order), by first-round match for
 // a knockout-only one ({slot}, side A of match m is 2m, side B 2m+1). Only a
-// competitor with a participant id is listed: an id is what a swap names.
+// competitor with a participant id is listed: an id is what a swap names. A
+// bracket side carries no seed, so a knockout entrant's seed is read off the
+// competition's roster by id; a pool's player carries it from pools.csv.
 export function drawEntrants(comp, pools, bracket) {
   const groups = [];
   if (comp && comp.format === 'knockout') {
+    const seedOf = new Map((comp.players || []).filter((p) => p && p.id && p.seed > 0).map((p) => [p.id, p.seed]));
     const first = (bracket && bracket.rounds && bracket.rounds[0]) || [];
     first.forEach((m, mi) => {
       const entrants = [];
       [[m && m.sideA, 2 * mi], [m && m.sideB, 2 * mi + 1]].forEach(([side, slot]) => {
-        if (side && side.id && side.name) entrants.push({ ...side, place: { slot } });
+        if (side && side.id && side.name) entrants.push({ ...side, seed: seedOf.get(side.id) || 0, place: { slot } });
       });
       if (entrants.length) groups.push({ label: firstRoundMatchLabel(bracket, mi).replace(/^first-round/, 'First-round'), entrants });
     });

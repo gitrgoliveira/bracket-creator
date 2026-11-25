@@ -2821,8 +2821,10 @@ paths:
         200 with `applied: false` and `reason: already_swapped`, and changes
         nothing.
 
-        An applied swap broadcasts `draw_generated` once. A dry run and an
-        `already_swapped` answer broadcast nothing. Organiser only: in
+        An applied swap broadcasts `draw_generated` once, and `lineup_updated`
+        (naming the competition and no team) once more when it moved or removed
+        saved match lineups. A dry run and an `already_swapped` answer broadcast
+        nothing. Organiser only: in
         self-run mode it needs `X-Tournament-Password` too. Refusals carry
         `error` (the code) and `message` (the sentence to show); nothing is
         written.

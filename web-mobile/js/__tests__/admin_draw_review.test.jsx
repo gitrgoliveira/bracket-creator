@@ -95,6 +95,14 @@ describe('the pickers', () => {
     expect(groups[1].entrants.map((e) => [e.id, e.place])).toEqual([['k3', { slot: 2 }]]);
     expect(drawPlaceLabel({ slot: 3 }, bracket)).toBe('first-round Match 2');
   });
+
+  it('mark a knockout seed from the roster, as a pool draw marks it from pools.csv', () => {
+    const bracket = { rounds: [[{ matchNumber: 1, sideA: side('k1', 'Ann', { dojo: 'D1' }), sideB: side('k2', 'Bo', { dojo: 'D2' }) }]] };
+    const comp = { format: 'knockout', players: [{ id: 'k1', seed: 1 }, { id: 'k2', seed: null }] };
+    const [group] = drawEntrants(comp, [], bracket);
+    expect(optionLabel(group.entrants[0])).toBe('Ann (D1) · seed 1');
+    expect(optionLabel(group.entrants[1])).toBe('Bo (D2)');
+  });
 });
 
 describe('If you swap them', () => {

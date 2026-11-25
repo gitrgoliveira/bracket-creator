@@ -347,9 +347,20 @@ func TestDrawSwap_LineupSaveForTheMatchATeamLeftIsRefused(t *testing.T) {
 	w := g.send(http.MethodPut, lineupPath, lineup)
 	require.Equal(t, http.StatusOK, w.Code, "%s", w.Body.String())
 
+	ch := g.hub.Subscribe()
+	defer g.hub.Unsubscribe(ch)
 	w = g.send(http.MethodPost, "/api/competitions/teams/draw/swap", swapBody(a, slots[a], b, slots[b], false))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, float64(1), decodeBody(t, w)["lineupsMoved"], "the team's lineup went with it")
+	for _, want := range []EventType{EventDrawGenerated, EventLineupUpdated} {
+		select {
+		case msg := <-ch:
+			assert.Equal(t, want, decodeHubEvent(t, msg).Type)
+		case <-time.After(time.Second):
+			t.Fatalf("no %s after a swap that moved a lineup", want)
+		}
+	}
+	requireNoEvent(t, ch, "one of each per applied swap")
 
 	w = g.send(http.MethodPut, lineupPath, lineup)
 	requireRefusal(t, w, http.StatusNotFound, "team_not_in_match",

@@ -32,8 +32,11 @@
 // confirmFirstResultFor (admin_scoring_shared.jsx), which names the match the
 // way the operator's rows do. Once the operator agrees for a competition, no
 // door asks again for it, so a start queued offline and the finish that follows
-// it ask once; the agreement is forgotten when the competition is seen back in
-// setup (its draw discarded), so a draw generated again asks again.
+// it ask once. The agreement belongs to the draw it was given for, so it is
+// forgotten when the competition is seen back in setup (its draw discarded) and
+// whenever the draw changes under it (a draw_generated or draw_discarded push,
+// forgetFirstResultAgreement), so a draw generated again asks again even on a
+// surface that never lists the competition in setup.
 //
 // The question opens through the injected confirmDialog (ui.jsx DialogHost),
 // which already moves focus in and back, traps Tab, cancels on Escape and takes
@@ -68,6 +71,12 @@ export function noteFirstResultCompetitions(comps) {
         noted.set(c.id, { name: c.name || '', awaits: competitionAwaitsFirstResult(c) });
         if (!c.status || c.status === 'setup') agreed.delete(c.id);
     }
+}
+
+// forgetFirstResultAgreement: the competition's draw was generated, swapped or
+// discarded, so an agreement given for the draw before it no longer holds.
+export function forgetFirstResultAgreement(compId) {
+    agreed.delete(compId);
 }
 
 // writeRecordsResult: whether a write would record a result, so start a drawn

@@ -73,8 +73,10 @@ func RegisterDrawReviewHandlers(r *gin.RouterGroup, comps CompetitionLoader, eng
 	// swap's answer (applied, or applied false with reason already_swapped for
 	// a resend of a swap that landed, or dryRun true); a refusal is
 	// respondIfSwapRefused's 400 or 409. An applied swap broadcasts
-	// draw_generated once, so every view refetches the draw; a dry run and an
-	// already_swapped resend broadcast nothing.
+	// draw_generated once, so every view refetches the draw, and, when it moved
+	// or removed saved lineups, lineup_updated naming the competition and no team
+	// (every team's lineup views read again); a dry run and an already_swapped
+	// resend broadcast nothing.
 	r.POST("/competitions/:id/draw/swap", func(c *gin.Context) {
 		comp, ok := drawReviewCompetition(c, comps)
 		if !ok {
@@ -95,6 +97,9 @@ func RegisterDrawReviewHandlers(r *gin.RouterGroup, comps CompetitionLoader, eng
 		}
 		if answer.Applied && !answer.DryRun {
 			hub.Broadcast(EventDrawGenerated, gin.H{"competitionId": comp.ID})
+			if answer.LineupsMoved+answer.LineupsRemoved > 0 {
+				hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(comp.ID, "", ""))
+			}
 		}
 		c.JSON(http.StatusOK, answer)
 	})

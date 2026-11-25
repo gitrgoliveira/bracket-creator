@@ -978,6 +978,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// A new competition's list was never shuffled, whatever the body says:
 		// only a roster PUT records a shuffle (markRosterShuffled).
 		comp.RosterShuffled = false
+		// Whether a draft is public is the draw routes' to say; a new
+		// competition has no draw, whatever the body says.
+		comp.DrawHidden = false
 
 		comp.Name = strings.TrimSpace(comp.Name)
 		// Trim NumberPrefix too so untrimmed input from the SETTINGS edit

@@ -54,8 +54,8 @@ func TestGenerateDraw_SelfRunStoresHiddenButHidesNothing(t *testing.T) {
 }
 
 // The one-click start (Start on a setup competition) generates and starts in
-// one go: the competition is public at once, so the draw is never stored as
-// hidden.
+// one go: the competition is public at once, so the started competition
+// carries no hidden flag.
 func TestStartCompetition_FromSetupDoesNotStoreAHiddenDraw(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	const compID = "one-click"
@@ -67,15 +67,25 @@ func TestStartCompetition_FromSetupDoesNotStoreAHiddenDraw(t *testing.T) {
 	assert.False(t, c.DrawHidden)
 }
 
-// Starting a hidden draft leaves the stored field alone; a started
-// competition is public whatever is stored.
+// Starting a hidden draft clears the stored field in the same write that moves
+// the status, so a started competition is public.
 func TestStartCompetition_AHiddenDraftIsPublicOnceStarted(t *testing.T) {
 	eng, store, id := drawReadyHidden(t, state.CompFormatKnockout)
 	require.NoError(t, eng.StartCompetition(id))
 	c := loadComp(t, store, id)
 	assert.Equal(t, state.CompStatusKnockout, c.Status)
-	assert.True(t, c.DrawHidden, "the start paths do not touch the field")
+	assert.False(t, c.DrawHidden, "the start clears the field")
 	assert.False(t, c.DrawHiddenIn(&state.Tournament{}), "a started competition is public")
+}
+
+// The auto-start on a first result clears the stored field as it starts the
+// competition, like the desk's Start.
+func TestStartIfDrawReady_ClearsDrawHidden(t *testing.T) {
+	eng, store, id := drawReadyHidden(t, state.CompFormatKnockout)
+	started, err := eng.startIfDrawReady(id)
+	require.NoError(t, err)
+	require.True(t, started)
+	assert.False(t, loadComp(t, store, id).DrawHidden)
 }
 
 // Discard draw clears the field in the same write that resets the status, so
@@ -146,10 +156,10 @@ func TestSetDrawHidden_RefusedOffDrawReady(t *testing.T) {
 	t.Run("started", func(t *testing.T) {
 		eng, store, id := drawReadyHidden(t, state.CompFormatKnockout)
 		require.NoError(t, eng.StartCompetition(id))
-		changed, err := eng.SetDrawHidden(id, false)
+		changed, err := eng.SetDrawHidden(id, true)
 		assert.False(t, changed)
 		require.ErrorIs(t, err, ErrDrawNotReady)
-		assert.True(t, loadComp(t, store, id).DrawHidden, "the refused write stored nothing")
+		assert.False(t, loadComp(t, store, id).DrawHidden, "the refused write stored nothing")
 	})
 	t.Run("missing", func(t *testing.T) {
 		eng, _, _ := setupTestEngine(t)

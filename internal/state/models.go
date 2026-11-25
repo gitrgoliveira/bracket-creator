@@ -439,8 +439,8 @@ type Competition struct {
 	// off the public pages until the organiser publishes it. Generate draw
 	// sets it (the commit in engine.runDrawPipeline, in every tournament
 	// mode), Publish clears it and Unpublish sets it (engine.SetDrawHidden),
-	// and Discard draw clears it in the same write that resets the status.
-	// The start paths leave it alone. It is server-managed: create zeroes it,
+	// and Discard draw and every start clear it in the same write that moves
+	// the status. It is server-managed: create zeroes it,
 	// the settings merge never copies it, and ConfigVersion leaves it out.
 	// Read it only through DrawHiddenIn, which says whether the public may
 	// see the draw now: a stored true on a started competition, or in a

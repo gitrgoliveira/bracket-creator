@@ -898,9 +898,10 @@ func (e *Engine) StartCompetition(id string) error {
 		// Draw already exists; only flip status.
 		return e.transitionDrawToRunning(id)
 	}
-	// One-click path: generate draw then transition. The draw is not hidden:
-	// the competition is public as soon as it starts.
-	if err := e.runDrawPipeline(id, false); err != nil {
+	// One-click path: generate draw then transition. The draft is stored as
+	// hidden like any other, so a transition that fails leaves no public
+	// draft; the transition clears the flag.
+	if err := e.runDrawPipeline(id, true); err != nil {
 		return err
 	}
 	return e.transitionDrawToRunning(id)
@@ -1040,6 +1041,7 @@ func (e *Engine) transitionDrawToRunning(id string) error {
 			return nil, validationErrorf("competition %s not in draw-ready state (status: %s); concurrent modification?", id, current.Status)
 		}
 		current.Status = runningStatusFor(current.Format)
+		current.DrawHidden = false // a started competition is public
 		return current, nil
 	})
 	return err
@@ -1061,6 +1063,7 @@ func (e *Engine) startIfDrawReady(id string) (bool, error) {
 			return nil, nil
 		}
 		current.Status = runningStatusFor(current.Format)
+		current.DrawHidden = false // a started competition is public
 		return current, nil
 	})
 }
@@ -1239,8 +1242,8 @@ func applyLeagueSinglePool(c *state.Competition, n int) {
 // competition's DrawHidden in that same commit: GenerateDraw passes true, so
 // a new draft is kept off the public pages until it is published, in every
 // tournament mode (state.Competition.DrawHiddenIn judges self-run at read
-// time); the one-click start passes false, since the competition it starts
-// is public at once.
+// time); the one-click start passes true too, and its status transition
+// clears the flag, so a failed start never leaves a public draft.
 //
 // Pipeline limitations (pre-existing):
 //   - Pool/bracket generation (writes pools.csv / bracket.json) runs

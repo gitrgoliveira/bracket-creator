@@ -99,12 +99,12 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 			if comp == nil {
 				continue
 			}
-			// What this audience may read of the competition: its names, and
-			// whether its draw is hidden (bc-drpb). A hidden draft is answered
-			// as the same competition in setup, which has no match to run, so
-			// none of its draw is read.
-			v := viewerMaskView(names, comp, aud)
-			if v.drawHidden {
+			// A draft whose draw is hidden from this audience (bc-drpb) is
+			// answered as the same competition in setup, which has no match to
+			// run, so none of its draw is read. Only that is asked here: the
+			// names' mask view is built once a running match is found, since
+			// this feed is polled every second or two.
+			if names.drawHidden(comp, aud) {
 				continue
 			}
 
@@ -119,6 +119,7 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 				// No bracket loaded yet on this branch (it is loaded further
 				// below, only once the pool scan comes up empty), so numbering
 				// falls back to its own pools.csv read for a pooled competition.
+				v := viewerMaskView(names, comp, aud)
 				players := currentMatchPlayers(store, comp, nil)
 				zek := comp.EffectiveWithZekkenName()
 				// Pool daihyosen/tiebreaker rep bouts carry team names in
@@ -158,6 +159,7 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 					// bracket is already loaded (below the pool scan above), so
 					// pass it through rather than letting numbersFromDrawWithBracket
 					// read bracket.json a second time.
+					v := viewerMaskView(names, comp, aud)
 					players := currentMatchPlayers(store, comp, bracket)
 					zek := comp.EffectiveWithZekkenName()
 					// bc-brid: BracketMatch carries a per-side id when its own
@@ -181,6 +183,7 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 				bm.Status == state.MatchStatusRunning {
 				// bracket is already loaded (above, this branch's own bm comes
 				// from it), so pass it through rather than a second read.
+				v := viewerMaskView(names, comp, aud)
 				players := currentMatchPlayers(store, comp, bracket)
 				zek := comp.EffectiveWithZekkenName()
 				ipponsA, hansokuA := bm.IpponsA, bm.HansokuA

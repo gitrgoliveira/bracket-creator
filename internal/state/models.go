@@ -442,9 +442,10 @@ type Competition struct {
 	// and Discard draw and every start clear it in the same write that moves
 	// the status. It is server-managed: create zeroes it,
 	// the settings merge never copies it, and ConfigVersion leaves it out.
-	// Read it only through DrawHiddenIn, which says whether the public may
-	// see the draw now: a stored true on a started competition, or in a
-	// self-run tournament, hides nothing. No load-time migration: an absent
+	// A public read goes through DrawHiddenIn, which says whether the public
+	// may see the draw now: a stored true on a started competition, or in a
+	// self-run tournament, hides nothing. The organiser's own records carry
+	// the stored flag as it is, so a self-run draft answers true there. No load-time migration: an absent
 	// key reads as published, so a competition drawn before the field
 	// existed stays public by the stored shape itself.
 	DrawHidden bool `yaml:"draw_hidden,omitempty" json:"drawHidden,omitempty"`

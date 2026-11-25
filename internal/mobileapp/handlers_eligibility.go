@@ -11,8 +11,10 @@
 package mobileapp
 
 import (
+	"cmp"
 	"errors"
 	"net/http"
+	"slices"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -95,8 +97,8 @@ func registerPublicEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatu
 			internalError(c, err)
 			return
 		}
-		// Return as a slice so the response shape is stable / orderable
-		// even if Go map iteration order isn't.
+		// Return as a slice, ordered by competitor id: the store hands back a
+		// map, whose iteration order changes from one read to the next.
 		out := make([]domain.CompetitorStatus, 0, len(statuses))
 		for _, st := range statuses {
 			if v.drawHidden && st.MatchID != "" {
@@ -104,6 +106,9 @@ func registerPublicEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatu
 			}
 			out = append(out, st)
 		}
+		slices.SortFunc(out, func(a, b domain.CompetitorStatus) int {
+			return cmp.Compare(a.PlayerID, b.PlayerID)
+		})
 		c.JSON(http.StatusOK, gin.H{"statuses": out})
 	})
 }

@@ -224,6 +224,26 @@ func TestNameMaskCache_AHiddenDraftsMaskHasNoDrawNumbers(t *testing.T) {
 	assert.Equal(t, maskedUnknown, side(), "hidden again, the number goes")
 }
 
+// A competition in setup holds no draw: the draft files a refused draw leaves
+// behind give no number (numberingApplies asks DrawSourceFor, which is none in
+// setup), as readsAsSetup answers it, so a hidden name reads "?" until the
+// draw commits.
+func TestNameMaskCache_ASetupCompetitionsMaskHasNoDrawNumbers(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	setDraft(t, &f, false)
+	comp, err := f.store.LoadCompetition(f.comp.ID)
+	require.NoError(t, err)
+	m, err := f.pn.masks.get(comp.ID)
+	require.NoError(t, err)
+	require.Equal(t, "K1", maskView{m: m}.side("Alice Arai", pnAlice), "the committed draw gives the number")
+
+	f.comp.Status = state.CompStatusSetup
+	require.NoError(t, f.store.SaveCompetition(f.comp))
+	m, err = f.pn.masks.get(comp.ID)
+	require.NoError(t, err)
+	assert.Equal(t, maskedUnknown, maskView{m: m}.side("Alice Arai", pnAlice), "draft files in setup give no number")
+}
+
 // The mask judges a hidden draft from the competition alone, which holds only
 // because no self-run read reaches the mask: a self-run tournament hides no
 // names, so neither a public read nor a reveal key there builds one, even for

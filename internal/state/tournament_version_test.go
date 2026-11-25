@@ -134,6 +134,71 @@ func TestTournamentVersionMovesWithEveryWrittenField(t *testing.T) {
 	}
 }
 
+// The posters block is hashed only when it holds a choice, so a tournament
+// that never saved one keeps the version it had before the block existed, and
+// copies that differ only by blanks or empty entries hash alike.
+func TestTournamentVersionWithoutPosterChoicesIsUnchanged(t *testing.T) {
+	base := TournamentVersion(versionTestTournament())
+	for name, p := range map[string]*Posters{
+		"empty block":       {},
+		"empty court entry": {Courts: map[string]PosterChoices{"B": {}}},
+		"blank text":        {Viewer: PosterChoices{Heading: "  "}},
+	} {
+		x := versionTestTournament()
+		x.Posters = p
+		if TournamentVersion(x) != base {
+			t.Errorf("%s moved the version", name)
+		}
+	}
+	padded := versionTestTournament()
+	padded.Posters = &Posters{Viewer: PosterChoices{Heading: "  Follow us "}}
+	trimmed := versionTestTournament()
+	trimmed.Posters = &Posters{Viewer: PosterChoices{Heading: "Follow us"}}
+	if TournamentVersion(padded) != TournamentVersion(trimmed) {
+		t.Fatalf("a heading with surrounding spaces hashed differently from the trimmed one it is stored as")
+	}
+}
+
+// Every field of a poster's choices is in the version, on the viewer home
+// poster and on a court's, field by field: a field added to PosterChoices is
+// covered or this fails.
+func TestTournamentVersionMovesWithEveryPosterChoice(t *testing.T) {
+	base := TournamentVersion(versionTestTournament())
+	typ := reflect.TypeOf(PosterChoices{})
+	for i := 0; i < typ.NumField(); i++ {
+		f := typ.Field(i)
+		var choice PosterChoices
+		v := reflect.ValueOf(&choice).Elem().Field(i)
+		switch f.Type.Kind() {
+		case reflect.String:
+			if f.Name == "Logo" {
+				v.SetString(PosterLogoAbove)
+			} else {
+				v.SetString("Scan me")
+			}
+		case reflect.Bool:
+			v.SetBool(true)
+		default:
+			t.Fatalf("PosterChoices.%s has a kind this test does not set; add it", f.Name)
+		}
+		viewer := versionTestTournament()
+		viewer.Posters = &Posters{Viewer: choice}
+		court := versionTestTournament()
+		court.Posters = &Posters{Courts: map[string]PosterChoices{"B": choice}}
+		otherCourt := versionTestTournament()
+		otherCourt.Posters = &Posters{Courts: map[string]PosterChoices{"A": choice}}
+		got := map[string]string{"viewer": TournamentVersion(viewer), "court B": TournamentVersion(court), "court A": TournamentVersion(otherCourt)}
+		for where, v := range got {
+			if v == base {
+				t.Errorf("setting %s on the %s poster left the version unchanged", f.Name, where)
+			}
+		}
+		if got["viewer"] == got["court B"] || got["court B"] == got["court A"] {
+			t.Errorf("%s hashed alike on two different posters", f.Name)
+		}
+	}
+}
+
 func TestAwardsVersion(t *testing.T) {
 	if AwardsVersion(nil) != "" {
 		t.Fatalf("nil competition must have no version")

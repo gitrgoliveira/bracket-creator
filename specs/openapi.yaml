@@ -607,6 +607,10 @@ paths:
 
         `name` is trimmed and must be non-empty after trim (`tournament name is required`).
         `venue` and `date` are also trimmed but may be empty.
+
+        `posters` is judged as on PUT (400 with its sentence). A POST against
+        an existing tournament that leaves `posters` out keeps the stored
+        block, as it keeps the stored `defaultPublicNames`.
       security:
         - TournamentPassword: []
         - {}
@@ -685,6 +689,11 @@ paths:
             exact branches.
 
         Validation matches POST for `name` (rejected if empty after trim).
+
+        **Posters**: a body that sends `posters` replaces the whole block
+        (`{}` clears it); a body that leaves the key out keeps the stored
+        block. A block the server would not store is 400 with one plain
+        sentence naming the poster and the box (see `Posters`).
 
         **Version check**: the body must carry `tournamentVersion`, the version
         of the settings the save was made from (from `GET /api/tournament`,
@@ -9806,6 +9815,63 @@ components:
               description: >
                 When true and a logo is uploaded, the lobby display shows the
                 tournament logo; absent reads false.
+        posters:
+          $ref: '#/components/schemas/Posters'
+    Posters:
+      type: object
+      description: >
+        The organiser's choices for the printed QR-code posters, saved through
+        PUT /api/tournament and part of `tournamentVersion` when it holds a
+        choice. Absent when nothing is chosen (every poster prints its
+        defaults). Text is trimmed and empty entries are dropped before it is
+        stored. A refusal is 400 with one sentence, for example "The heading
+        on the Shiaijo B poster is longer than 80 characters.". The limits,
+        logo values and default headings are shared with the browser through
+        `internal/state/testdata/poster_rules.json`.
+      properties:
+        viewer:
+          $ref: '#/components/schemas/PosterChoices'
+        courts:
+          type: object
+          maxProperties: 32
+          description: >
+            One entry per court poster, keyed by court label (one non-blank
+            character). An entry for a court the tournament no longer has is
+            kept and valid, and is not shown. At most 32 entries (twice the
+            court limit).
+          propertyNames:
+            minLength: 1
+            maxLength: 1
+          additionalProperties:
+            $ref: '#/components/schemas/PosterChoices'
+    PosterChoices:
+      type: object
+      description: One poster's choices. Every field is omitted when empty.
+      properties:
+        heading:
+          type: string
+          maxLength: 80
+          description: >
+            Heading printed under the band. Empty prints the default, "Follow
+            the tournament live" on the viewer home poster and "Shiaijo
+            <label>" on a court poster. At most 80 characters after trimming.
+        callToAction:
+          type: string
+          maxLength: 120
+          description: >
+            Optional line printed under the heading; empty prints nothing. At
+            most 120 characters after trimming.
+        logo:
+          type: string
+          enum: ['', centre, above]
+          description: >
+            Where the tournament logo goes when one is uploaded. Empty is the
+            default (in the centre of the code when the address fits, else
+            above it), `centre` puts it in the middle of the code, `above`
+            above the code.
+        hideSponsors:
+          type: boolean
+          description: True leaves the sponsor strip off this poster; absent shows it.
     TournamentWithCompetitions:
       description: >
         The response shape for POST and PUT /api/tournament: every Tournament

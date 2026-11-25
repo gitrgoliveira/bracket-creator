@@ -148,9 +148,10 @@
     <!-- sponsor_strip.js exports SponsorStrip to window. Must load before
          display.js and viewer.js, both consume window.SponsorStrip (mp-c38). -->
     <script type="module" src="/dist/sponsor_strip.js" onerror="bcModuleFailed(this)"></script>
-    <!-- qr.js exposes window.renderQR; must load before display.js so the
-         StreamingOverlay's QR ("scan for results") can draw. -->
-    <script type="module" src="/dist/qr.js" onerror="bcModuleFailed(this)"></script>
+    <!-- qr.jsx exposes window.renderQR; must load before display.js so the
+         StreamingOverlay's QR ("scan for results") can draw. It is a leaf the
+         poster modules import, so the browser holds one module URL for it. -->
+    <script type="module" src="/dist/qr.jsx" onerror="bcModuleFailed(this)"></script>
     <!-- display.js exports queueLabel / queueLabelCompact to window for the
          viewer pills. Must load *before* viewer.js so the first viewer render
          picks up the labels. -->

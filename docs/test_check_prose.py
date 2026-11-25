@@ -251,7 +251,7 @@ class SentenceLengthTest(unittest.TestCase):
         self.assertEqual(self.rules(f"{words(40)}\n\n{words(41)}\n"), [(3, "long-sentence")])
 
     def test_a_sentence_wrapped_over_lines_is_one_sentence(self):
-        wrapped = words(41).replace(" word word", "\nword word", 1)
+        wrapped = words(41).replace(" word", "\nword", 1)
         self.assertEqual(self.rules(wrapped), [(1, "long-sentence")])
 
     def test_list_items_headings_and_tables_end_a_sentence(self):

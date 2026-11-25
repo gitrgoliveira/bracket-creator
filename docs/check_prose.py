@@ -397,7 +397,7 @@ WORD_STARTS_RE = re.compile(r"[A-Z0-9\"'(\[\u201c]")
 
 def _one_word(m: re.Match[str]) -> str:
     """A quotation as one word, keeping the full stop it ends with."""
-    return "Q." if re.search(r"[.!?]\W?$", m.group(0)) else "Q"
+    return "Q." if WORD_ENDS_RE.search(m.group(0)) else "Q"
 
 
 def _sentence_words(line: str) -> list[str]:
@@ -406,53 +406,54 @@ def _sentence_words(line: str) -> list[str]:
     line = IMAGE_RE.sub(" ", line)
     line = LINK_RE.sub(r"\1", line)
     line = ATTR_LIST_RE.sub(" ", line)
-    line = HTML_TAG_RE.sub(" ", line)
-    line = QUOTATION_RE.sub(_one_word, EMPHASIS_RE.sub("", line))
+    line = _paragraph_prose(line)
+    line = QUOTATION_RE.sub(_one_word, line)
     return line.split()
 
 
-def long_sentences(numbered_lines, markdown: bool = True):
-    """Yield (first line, last line, words, excerpt) for each sentence over
-    MAX_SENTENCE_WORDS words, excerpt being its first words. A blank line ends
-    a sentence; in Markdown so do a list item, a heading and a table row."""
+def iter_sentences(numbered_lines, markdown: bool):
+    """Yield each sentence as a list of (lineno, word). A blank line ends a
+    sentence; in Markdown so do a list item, a heading and a table row."""
     words: list[tuple[int, str]] = []
-
-    def finish():
-        if len(words) > MAX_SENTENCE_WORDS:
-            excerpt = " ".join(w for _, w in words[:8]) + " ..."
-            yield words[0][0], words[-1][0], len(words), excerpt
-        words.clear()
-
     for lineno, line in numbered_lines:
-        if not line.strip() or (markdown and NOT_A_SENTENCE_RE.match(line)):
-            yield from finish()
+        skip = not line.strip() or (markdown and NOT_A_SENTENCE_RE.match(line))
+        if words and (skip or (markdown and ITEM_START_RE.match(line))):
+            yield words
+            words = []
+        if skip:
             continue
-        if markdown and ITEM_START_RE.match(line):
-            yield from finish()
         for word in _sentence_words(line):
             if words and WORD_ENDS_RE.search(words[-1][1]) and WORD_STARTS_RE.match(word):
-                yield from finish()
+                yield words
+                words = []
             words.append((lineno, word))
-    yield from finish()
+    if words:
+        yield words
 
 
 def check_sentence_length(text: str, numbered_lines, markdown: bool = True) -> list[tuple[int, str, str]]:
     """Return (lineno, rule, excerpt) for every sentence that is too long and
     carries no exception, and for every exception that has no reason or covers
     no long sentence. numbered_lines is the prose, with inline code as one word."""
-    exceptions = {}
-    for lineno, line in enumerate(text.splitlines(), start=1):
-        m = EXCEPTION_RE.search(line)
-        if m:
-            exceptions[lineno] = m.group(1).strip()
+    # Keyed by line number in file order, so the first match below is the
+    # earliest unused exception inside the sentence.
+    exceptions = {
+        lineno: m.group(1).strip()
+        for lineno, line in enumerate(text.splitlines(), start=1)
+        if (m := EXCEPTION_RE.search(line))
+    }
     hits, used = [], set()
-    for start, end, count, excerpt in long_sentences(numbered_lines, markdown):
-        covering = [n for n in sorted(exceptions) if start <= n <= end and n not in used]
-        if covering:
-            used.add(covering[0])
+    for sentence in iter_sentences(numbered_lines, markdown):
+        if len(sentence) <= MAX_SENTENCE_WORDS:
             continue
-        hits.append((start, "long-sentence", f"{count} words, over {MAX_SENTENCE_WORDS}: {excerpt}"))
-    for lineno, reason in sorted(exceptions.items()):
+        start, end = sentence[0][0], sentence[-1][0]
+        covering = next((n for n in exceptions if start <= n <= end and n not in used), None)
+        if covering is not None:
+            used.add(covering)
+            continue
+        excerpt = " ".join(w for _, w in sentence[:8]) + " ..."
+        hits.append((start, "long-sentence", f"{len(sentence)} words, over {MAX_SENTENCE_WORDS}: {excerpt}"))
+    for lineno, reason in exceptions.items():
         if not reason:
             hits.append((lineno, "long-sentence-exception", "an exception needs its reason after the colon"))
         elif lineno not in used:

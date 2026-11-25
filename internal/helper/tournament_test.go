@@ -11,7 +11,7 @@ import (
 
 // buildSetsFromPools reconstructs the per-pool dojo/name conflict sets from
 // pools that already have players assigned, so that direct calls to discoverPool
-// in tests start from the correct initial state. Keyed by dojoKey (bc-drwx
+// in tests start from the correct initial state. Keyed by DojoKey (bc-drwx
 // item 3), matching discoverPool's and assignPlayersToPools' own normalized
 // map keys -- a raw key here would silently never match a normalized lookup.
 func buildSetsFromPools(pools []Pool) (dojoSets []map[string]bool) {
@@ -19,7 +19,7 @@ func buildSetsFromPools(pools []Pool) (dojoSets []map[string]bool) {
 	for i, pool := range pools {
 		dojoSets[i] = make(map[string]bool, len(pool.Players))
 		for _, p := range pool.Players {
-			dojoSets[i][dojoKey(p.Dojo)] = true
+			dojoSets[i][DojoKey(p.Dojo)] = true
 		}
 	}
 	return

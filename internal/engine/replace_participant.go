@@ -93,7 +93,7 @@ func (e *Engine) ReplaceParticipantInDrawTx(
 		// Warn but do not block, the operator decides whether to proceed.
 		// Dojos are compared under the roster's identity normalisation
 		// (case, diacritics, whitespace), the same rule the draw itself
-		// applies through helper.dojoKey, so "Mumeishi" and "mumeishi"
+		// applies through helper.DojoKey, so "Mumeishi" and "mumeishi"
 		// count as one dojo here exactly as they do when the pools are
 		// formed; a raw string compare under-reported the conflict.
 		for _, pool := range pools {

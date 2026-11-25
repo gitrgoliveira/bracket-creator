@@ -28,6 +28,7 @@ import { isTeamDefaultWinDecision } from './team_default_credit.jsx';
 import { struckIppons, realIppons } from './result_slot.jsx';
 import { acceptTap, useArmedConfirm } from './tap_guard.jsx';
 import { useLatestRef } from './latest_ref.jsx';
+import { FIRST_RESULT_CANCELLED } from './first_result_confirm.jsx';
 // bc-evts: the board of a running match (tapBoardOf) is the server's copy with
 // this device's pending taps folded on, by the JS replay port.
 import { applyPending, assignMarks, APPLIED, BOUT_REMOVED, BOUT_REMOVED_MESSAGE } from './score_events.jsx';
@@ -965,6 +966,14 @@ function makeSubmitDecision({
       // The organiser declined the lots warning: the bout and the lots stand.
       if (e && e.lotsReplacedCancelled) {
         if (mountedRef.current) setDecisionErr(LOTS_REPLACED_CANCELLED);
+        return;
+      }
+      // The operator kept back the first result of a drawn competition
+      // (attemptScoreWrite asked, first_result_confirm.jsx): nothing was sent,
+      // and the form stays open so the decision can be recorded once the
+      // competition is to start.
+      if (e && e.firstResultCancelled) {
+        if (mountedRef.current) setDecisionErr(FIRST_RESULT_CANCELLED);
         return;
       }
       // Any other refusal is shown as the server worded it; nothing is

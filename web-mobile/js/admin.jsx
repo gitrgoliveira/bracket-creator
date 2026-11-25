@@ -30,6 +30,7 @@ import { dismissToastById } from './toast_queue.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
 import { PUBLIC_NAMES_APPLY_CONFIRM, confirmPublicNamesApply } from './public_names_fields.jsx';
 import { useLatestRef } from './latest_ref.jsx';
+import { noteFirstResultCompetitions, FIRST_RESULT_CANCELLED } from './first_result_confirm.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -220,6 +221,20 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // Refs are read by the SSE subscription (which has narrower deps to avoid
   // teardown); refresh them only when the underlying props change.
   useEffect(() => { tRef.current = t; onUpdateRef.current = onUpdate; }, [t, onUpdate]);
+  // bc-drev D4 b: what the console shows is what the first-result question
+  // judges (first_result_confirm.jsx). Every admin host (the Scores tab and
+  // page, Pools and Bracket, their previews included) writes through
+  // editMatchScore and so attemptScoreWrite, which asks before the first result
+  // of a drawn competition; it can ask only about a competition noted here.
+  // The tournament's competitions carry their poolMatches and bracket; the open
+  // competition's detail, when loaded, is noted after them, as it is the
+  // fresher copy of that one competition.
+  useEffect(() => { noteFirstResultCompetitions(t && t.competitions); }, [t && t.competitions]);
+  useEffect(() => {
+    const cfg = adminCompData && adminCompData.config;
+    if (!cfg || !cfg.id) return;
+    noteFirstResultCompetitions([{ ...cfg, poolMatches: adminCompData.poolMatches, bracket: adminCompData.bracket }]);
+  }, [adminCompData]);
   // AdminApp unmounts on logout / viewer-mode switch. Several async
   // handlers below (updateCompetition's fetchCompetitionDetails,
   // startAllCompetitions) setAdminCompData / setAdminLoading
@@ -544,6 +559,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       }
       // bc-adna: if the operator cancelled forcing court, toast nothing and mark toasted
       if (e.courtForceCancelled) {
+        throw markToasted(e);
+      }
+      // bc-drev D4 b: the operator answered Not yet to "Start <competition>?"
+      // (first_result_confirm.jsx). Nothing was sent; it is their choice, not
+      // a failure, so the toast is not an error.
+      if (e.firstResultCancelled) {
+        showToast(FIRST_RESULT_CANCELLED);
         throw markToasted(e);
       }
       showToast(e.message, "error");

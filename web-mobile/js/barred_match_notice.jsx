@@ -5,9 +5,11 @@
 // editors. Reads ineligible_match.jsx's stamp; writes through the ordinary
 // /decision and /reinstate calls, exactly like every other operator action.
 //
-// A DELIBERATE LEAF: imports only ineligible_match.jsx, write_result.jsx and
-// unsaved_entries.jsx, leaves themselves with no imports of their own (see their headers for
-// why). admin_scoring_shared.jsx re-exports this component so the editors'
+// A DELIBERATE LEAF: imports only ineligible_match.jsx, write_result.jsx,
+// unsaved_entries.jsx, first_result_confirm.jsx and pool_ids.jsx, leaves themselves (see
+// their headers for why; write_result.jsx's one import is first_result_confirm.jsx, whose
+// one import is the recorded_result.jsx leaf, and pool_ids.jsx reaches only side_cell.jsx
+// and icon.jsx). admin_scoring_shared.jsx re-exports this component so the editors'
 // existing `from './admin_scoring_shared.jsx'` import lists need no change,
 // but admin_shiaijo.jsx and admin_schedule_score_editor.jsx import it
 // directly from here. Importing it via admin_scoring_shared.jsx from either
@@ -28,6 +30,8 @@ import {
 } from './ineligible_match.jsx';
 import { notLandedBanner, notSavedText, writeDidNotLand, queuedNotice } from './write_result.jsx';
 import { holdsUnsaved, confirmDiscardUnsaved, recordDecisionAnyway } from './unsaved_entries.jsx';
+import { firstResultAsks, confirmFirstResult, FIRST_RESULT_CANCELLED } from './first_result_confirm.jsx';
+import { scoreRowMatchName } from './pool_ids.jsx';
 
 // No onDone/refresh plumbing here on purpose: recording the default win, or
 // reinstating the competitor, is an ordinary /decision or /reinstate write,
@@ -65,6 +69,22 @@ export function BarredMatchNotice({ match, password, onDone, unsaved = false, on
   // no finished-league confirm (the server's decisionCorrects reads it so).
   const submitDecision = async (body) => {
     if (!body || !window.API || typeof window.API.recordDecision !== "function") return;
+    // bc-drev D4 b: the decision calls the API directly, not through
+    // attemptScoreWrite, so it asks here before the first result of a drawn
+    // competition (first_result_confirm.jsx asks nothing for a competition
+    // already started or one no surface has noted). Asked BEFORE the unsaved
+    // entries' question, so a Not yet never discards what the editor holds.
+    // Kept back, nothing is sent and the notice says so.
+    if (firstResultAsks(match.compId)) {
+      const go = await confirmFirstResult({
+        confirmDialog: window.confirmDialog, compId: match.compId, label: scoreRowMatchName(match),
+      });
+      if (!mountedRef.current) return;
+      if (!go) {
+        setErr(FIRST_RESULT_CANCELLED);
+        return;
+      }
+    }
     if (holdsUnsaved(unsaved)) {
       const go = await confirmDiscardUnsaved(unsaved, recordDecisionAnyway(body.decision), onDiscard);
       if (!go || !mountedRef.current) return;

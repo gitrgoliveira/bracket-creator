@@ -882,8 +882,12 @@ func discoverPool(pools []Pool, dojoSets []map[string]bool, player Player, targe
 	return -1
 }
 
-// dojoKey is the ONE normalized projection every draw comparison and map key
-// built from a dojo string must go through (bc-drwx item 3). Identity
+// DojoKey is the ONE normalized projection every draw comparison and map key
+// built from a dojo string must go through (bc-drwx item 3). It is exported so
+// a reader outside the draw that groups competitors by dojo (the draw review's
+// dojo separation summary, engine.DojoSeparation) asks the same rule the draw
+// placed them by instead of re-deriving it. A blank or whitespace-only dojo
+// keys to "", which such a reader treats as no dojo. Identity
 // already normalizes the dojo the same way as the name
 // (helper.NormalizeParticipantName, applied to both halves of a dedup key --
 // dedup.go's newDupKey, and to CompetitorKey's own dojo half, identity.go)
@@ -900,29 +904,29 @@ func discoverPool(pools []Pool, dojoSets []map[string]bool, player Player, targe
 // This is a comparison-time projection ONLY -- it must never be written back
 // onto a Player.Dojo field or into rendered output, which keeps the
 // operator's original spelling on the sheet exactly as typed. A roster
-// whose dojo spellings are already byte-identical is unaffected: dojoKey is
+// whose dojo spellings are already byte-identical is unaffected: DojoKey is
 // the identity function on ASCII/already-normalized input, so every
 // existing golden with consistent spelling holds unchanged.
-func dojoKey(dojo string) string {
+func DojoKey(dojo string) string {
 	return NormalizeParticipantName(dojo)
 }
 
-// dojoKeyCache memoizes dojoKey by its raw input string, built ONCE per draw
+// dojoKeyCache memoizes DojoKey by its raw input string, built ONCE per draw
 // call and threaded through every hot dojo-comparison path (bc-drwx review
-// fix: the original item-3 fix called dojoKey/NormalizeParticipantName fresh
+// fix: the original item-3 fix called DojoKey/NormalizeParticipantName fresh
 // inside countDojoInPool and its callers, which measured 25x-200x slower
 // than origin/main -- NormalizeParticipantName does real work (NFD
 // decompose, strip combining marks, re-NFC, lowercase, whitespace collapse),
 // and a draw's hot paths compare the SAME small set of distinct dojo strings
 // over and over. Keying by the raw string and normalizing only on a cache
-// miss turns O(comparisons) normalizations into O(distinct dojos). dojoKey
+// miss turns O(comparisons) normalizations into O(distinct dojos). DojoKey
 // itself stays the one normalization primitive; this only avoids calling it
 // twice for a string it has already seen.
 //
 // dojoIDCache (below) is this cache's int-keyed sibling (bc-pnum): a draw's
 // PER-POOL and PER-NODE dojo tallies (the tree-aware distributor's `counts`
 // and dojoNode.dojoCount, pool_distribution_tree_aware.go) still paid a
-// map[string]* lookup on every candidate evaluated even once dojoKey itself
+// map[string]* lookup on every candidate evaluated even once DojoKey itself
 // was memoized here -- mapaccess2_faststr profiled at 51% cumulative in
 // BuildPoolPhaseTreeAware_256_16x16_Interleaved. dojoIDCache wraps a
 // dojoKeyCache by interning each normalized key ONE level further, into a
@@ -970,7 +974,7 @@ func (c dojoKeyCache) of(dojo string) string {
 	if k, ok := c[dojo]; ok {
 		return k
 	}
-	k := dojoKey(dojo)
+	k := DojoKey(dojo)
 	c[dojo] = k
 	return k
 }
@@ -1048,7 +1052,7 @@ func newDojoIDCacheFor(players []Player) (dojoIDCache, dojoKeyCache) {
 // by the fallback that chooses where an unplaceable competitor goes and by the
 // repair pass that swaps competitors afterwards, so the two can never disagree
 // about what "how many of this dojo are here" means -- dojo comparison is
-// normalized (dojoKey) here, in the one place it changes.
+// normalized (DojoKey) here, in the one place it changes.
 func countDojoInPool(pool Pool, dojo string, keys dojoKeyCache) int {
 	key := keys.of(dojo)
 	n := 0

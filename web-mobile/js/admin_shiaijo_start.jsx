@@ -32,6 +32,7 @@ import { startPatch, classifyStartOutcome, startFailureMessage, startRefusalStan
 // carry its own copy. scoreRowMatchName names a match in the refusal notices.
 import { scoreRowMatchName } from './pool_ids.jsx';
 import { holdsUnsaved } from './unsaved_entries.jsx';
+import { firstResultAsks, confirmFirstResult } from './first_result_confirm.jsx';
 import { confirmMatchLabel } from './court_move.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 import { matchKey } from './admin_shiaijo_feed.jsx';
@@ -375,6 +376,9 @@ export function useCourtStart({
     //     on its row, also BEFORE the defer, so the running bout is not sent
     //     back for a start that never happens. A repeat for the match already
     //     being started is silent: it is on its way.
+    //   • The first start of a drawn competition asks whether to start the
+    //     competition (bc-drev D4 b, first_result_confirm.jsx), BEFORE the
+    //     defer, so a Not yet sends nothing back and starts nothing.
     const pickMatch = async (m, asked = false) => {
         if (!m || m.status === "completed") return;
         if (openCorrection) {
@@ -394,6 +398,20 @@ export function useCourtStart({
         // review 9, m3).
         if (!asked && selectedMatch && matchKey(selectedMatch) !== matchKey(m) && holdsUnsaved(editorUnsavedRef)) {
             if (!(await leaveEditorConfirmed())) return;
+            const latest = latestRef.current;
+            const fresh = latest.allMatches.find((x) => matchKey(x) === matchKey(m));
+            if (fresh) await latest.pickMatch(fresh, true);
+            return;
+        }
+        // The pick would record the competition's first result. Asked once:
+        // agreed, the owner asks no more for this competition, and the pick is
+        // judged again from the top on the court as it is then (the question
+        // waits on the operator, as the one above does).
+        if (m.status === "scheduled" && !isStartedSnapshot(m) && firstResultAsks(m.compId)) {
+            const go = await confirmFirstResult({
+                confirmDialog: window.confirmDialog, compId: m.compId, label: scoreRowMatchName(m), starts: true,
+            });
+            if (!go || !mountedRef.current) return;
             const latest = latestRef.current;
             const fresh = latest.allMatches.find((x) => matchKey(x) === matchKey(m));
             if (fresh) await latest.pickMatch(fresh, true);

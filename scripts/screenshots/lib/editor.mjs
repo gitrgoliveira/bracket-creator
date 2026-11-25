@@ -97,6 +97,7 @@ export async function finishMatch(page) {
   await page.waitForTimeout(Math.max(0, TAP_DWELL_MS - (Date.now() - armedAt)));
   const landed = scoreWriteAnswered(page, 'completed');
   await armed.click();
+  await startTheCompetitionIfAsked(page, landed);
   // Return once the write has landed, not after a guessed pause. The editor
   // hands the finish to the outbox and moves on at once (it never waits on
   // the network), so the editor's own state says nothing about the server:
@@ -112,7 +113,29 @@ export async function startMatch(page) {
   if (!(await btn.count())) return;
   const landed = scoreWriteAnswered(page, 'running');
   await btn.click();
+  await startTheCompetitionIfAsked(page, landed);
   await landed;
+}
+
+// The first result of a drawn competition (a start, a finish or a decision of
+// its first match) asks "Start <competition>?" before anything is sent
+// (web-mobile/js/first_result_confirm.jsx, in the app's confirm dialog), and
+// the write waits on the answer. Given the answer the tap is waiting for
+// (`landed`, armed before the tap), this agrees when the question comes first
+// and returns at once when the write lands unasked. The dialog ignores a tap
+// inside the bounce window of the one that opened it, so the agreeing tap
+// waits TAP_DWELL_MS.
+export const FIRST_RESULT_CONFIRM_LABEL = 'Start the competition';
+export async function startTheCompetitionIfAsked(page, landed, timeout = 15000) {
+  const agree = page.locator('.modal-backdrop--dialog [role="dialog"] button')
+    .filter({ hasText: new RegExp(`^${FIRST_RESULT_CONFIRM_LABEL}$`) }).first();
+  const asked = await Promise.race([
+    agree.waitFor({ state: 'visible', timeout }).then(() => true, () => false),
+    landed.then(() => false, () => false),
+  ]);
+  if (!asked) return;
+  await page.waitForTimeout(TAP_DWELL_MS);
+  await agree.click();
 }
 
 // On the Scores tab (/admin/score-editor, /admin/competition/:id/scores) Finish

@@ -724,7 +724,7 @@ func earliestPairing(a, b []int) int {
 // runs after every player already has a pool, so its own call passes nil.
 //
 // The footprint is a []int indexed by dense dojo id (bc-pnum: was a
-// map[string]int keyed by dojoKey, in the hot excessOf/optimum call path of
+// map[string]int keyed by DojoKey, in the hot excessOf/optimum call path of
 // improveDojoMeetings' exchange loop, so its lookup was part of the
 // mapaccess2_faststr cost that motivated dojoIDCache -- see that type's own
 // doc comment). ids must already have interned every dojo in `pools` and
@@ -932,7 +932,7 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 	// roster's literal last remaining seat). Reads `counts` directly
 	// (bc-drwx review fix) instead of re-scanning every pool's Players --
 	// `counts` is already the authoritative per-pool tally, kept in sync by
-	// every swap below, so re-deriving it here via dojoKey per player was
+	// every swap below, so re-deriving it here via DojoKey per player was
 	// pure waste. Walks every id in 0..numDojos (bc-pnum: `counts[i]` is now
 	// a dense []int rather than a map with one entry per dojo ACTUALLY IN
 	// this pool), which excessOf(id, 0) correctly scores as 0 excess for

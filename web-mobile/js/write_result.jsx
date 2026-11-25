@@ -10,11 +10,14 @@
 // reads these names off `window`: the mirrors api_client used to publish are
 // gone, so there is exactly one binding per name and no second spelling to drift.
 //
-// This is a leaf on purpose (no imports, no window reads), and it is
-// import-only: it has no <script type="module"> tag of its own and must never
-// gain one. A module that is BOTH script-tagged and ES-imported loads twice
-// under two URLs and splits its module-level singleton state -- a known,
-// previously-shipped failure here (mp-zd1v), and the reason a script-tagged
+// This is a leaf on purpose (no window reads; its one import is
+// first_result_confirm.jsx, the question attemptScoreWrite asks before a drawn
+// competition's first result, itself import-only and importing only the
+// recorded_result.jsx leaf), and it is import-only: it has no
+// <script type="module"> tag of its own and must never gain one. A module
+// that is BOTH script-tagged and ES-imported loads twice under two URLs and
+// splits its module-level singleton state -- a known, previously-shipped
+// failure here (mp-zd1v), and the reason a script-tagged
 // surface like admin_shiaijo.jsx cannot import api_client.jsx to reach this
 // rule. Because THIS file is never tagged, importing it is safe from either
 // kind of module, which is what makes the direct import available everywhere
@@ -29,6 +32,8 @@
 // not-landed shape the conversion reached five sites and missed the sixth --
 // which happened to be the one guarding a hard prerequisite. A predicate a
 // caller must remember to re-derive is a predicate that drifts.
+
+import { confirmFirstResult, firstResultAsks, writeRecordsResult, FIRST_RESULT_CANCELLED } from './first_result_confirm.jsx';
 
 // writeDidNotLand: the write is NOT stored. Two shapes, one meaning --
 // `queued` (never reached the server, held for retry) and `applied:false` (the
@@ -1231,6 +1236,13 @@ export function downstreamKnockoutReopenedNotice(matches) {
 // thrown error carries `.downstreamKnockoutPlayedCancelled = true` so the
 // caller can pick DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED instead of the generic
 // error copy.
+//
+// Before anything is sent, a write that would record the first result of a
+// drawn competition asks whether to start it (confirmFirstResult,
+// first_result_confirm.jsx, bc-drev D4 b): the start, finish or decision of
+// every editor on every host comes through here. Kept back, nothing is sent and
+// the thrown error carries `.firstResultCancelled = true` and
+// FIRST_RESULT_CANCELLED as its message.
 export async function attemptScoreWrite({
     recordScore, confirmDialog, compId, matchId, result, password, match, label = '', onRefusal, onDownstreamReopened, onForced, allowCourtForce = false,
 }) {
@@ -1246,6 +1258,15 @@ export async function attemptScoreWrite({
     // `label` is the host's name for the match as its rows show it ("Pool A ·
     // Match 3"); matchLabel alone falls back to a pool match's raw id.
     const started = label || matchLabel(match) || matchLabel(matchId);
+    // Awaited only when it asks: a write that asks nothing still reaches
+    // recordScore in the same tick (score_write_same_tick.test.jsx).
+    if (writeRecordsResult(result) && firstResultAsks(compId) && !(await confirmFirstResult({
+        confirmDialog, compId, label: started, starts: result.status === 'running' && !result.decision,
+    }))) {
+        const kept = new Error(FIRST_RESULT_CANCELLED);
+        kept.firstResultCancelled = true;
+        throw kept;
+    }
     // The refusal the organiser may confirm past, with how to ask and which
     // flag the resend carries; null for any other refusal.
     const forcible = (e) => {

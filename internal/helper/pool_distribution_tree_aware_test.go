@@ -691,7 +691,7 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 	count := dojoCounter(func(poolIdx int, id int) int {
 		return countDojoInPool(pools[poolIdx], idOfID[id], keys)
 	})
-	// Normalized via dojoKey (bc-drwx item 3), matching the real function,
+	// Normalized via DojoKey (bc-drwx item 3), matching the real function,
 	// so this reference's only remaining difference from it is the caching
 	// this test exists to isolate (see this function's own doc comment).
 	footprint := make(map[string]int, len(roster))

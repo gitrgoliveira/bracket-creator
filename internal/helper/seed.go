@@ -736,7 +736,7 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 				indices[si] = targetIdx
 				occupied[targetIdx] = true
 				if globalPoolIdx >= 0 && globalPoolIdx < numPools {
-					poolSeedDojos[globalPoolIdx][dojoKey(p.Dojo)] = true
+					poolSeedDojos[globalPoolIdx][DojoKey(p.Dojo)] = true
 				}
 				return true
 			}
@@ -774,7 +774,7 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 		if posInPool > 0 {
 			placed = scan(func(gp int) bool { return len(poolSeedDojos[gp]) == 0 })
 			if !placed && p.Dojo != "" {
-				placed = scan(func(gp int) bool { return !poolSeedDojos[gp][dojoKey(p.Dojo)] })
+				placed = scan(func(gp int) bool { return !poolSeedDojos[gp][DojoKey(p.Dojo)] })
 			}
 		}
 		if !placed {
@@ -786,7 +786,7 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 				if !occupied[j] {
 					indices[si] = j
 					occupied[j] = true
-					poolSeedDojos[j%numPools][dojoKey(p.Dojo)] = true
+					poolSeedDojos[j%numPools][DojoKey(p.Dojo)] = true
 					break
 				}
 			}

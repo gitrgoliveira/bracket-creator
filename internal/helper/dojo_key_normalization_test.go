@@ -8,17 +8,20 @@ import (
 )
 
 // TestDojoKey_NormalizesCaseAndDiacritics pins bc-drwx item 3's own
-// primitive: dojoKey must treat two spellings of one dojo -- differing only
+// primitive: DojoKey must treat two spellings of one dojo -- differing only
 // in case (the reported repro: "Mumeishi" vs "mumeishi") or in diacritics --
 // as the SAME key, while leaving already-consistent spellings (and genuinely
-// different dojos) untouched.
+// different dojos) untouched. A blank or whitespace-only dojo keys to "", the
+// key a reader grouping by dojo (engine.DojoSeparation) reads as no dojo.
 func TestDojoKey_NormalizesCaseAndDiacritics(t *testing.T) {
-	assert.Equal(t, dojoKey("Mumeishi"), dojoKey("mumeishi"),
+	assert.Equal(t, DojoKey("Mumeishi"), DojoKey("mumeishi"),
 		"differing case of the same dojo must normalize to one key")
-	assert.Equal(t, dojoKey("Müller Dojo"), dojoKey("muller dojo"),
+	assert.Equal(t, DojoKey("Müller Dojo"), DojoKey("muller dojo"),
 		"a diacritic-only spelling difference must normalize to one key")
-	assert.NotEqual(t, dojoKey("Mumeishi"), dojoKey("OtherDojo"),
+	assert.NotEqual(t, DojoKey("Mumeishi"), DojoKey("OtherDojo"),
 		"genuinely different dojos must not collide")
+	assert.Equal(t, "", DojoKey(""), "an empty dojo keys to no dojo")
+	assert.Equal(t, "", DojoKey("  \t "), "a whitespace-only dojo keys to no dojo")
 }
 
 // TestCountDojoInPool_NormalizesSpelling is the exact repro from bc-drwx

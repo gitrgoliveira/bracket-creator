@@ -9,13 +9,20 @@ import (
 // The mask view of hidden public names: a payload copy rewritten so each hidden
 // name reads as the competitor's number or the member's label (bc-hnam).
 
-// maskView answers for one competition and one audience. The zero view (the
-// organiser, a competition link's holder, or a competition that shows names)
-// changes nothing; a view with a mask rewrites the copies it is given.
+// maskView answers for one competition and one audience: what that audience
+// may read of it. The zero view (the organiser, or a competition that shows
+// names and whose draw is public) changes nothing; a view with a mask
+// rewrites the copies it is given.
 type maskView struct {
 	m *nameMask
 	// reveal holds the participant ids the caller's own links reveal.
 	reveal map[string]bool
+	// drawHidden says the audience may not see the competition's draw now
+	// (publicNames.drawHidden, bc-drpb): the read answers it as the same
+	// competition in setup. It is judged apart from names, so a view that
+	// masks nothing (names shown, or a competition link's holder) can still
+	// hide the draw; a reveal key never shows a hidden draw.
+	drawHidden bool
 }
 
 // namesHidden reports whether payloads through this view are masked, the

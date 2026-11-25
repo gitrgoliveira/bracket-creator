@@ -72,19 +72,22 @@ func RegisterPublicEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatu
 }
 
 // registerPublicEligibilityHandlers wires the competitor-status read. It judges
-// its caller like every public read of a competition's data (judgePublicRead: a
-// password sent but wrong is 401, the answer is no-store), but answers every
-// audience alike, since nothing in it is masked when a competition hides names
-// (bc-hnam): a status names its competitor and its match by id alone, and the
-// reasons the app writes are a decision and a match id. A reason the organiser
-// types is free text, shown as typed like every free text (E6).
+// its caller like every public read of a competition's data (publicReadView: a
+// password sent but wrong is 401, the answer is no-store). Nothing in it is
+// masked when a competition hides names (bc-hnam): a status names its
+// competitor and its match by id alone, and the reasons the app writes are a
+// decision and a match id. A reason the organiser types is free text, shown as
+// typed like every free text (E6). A draft whose draw is hidden from the
+// caller (maskView.drawHidden, bc-drpb) is answered as the same competition in
+// setup: only the records that name no match, since a match id is the draw's.
 func registerPublicEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore, names *publicNames) {
 	r.GET("/competitions/:id/competitor-status", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
 		}
-		if !judgePublicRead(c, names) {
+		v, ok := publicReadView(c, names, id)
+		if !ok {
 			return
 		}
 		statuses, err := store.LoadCompetitorStatus(id)
@@ -96,6 +99,9 @@ func registerPublicEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatu
 		// even if Go map iteration order isn't.
 		out := make([]domain.CompetitorStatus, 0, len(statuses))
 		for _, st := range statuses {
+			if v.drawHidden && st.MatchID != "" {
+				continue
+			}
 			out = append(out, st)
 		}
 		c.JSON(http.StatusOK, gin.H{"statuses": out})

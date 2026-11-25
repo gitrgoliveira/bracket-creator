@@ -199,3 +199,57 @@ func TestNameMaskCache_AWriteToAnyMaskFileInvalidatesTheMask(t *testing.T) {
 		assert.Equal(t, before+1, builds, "the mask built after the %s write is kept", file)
 	}
 }
+
+// A hidden draft's mask holds no draw numbers: a hidden name reads "?" as it
+// does before the draw. Publishing writes config.md, so the next read builds
+// the mask again with the draw's numbers; hiding it again takes them away.
+func TestNameMaskCache_AHiddenDraftsMaskHasNoDrawNumbers(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesHidden)
+	side := func() string {
+		t.Helper()
+		comp, err := f.store.LoadCompetition(f.comp.ID)
+		require.NoError(t, err)
+		v, err := f.pn.view(comp, audience{})
+		require.NoError(t, err)
+		return v.side("Alice Arai", pnAlice)
+	}
+
+	setDraft(t, &f, true)
+	assert.Equal(t, maskedUnknown, side(), "a hidden draft shows no number from its draw")
+
+	setDraft(t, &f, false)
+	assert.Equal(t, "K1", side(), "the published draft shows the draw's number")
+
+	setDraft(t, &f, true)
+	assert.Equal(t, maskedUnknown, side(), "hidden again, the number goes")
+}
+
+// The mask judges a hidden draft from the competition alone, which holds only
+// because no self-run read reaches the mask: a self-run tournament hides no
+// names, so neither a public read nor a reveal key there builds one, even for
+// a competition whose stored setting hides names and whose draw is stored
+// hidden.
+func TestNameMaskCache_NoSelfRunReadReachesTheMask(t *testing.T) {
+	f := newPNFixture(t, state.PublicNamesCompetition)
+	setDraft(t, &f, true)
+	makeSelfRun(t, &f)
+	var builds atomic.Int32
+	f.pn.masks.build = func(compID string) (*nameMask, error) {
+		builds.Add(1)
+		return failClosedMask(f.comp), nil
+	}
+
+	for _, hdr := range []map[string]string{
+		nil,
+		{revealKeyHeader: f.comp.ID + ":" + state.CompetitionRevealKey(f.comp)},
+		{"X-Tournament-Password": "secret-pw"},
+	} {
+		aud, ok, w := judgeRequest(t, f.pn, hdr)
+		require.True(t, ok, w.Body.String())
+		v, err := f.pn.view(f.comp, aud)
+		require.NoError(t, err)
+		assert.False(t, v.namesHidden(), "self-run shows names")
+		assert.False(t, v.drawHidden, "self-run shows the draw")
+	}
+	assert.Zero(t, builds.Load(), "no self-run read builds a mask")
+}

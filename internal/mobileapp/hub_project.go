@@ -29,9 +29,10 @@ import (
 // (historyEntry.masked); only a stream holding competitors' own links has a
 // copy built for it alone.
 
-// maskedPayload memoises what every stream asks of a masked event: the
-// judgement of the competition it names, and with it the public projection (no
-// names revealed) built from that competition.
+// maskedPayload memoises what every stream asks of a masked event or a draw
+// event (sseEventSpec.judgesCompetition): the judgement of the competition it
+// names, and with it the public projection (no names revealed) built from
+// that competition.
 type maskedPayload struct {
 	mu sync.Mutex
 	// judged is the competition's judgement, taken by the first stream that
@@ -72,10 +73,23 @@ const (
 )
 
 // sseEventSpec classifies one event type. mask rewrites a masked event's
-// data object in place through v.
+// data object in place through v. draw marks an event that carries draw
+// content or the draw's shape (a match, a status record naming a match, a
+// lineup saved for a match, a Swiss round's match count) of the competition
+// it names (data.competitionId): while that competition's draw is hidden from
+// the public (publicNames.drawHidden), every stream but the organiser's is
+// sent it with no data, whatever its class (bc-drpb).
 type sseEventSpec struct {
 	class sseEventClass
 	mask  func(data map[string]json.RawMessage, v maskView) error
+	draw  bool
+}
+
+// judgesCompetition reports whether an event of this spec is judged on the
+// competition it names: a masked event for its names, a draw event for its
+// draw. Broadcast records the competition for these and the self-run memo.
+func (spec sseEventSpec) judgesCompetition() bool {
+	return spec.class == sseEventMasked || spec.draw
 }
 
 // sseEventCatalogue classifies EVERY event type the hub sends; a type missing
@@ -85,13 +99,13 @@ type sseEventSpec struct {
 var sseEventCatalogue = map[EventType]sseEventSpec{
 	// A match's result: its sides, winner, bout rows and representative-bout
 	// fighters name competitors and team members.
-	EventMatchUpdated: {class: sseEventMasked, mask: maskMatchUpdatedData},
+	EventMatchUpdated: {class: sseEventMasked, mask: maskMatchUpdatedData, draw: true},
 	// The rest carry ids, numbers of rounds or nothing at all.
 	EventCompetitionStarted:      {class: sseEventPasses},
 	EventCompetitionCompleted:    {class: sseEventPasses},
 	EventTournamentUpdated:       {class: sseEventPasses},
 	EventScheduleUpdated:         {class: sseEventPasses},
-	EventCompetitorStatusUpdated: {class: sseEventPasses}, // a player id and a reason code
+	EventCompetitorStatusUpdated: {class: sseEventPasses, draw: true}, // a player id, a reason code and the match it names
 	EventParticipantsUpdated:     {class: sseEventPasses},
 	EventPasswordReset:           {class: sseEventPasses}, // an originator id, or nothing
 	// Free text the organiser typed: shown to everyone as typed (E6; the
@@ -100,10 +114,14 @@ var sseEventCatalogue = map[EventType]sseEventSpec{
 	EventDrawGenerated:      {class: sseEventPasses},
 	EventDrawDiscarded:      {class: sseEventPasses},
 	EventBracketQuarantined: {class: sseEventPasses},
-	EventLineupUpdated:      {class: sseEventPasses}, // competition, team and match ids
+	EventLineupUpdated:      {class: sseEventPasses, draw: true}, // competition, team and match ids
 	EventResyncRequired:     {class: sseEventPasses},
-	// Swiss never hides names (Q-swiss), and the event carries counts only.
-	EventSwissRoundGenerated: {class: sseEventPasses},
+	// Swiss never hides names (Q-swiss), and the event carries counts only,
+	// but a round's match count is the draw's shape.
+	EventSwissRoundGenerated: {class: sseEventPasses, draw: true},
+	// A draft's draw was published or hidden again: a competition id and
+	// whether it is hidden now, which the public pages refetch on.
+	EventDrawVisibilityChanged: {class: sseEventPasses},
 }
 
 // sseEventClassOf is t's class; an unknown type is organiser-only.
@@ -140,19 +158,24 @@ func eventCompetitionID(data any, payload []byte) string {
 }
 
 // project is what sub's stream is sent for e: the event as broadcast for the
-// organiser, for an event that names no one, in a self-run tournament (which
-// hides no names, so every stream is sent every event as it always was), and
-// for a competition that shows names or whose names sub may see; a masked
-// copy otherwise. Whatever cannot be judged (an unknown event type, a masked
-// event naming no competition, a competition that cannot be read, a copy that
-// cannot be built) is sent with no data, never as broadcast.
+// organiser, for an event that names no one and carries no draw, in a
+// self-run tournament (which hides no names and shows every draw, so every
+// stream is sent every event as it always was), and for a competition that
+// shows names or whose names sub may see; a masked copy otherwise. A draw
+// event (sseEventSpec.draw) of a competition whose draw is hidden from sub
+// (publicNames.drawHidden) is sent with no data, judged first, before the
+// event's class, the names option or a reveal link count: a hidden draft is
+// the public's competition in setup, whose events carry nothing to show.
+// Whatever cannot be judged (an unknown event type, an event naming no
+// competition that it must be judged on, a competition that cannot be read,
+// a copy that cannot be built) is sent with no data, never as broadcast.
 func (h *Hub) project(e *historyEntry, sub *sseSubscriber) string {
 	names := h.names
 	if names == nil || sub == nil || sub.aud.isOrganiser() {
 		return e.payload
 	}
 	spec, known := sseEventCatalogue[e.typ]
-	if known && spec.class == sseEventPasses {
+	if known && spec.class == sseEventPasses && !spec.draw {
 		return e.payload
 	}
 	if e.inSelfRun(names) {
@@ -168,7 +191,10 @@ func (h *Hub) project(e *historyEntry, sub *sseSubscriber) string {
 	if comp == nil {
 		return withoutData(e)
 	}
-	if !hides {
+	if spec.draw && names.drawHidden(comp, sub.aud) {
+		return withoutData(e)
+	}
+	if spec.class == sseEventPasses || !hides {
 		return e.payload
 	}
 	aud := streamRevealFor(names, comp, sub.aud)
@@ -224,7 +250,9 @@ func (e *historyEntry) inSelfRun(names *publicNames) bool {
 // because it also reads the tournament's mode, which a restore that keeps the
 // competition in place can change without moving the competition's token (a
 // kept answer would show the names of a tournament that was self-run when the
-// event was first judged); the store caches the tournament read.
+// event was first judged); the store caches the tournament read. Whether
+// its draw is hidden is not kept either, for the same reason: project asks
+// publicNames.drawHidden on every call.
 func (e *historyEntry) judgeCompetition(names *publicNames) (*state.Competition, bool) {
 	if e.masked == nil {
 		comp := loadJudgedCompetition(names, e.compID)

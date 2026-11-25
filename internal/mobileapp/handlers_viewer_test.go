@@ -527,8 +527,12 @@ func TestViewerCompetitionDetail_KnockoutNumbersFollowBracketPosition(t *testing
 		assert.False(t, hasNumber, "pre-draw: player %v must carry no number field at all", p["name"])
 	}
 
-	// Generate (not start, so a later DiscardDraw is legal) the real draw.
+	// Generate (not start, so a later DiscardDraw is legal) the real draw,
+	// and publish it: a new draw is hidden from the public, and this read is
+	// the public's (bc-drpb).
 	require.NoError(t, eng.GenerateDraw(cid))
+	_, err := eng.SetDrawHidden(cid, false)
+	require.NoError(t, err)
 
 	bracket, err := store.LoadBracket(cid)
 	require.NoError(t, err)

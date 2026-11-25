@@ -222,7 +222,9 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 // (engine.LeagueTiebreakCandidates answers none for any other competition), and
 // a team keeps its name, id and dojo when names are hidden, so the mask changes
 // no candidate today; it is applied so a candidate that is ever a person reads
-// as their number.
+// as their number. A draft whose draw is hidden from the caller
+// (maskView.drawHidden, bc-drpb) is answered as the same competition in setup:
+// no candidates.
 func registerPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine, store LeagueTiebreakStore, names *publicNames) {
 	// GET /competitions/:id/league-tiebreak/candidates
 	// Returns the consequential tied groups for this team-league competition.
@@ -233,8 +235,15 @@ func registerPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 		if !ok {
 			return
 		}
-		v, ok := publicReadExisting(c, names, store, id)
+		v, _, ok := publicReadExisting(c, names, store, id)
 		if !ok {
+			return
+		}
+		if v.drawHidden {
+			// A hidden draw is answered as setup, which has no tie to break.
+			answer := gin.H{"candidates": leagueTiebreakGroupsJSON(nil)}
+			stampNamesHidden(answer, v)
+			c.JSON(http.StatusOK, answer)
 			return
 		}
 

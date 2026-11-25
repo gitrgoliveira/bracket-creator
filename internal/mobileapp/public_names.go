@@ -32,11 +32,18 @@ import (
 // team's number and the member's index, "T10.1"), lineup positions,
 // representative-bout fighters and fighting-spirit recipients.
 //
+// The mask view carries one judgement besides names (bc-drpb): whether the
+// audience may see the competition's draw (maskView.drawHidden, judged by
+// publicNames.drawHidden in public_draw.go). It rides here because the view
+// already reaches every public read and the event stream, so the view is "what
+// this audience may read of one competition", not only its names.
+//
 // The files: this one holds publicNames (the owner of both halves) and whether a
 // competition hides its names; public_names_audience.go the audience judge and
 // the reveal keys; public_names_view.go the mask view over payloads;
 // public_names_mask.go the mask a competition's names are built into;
-// public_names_cache.go the cache of masks and the files it is keyed by.
+// public_names_cache.go the cache of masks and the files it is keyed by;
+// public_draw.go whether the audience may see a draft draw.
 
 // maskedUnknown is what a hidden name reads as when the mask cannot say which
 // competitor it is (a named side with no id, an id with no number): fail
@@ -98,13 +105,16 @@ func (p *publicNames) tournament() *state.Tournament {
 	return t
 }
 
-// view is the mask view for comp and aud. The error is the mask's build
-// error (a file that could not be read); the view is still usable and fails
-// closed, so a caller logs the error and serves the view.
+// view is the mask view for comp and aud: the names aud may read, and whether
+// aud may see comp's draw (drawHidden, judged whether or not names are
+// hidden). The error is the mask's build error (a file that could not be
+// read); the view is still usable and fails closed, so a caller logs the
+// error and serves the view.
 func (p *publicNames) view(comp *state.Competition, aud audience) (maskView, error) {
+	draw := p.drawHidden(comp, aud)
 	if !p.hides(comp) || aud.revealsAll(comp.ID) {
-		return maskView{}, nil
+		return maskView{drawHidden: draw}, nil
 	}
 	m, err := p.masks.get(comp.ID)
-	return maskView{m: m, reveal: aud.revealedCompetitors(comp.ID)}, err
+	return maskView{m: m, reveal: aud.revealedCompetitors(comp.ID), drawHidden: draw}, err
 }

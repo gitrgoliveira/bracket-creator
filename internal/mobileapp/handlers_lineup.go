@@ -28,6 +28,7 @@ package mobileapp
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"maps"
 	"net/http"
@@ -243,15 +244,23 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 // audience, so in a competition that hides names (bc-hnam) the public reads
 // each team member's label ("T10.1") where the member's name is, and the holder
 // of a team's own link reads that team's names (E7). Team names and member ids
-// stay. The fielded-lineup read answers member ids alone, but it is judged too
-// (judgePublicRead), like every public read of a competition's data.
+// stay. The fielded-lineup read answers member ids alone, but it is judged too,
+// like every public read of a competition's data.
+//
+// A draft whose draw is hidden from the caller (maskView.drawHidden, bc-drpb)
+// is answered as the same competition in setup, which holds no match: the
+// round lineup read is unchanged (team members and the starting lineup are
+// set before the draw), the match lineup read answers nothing saved, the
+// lineup in force is the team's starting lineup (as for a match the draw does
+// not hold), the fielded-lineup read fills nothing and the kachinuki roster
+// does not find the match.
 func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, eng LineupEngine, names *publicNames) {
 	r.GET("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)
 		if !ok {
 			return
 		}
-		v, ok := publicReadExisting(c, names, comps, compID)
+		v, _, ok := publicReadExisting(c, names, comps, compID)
 		if !ok {
 			return
 		}
@@ -276,16 +285,22 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !ok {
 			return
 		}
-		v, ok := publicReadExisting(c, names, comps, compID)
+		v, _, ok := publicReadExisting(c, names, comps, compID)
 		if !ok {
 			return
 		}
-		lineups, err := store.LoadTeamLineups(compID)
-		if err != nil {
-			internalError(c, err)
-			return
+		// A hidden draw's match is one setup does not hold, so nothing is
+		// saved for it there.
+		var lineup domain.TeamLineup
+		found := false
+		if !v.drawHidden {
+			lineups, err := store.LoadTeamLineups(compID)
+			if err != nil {
+				internalError(c, err)
+				return
+			}
+			lineup, found = findMatchLineup(lineups, teamID, matchID)
 		}
-		lineup, found := findMatchLineup(lineups, teamID, matchID)
 		if !found {
 			lineup = domain.TeamLineup{TeamID: teamID, CompetitionID: compID, MatchID: matchID, Positions: map[domain.Position]string{}}
 		}
@@ -303,11 +318,18 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !ok {
 			return
 		}
-		v, ok := publicReadExisting(c, names, comps, compID)
+		v, _, ok := publicReadExisting(c, names, comps, compID)
 		if !ok {
 			return
 		}
-		in, err := eng.LineupInForce(compID, teamID, matchID)
+		// A hidden draw's match is asked as no match at all: the draw holds
+		// none, so only the starting lineup applies, as for a match the draw
+		// does not hold in setup (no lineup is saved for the empty match id).
+		inForceAt := matchID
+		if v.drawHidden {
+			inForceAt = ""
+		}
+		in, err := eng.LineupInForce(compID, teamID, inForceAt)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -328,10 +350,8 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		if !ok {
 			return
 		}
-		if !judgePublicRead(c, names) {
-			return
-		}
-		if !requireExistingCompetition(c, comps, compID) {
+		v, comp, ok := publicReadExisting(c, names, comps, compID)
+		if !ok {
 			return
 		}
 		var req fieldedLineupRequest
@@ -342,10 +362,17 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 			return
 		}
-		places, err := eng.KachinukiFieldedPlaces(compID, teamID, matchID, domain.TeamLineup{
+		form := domain.TeamLineup{
 			TeamID: teamID, CompetitionID: compID, MatchID: matchID,
 			Positions: req.Positions, MemberIDs: req.MemberIDs,
-		})
+		}
+		var places map[domain.Position]string
+		var err error
+		if v.drawHidden {
+			places, err = fieldedPlacesAsSetup(comp, form)
+		} else {
+			places, err = eng.KachinukiFieldedPlaces(compID, teamID, matchID, form)
+		}
 		var notFound *engine.NotFoundError
 		switch {
 		case errors.As(err, &notFound):
@@ -380,14 +407,21 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 			c.JSON(http.StatusBadRequest, gin.H{"error": "match ID is required"})
 			return
 		}
-		v, ok := publicReadView(c, names, compID)
+		v, comp, ok := publicReadViewOf(c, names, compID)
 		if !ok {
 			return
 		}
 		// The engine reads config.md once and answers an unknown competition or
 		// match with a NotFoundError naming which, so the handler reads nothing
-		// of its own and answers with that error's own words.
-		roster, err := eng.KachinukiRoster(compID, matchID)
+		// of its own and answers with that error's own words. A hidden draw's
+		// match is one setup does not hold (kachinukiRosterAsSetup).
+		var roster engine.KachinukiRoster
+		var err error
+		if v.drawHidden {
+			err = kachinukiRosterAsSetup(comp, matchID)
+		} else {
+			roster, err = eng.KachinukiRoster(compID, matchID)
+		}
 		var notFound *engine.NotFoundError
 		switch {
 		case errors.As(err, &notFound):
@@ -405,17 +439,33 @@ func registerPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 	})
 }
 
-// judgePublicRead judges a public read whose answer carries no competitor's
-// name (names.judge: a password sent but wrong is 401, the answer is
-// no-store), so it answers every audience alike. false when the answer has
-// been written. With no judge (names nil: a test mounting the reads alone)
-// every caller is answered.
-func judgePublicRead(c *gin.Context, names *publicNames) bool {
-	if names == nil {
-		return true
+// fieldedPlacesAsSetup is the fielded-lineup read's answer for a draft whose
+// draw is hidden from the caller: the answer engine.KachinukiFieldedPlaces
+// gives the same competition in setup, where no match is held. A competition
+// that is not kachinuki fills nothing; a kachinuki one still refuses a form
+// position its team size has no place for, then fills nothing for the match
+// it does not hold.
+func fieldedPlacesAsSetup(comp *state.Competition, form domain.TeamLineup) (map[domain.Position]string, error) {
+	places := map[domain.Position]string{}
+	if !comp.IsKachinuki() {
+		return places, nil
 	}
-	_, ok := names.judge(c)
-	return ok
+	if err := form.ValidatePositions(comp.TeamSize); err != nil {
+		return nil, err
+	}
+	return places, nil
+}
+
+// kachinukiRosterAsSetup is the kachinuki roster read's refusal for a draft
+// whose draw is hidden from the caller: the one engine.KachinukiRoster gives
+// the same competition in setup, where no match is held. A competition that
+// is not kachinuki is engine.ErrNotKachinuki; a kachinuki one does not find
+// the match.
+func kachinukiRosterAsSetup(comp *state.Competition, matchID string) error {
+	if !comp.IsKachinuki() {
+		return engine.ErrNotKachinuki
+	}
+	return &engine.NotFoundError{Msg: fmt.Sprintf("match %s not found", matchID)}
 }
 
 // publicReadView judges a public read's caller and gives the mask view of
@@ -454,25 +504,25 @@ func publicReadViewOf(c *gin.Context, names *publicNames, compID string) (maskVi
 	return viewerMaskView(names, comp, aud), comp, true
 }
 
-// publicReadExisting is publicReadView for a read that answers 404 for an
-// unknown competition. The judge's own read is the one read of the
-// competition: it is not asked for again, and its finding none is the 404.
-// With no judge comps answers (a public endpoint, so internalError leaks no
-// store error string).
-func publicReadExisting(c *gin.Context, names *publicNames, comps competitionLoader, compID string) (maskView, bool) {
+// publicReadExisting is publicReadViewOf for a read that answers 404 for an
+// unknown competition, so the competition it gives is never nil when ok. The
+// judge's own read is the one read of the competition: it is not asked for
+// again, and its finding none is the 404. With no judge comps answers (a
+// public endpoint, so internalError leaks no store error string).
+func publicReadExisting(c *gin.Context, names *publicNames, comps competitionLoader, compID string) (maskView, *state.Competition, bool) {
 	v, comp, ok := publicReadViewOf(c, names, compID)
 	if !ok {
-		return maskView{}, false
+		return maskView{}, nil, false
 	}
 	if comp != nil {
-		return v, true
+		return v, comp, true
 	}
 	if names != nil {
 		respondCompetitionNotFound(c)
-		return maskView{}, false
+		return maskView{}, nil, false
 	}
-	_, ok = loadExistingCompetition(c, comps, compID)
-	return v, ok
+	comp, ok = loadExistingCompetition(c, comps, compID)
+	return v, comp, ok
 }
 
 // kachinukiRosterRead is the kachinuki roster read's answer: the engine's

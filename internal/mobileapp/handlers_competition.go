@@ -2970,6 +2970,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusNoContent)
 	})
 
+	// Publish draw and Unpublish (bc-drpb): organiser-only in self-run too
+	// (isSelfRunMainGatedConfigRoute), where they answer 409.
+	registerDrawVisibilityHandlers(r, store, eng, hub)
+
 	// Organiser-only in self-run (isSelfRunMainGatedConfigRoute), like DELETE
 	// /draw above: it discards recorded results. It does NOT delete the
 	// operator's file, but the knockout results inside it become unreachable

@@ -30,6 +30,7 @@ const DIRECT_WRITES = {
   startCompetition: () => API.startCompetition('c1', PW),
   generateDraw: () => API.generateDraw('c1', PW),
   discardDraw: () => API.discardDraw('c1', PW),
+  swapDrawPlaces: () => API.swapDrawPlaces('c1', { a: { id: 'a', place: { pool: 'Pool A', position: 1 } }, b: { id: 'b', place: { pool: 'Pool B', position: 1 } } }, PW),
   quarantineBracket: () => API.quarantineBracket('c1', PW),
   completeCompetition: () => API.completeCompetition('c1', PW),
   importCompetitions: () => API.importCompetitions(new FormData(), PW),

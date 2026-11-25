@@ -133,6 +133,8 @@ const CHECK_MODULES = [
   'admin_competition_bracket.jsx',
   'admin_competition_overview.jsx',
   'admin_competition_swiss.jsx',
+  'admin_draw_review.jsx',
+  'admin_draw_swap_check.jsx',
   'admin_pools.jsx',
   'admin_registration_desk.jsx',
   'admin_schedule.jsx',

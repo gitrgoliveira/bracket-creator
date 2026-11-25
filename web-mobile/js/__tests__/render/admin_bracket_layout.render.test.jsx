@@ -24,17 +24,31 @@ const STUBBED_GLOBALS = {
   GlossaryHint: ({ name }) => <span title={name} />,
 };
 
+// The page imports the draw swap check, which loads bracket.jsx, and loading
+// bracket.jsx sets the real MatchCard, bracketColumnCount and bronzeSlotLabels
+// over the stubs above. Put these stubs back once the import has run.
+const BRACKET_STUBS = {
+  MatchCard: STUBBED_GLOBALS.MatchCard,
+  bracketColumnCount: STUBBED_GLOBALS.bracketColumnCount,
+  bronzeSlotLabels: STUBBED_GLOBALS.bronzeSlotLabels,
+};
+
 let restoreGlobals;
+let restoreBracketStubs;
 let AdminBracket;
 let scrolled;
 
 beforeAll(async () => {
   restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_competition_bracket.jsx');
+  restoreBracketStubs = installWindowStubs(BRACKET_STUBS);
   AdminBracket = window.AdminBracket;
 });
 
-afterAll(() => restoreGlobals());
+afterAll(() => {
+  restoreBracketStubs();
+  restoreGlobals();
+});
 
 beforeEach(() => {
   scrolled = [];

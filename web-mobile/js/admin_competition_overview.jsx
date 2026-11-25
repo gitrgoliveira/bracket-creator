@@ -18,6 +18,9 @@ import { isOffline, savedOfflineSentence } from './write_result.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
 import { dismissToastById } from './toast_queue.jsx';
 import { Icon } from './icon.jsx';
+// The Draw review card (bc-drev): the dojo separation summary, then the
+// optional swap step, shown in the draw-ready state of a format with a bracket.
+import { DrawReviewPanel, reviewsDraw } from './admin_draw_review.jsx';
 // One owner for what the operator is told when a file on disk does not say what
 // the app expects; shared with the pool surfaces so the wording cannot drift.
 import {
@@ -815,10 +818,16 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
             <div className="card card--sm" style={{ background: "var(--bg)" }}>
               <div className="card__title" style={{ marginBottom: 4, color: "var(--ink-2)" }}>To start</div>
               <div className="card__sub">
-                Use the <strong>Start competition</strong> button above. To change the draw, use <strong>Discard draw</strong> first.
+                {reviewsDraw(c)
+                  ? <>Use the <strong>Start competition</strong> button above. To swap two competitors, use the <strong>Draw review</strong> below; to change anything else, use <strong>Discard draw</strong> first.</>
+                  : <>Use the <strong>Start competition</strong> button above. To change the draw, use <strong>Discard draw</strong> first.</>}
               </div>
             </div>
           </div>
+          {reviewsDraw(c) && (
+            <DrawReviewPanel c={c} pools={pools ?? c.pools} poolMatches={poolMatches ?? c.poolMatches} bracket={effectiveBracket}
+              password={password} showToast={showToast} onRefreshCompetition={onRefreshCompetition} />
+          )}
         </div>
       );
     }

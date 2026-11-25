@@ -6,7 +6,12 @@
 import { realIppons } from './result_slot.jsx';
 import { writeKeepsEditorOpen } from './write_result.jsx';
 import { holdsUnsaved, confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY } from './unsaved_entries.jsx';
-const { useState, useEffect, useRef } = React;
+import { competitionHasRecordedResult } from './recorded_result.jsx';
+import { reviewsDraw } from './admin_draw_review.jsx';
+import { DrawSwapCheck, drawEntrants, drawPlaceLabel, swapDoneToast } from './admin_draw_swap_check.jsx';
+import { acceptTap } from './tap_guard.jsx';
+import { useEscapeToClose } from './ui.jsx';
+const { useState, useEffect, useRef, useMemo } = React;
 
 const hasBothSides = window.hasBothSides;
 const hasPoolOriginPlaceholder = window.hasPoolOriginPlaceholder;
@@ -201,6 +206,135 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
   );
 });
 RunningMatchPanel.displayName = "RunningMatchPanel";
+// ---------------------------------------------------------------------------
+// The Swap competitors mode (bc-drev FR10, decision D8 (b)): on Pools
+// (preview) of a pools + knockout draw and Bracket (preview) of a
+// knockout-only one, while the competition is draw-ready with nothing
+// recorded, the organiser taps two competitors to swap them. Both hosts
+// (AdminPools, AdminBracket below) run this one hook; the shared viewers
+// (PoolsViewer, BracketTree) take its `swap` prop, which only these hosts pass,
+// so the public pages render as before.
+//
+// A tap picks, a tap on the picked name unpicks, a tap on another opens "If
+// you swap them" (DrawSwapCheck), the only door that sends a swap. Every tap
+// of the mode (turning it on, a pick, Cancel, Done) goes through ONE keyless
+// tap guard (acceptTap), so the bounce of a double tap never picks and
+// unpicks, picks twice, or lands on the Done that took the place of the
+// button it turned on with; the check panel takes the bounce of the tap that
+// opened it itself. After a swap the mode stays on with nothing picked, so a
+// second swap can follow; Done, Escape, or leaving the tab (the host
+// unmounts) turns it off. The page reads the swapped draw on the
+// draw_generated broadcast the swap makes (admin.jsx).
+// ---------------------------------------------------------------------------
+
+// swapModeAvailable: does this tab offer the mode now? A pools + knockout
+// draw is swapped on its pools (its bracket holds "Pool A-1st" places, not
+// competitors), a knockout-only draw on its bracket.
+export function swapModeAvailable(c, tab, poolMatches, bracket) {
+  if (!c || c.status !== 'draw-ready' || !reviewsDraw(c)) return false;
+  if (c.format !== (tab === 'bracket' ? 'knockout' : 'mixed')) return false;
+  return !competitionHasRecordedResult(poolMatches, bracket);
+}
+
+// swapPickLine: the line under the banner once one competitor is picked.
+export function swapPickLine(picked, bracket) {
+  const where = [drawPlaceLabel(picked.place, bracket), picked.number].filter(Boolean).join(', ');
+  return `Swap ${picked.name}${where ? ` (${where})` : ''} with… tap another competitor.`;
+}
+
+// useSwapCompetitors: the mode's state for one host tab. Returns `swap` (the
+// prop for the viewer, null while the mode is off), `active`, and `controls`
+// (the button or banner, and the check panel) for the host to draw above the
+// viewer. `beforeTurnOn` may refuse (an editor holding unsaved entries).
+export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, password, beforeTurnOn, onTurnOn }) {
+  const [on, setOn] = useState(false);
+  const [pickedId, setPickedId] = useState(null);
+  const [checking, setChecking] = useState(null);
+  const [note, setNote] = useState(null);
+  const tapRef = useRef(null);
+  const available = swapModeAvailable(c, tab, poolMatches, bracket);
+  const active = on && available;
+  const entrants = useMemo(() => {
+    const byId = new Map();
+    if (available) drawEntrants(c, pools, bracket).forEach((g) => g.entrants.forEach((e) => byId.set(e.id, e)));
+    return byId;
+  }, [available, c, pools, bracket]);
+  // A pick the draw no longer holds (it changed under the page) reads as none,
+  // and a pick the draw still holds carries the place it holds now.
+  const picked = active && pickedId ? entrants.get(pickedId) || null : null;
+
+  const turnOff = () => { setOn(false); setPickedId(null); setChecking(null); setNote(null); };
+  // One Escape closes one layer: while the check panel is open it is the
+  // panel's (DrawSwapCheck cancels on it), never the mode's as well.
+  useEscapeToClose(active && !checking ? turnOff : undefined);
+
+  const guarded = (fn) => (ev) => { if (!acceptTap(tapRef, ev)) return; fn(ev); };
+  const turnOn = guarded(async () => {
+    if (beforeTurnOn && !(await beforeTurnOn())) return;
+    setOn(true);
+    setPickedId(null);
+    setNote(null);
+    if (onTurnOn) onTurnOn();
+  });
+  const onPick = (entrant, ev) => {
+    if (!acceptTap(tapRef, ev)) return;
+    setNote(null);
+    if (!picked) { setPickedId(entrant.id); return; }
+    if (picked.id === entrant.id) { setPickedId(null); return; }
+    setChecking({ a: picked, b: entrant });
+  };
+  const onSwapped = (answer) => {
+    const pair = checking;
+    setChecking(null);
+    setPickedId(null);
+    setNote({ text: swapDoneToast(answer, pair && pair.a, pair && pair.b) });
+  };
+  const onDrawChanged = (message) => {
+    setChecking(null);
+    setPickedId(null);
+    setNote({ text: message || 'The draw has changed. Pick the two competitors again.', error: true });
+  };
+
+  const swap = active ? { entrantOf: (id) => entrants.get(id) || null, pickedId: picked ? picked.id : null, onPick } : null;
+
+  let controls = null;
+  if (available && !active) {
+    controls = (
+      <div className="swap-mode swap-mode--off">
+        <button type="button" className="btn btn--sm" data-testid="swap-mode-on" onClick={turnOn}>Swap competitors</button>
+      </div>
+    );
+  } else if (active) {
+    controls = (
+      <div className="swap-mode" role="region" aria-label="Swap competitors" data-testid="swap-mode">
+        <div className="swap-mode__head">
+          <p className="swap-mode__lead">
+            <strong>Swap competitors: on.</strong> Tap two competitors to swap them. Taps do not open score sheets now.
+          </p>
+          <button type="button" className="btn btn--sm btn--primary" data-testid="swap-mode-done" onClick={guarded(turnOff)}>Done</button>
+        </div>
+        {/* Always drawn, so a pick that writes its line moves nothing under the
+            finger. */}
+        <div className="swap-mode__line" aria-live="polite" data-testid="swap-mode-line">
+          {picked ? (
+            <>
+              <span>{swapPickLine(picked, bracket)}</span>
+              <button type="button" className="btn btn--sm" data-testid="swap-mode-cancel" onClick={guarded(() => setPickedId(null))}>Cancel</button>
+            </>
+          ) : note ? (
+            <span className={note.error ? 'swap-mode__note swap-mode__note--error' : 'swap-mode__note'}>{note.text}</span>
+          ) : null}
+        </div>
+        {checking && (
+          <DrawSwapCheck comp={c} bracket={bracket} a={checking.a} b={checking.b} password={password}
+            onClose={() => setChecking(null)} onSwapped={onSwapped} onDrawChanged={onDrawChanged} />
+        )}
+      </div>
+    );
+  }
+  return { swap, active, controls };
+}
+
 function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password, hostUnsavedRef = null }) {
   const [selected, setSelected] = useState(null);
   // The panel's editor publishes its unsaved entries here: choosing another
@@ -255,6 +389,13 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     () => (bracket?.rounds && window.bronzeSlotLabels ? window.bronzeSlotLabels(bracket.rounds, displayModel.matchNumById) : undefined),
     [bracket, displayModel]
   );
+  // Swap competitors (knockout-only draws): turning it on closes the scoring
+  // panel, so over unsaved entries it asks first, as choosing another match does.
+  const swapMode = useSwapCompetitors({
+    c, tab: 'bracket', pools: null, poolMatches: null, bracket, password,
+    beforeTurnOn: async () => !holdsUnsaved(editorUnsavedRef) || confirmDiscardUnsaved(editorUnsavedRef, LEAVE_MATCH_ANYWAY),
+    onTurnOn: () => setSelected(null),
+  });
   const matchMeta = (matchId) => {
     if (!matchId || !bracket?.rounds) return { matchNum: null, roundName: null };
     const cols = displayModel.hasMeta ? displayModel.columns : bracket.rounds;
@@ -346,6 +487,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     // tree's columns narrow to fit (.bracket-canvas--fit).
     <div className="bracket-layout">
       <div className="bracket-layout__bracket">
+        {swapMode.controls}
         {hasUnseededPools && (
           <div className="banner banner--info" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--accent-soft)", border: "1px solid var(--accent)", borderRadius: 6, fontSize: 13 }}>
             <strong>Knockout filling in</strong>: this bracket fills in automatically as each pool finishes. Matches start once both sides are decided.
@@ -359,13 +501,14 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
               variant={tweaks.cardVariant}
               showDojo={tweaks.showDojo}
               onMatchClick={(m, ri, mi) => { if (hasBothSides(m)) select(m, ri, mi); }}
-              highlightedMatchId={selected?.matchId}
+              highlightedMatchId={swapMode.active ? undefined : selected?.matchId}
               autoScrollMatchId={autoScrollId}
               scrollContainerRef={scrollRef}
+              swap={swapMode.swap}
             />
             {bracket.thirdPlaceMatch && (() => {
               const bm = bracket.thirdPlaceMatch;
-              const isReady = hasBothSides(bm);
+              const isReady = hasBothSides(bm) && !swapMode.active;
               const isHighlighted = selected?.matchId === bm.id;
               // The "3rd Place Match" section header identifies the lone bronze
               // card, so the card omits a per-card meta badge (no redundant
@@ -403,7 +546,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
         </div>
       </div>
       <div className="bracket-layout__panel" ref={panelRef}>
-        {hasBothSides(selectedMatch) ? (
+        {swapMode.active ? null : hasBothSides(selectedMatch) ? (
           <RunningMatchPanel
             hostUnsavedRef={editorUnsavedRef}
             match={scoringMatch}

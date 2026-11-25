@@ -73,6 +73,13 @@ const REFRESHABLE_EVENTS = new Set([
   "swiss_round_generated",
   // participants_updated fires when a participant is checked in or out.
   "participants_updated",
+  // bc-drev FR13: draw_generated fires when a draw is made and when two
+  // competitors are swapped in it (POST .../draw/swap), draw_discarded when it
+  // is discarded. Another organiser device then shows the draw as stored (the
+  // Overview's Draw review card, Pools (preview), Bracket (preview)) without a
+  // reload; the court console and the calendar already listened for both.
+  "draw_generated",
+  "draw_discarded",
 ]);
 
 // Page components rendered by AdminApp's view switch (produced by sibling
@@ -1011,7 +1018,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             // gratuitous re-render).
             if (event.type === "match_updated" || event.type === "competitor_status_updated") {
               setAdminCompData(prev => pushes.push(prev, prev && prev.config && prev.config.id, event));
-            } else if (event.type === "tournament_updated") {
+            } else if (event.type === "tournament_updated"
+                || event.type === "draw_generated" || event.type === "draw_discarded") {
+              // A new or changed draw names other sides in the same match
+              // ids: no pushed copy outranks the refetch.
               pushes.clear();
             }
             // Still trigger full refresh (jittered) to reconcile standings/propagation
@@ -1025,7 +1035,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
               || event.type === "competition_started"
               || event.type === "competition_completed"
               || event.type === "competitor_status_updated"
-              || event.type === "swiss_round_generated") {
+              || event.type === "swiss_round_generated"
+              || event.type === "draw_generated"
+              || event.type === "draw_discarded") {
             scheduleTournamentRefresh(false);
           } else if (event.type === "tournament_updated") {
             scheduleTournamentRefresh(true);

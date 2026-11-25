@@ -57,17 +57,22 @@ type Posters struct {
 	Courts map[string]PosterChoices `yaml:"courts,omitempty" json:"courts,omitempty"`
 }
 
+// isEmpty reports whether c holds no choice after trimming.
+func (c PosterChoices) isEmpty() bool {
+	return trimPosterChoices(c) == PosterChoices{}
+}
+
 // IsEmpty reports whether the block holds no choice at all. A nil block is
 // empty.
 func (p *Posters) IsEmpty() bool {
 	if p == nil {
 		return true
 	}
-	if p.Viewer != (PosterChoices{}) {
+	if !p.Viewer.isEmpty() {
 		return false
 	}
 	for _, c := range p.Courts {
-		if c != (PosterChoices{}) {
+		if !c.isEmpty() {
 			return false
 		}
 	}
@@ -90,14 +95,13 @@ func NormalizePosters(p *Posters) *Posters {
 	}
 	out := &Posters{Viewer: trimPosterChoices(p.Viewer)}
 	for key, c := range p.Courts {
-		c = trimPosterChoices(c)
-		if c == (PosterChoices{}) {
+		if c.isEmpty() {
 			continue
 		}
 		if out.Courts == nil {
 			out.Courts = make(map[string]PosterChoices, len(p.Courts))
 		}
-		out.Courts[key] = c
+		out.Courts[key] = trimPosterChoices(c)
 	}
 	if out.IsEmpty() {
 		return nil
@@ -135,7 +139,9 @@ func posterErrorf(format string, args ...any) error {
 // ValidatePosters refuses a block the server would not store, with one plain
 // sentence naming the poster and the box in the operator's words (the PUT and
 // the POST answer it as it is). The lengths are judged after trimming. An
-// entry for a court the tournament no longer has is valid: it is kept.
+// entry for a court the tournament no longer has is valid: it is kept. Only
+// non-empty court entries count toward MaxPosterCourtEntries, because
+// NormalizePosters drops empty ones before storage.
 func ValidatePosters(p *Posters) error {
 	if p == nil {
 		return nil
@@ -143,8 +149,14 @@ func ValidatePosters(p *Posters) error {
 	if err := validatePosterChoices("", p.Viewer); err != nil {
 		return err
 	}
-	if len(p.Courts) > MaxPosterCourtEntries {
-		return posterErrorf("Poster choices can be kept for at most %d shiaijo; this save holds %d.", MaxPosterCourtEntries, len(p.Courts))
+	kept := 0
+	for _, c := range p.Courts {
+		if !c.isEmpty() {
+			kept++
+		}
+	}
+	if kept > MaxPosterCourtEntries {
+		return posterErrorf("Poster choices can be kept for at most %d shiaijo; this save holds %d.", MaxPosterCourtEntries, kept)
 	}
 	for _, key := range slices.Sorted(maps.Keys(p.Courts)) {
 		if !IsCourtLabel(key) {

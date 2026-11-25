@@ -130,6 +130,9 @@ func TestValidatePosters_BoundsTheCourtEntries(t *testing.T) {
 		courts[string(rune('A'+i))] = PosterChoices{HideSponsors: true}
 	}
 	assert.NoError(t, ValidatePosters(&Posters{Courts: courts}), "32 entries are kept")
+	courts["!"] = PosterChoices{}
+	courts["#"] = PosterChoices{Heading: "   "}
+	assert.NoError(t, ValidatePosters(&Posters{Courts: courts}), "empty entries do not count toward the limit")
 	courts["~"] = PosterChoices{HideSponsors: true}
 	assert.Equal(t, "Poster choices can be kept for at most 32 shiaijo; this save holds 33.", posterMessage(t, ValidatePosters(&Posters{Courts: courts})))
 }

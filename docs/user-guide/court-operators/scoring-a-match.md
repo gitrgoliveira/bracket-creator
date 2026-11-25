@@ -33,7 +33,7 @@ To take back a strike, tap the scored mark itself in the centre of the board. Th
 
 ### The first match of a competition
 
-While a competition's draw is still ready and nothing has been recorded, the first start on a shiai-jo, finished match or decision asks "Start Men's Individual?" and names the match. **Start the competition** goes ahead and fixes the draw, so competitors can no longer be swapped. **Not yet** sends nothing: the match stays as it was, and the score sheet reads "Not recorded: the competition was not started." If the organiser asked you to wait, choose **Not yet**. Once you have answered **Start the competition** for a competition, the app does not ask again for it. The question is described in [Before the first result](../organisers/run-tournament.md#before-the-first-result).
+While a competition's draw is still ready and nothing has been recorded, the first write that records a result asks "Start Men's Individual?" and names the match. That write is starting a match on a shiai-jo, finishing a match or recording a decision. **Start the competition** goes ahead and fixes the draw, so competitors can no longer be swapped. **Not yet** sends nothing: the match stays as it was, and the score sheet reads "Not recorded: the competition was not started." If the organiser asked you to wait, choose **Not yet**. Once you have answered **Start the competition** for a competition, the app does not ask again for it. The question is described in [Before the first result](../organisers/run-tournament.md#before-the-first-result).
 
 ### Match history
 

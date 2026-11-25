@@ -278,10 +278,9 @@ lineup whose order has no match at the new place, after a move to a smaller pool
 and the swap's answer counts it. The matches listed under the team in `round_lineups_given`
 (described below) move the same way, and the team's carried lineups are worked out again over
 its new matches. The opponents' lineups and the starting lineups stay where they are. A
-lineup save for a team
-that a match does not hold, when both of the match's sides are known competitors, is refused
-for every caller, the organiser included: a device that loaded the match before the swap would
-otherwise store a lineup for a team that no longer plays there.
+lineup save for a team that a match does not hold, when both of the match's sides are known
+competitors, is refused for every caller, the organiser included: a device that loaded the
+match before the swap would otherwise store a lineup for a team that no longer plays there.
 
 A lineup save names the positions it changed, and the server writes only those, under the
 competition's lock, onto the lineup stored for that match or that starting lineup. A save also

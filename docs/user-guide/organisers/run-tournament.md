@@ -267,7 +267,7 @@ A draw-ready competition is already listed on the shiai-jo operator views, since
 
 ### Review the draw
 
-A **Pools + Knockout** or **Knockout only** competition whose draw is ready shows a **Draw review** card on its **Overview**. It answers the question the desk is asked most often once the draw is out: when do two competitors from the same dojo meet? If a pairing is wrong, you can swap two competitors there and then, without discarding the draw. League and Swiss competitions have no card.
+A **Pools + Knockout** or **Knockout only** competition whose draw is ready shows a **Draw review** card on its **Overview**. It shows when two competitors from the same dojo can first meet. If a pairing is wrong, you can swap two competitors there and then, without discarding the draw. League and Swiss competitions have no card.
 
 ![The Draw review card: the Dojo separation table with one row per pair of dojo-mates and the round where they can first meet, then Change the draw (optional) with a line for each dojo that no suggested swap helps and the two pickers for your own swap.](../../screenshots/mobile-draw-review.png)
 
@@ -290,7 +290,7 @@ Below the suggestions, **Or pick your own swap** has two lists, **Competitor** a
 
 #### If you swap them
 
-Every swap, a suggestion, your own or one tapped on a preview tab, opens **If you swap them** before anything changes. It says, in plain words:
+Every swap, a suggestion, your own or one tapped on a preview tab, opens **If you swap them** before anything changes. It says:
 
 - Where each competitor goes, for example "Ren Suzuki goes to Pool C, Luca Conti to Pool B."
 - How each affected dojo's earliest meeting changes, and whether it comes later or earlier.

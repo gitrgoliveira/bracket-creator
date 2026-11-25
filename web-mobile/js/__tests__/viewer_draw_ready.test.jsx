@@ -233,6 +233,20 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
     expect(text).toContain('Standings');
     expect(text).not.toContain('Pools and Bracket');
   });
+
+  // bc-nost: a competition with no start time read "Starts at . ..." on both
+  // cards. The start sentence is left out when there is no time to give.
+  it.each(['setup', 'draw-ready'])('%s with no start time leaves the start sentence out', (status) => {
+    const tree = runtime.mount(ViewerOverview, { c: { status, startTime: '' }, ...baseProps });
+    const text = collectText(tree, expandAll);
+    expect(text).not.toContain('Starts at');
+  });
+
+  it.each(['setup', 'draw-ready'])('%s with a start time still says when it starts', (status) => {
+    const tree = runtime.mount(ViewerOverview, { c: { status, startTime: '09:00' }, ...baseProps });
+    const text = collectText(tree, expandAll);
+    expect(text).toContain('Starts at 09:00.');
+  });
 });
 
 // mp-rrd: the home page must NOT treat a draw-ready comp as running. runningCompIds

@@ -434,6 +434,34 @@ describe('createRefetchGate', () => {
     expect(h.sent).toHaveLength(1);
   });
 
+  it('a failed restart() fetch is asked for again once, though no event is seen', async () => {
+    const h = harness();
+    h.gate.restart(); // nothing counts as applied, and nothing was seen
+    h.fireTimers();
+    await h.fail(new Error('offline'));
+    expect(h.timers).toHaveLength(1);
+    h.fireTimers();
+    expect(h.sent).toHaveLength(2); // the retry is as forced as the fetch that failed
+    await h.fail(new Error('offline'));
+    expect(h.timers).toHaveLength(0); // the second failure waits: no polling
+  });
+
+  it('a failed now() fetch is asked for again once, though every event seen is applied', async () => {
+    const h = harness();
+    h.gate.applied(5);
+    h.gate.now();
+    h.fireTimers();
+    await h.fail(new Error('offline'));
+    expect(h.timers).toHaveLength(1);
+    h.fireTimers();
+    expect(h.sent).toHaveLength(2);
+    await h.answer(answerAt(5));
+    expect(h.timers).toHaveLength(0);
+    // The retry that landed was the last forced one: a later event the answer
+    // holds asks for nothing.
+    expect(h.gate.event(5)).toBe(false);
+  });
+
   it('a take that throws is reported and its seq is not adopted', async () => {
     const timers = [];
     const sends = [];

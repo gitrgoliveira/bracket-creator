@@ -278,8 +278,8 @@ const HELD_PUSH_WAIT_MS = 300;
 //     applied seq only ever rises. A seq cannot be compared across a server
 //     restart (the head seq starts again at 0 and no header names the
 //     stream), so a host whose stream ended and reopened calls restart();
-//   - a refetch that fails is asked for again once, after the same wait; a
-//     second failure waits for the next event or now() (an offline device
+//   - a refetch that fails is asked for again once, after the same wait, and
+//     as forced as the one that failed (now(), restart()); a second failure waits for the next event or now() (an offline device
 //     must not poll);
 //   - forget() (resync_required) drops every seq: nothing counts as applied,
 //     and an answer to a fetch sent before it is taken but its seq is not
@@ -313,6 +313,7 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
     let flightRecheck = false; // the fetch out is the repeat of one that answered behind
     let recheck = false;  // the refetch wanted is that repeat
     let forced = false;   // the refetch wanted is one applied() cannot cancel
+    let flightForced = false; // the fetch out was one, so its retry is too
     let generation = 0;
     let failed = false;   // the last fetch failed and has been asked for again
     let disposed = false; // the host's effect ended: nothing is sent or applied
@@ -358,10 +359,16 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
         // A failed fetch is asked for again once: the burst it served rode on
         // it alone, so no later fetch covers it. A second failure waits for
         // an event or now().
-        if (gen === generation && !ok && !failed) failed = more = true;
+        if (gen === generation && !ok && !failed) {
+            failed = more = true;
+            // A forced fetch (now(), restart()) was sent whatever had been
+            // applied: its retry is too, or fire() would find nothing to ask.
+            force = force || flightForced;
+        }
         else if (!ok) failed = false;
         flightSeq = 0;
         flightUnknown = false;
+        flightForced = false;
         if (more) want(force);
     };
 
@@ -374,6 +381,7 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
         const repeat = recheck;
         recheck = false;
         if (!forced && seen <= applied) return;
+        flightForced = forced;
         forced = false;
         inflight = true;
         flightSeq = 0;

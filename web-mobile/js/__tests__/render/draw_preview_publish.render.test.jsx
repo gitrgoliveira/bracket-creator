@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import {
   DRAW_HIDDEN_HINT, DRAW_PUBLISHED_HINT, DRAW_PUBLISHED_TOAST, DRAW_UNPUBLISHED_TOAST,
+  DRAW_HIDDEN_CARD_LINE, DRAW_PUBLIC_CARD_LINE, OPEN_PUBLIC_PAGE_LABEL,
   startHiddenDrawMessage, discardPublishedDrawMessage,
 } from '../../draw_visibility.jsx';
 
@@ -83,20 +84,34 @@ const headerButtons = (container) => [...container.querySelectorAll('.page-head_
 const labels = (container) => headerButtons(container).map((b) => b.textContent.trim());
 const button = (container, label) => headerButtons(container).find((b) => b.textContent.trim() === label);
 const hint = () => screen.queryByTestId('draw-visibility-hint');
+const state = () => screen.queryByTestId('draw-visibility-state');
+const publicLink = () => screen.queryByTestId('draw-public-page-link');
 
 describe('the draw preview header (bc-drpb)', () => {
   it('a hidden draft offers Discard draw, Publish draw, Start competition in that order, and says it is hidden', async () => {
     const { container } = await mount({ hidden: true });
     expect(labels(container)).toEqual(['Discard draw', 'Publish draw', 'Start competition']);
-    expect(hint().textContent).toBe(DRAW_HIDDEN_HINT);
+    expect(hint().textContent).toBe(`${DRAW_HIDDEN_HINT} ${OPEN_PUBLIC_PAGE_LABEL}`);
     expect(hint().className).toContain('draw-visibility-hint--hidden');
+    // The title row says it too, beside the Draw ready badge.
+    expect(state().textContent).toBe(DRAW_HIDDEN_CARD_LINE);
+    expect(state().className).toContain('draw-visibility-line--hidden');
+  });
+
+  it('the hint ends with a link to this competition\'s public page, in a new tab', async () => {
+    await mount({ hidden: true });
+    expect(publicLink().getAttribute('href')).toBe('/competition/c1');
+    expect(publicLink().getAttribute('target')).toBe('_blank');
+    expect(publicLink().getAttribute('rel')).toBe('noopener noreferrer');
   });
 
   it('a published draft offers Unpublish in the same place and says it is published', async () => {
     const { container } = await mount({ hidden: false });
     expect(labels(container)).toEqual(['Discard draw', 'Unpublish', 'Start competition']);
-    expect(hint().textContent).toBe(DRAW_PUBLISHED_HINT);
+    expect(hint().textContent).toBe(`${DRAW_PUBLISHED_HINT} ${OPEN_PUBLIC_PAGE_LABEL}`);
     expect(hint().className).toContain('draw-visibility-hint--published');
+    expect(state().textContent).toBe(DRAW_PUBLIC_CARD_LINE);
+    expect(state().className).toContain('draw-visibility-line--public');
   });
 
   it('Publish draw publishes, refetches and says so; nothing asks first', async () => {
@@ -175,7 +190,7 @@ describe('the draw preview header (bc-drpb)', () => {
   it('Discard on a published draft warns that the public saw it; a hidden draft keeps the plain confirm', async () => {
     const pub = await mount({ hidden: false });
     await act(async () => { fireEvent.click(button(pub.container, 'Discard draw')); });
-    expect(window.confirmDialog.mock.calls[0][0]).toMatchObject({ message: discardPublishedDrawMessage('Mudansha'), confirmLabel: 'Discard draw', cancelLabel: 'Cancel', danger: true });
+    expect(window.confirmDialog.mock.calls[0][0]).toMatchObject({ title: 'Discard the draw for Mudansha?', message: discardPublishedDrawMessage('Mudansha'), confirmLabel: 'Discard draw', cancelLabel: 'Cancel', danger: true });
     expect(window.API.discardDraw).not.toHaveBeenCalled();
     pub.unmount();
 
@@ -183,12 +198,15 @@ describe('the draw preview header (bc-drpb)', () => {
     const hid = await mount({ hidden: true });
     await act(async () => { fireEvent.click(button(hid.container, 'Discard draw')); });
     expect(window.confirmDialog.mock.calls[0][0].message).toMatch(/^Discard the generated draw for "Mudansha"\?/);
+    expect(window.confirmDialog.mock.calls[0][0].title).toBe('Discard the draw for Mudansha?');
   });
 
   it('a self-run tournament shows no visibility control, hint or confirm', async () => {
     const { container } = await mount({ hidden: true, mode: 'self-run' });
     expect(labels(container)).toEqual(['Discard draw', 'Start competition']);
     expect(hint()).toBeNull();
+    expect(state()).toBeNull();
+    expect(publicLink()).toBeNull();
     expect(container.textContent).toContain('Draw generated. Preview below, then start.');
     fireEvent.click(button(container, 'Start competition'));
     expect(window.API.startCompetition).toHaveBeenCalledTimes(1);

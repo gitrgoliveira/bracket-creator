@@ -98,9 +98,9 @@ const tabNames = () => [...document.querySelectorAll('.viewer__tab')].map((b) =>
 const activeTab = () => document.querySelector('.viewer__tab.is-active')?.textContent;
 
 describe('StatusBadge: a hidden draft on a public surface (bc-drpb)', () => {
-  it('reads "Draw being prepared" where the public page asks, "Draw ready" for the organiser', () => {
+  it('reads "Preparing draw" where the public home list asks, "Draw ready" for the organiser', () => {
     const { rerender } = render(<StatusBadge status="draw-ready" drawPreparing />);
-    expect(screen.getByText('Draw being prepared').className).toContain('badge--draw-preparing');
+    expect(screen.getByText('Preparing draw').className).toContain('badge--draw-preparing');
     rerender(<StatusBadge status="draw-ready" />);
     expect(screen.getByText('Draw ready')).toBeTruthy();
     // A started competition is never "being prepared", whatever is passed.

@@ -21,7 +21,8 @@ import { andList } from './list_phrase.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor } from './queued_writes_wait.jsx';
 import {
-  drawHiddenFromPublic, drawPublishedDraft, drawVisibilityIcon, confirmStartHiddenDraw, discardPublishedDrawMessage,
+  drawHiddenFromPublic, drawPublishedDraft, drawVisibilityIcon, drawVisibilityCardLine, confirmStartHiddenDraw,
+  discardPublishedDrawMessage, discardDrawTitle, publicCompetitionPath, OPEN_PUBLIC_PAGE_LABEL,
   DRAW_HIDDEN_HINT, DRAW_PUBLISHED_HINT, PUBLISH_DRAW_LABEL, UNPUBLISH_DRAW_LABEL, DRAW_PUBLISHED_TOAST, DRAW_UNPUBLISHED_TOAST,
 } from './draw_visibility.jsx';
 export { formatCompMinutes } from './admin_competition_settings.jsx';
@@ -191,8 +192,8 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     // draw starts hidden; a hidden one keeps the plain confirm.
     const seen = !selfRun && drawPublishedDraft(t, c);
     const ask = seen
-      ? { message: discardPublishedDrawMessage(c.name), confirmLabel: "Discard draw", cancelLabel: "Cancel", danger: true }
-      : { message: `Discard the generated draw for "${c.name}"? The pools/bracket will be removed so you can edit participants and settings, then generate a new draw.`, confirmLabel: "Discard draw", danger: true };
+      ? { title: discardDrawTitle(c.name), message: discardPublishedDrawMessage(c.name), confirmLabel: "Discard draw", cancelLabel: "Cancel", danger: true }
+      : { title: discardDrawTitle(c.name), message: `Discard the generated draw for "${c.name}"? The pools/bracket will be removed so you can edit participants and settings, then generate a new draw.`, confirmLabel: "Discard draw", danger: true };
     if (!(await window.confirmDialog(ask))) return;
     setDiscarding(true);
     try {
@@ -476,6 +477,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h1 className="page-head__title">{c.name}</h1>
               <StatusBadge status={localStatus ?? c.status} format={c.format} />
+              {/* Beside the badge, whether the public can see the draw: the
+                  dashboard card's eye line, read where the eye lands first. */}
+              {isDrawReady && !selfRun && (
+                <span className={`draw-visibility-line draw-visibility-line--${drawHidden ? "hidden" : "public"}`} data-testid="draw-visibility-state">
+                  <Icon name={drawVisibilityIcon(t, c)} size={12} />{drawVisibilityCardLine(t, c)}
+                </span>
+              )}
             </div>
             {/* One phrase under the name, its parts separated by commas. "at"
                 only between a date AND a time; a part with nothing to say is
@@ -560,7 +568,10 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 ) : (
                   <div className={`draw-visibility-hint draw-visibility-hint--${drawHidden ? "hidden" : "published"}`} data-testid="draw-visibility-hint">
                     <Icon name={drawVisibilityIcon(t, c)} size={13} />
-                    <span>{drawHidden ? DRAW_HIDDEN_HINT : DRAW_PUBLISHED_HINT}</span>
+                    <span>
+                      {drawHidden ? DRAW_HIDDEN_HINT : DRAW_PUBLISHED_HINT}{" "}
+                      <a href={publicCompetitionPath(c)} target="_blank" rel="noopener noreferrer" data-testid="draw-public-page-link">{OPEN_PUBLIC_PAGE_LABEL}</a>
+                    </span>
                   </div>
                 )}
               </div>

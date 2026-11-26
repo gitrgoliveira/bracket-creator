@@ -36,8 +36,10 @@ const ROSTER = [
 ];
 const NAMES = ROSTER.map(([n]) => n);
 
-// What the public pages call a hidden draft (web-mobile/js/draw_visibility.jsx).
+// What the public pages call a hidden draft (web-mobile/js/draw_visibility.jsx):
+// the competition page's card, and the home list's shorter badge.
 const PREPARING = 'Draw being prepared';
+const PREPARING_BADGE = 'Preparing draw';
 const PREPARING_MESSAGE = `Starts at ${START_TIME}. ${ROSTER.length} competitors entered. The draw shows here once it is published.`;
 // The dashboard card's line under the name.
 const CARD_LINE = { hidden: 'Hidden from the public', public: 'Public' };
@@ -98,6 +100,9 @@ test.describe('a draft draw kept off the public pages until it is published', ()
     await test.step('the draw preview header says the public cannot see it', async () => {
       await expect(drawVisibilityHint(op)).toHaveText(DRAW_VISIBILITY.hiddenHint);
       await expect(op.getByTestId('draw-visibility-toggle')).toHaveText(DRAW_VISIBILITY.publish);
+      // The title row says it too, beside the Draw ready badge.
+      await expect(op.getByTestId('draw-visibility-state')).toHaveText(CARD_LINE.hidden);
+      await expect(op.getByTestId('draw-public-page-link')).toHaveAttribute('href', `/competition/${id}`);
       await shot(op, 'header-hidden');
     });
 
@@ -108,10 +113,10 @@ test.describe('a draft draw kept off the public pages until it is published', ()
       await expect(op.locator('.tcard', { hasText: COMP_NAME }).locator('.badge--draw-ready')).toBeVisible();
     });
 
-    await test.step('the public home: the badge reads "Draw being prepared"', async () => {
+    await test.step('the public home: the badge reads "Preparing draw"', async () => {
       await page.goto('/');
       await expect(page.locator('.viewer__title')).toHaveText('Draw Cup');
-      await expect(homeRow(page).locator('.badge--draw-preparing')).toHaveText(PREPARING);
+      await expect(homeRow(page).locator('.badge--draw-preparing')).toHaveText(PREPARING_BADGE);
       await expect(homeRow(page).locator('.badge--draw-ready')).toHaveCount(0);
     });
 

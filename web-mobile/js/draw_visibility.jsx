@@ -63,6 +63,13 @@ export function isWithheldMatchEvent(event) {
 // The draw preview header's hint line.
 export const DRAW_HIDDEN_HINT = "Hidden from the public. Publish draw or Start competition makes it public.";
 export const DRAW_PUBLISHED_HINT = "Published. The public can see this draw. Changes you make show on public pages at once.";
+// The link that ends the hint line: this competition's public page, opened in
+// a new tab so the organiser can check what the public sees before and after
+// publishing.
+export const OPEN_PUBLIC_PAGE_LABEL = "Open the public page";
+export function publicCompetitionPath(comp) {
+  return `/competition/${encodeURIComponent(comp.id)}`;
+}
 
 // The header's buttons and their toasts.
 export const PUBLISH_DRAW_LABEL = "Publish draw";
@@ -81,11 +88,14 @@ export function drawVisibilityCardLine(tournament, comp) {
   return drawHiddenFromPublic(tournament, comp) ? DRAW_HIDDEN_CARD_LINE : DRAW_PUBLIC_CARD_LINE;
 }
 
-// What the public pages call a hidden draft: the status badge on the home
-// list, the watchlist line, the competition page's card title (that page's
-// header carries no badge for it, since the card already says it). The
-// organiser's own badge keeps "Draw ready".
+// What the public pages call a hidden draft: the watchlist line and the
+// competition page's card title (that page's header carries no badge for it,
+// since the card already says it). The organiser's own badge keeps "Draw
+// ready".
 export const PUBLIC_DRAW_PREPARING = "Draw being prepared";
+// The home list's status badge for the same state, short enough to stay on
+// one line beside a card's details on a phone.
+export const PUBLIC_DRAW_PREPARING_BADGE = "Preparing draw";
 
 // The public card's message: "Starts at 10:30. 12 competitors entered. The
 // draw shows here once it is published." The start sentence only with a start
@@ -106,8 +116,13 @@ export function startHiddenDrawMessage(name) {
   return `The draw for "${name || ""}" is still hidden from the public. Starting the competition makes it public at once.`;
 }
 
+// Both Discard confirms' title, on a hidden draft and a published one.
+export function discardDrawTitle(name) {
+  return `Discard the draw for ${name || ""}?`;
+}
+
 // The Discard confirm on a published draft (a hidden one keeps the header's
-// own confirm).
+// own message).
 export function discardPublishedDrawMessage(name) {
   return `The public has already seen this draw. Discard the draw for "${name || ""}"? The pools and bracket are removed so you can edit participants and settings, and the new draw starts hidden.`;
 }

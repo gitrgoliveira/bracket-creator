@@ -85,7 +85,7 @@ If someone is entered in more than one competition, they have a separate number 
 
 ### When the draw is being prepared
 
-The organiser makes the draw and checks it before anyone else sees it. Until they publish it or start the competition, the competition reads **Draw being prepared** on the home list. Its page shows only the Overview (and the Standings, for a Swiss competition, with nobody scored yet), with a **Draw being prepared** card that says when it starts, if a start time is set, and how many competitors or teams are entered. There are no pools, bracket, matches or competitor numbers to see yet, and the court displays show none of its matches.
+The organiser makes the draw and checks it before anyone else sees it. Until they publish it or start the competition, the competition reads **Preparing draw** on the home list. Its page shows only the Overview (and the Standings, for a Swiss competition, with nobody scored yet), with a **Draw being prepared** card that says when it starts, if a start time is set, and how many competitors or teams are entered. There are no pools, bracket, matches or competitor numbers to see yet, and the court displays show none of its matches.
 
 ![A competition page on a phone while the draw is being prepared: the name, the start time and the number of competitors, with no pools or bracket.](../../screenshots/draw-preparing-public.png)
 

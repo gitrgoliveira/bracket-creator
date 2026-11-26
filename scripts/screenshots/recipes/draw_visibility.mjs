@@ -39,8 +39,8 @@ const ROSTER = [
 
 // The words a person reads (web-mobile/js/draw_visibility.jsx).
 const TEXT = {
-  hiddenHint: 'Hidden from the public. Publish draw or Start competition makes it public.',
-  publishedHint: 'Published. The public can see this draw. Changes you make show on public pages at once.',
+  hiddenHint: 'Hidden from the public. Publish draw or Start competition makes it public. Open the public page',
+  publishedHint: 'Published. The public can see this draw. Changes you make show on public pages at once. Open the public page',
   hiddenCardLine: 'Hidden from the public',
   preparing: 'Draw being prepared',
   preparingMessage: `Starts at ${START_TIME}. ${ROSTER.length} competitors entered. The draw shows here once it is published.`,

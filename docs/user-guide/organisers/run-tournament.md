@@ -259,13 +259,13 @@ A draw-ready competition is already listed on the shiai-jo operator views, since
 
 A new draw starts hidden from the public. Spectators, court displays and the stream overlay see the competition as if it were still in setup: its name, its competitors and the line **Draw being prepared**, but no pools, bracket, matches or competitor numbers. Your own screens show the draw as usual, and so does the court console. Refer to [Follow the tournament](../spectators/following.md#when-the-draw-is-being-prepared) for what spectators see.
 
-The preview header holds three buttons, in this order: **Discard draw**, **Publish draw** and **Start competition**. A line below them says where the draw stands.
+The preview header holds three buttons, in this order: **Discard draw**, **Publish draw** and **Start competition**. Beside the **Draw ready** badge next to the competition's name, a crossed-out eye and "Hidden from the public", or an open eye and "Public", say at a glance who can see the draw. A line below the buttons says it in full, and ends with **Open the public page**, which opens the competition's public page in a new tab so you can check what spectators see before and after you publish.
 
-![The draw preview header of a hidden draw: Discard draw, Publish draw and Start competition, with the line "Hidden from the public" below them.](../../screenshots/draw-hidden-header.png)
+![The draw preview header of a hidden draw: Discard draw, Publish draw and Start competition, with "Hidden from the public" beside the badge and in the line below them.](../../screenshots/draw-hidden-header.png)
 
-![The same header once the draw is published: Discard draw, Unpublish and Start competition, with the line "Published" below them.](../../screenshots/draw-published-header.png)
+![The same header once the draw is published: Discard draw, Unpublish and Start competition, with "Public" beside the badge and the line "Published" below them.](../../screenshots/draw-published-header.png)
 
-The two lines read:
+The line below the buttons reads:
 
 - While it is hidden: "Hidden from the public. Publish draw or Start competition makes it public."
 - Once it is published: "Published. The public can see this draw. Changes you make show on public pages at once."
@@ -277,7 +277,7 @@ The dashboard card of a draw-ready competition shows the same thing at a glance:
 - **Publish draw** shows the draw on the public pages at once, without waiting for the start. It asks nothing first. Once published, the button reads **Unpublish**.
 - **Unpublish** hides the draw again, for example when you published it by mistake or spotted an error after publishing. The app says "Hidden again. Anyone who looked still has what they saw.": a spectator who already read the draw, took a screenshot or printed it keeps that copy, so tell people when a published draw changes.
 - **Start competition** makes the draw public whether or not you published it. On a hidden draw it asks first, under the title "Start <name>?": "The draw for "<name>" is still hidden from the public. Starting the competition makes it public at once." Choose **Start competition** to go ahead, or **Cancel**. **Start** on the dashboard card asks the same, and **Start all** starts every competition in setup and every competition whose draw is already made, and before you confirm it names the hidden draws it would make visible: "Starting makes these draws visible to the public: <names>."
-- **Discard draw** on a published draw warns you that the public has already seen it, and that the new draw you generate starts hidden again. On a hidden draw it asks only whether to remove the pools and bracket so you can edit participants and settings.
+- **Discard draw** asks first, under the title "Discard the draw for <name>?". On a published draw it warns you that the public has already seen it, and that the new draw you generate starts hidden again. On a hidden draw it asks only whether to remove the pools and bracket so you can edit participants and settings.
 
 Scoring a match of a draw-ready competition starts it, so that also makes its draw public. A court operator who taps **Call to court** for a match of a hidden draw is asked first: "The draw for <competition> is still hidden from the public. Calling this match shows its competitors on the public screens." **Call anyway** makes the call, and **Cancel** (or Escape) leaves the match uncalled. Publish the draw first if you do not want the call to be the first thing spectators see.
 

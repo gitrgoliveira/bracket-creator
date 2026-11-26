@@ -1837,6 +1837,10 @@ a:hover {
   color: var(--ink-2);
   border-color: var(--line);
   border-style: dashed;
+  /* Never broken over two lines inside its pill: the card's details wrap
+     instead. */
+  white-space: nowrap;
+  flex: none;
 }
 
 /* The draw preview header's hint line under its buttons, with the eye or the
@@ -1862,6 +1866,18 @@ a:hover {
 }
 .draw-visibility-hint--published {
   color: var(--ok-ink);
+}
+/* "Open the public page" at the end of the hint: underlined, as the app's
+   other links inside a sentence are, and never split over two lines. */
+.draw-visibility-hint a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+.draw-visibility-hint a:hover {
+  text-decoration-color: currentColor;
 }
 
 /* The dashboard card's line: the crossed-out eye and "Hidden from the

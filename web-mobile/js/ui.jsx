@@ -4,19 +4,19 @@ import { useOpenedTapGuard } from './tap_guard.jsx';
 import { toastSnapshot, subscribeToast, dismissToast } from './toast_queue.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { Icon } from './icon.jsx';
-import { PUBLIC_DRAW_PREPARING } from './draw_visibility.jsx';
+import { PUBLIC_DRAW_PREPARING_BADGE } from './draw_visibility.jsx';
 
 // Formats that run their matches through the pool pipeline but are not pools.
 // See the label note inside StatusBadge.
 const POOLS_PHASE_FORMAT_LABEL = { league: "League", swiss: "Swiss" };
 
-// `drawPreparing` (bc-drpb): a PUBLIC surface passes
+// `drawPreparing` (bc-drpb): the public home list passes
 // drawHiddenFromPublic(tournament, c) (draw_visibility.jsx), and a draft the
-// public may not see yet reads "Draw being prepared" there. The organiser's
+// public may not see yet reads "Preparing draw" there. The organiser's
 // badge never passes it, so it keeps "Draw ready".
 function StatusBadge({ status, showRunningDot, format, drawPreparing }) {
   if (drawPreparing && status === "draw-ready") {
-    return <span className="badge badge--draw-preparing">{PUBLIC_DRAW_PREPARING}</span>;
+    return <span className="badge badge--draw-preparing">{PUBLIC_DRAW_PREPARING_BADGE}</span>;
   }
   const map = {
     setup: ["badge--setup", "Pending"],

@@ -54,12 +54,15 @@ export async function discardDraw(page) {
 
 // The words of the draw's visibility on the draw preview header
 // (web-mobile/js/draw_visibility.jsx): the toggle's two labels, the hint line
-// under the buttons in each state, and the toasts a tap leaves.
+// under the buttons in each state (each ending with the link to the public
+// page), and the toasts a tap leaves.
+const OPEN_PUBLIC_PAGE = 'Open the public page';
 export const DRAW_VISIBILITY = {
   publish: 'Publish draw',
   unpublish: 'Unpublish',
-  hiddenHint: 'Hidden from the public. Publish draw or Start competition makes it public.',
-  publishedHint: 'Published. The public can see this draw. Changes you make show on public pages at once.',
+  openPublicPage: OPEN_PUBLIC_PAGE,
+  hiddenHint: `Hidden from the public. Publish draw or Start competition makes it public. ${OPEN_PUBLIC_PAGE}`,
+  publishedHint: `Published. The public can see this draw. Changes you make show on public pages at once. ${OPEN_PUBLIC_PAGE}`,
   publishedToast: 'Draw published. The public can see it now.',
   unpublishedToast: 'Hidden again. Anyone who looked still has what they saw.',
   // The Start confirm on a hidden draw, for a competition called `name`.

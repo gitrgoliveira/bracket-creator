@@ -312,6 +312,9 @@ func TestSwapCandidates_Refusals(t *testing.T) {
 
 // A seeded pick in a 256-competitor pools + knockout draw judges every
 // candidate on the dry run, each a knockout rebuild; it must stay usable.
+// About 1.2 s measured locally, so the budget catches an order of magnitude
+// lost. It is not asserted under the race detector, which made the same pick
+// take 23 s on a CI runner: there the timings are only logged.
 func TestSwapCandidates_TimingFor256(t *testing.T) {
 	const budget = 20 * time.Second
 	dojos := make([]string, 256)
@@ -341,7 +344,9 @@ func TestSwapCandidates_TimingFor256(t *testing.T) {
 				took := time.Since(start)
 				t.Logf("%s, %s pick: %v", format, name, took)
 				assert.Len(t, got.Candidates, 255)
-				assert.Less(t, took, budget)
+				if !raceEnabled {
+					assert.Less(t, took, budget)
+				}
 			}
 		})
 	}

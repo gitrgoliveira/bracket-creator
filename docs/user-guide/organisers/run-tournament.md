@@ -86,6 +86,10 @@ The same **Edit details** page also has branding and sponsor fields, below tourn
 - **Accent colours**: set a primary accent colour and, if you want one, a soft background tint; the viewer and display screens adopt them across the whole site. Leave the tint alone and it is derived from the primary, so one colour choice re-tints every surface, including the running-match rings and focus halos.
 - **Sponsors**: upload full-width images that appear on the public viewer page only. Sponsor images do not appear on the TV lobby boards or scoring displays.
 
+## QR-code posters
+
+Click **Posters** on the dashboard to print a poster for the viewer home and one for each shiai-jo, each with a QR code that opens the right page on a spectator's phone. Refer to [Print QR-code posters](posters.md) for the choices, saving and printing. The codes open the **Public URL** set above. When it is not set and the page is open at an address phones may not reach, such as `localhost`, the poster page warns you.
+
 ## Announcements
 
 Click **Announce** from the dashboard to broadcast a short message to every viewer. Choose a duration of 5, 10, 15, or 30 minutes; the message clears itself automatically when the time expires. It appears as an overlay on the viewer and display screens. Spectators who allow browser notifications can receive it in the background.

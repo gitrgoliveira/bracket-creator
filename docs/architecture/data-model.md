@@ -58,6 +58,7 @@ classDiagram
         +int SlowestCourtBufferPct
         +Sponsor[] Sponsors
         +Theme Theme
+        +Posters Posters
         +TournamentContact[] Contacts
     }
 
@@ -75,6 +76,19 @@ classDiagram
         +string WindowTitle
         +string LogoPath
         +bool LogoOnLobby
+    }
+
+    class Posters {
+        +PosterChoices Viewer
+        +map~string, PosterChoices~ Courts
+    }
+
+    class PosterChoices {
+        +string Heading
+        +string CallToAction
+        +string Logo
+        +string Size
+        +bool HideSponsors
     }
 
     class Competition {
@@ -102,6 +116,8 @@ classDiagram
     Tournament "1" o-- "0..*" Competition
     Tournament "1" o-- "0..*" Pause
     Tournament "1" *-- "0..1" Theme
+    Tournament "1" *-- "0..1" Posters
+    Posters "1" *-- "0..*" PosterChoices
 ```
 
 Inside a competition, the entrants, the pools and the records kept beside them hang off the
@@ -750,6 +766,8 @@ Markdown, CSV, and JSON or YAML each earn their place:
 | JSON lines (JSONL) | match history and per-match score event logs | Append-only audit trail and event sourcing stream; one line per write or event |
 
 In `tournament.md`, YAML front matter stores the tournament settings, among them `name`, `date`, `venue`, `courts`, `mode`, `default_public_names`, `duration_days`, `pauses`, `clock_to_elapsed_multiplier`, `slowest_court_buffer_pct`, `sponsors`, and `theme`. A file that still carries `lunch_block`, `opening_block` or `closing_block` is converted to `pauses` at startup. The optional `theme` block holds the accent colours, the window title, `logo_path`, and `logo_on_lobby` (a bool; absent reads false). When `logo_on_lobby` is true and a logo is uploaded in `branding/`, the lobby display shows the logo. The `default_public_names` field is the tournament-wide choice of what the public pages show for a competitor, taking the same values as a competition's `public_names` (below): new competitions start with it, saving it in the settings sets every competition except a Swiss one after the organiser confirms the list of competitions it will change, and each competition can still be changed on its own afterwards. An absent key means names are shown, and the field is part of `tournamentVersion`.
+
+The optional `posters` block holds what the organiser chose on the Posters page for the printed QR-code posters. `viewer` is the viewer home poster, and `courts` maps a court label (`A`, `B`, and so on) to that court's poster. Each entry holds `heading` (at most 80 characters after trimming; empty prints the default heading, "Follow the tournament live" or "Follow this court live"), `call_to_action` (at most 120 characters; empty prints no line), `logo` (`centre` for the logo in the middle of the code, `above` for the logo above it on the viewer home poster and in the top corner beside the letter on a court poster, empty for the default), `size` (court posters only: `code` for a larger code with a smaller letter, empty for the default large letter; the viewer home poster has no letter, so any value there is refused), and `hide_sponsors` (a bool; absent shows the sponsor strip). The default logo place is the middle of the code when the address fits the code's strongest error correction, and the `above` place otherwise. Every key is omitted when empty, an entry with nothing in it is dropped, and a block with nothing in it is not written at all. An entry for a court the tournament no longer has is kept, so the poster comes back with the court, and the block holds at most 32 court entries. The limits, the logo and size values and the default headings are in the table `internal/state/testdata/poster_rules.json`, which the server's tests check and the browser's copy of the rules is tested against. A tournament save that sends `posters`, through the settings PUT or the setup form's POST, replaces the whole block (an empty object clears it). One that leaves the key out keeps the stored block, so a client that never read the block cannot wipe it. The block is part of `tournamentVersion` only when it holds a choice, so a tournament that never saved one keeps its version, and it needs no migration: an absent block reads as every default. Backups carry it inside `tournament.md`.
 
 In `competitions/<id>/config.md`, YAML front matter stores competition configuration: `name`, `date`, `start_time`, `courts`, `kind`, `format`, `status`, rules and match durations, `expected_participants`, and format-specific options. The `expected_participants` field is an optional integer (0 to 1024, absent means 0) representing the organiser's expected entry count (expected teams in team competitions) for setup schedule estimation. It needs no migration because no earlier release wrote the key.
 

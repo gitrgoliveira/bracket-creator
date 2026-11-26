@@ -35,14 +35,14 @@
 //   a competitor without one    ->  their id         "3f2a9c7e-..."
 //   a dojo entry                ->  ":" + the name   ":Hagane Dojo"
 //
-// Numbers are SHORT, which is the whole point: a QR tops out at QR_MAX_BYTES
-// (213, qr.jsx) including the origin, so a number-encoded list of ~45 scans
-// while a UUID-encoded one of 6 already does not. The number costs two things
-// the caller must surface rather than hide: a competitor has none until the
-// draw runs, and a number is a draw POSITION (bc-pnum), so discarding and
-// regenerating a draw re-mints it and an old link then names a DIFFERENT
-// competitor. An id has neither failure mode and is simply longer. That trade
-// is the operator's ruling, not a default.
+// Numbers are SHORT, which is the whole point: a QR tops out at qrMaxBytes
+// (qr.jsx; 213 bytes at level M, the default) including the origin, so a
+// number-encoded list of ~45 scans while a UUID-encoded one of 6 already does
+// not. The number costs two things the caller must surface rather than hide: a
+// competitor has none until the draw runs, and a number is a draw POSITION
+// (bc-pnum), so discarding and regenerating a draw re-mints it and an old link
+// then names a DIFFERENT competitor. An id has neither failure mode and is
+// simply longer. That trade is the operator's ruling, not a default.
 //
 // SEPARATOR. "," and not ".", and the query is read RAW rather than through
 // URLSearchParams.get. encodeURIComponent leaves "." untouched, so a dojo

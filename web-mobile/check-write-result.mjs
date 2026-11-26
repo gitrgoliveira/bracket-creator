@@ -55,7 +55,7 @@ const JS_DIR = resolve(ROOT, 'js');
 // the default-win rules alone also scan them; the two JS-API rules above stay
 // scoped to JS_DIR, since neither an `.applied` comparison nor a `window.`
 // mirror read is a thing either file could ever contain.
-const EXTRA_TEXT_FILES = [resolve(ROOT, 'index.html'), resolve(ROOT, 'css', 'styles.css')]
+const EXTRA_TEXT_FILES = [resolve(ROOT, 'index.html'), resolve(ROOT, 'css', 'styles.css'), resolve(ROOT, 'css', 'posters.css')]
   .filter((f) => existsSync(f));
 
 // The module that OWNS the rule, and is therefore the one place allowed to

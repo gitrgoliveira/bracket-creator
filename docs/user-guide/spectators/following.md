@@ -138,6 +138,10 @@ Scores entered by the operator appear on the viewer immediately, across every co
   <figcaption>A scorer's result appearing on the viewer in real time, with no refresh. Press play to watch.</figcaption>
 </figure>
 
+## QR codes on venue posters
+
+The organiser may put posters on the walls of the venue. The poster at the entrance carries a QR code that opens this public viewer home, so you can follow the whole day from your phone. A poster at a shiai-jo shows the court's letter in large type, and its code opens that court's scoreboard display with the bout in progress, the queue and the latest results. Point your phone's camera at the code and tap the link it offers. The address is printed under each code, so you can type it if scanning does not work. A poster's code opens the same page for everyone: it never shows a name the organiser has chosen to hide. Refer to [Print QR-code posters](../organisers/posters.md) for how the organiser makes them.
+
 ## QR codes on competitor tags
 
 When the organiser sets the tournament public URL, each printed competitor tag includes a personal QR code. Scanning it opens the viewer and adds that competitor to your watchlist, so their next match and results appear on the home screen. The code is a shared watchlist link with one competitor in it: it adds to whatever you already watch and never removes anyone. If that competitor's competition is still loading when you scan, they are added as soon as it loads.

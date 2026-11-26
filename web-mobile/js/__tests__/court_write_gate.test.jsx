@@ -13,6 +13,7 @@ let API;
 let cc;
 let enqueue;
 let control;
+let controlStatus;
 let _orig;
 let offs;
 
@@ -48,9 +49,10 @@ beforeEach(async () => {
   sent.length = 0;
   offs = [];
   control = HOLDS;
+  controlStatus = 200;
   global.fetch = vi.fn((url, init = {}) => {
     const u = String(url);
-    if (u.includes('/api/courts/')) return Promise.resolve({ ok: true, status: 200, json: async () => control });
+    if (u.includes('/api/courts/')) return Promise.resolve({ ok: controlStatus < 400, status: controlStatus, json: async () => control });
     if (u.includes('/api/time')) return Promise.reject(new TypeError('clock'));
     sent.push({ url: u, method: init.method });
     // Every outbox send stays out, so what was queued stays queued.
@@ -187,5 +189,14 @@ describe('no console, or a holding one', () => {
     expect(entry.payload.courtControl).toEqual({ tabId: cc.courtTabId(), deviceId: cc.courtDeviceId() });
     // The tablet keeps the control while that entry is queued.
     expect(cc.courtReleasable('A')).toBe(false);
+  });
+
+  it('a shiaijo the tournament no longer lists (404 not-listed) is not gated', async () => {
+    controlStatus = 404;
+    await mount({ error: 'not found' });
+    expect(cc.courtControlView('A').state).toBe('not-listed');
+    const res = await API.recordScore('c1', 'm1', finish, 'pw', match);
+    expect(writeCourtNotHeld(res)).toBe(false);
+    expect(stored().length).toBe(1);
   });
 });

@@ -575,7 +575,7 @@ test.describe('concurrent taps from two devices', () => {
       const asked = await takeControl(d3);
       expect(asked).toBe('The other device will stop running shiaijo A. Take control?');
       await expect.poll(() => controlState(d1), { message: 'device 1 learns it no longer runs shiaijo A' }).toBe('other');
-      expect(await controlText(d1), 'device 1 shows the amber bar').toBe('Shiaijo A is now run from another device. Results this tablet still has queued count like any other device\'s.');
+      expect(await controlText(d1), 'device 1 shows the amber bar').toBe('Shiaijo A is now run from another device.');
       await expect(ipponButton(d1, 'shiro', 'M'), 'device 1 can no longer score').toBeDisabled();
       await expect(ipponButton(d3, 'shiro', 'M'), 'the console that took control can').toBeEnabled();
       await shot(d1, 'h-device-1-lost-control');

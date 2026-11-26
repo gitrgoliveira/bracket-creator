@@ -118,12 +118,13 @@ describe('the mark under the top bar', () => {
     } finally { c.restore(); c.utils.unmount(); }
   });
 
-  it('another tab on this tablet: a grey bar saying the tablet keeps the court\'s standing, and its own question', async () => {
+  it('another tab on this tablet: a grey bar, and its own question', async () => {
     reply = () => ({ body: answer({ holderKey: 'cccc', device: 'ipad', sameDevice: true, lastActiveAt: twoMinAgo() }) });
     const c = await mount();
     try {
-      expect(bar(c).textContent).toContain(
-        'Shiaijo A is run from another tab on this tablet (last active 2 min ago). Results this tablet has queued still count as the court\'s.');
+      expect(bar(c).querySelector('.shiaijo-control__text').textContent)
+        .toBe('Shiaijo A is run from another tab on this tablet (last active 2 min ago).');
+      expect(bar(c).textContent).not.toContain('still count');
       expect(bar(c).className).toContain('shiaijo-control--other');
       await act(async () => { within(bar(c)).getByRole('button', { name: 'Take control' }).click(); });
       expect(c.utils.getByTestId('take-control-ask').textContent)
@@ -135,8 +136,9 @@ describe('the mark under the top bar', () => {
     reply = () => ({ body: answer({ holderKey: 'bbbb', device: 'ipad', youWereDisplaced: true }) });
     const c = await mount();
     try {
-      expect(bar(c).textContent).toContain(
-        'Shiaijo A is now run from another device. Results this tablet still has queued count like any other device\'s.');
+      expect(bar(c).querySelector('.shiaijo-control__text').textContent)
+        .toBe('Shiaijo A is now run from another device.');
+      expect(bar(c).textContent).not.toContain('count like');
       expect(bar(c).className).toContain('shiaijo-control--warn');
       expect(within(bar(c)).getByRole('button', { name: 'Take control' })).toBeTruthy();
       expect(queueScope(c).disabled).toBe(true);
@@ -200,14 +202,17 @@ describe('the mark under the top bar', () => {
     } finally { c.restore(); c.utils.unmount(); }
   });
 
-  it('404 keeps the checking wording', async () => {
+  it('404: says the shiaijo is no longer in the tournament, offers no Take control, and still allows writes', async () => {
     reply = () => ({ status: 404, body: { error: 'not found' } });
     await settle(10);
     const c = await mount();
     try {
-      expect(bar(c).textContent).toBe('Checking who runs shiaijo A…');
-      expect(bar(c).className).toContain('shiaijo-control--checking');
-      expect(bar(c).getAttribute('data-state')).toBe('unknown');
+      expect(bar(c).textContent).toBe('Shiaijo A is no longer in this tournament. Go back to the schedule and pick one that is.');
+      expect(bar(c).textContent).not.toContain('Checking who runs');
+      expect(bar(c).className).toContain('shiaijo-control--warn');
+      expect(bar(c).getAttribute('data-state')).toBe('not-listed');
+      expect(within(bar(c)).queryByRole('button', { name: 'Take control' })).toBeNull();
+      expect(queueScope(c).disabled).toBe(false);
     } finally { c.restore(); c.utils.unmount(); }
   });
 

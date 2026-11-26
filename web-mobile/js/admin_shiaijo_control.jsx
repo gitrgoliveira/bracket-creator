@@ -8,9 +8,9 @@
 // and asks it:
 //   - useShiaijoControl(court, password, showToast) mounts the control for the
 //     console (useCourtControl) and answers { view, canWrite, controlRef }.
-//     `canWrite` is true while this tab runs the shiaijo, or has had no answer
-//     yet (offline: an unconnected console still scores, and its results claim
-//     a free shiaijo on arrival, FR8). `controlRef` is what the console's hooks
+//     `canWrite` is true while this tab runs the shiaijo, has had no answer
+//     yet (offline: an unconnected console still scores), or the shiaijo is
+//     not listed. `controlRef` is what the console's hooks
 //     read, so a handler judges the control as it is when tapped.
 //   - refusedNotHeld(controlRef, { quiet }) is the ONE check those handlers
 //     make: true (and a toast, unless quiet) when this tab may not write.
@@ -60,9 +60,9 @@ export function lastActivePhrase(at, now = serverNowMs()) {
     return `last active ${Math.floor(mins / 60)} h ago`;
 }
 
-/** Whether the console may write: it runs the shiaijo, or has had no answer yet. */
+/** Whether the console may write: it runs the shiaijo, has had no answer yet, or the shiaijo is not listed. */
 export function courtControlWrites(view) {
-    return !!view && (view.state === 'holds' || view.state === 'unknown');
+    return !!view && (view.state === 'holds' || view.state === 'unknown' || view.state === 'not-listed');
 }
 
 /**
@@ -90,7 +90,7 @@ export function courtControlBar(view, court, { now = serverNowMs(), checked = tr
         const active = lastActivePhrase(view.holderLastActiveAt, now);
         return {
             tone: 'other',
-            text: `Shiaijo ${c} is run from another tab on this tablet${active ? ` (${active})` : ''}. Results this tablet has queued still count as the court's.`,
+            text: `Shiaijo ${c} is run from another tab on this tablet${active ? ` (${active})` : ''}.`,
             take: true,
             ask: `The other tab on this tablet will stop running shiaijo ${c}. Take control?`,
         };
@@ -98,7 +98,7 @@ export function courtControlBar(view, court, { now = serverNowMs(), checked = tr
     if (state === 'other' && view.youWereDisplaced) {
         return {
             tone: 'warn',
-            text: `Shiaijo ${c} is now run from another device. Results this tablet still has queued count like any other device's.`,
+            text: `Shiaijo ${c} is now run from another device.`,
             take: true,
             ask: `The other device will stop running shiaijo ${c}. Take control?`,
         };
@@ -119,6 +119,14 @@ export function courtControlBar(view, court, { now = serverNowMs(), checked = tr
                 ? `Nobody runs shiaijo ${c} now. This tablet lost the control earlier; tap Take control to run it.`
                 : `Nobody runs shiaijo ${c} now. Another tab on this tablet ran it earlier; tap Take control to run it here.`,
             take: true,
+            ask: null,
+        };
+    }
+    if (state === 'not-listed') {
+        return {
+            tone: 'warn',
+            text: `Shiaijo ${c} is no longer in this tournament. Go back to the schedule and pick one that is.`,
+            take: false,
             ask: null,
         };
     }

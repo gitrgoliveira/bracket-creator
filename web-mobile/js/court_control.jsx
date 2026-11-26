@@ -73,7 +73,7 @@ let _deviceId = '';
 let _tabCheck = null; // { ready: Promise, channel, loadedAt }
 let _listening = false;
 let _reqSeq = 0;
-// court -> { mounts, listeners:Set, answer, connected, refusedStatus,
+// court -> { mounts, listeners:Set, answer, connected, refusedStatus, notListed,
 //            answeredSeq, settledSeq, timer, freedTimer, unsubEvents, getPassword, releaseTimer }
 const _courts = new Map();
 // The stamps courtControlFor handed out, to the shiaijo each was for.
@@ -217,7 +217,7 @@ function _rec(court) {
     if (!r) {
         r = {
             mounts: 0, listeners: new Set(), answer: _cachedAnswer(court), connected: false,
-            refusedStatus: 0, answeredSeq: 0, settledSeq: 0, timer: null, freedTimer: null, unsubEvents: null,
+            refusedStatus: 0, notListed: false, answeredSeq: 0, settledSeq: 0, timer: null, freedTimer: null, unsubEvents: null,
             getPassword: () => '', releaseTimer: null,
         };
         _courts.set(court, r);
@@ -262,6 +262,7 @@ function _noteAnswer(court, seq, answer) {
     r.answeredSeq = seq;
     r.connected = true;
     r.refusedStatus = 0;
+    r.notListed = false;
     r.answer = answer;
     if (answer && (answer.youHold === true || answer.holderKey)) _clearFreedTimer(r);
     try {
@@ -271,13 +272,27 @@ function _noteAnswer(court, seq, answer) {
     _notify(court);
 }
 
+function _noteNotListed(court, seq) {
+    const r = _rec(court);
+    if (seq < r.settledSeq) return;
+    r.settledSeq = seq;
+    r.answeredSeq = seq;
+    r.connected = true;
+    r.refusedStatus = 0;
+    r.notListed = true;
+    r.answer = null;
+    try { sessionStorage.removeItem(COURT_ANSWER_PREFIX + court); } catch (_e) { /* nothing kept */ }
+    _notify(court);
+}
+
 function _noteNoAnswer(court, seq) {
     const r = _rec(court);
     if (seq < r.settledSeq) return;
     r.settledSeq = seq;
-    if (r.connected || r.refusedStatus !== 0) {
+    if (r.connected || r.refusedStatus !== 0 || r.notListed) {
         r.connected = false;
         r.refusedStatus = 0;
+        r.notListed = false;
         _notify(court);
     }
 }
@@ -287,9 +302,10 @@ function _noteRefusal(court, seq, status) {
     if (seq < r.settledSeq) return;
     r.settledSeq = seq;
     const s = Number(status) || 0;
-    if (r.connected || r.refusedStatus !== s) {
+    if (r.connected || r.refusedStatus !== s || r.notListed) {
         r.connected = false;
         r.refusedStatus = s;
+        r.notListed = false;
         _notify(court);
     }
 }
@@ -331,7 +347,9 @@ function _withDeadline(fn) {
 // Answers the server's answer, or null when none came. A take throws its
 // refusal; a claim never does.
 async function _claim(court, { take = false } = {}) {
+    if (!take && _courts.get(court)?.freedTimer) return null;
     await _tabReady();
+    if (!take && _courts.get(court)?.freedTimer) return null;
     const seq = ++_reqSeq;
     const body = {
         tabId: courtTabId(), pageId: courtPageId(), deviceId: courtDeviceId(), take, device: deviceWord(),
@@ -359,7 +377,7 @@ async function _claim(court, { take = false } = {}) {
     if (!res.ok) {
         // 404 means the tournament no longer lists the shiaijo; any other
         // refusal keeps the HTTP status so the bar can tell the operator why.
-        if (res.status === 404) _noteAnswer(court, seq, null);
+        if (res.status === 404) _noteNotListed(court, seq);
         else _noteRefusal(court, seq, res.status);
         if (take) {
             throw Object.assign(new Error((data && data.error) || 'Control was not taken. Try again.'), {
@@ -470,7 +488,7 @@ function _startCourt(court) {
     const r = _rec(court);
     _listenOnce();
     const interval = setInterval(() => {
-        if (_visible() && _online() && !r.freedTimer) _claim(court);
+        if (_visible() && _online()) _claim(court);
     }, COURT_HEARTBEAT_MS);
     if (interval && typeof interval.unref === 'function') interval.unref();
     r.timer = interval;
@@ -569,8 +587,9 @@ export function retryRefusedCourtControl(court) {
 /**
  * The court console's view of `court`: { holds, state, holderDevice,
  * sameDevice, youWereDisplaced, tabWasDisplaced, holderLastActiveAt,
- * holderSince, connected, refusedStatus, take }. `state` is courtControlState's;
- * `take()` is takeCourtControl.
+ * holderSince, connected, refusedStatus, take }. `state` is courtControlState's,
+ * or 'not-listed' when the tournament no longer lists the shiaijo; `take()` is
+ * takeCourtControl.
  */
 export function useCourtControl(court, password) {
     const c = String(court || '');
@@ -596,7 +615,7 @@ export function useCourtControl(court, password) {
 export function courtControlView(court, take = () => takeCourtControl(court)) {
     const r = court ? _courts.get(court) : null;
     const a = r ? r.answer : null;
-    const state = courtControlState(a);
+    const state = r && r.notListed ? 'not-listed' : courtControlState(a);
     return {
         holds: state === 'holds',
         state,
@@ -634,7 +653,7 @@ export function consoleWriteRefusal() {
 export function courtControlFor(court) {
     const c = String(court || '');
     const r = c ? _courts.get(c) : null;
-    if (!r || r.mounts <= 0) return null;
+    if (!r || r.mounts <= 0 || r.notListed) return null;
     const state = courtControlState(r.answer);
     if (state !== 'holds' && state !== 'unknown') return null;
     const stamp = { tabId: courtTabId(), deviceId: courtDeviceId() };

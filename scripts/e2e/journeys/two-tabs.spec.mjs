@@ -9,9 +9,8 @@
 // The two tabs are ONE tablet (pages of one browser context share
 // localStorage, where court_control.jsx keeps the tablet id), and one tab runs
 // each shiaijo (FR9): the first tab to open shiaijo A shows the green bar and
-// runs it; the second shows the grey "another tab on this tablet" bar, which
-// says the tablet's queued results still count as the court's, and is view
-// only until Take control. The journey pins both bars, so the calls below come
+// runs it; the second shows the grey "another tab on this tablet" bar and is
+// view only until Take control. The journey pins both bars, so the calls below come
 // from the tab that runs the shiaijo.
 import { test, expect } from '../fixtures/test.mjs';
 import { createTournament } from '../fixtures/setup.mjs';

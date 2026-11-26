@@ -226,7 +226,8 @@ describe('the claim and the state', () => {
     reply = () => ({ status: 404, body: { error: 'not found' } });
     emit({ type: 'resync_required' });
     await settle();
-    expect(courtControlView('A')).toMatchObject({ state: 'unknown', connected: true, refusedStatus: 0 });
+    expect(courtControlView('A')).toMatchObject({ state: 'not-listed', connected: true, refusedStatus: 0 });
+    expect(consoleWriteRefusal()).toBeNull();
 
     reply = () => new TypeError('Failed to fetch');
     emit({ type: 'resync_required' });
@@ -237,6 +238,32 @@ describe('the claim and the state', () => {
     emit({ type: 'resync_required' });
     await settle();
     expect(courtControlView('A')).toMatchObject({ state: 'holds', connected: true, refusedStatus: 0 });
+    off();
+  });
+
+  it('a 404 claim records not-listed without refusing writes, clears cached answer, and a later 200 restores holds', async () => {
+    const {
+      mountCourtControl, consoleWriteRefusal, courtControlView, courtReleasable, courtControlFor, COURT_ANSWER_PREFIX,
+    } = await load();
+    const off = track(mountCourtControl('A', () => 'pw'));
+    await settle();
+    expect(courtControlView('A').state).toBe('holds');
+    expect(sessionStorage.getItem(COURT_ANSWER_PREFIX + 'A')).not.toBeNull();
+
+    reply = () => ({ status: 404, body: { error: 'not found' } });
+    emit({ type: 'resync_required' });
+    await settle();
+    expect(courtControlView('A')).toMatchObject({ state: 'not-listed', holds: false, connected: true, refusedStatus: 0 });
+    expect(sessionStorage.getItem(COURT_ANSWER_PREFIX + 'A')).toBeNull();
+    expect(consoleWriteRefusal()).toBeNull();
+    expect(courtReleasable('A')).toBe(false);
+    expect(courtControlFor('A')).toBeNull();
+
+    reply = () => ({ body: HOLDS });
+    emit({ type: 'resync_required' });
+    await settle();
+    expect(courtControlView('A')).toMatchObject({ state: 'holds', holds: true, connected: true, refusedStatus: 0 });
+    expect(consoleWriteRefusal()).toBeNull();
     off();
   });
 
@@ -492,6 +519,53 @@ describe('the claim and the state', () => {
 
     await vi.advanceTimersByTimeAsync(1);
     expect(puts().length, 'grace expiry still sends the claim').toBe(2);
+    off();
+    await vi.advanceTimersByTimeAsync(1);
+  });
+
+  it('skips visibilitychange, online, pageshow, resync_required and stream reopen claims while freed-court grace is pending, then claims when grace ends', async () => {
+    vi.useFakeTimers();
+    reply = () => ({ body: OTHER });
+    const { mountCourtControl, COURT_FREED_GRACE_MS } = await load();
+    const off = track(mountCourtControl('A', () => 'pw'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length).toBe(1);
+
+    emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('online'));
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+    emit({ type: 'resync_required' });
+    status('error');
+    status('open');
+
+    await vi.advanceTimersByTimeAsync(COURT_FREED_GRACE_MS - 1);
+    expect(puts().length, 'no non-take claim during freed grace').toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length, 'grace expiry still sends the claim').toBe(2);
+    off();
+    await vi.advanceTimersByTimeAsync(1);
+  });
+
+  it('takeCourtControl still sends while freed-court grace is pending', async () => {
+    vi.useFakeTimers();
+    reply = (_url, _init, body) => ({ body: body && body.take ? HOLDS : OTHER });
+    const { mountCourtControl, takeCourtControl, courtControlView, COURT_FREED_GRACE_MS } = await load();
+    const off = track(mountCourtControl('A', () => 'pw'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length).toBe(1);
+
+    emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
+    const taking = takeCourtControl('A');
+    await vi.advanceTimersByTimeAsync(1);
+    await taking;
+    expect(puts().length).toBe(2);
+    expect(puts()[1].body.take).toBe(true);
+    expect(courtControlView('A').state).toBe('holds');
+
+    await vi.advanceTimersByTimeAsync(COURT_FREED_GRACE_MS);
+    expect(puts().length, 'no extra claim after grace once take succeeded').toBe(2);
     off();
     await vi.advanceTimersByTimeAsync(1);
   });

@@ -1,6 +1,7 @@
 // Shared UI primitives used by both admin and viewer modules.
 
 import { useOpenedTapGuard } from './tap_guard.jsx';
+import { useDialogFocus } from './dialog_focus.jsx';
 import { toastSnapshot, subscribeToast, dismissToast } from './toast_queue.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { Icon } from './icon.jsx';
@@ -621,9 +622,14 @@ function Modal({ title, onClose, children, footer, size, dismissable = true, cla
   // bc-cfbd: the bounce of the tap that opened this modal must not reach its
   // backdrop or its buttons.
   const { openedRef, onClickCapture } = useOpenedTapGuard();
+  // Focus goes into the dialog as it opens (its Close button) and back to the
+  // control that opened it as it closes.
+  const boxRef = React.useRef(null);
+  useDialogFocus(boxRef);
   return (
     <div className="modal-backdrop" ref={openedRef} onClick={dismissable ? onClose : undefined} onClickCapture={onClickCapture}>
       <div
+        ref={boxRef}
         className={`modal${size ? ` modal--${size}` : ""}${className ? ` ${className}` : ""}`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"

@@ -269,7 +269,7 @@ A draw-ready competition is already listed on the shiai-jo operator views, since
 
 A **Pools + Knockout** or **Knockout only** competition whose draw is ready shows a **Draw review** card on its **Overview**. It shows when two competitors from the same dojo can first meet. If a pairing is wrong, you can swap two competitors there and then, without discarding the draw. League and Swiss competitions have no card.
 
-![The Draw review card: the Dojo separation table with one row per pair of dojo-mates and the round where they can first meet, then Change the draw (optional) with a line for each dojo that no suggested swap helps and the two pickers for your own swap.](../../screenshots/mobile-draw-review.png)
+![The Draw review card: the Dojo separation table with one row per pair of dojo-mates and the round where they can first meet, then Change the draw (optional) with one line naming the dojos that no suggested swap helps and the two pickers for your own swap.](../../screenshots/mobile-draw-review.png)
 
 #### Dojo separation
 
@@ -309,7 +309,7 @@ If the draw changed on another device while the panel was open, the swap is not 
 
 You can also swap straight from the draw. **Pools (preview)** of a **Pools + Knockout** competition, and **Bracket (preview)** of a **Knockout only** competition, have a **Swap competitors** button. A Pools + Knockout bracket has none, because its places are pool places, such as Pool A-1st, rather than competitors.
 
-With the mode on, a banner reads "Swap competitors: on." and taps no longer open score sheets. Tap a competitor to pick them; tap them again to put them back. Tap a second competitor and the same **If you swap them** panel opens. After a swap the mode stays on, so you can make another; **Done**, Escape, or leaving the tab turns it off.
+With the mode on, a banner reads "Swap competitors: on." and taps no longer open score sheets. Every competitor you can tap has a dashed outline. Tap a competitor to pick them; tap them again to put them back. Tap a second competitor and the same **If you swap them** panel opens. After a swap the mode stays on, so you can make another; **Done**, Escape, or leaving the tab turns it off.
 
 #### Before the first result
 

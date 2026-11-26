@@ -12824,6 +12824,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .draw-review__table td {
   vertical-align: top;
 }
+/* One competitor per line in the Pair cell, never broken inside: the table
+   scrolls instead (above). */
+.draw-review__who {
+  white-space: nowrap;
+}
 .draw-review__row--same-pool td:last-child {
   color: var(--warn-ink);
   font-weight: 600;
@@ -12964,7 +12969,7 @@ button.swap-pick {
   min-height: max(36px, var(--tap-floor));
   padding: 4px 8px;
   background: transparent;
-  border: 1px dashed var(--line);
+  border: 1px dashed var(--ink-4);
   border-radius: 6px;
 }
 :where(button.bc-side.swap-pick) {
@@ -12986,6 +12991,13 @@ button.bc-side.swap-pick.swap-pick--picked {
   background: var(--accent-soft);
   box-shadow: inset 0 0 0 2px var(--accent);
   font-weight: 700;
+}
+/* A bracket side has no border of its own to dash (its colour edge is the
+   side's), so its pick mark is a dashed outline drawn inside it: the card
+   does not move, and the focus ring and the picked ring replace it. */
+button.bc-side.swap-pick:not(.swap-pick--picked):not(:focus-visible) {
+  outline: 1px dashed var(--ink-4);
+  outline-offset: -4px;
 }
 button.swap-pick:focus-visible {
   outline: 2px solid var(--accent);

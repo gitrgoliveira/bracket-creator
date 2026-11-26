@@ -60,7 +60,7 @@ describe('If you swap them', () => {
     expect(window.API.swapDrawPlaces).toHaveBeenCalledWith('c1',
       { a: { id: 'a', place: a.place }, b: { id: 'b', place: b.place }, dryRun: true }, 'pw');
     expect(screen.getByTestId('swap-moves').textContent).toBe('Arthur Dick goes to Pool C, Lena Park to Pool B.');
-    expect(screen.getByTestId('swap-separation').textContent).toContain('Team Omega: share Pool B → earliest Semifinals (later).');
+    expect(screen.getByTestId('swap-separation').textContent).toContain('Team Omega: shared Pool B, now not before the Semifinals.');
     expect(screen.getByTestId('swap-numbers').textContent)
       .toBe('Numbers stay with the place: Arthur Dick takes IMS8, Lena Park takes IMS4. Swap their tags.');
     expect(screen.getByText('Arthur Dick is seed 2 and moves to Pool C.')).toBeInTheDocument();

@@ -79,9 +79,12 @@ describe('the Draw review card', () => {
     expect(within(sep).getByText('Every pair of competitors from the same dojo, earliest meeting first.')).toBeInTheDocument();
     const rows = screen.getAllByTestId('dojo-separation-row');
     expect(rows.map((r) => r.textContent)).toEqual([
-      'Team OmegaIMS1 Arthur Dick · IMS3 Xu LinShare Pool A',
-      'Team KappaIMS2 Lena Park · IMS4 Yan WuSemifinalsFinal if both win their pools',
+      'Team OmegaIMS1 Arthur DickIMS3 Xu LinShare Pool A',
+      'Team KappaIMS2 Lena ParkIMS4 Yan WuSemifinalsFinal if both win their pools',
     ]);
+    // One competitor per line in the Pair cell, never joined by a dot, so a
+    // narrow screen never wraps one name into the other.
+    expect([...rows[0].querySelectorAll('td')[1].children].map((n) => n.textContent)).toEqual(['IMS1 Arthur Dick', 'IMS3 Xu Lin']);
     expect(window.API.fetchDojoSeparation).toHaveBeenCalledWith('c1', 'pw');
   });
 
@@ -108,10 +111,10 @@ describe('the Draw review card', () => {
     await mount();
     const item = screen.getByTestId('swap-suggestion');
     expect(item.textContent).toContain('Swap IMS3 Xu Lin (Pool A) and IMS4 Yan Wu (Pool B)');
-    expect(item.textContent).toContain('Team Omega: share Pool A → earliest Semifinals.');
+    expect(item.textContent).toContain('Team Omega: shared Pool A, now not before the Semifinals.');
     expect(item.textContent).toContain('Nobody else meets earlier.');
     expect(screen.getByTestId('swap-stuck').textContent)
-      .toBe('Team Pi: they can first meet in the Quarterfinals, and no suggested swap moves that later without making another dojo meet earlier.');
+      .toBe('For Team Pi, no suggested swap makes their first meeting later without making another dojo meet earlier.');
   });
 
   it('opens the check for a suggestion with the places the server gave', async () => {
@@ -126,7 +129,7 @@ describe('the Draw review card', () => {
     await mount();
     const pickA = screen.getByTestId('swap-pick-a');
     expect([...pickA.querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['Pool A', 'Pool B']);
-    expect(pickA.querySelector('option[value="p1"]').textContent).toBe('IMS1 Arthur Dick (Team Omega) · seed 1');
+    expect(pickA.querySelector('option[value="p1"]').textContent).toBe('IMS1 Arthur Dick (Team Omega), seed 1');
     const check = screen.getByTestId('swap-check-btn');
     expect(check).toBeDisabled();
     await act(async () => { fireEvent.change(pickA, { target: { value: 'p1' } }); });

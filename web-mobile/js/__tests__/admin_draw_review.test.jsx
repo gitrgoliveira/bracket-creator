@@ -3,10 +3,10 @@
 // so each one is pinned against an answer of the shape the routes give.
 import { describe, it, expect } from 'vitest';
 import {
-  reviewsDraw, canFirstMeet, pairText, stuckSentence, improvementSentence, optionLabel,
+  reviewsDraw, canFirstMeet, stuckSentences, improvementSentence, optionLabel,
 } from '../admin_draw_review.jsx';
 import {
-  drawEntrants, drawPlaceLabel, meetingPhrase, separationSentences, movesSentence, numbersSentence,
+  drawEntrants, drawPlaceLabel, meetingChange, separationSentences, movesSentence, numbersSentence,
   swapDetailLines, swapDoneToast, swapBody, competitorLabel,
 } from '../admin_draw_swap_check.jsx';
 
@@ -55,25 +55,26 @@ describe('the Can first meet cell', () => {
   });
 });
 
-describe('the Pair cell', () => {
-  it('joins the two by "·", each with their number when the competition numbers', () => {
-    expect(pairText({ a: side('a', 'Elijah Everdeen', { number: 'IMS2' }), b: side('b', 'Lena Park', { number: 'IMS5' }) }))
-      .toBe('IMS2 Elijah Everdeen · IMS5 Lena Park');
-    expect(pairText({ a: side('a', 'Elijah'), b: side('b', 'Lena') })).toBe('Elijah · Lena');
-  });
-});
-
 describe('the suggestions', () => {
-  it('words one improvement as before and after', () => {
+  it('words one improvement as before and after, in words and never an arrow', () => {
     expect(improvementSentence({ dojo: 'Team Omega', before: { samePool: 'Pool B' }, after: { earliest: meet('r1-m0', 1) } }))
-      .toBe('Team Omega: share Pool B → earliest Semifinals.');
+      .toBe('Team Omega: shared Pool B, now not before the Semifinals.');
+    expect(improvementSentence({ dojo: 'Team Omega', before: { earliest: meet('r0-m0', 0) }, after: {} }))
+      .toBe('Team Omega: could first meet in the Quarterfinals, now cannot meet in the knockout.');
   });
 
-  it('words a stuck dojo by its earliest meeting', () => {
-    expect(stuckSentence({ dojo: 'Team Pi', meeting: { earliest: meet('r0-m1', 0) } }))
-      .toBe('Team Pi: they can first meet in the Quarterfinals, and no suggested swap moves that later without making another dojo meet earlier.');
-    expect(stuckSentence({ dojo: 'Team Pi', meeting: { samePool: 'Pool A' } }))
-      .toBe('Team Pi: no suggested swap takes them out of Pool A without making another dojo meet earlier.');
+  it('words the dojos no swap helps: one line for those meeting in the bracket, one per shared pool', () => {
+    expect(stuckSentences([
+      { dojo: 'Team Pi', meeting: { earliest: meet('r0-m1', 0) } },
+      { dojo: 'Team Rho', meeting: { samePool: 'Pool A' } },
+      { dojo: 'Team Sigma', meeting: { earliest: meet('r1-m0', 1) } },
+    ])).toEqual([
+      'Team Rho: no suggested swap takes them out of Pool A without making another dojo meet earlier.',
+      'For Team Pi and Team Sigma, no suggested swap makes their first meeting later without making another dojo meet earlier.',
+    ]);
+    expect(stuckSentences([{ dojo: 'Team Pi', meeting: { earliest: meet('r0-m1', 0) } }]))
+      .toEqual(['For Team Pi, no suggested swap makes their first meeting later without making another dojo meet earlier.']);
+    expect(stuckSentences([])).toEqual([]);
   });
 });
 
@@ -87,7 +88,7 @@ describe('the pickers', () => {
     expect(groups.map((g) => g.label)).toEqual(['Pool A', 'Pool B']);
     expect(groups[0].entrants.map((e) => e.place)).toEqual([{ pool: 'Pool A', position: 1 }, { pool: 'Pool A', position: 2 }]);
     expect(groups[1].entrants.map((e) => e.id), 'a place with no participant id cannot be named').toEqual(['p3']);
-    expect(optionLabel(groups[0].entrants[0])).toBe('K1 Ann (D1) · seed 1');
+    expect(optionLabel(groups[0].entrants[0])).toBe('K1 Ann (D1), seed 1');
     expect(optionLabel(groups[0].entrants[1])).toBe('Bo (D2)');
   });
 
@@ -106,7 +107,7 @@ describe('the pickers', () => {
     const bracket = { rounds: [[{ matchNumber: 1, sideA: side('k1', 'Ann', { dojo: 'D1' }), sideB: side('k2', 'Bo', { dojo: 'D2' }) }]] };
     const comp = { format: 'knockout', players: [{ id: 'k1', seed: 1 }, { id: 'k2', seed: null }] };
     const [group] = drawEntrants(comp, [], bracket);
-    expect(optionLabel(group.entrants[0])).toBe('Ann (D1) · seed 1');
+    expect(optionLabel(group.entrants[0])).toBe('Ann (D1), seed 1');
     expect(optionLabel(group.entrants[1])).toBe('Bo (D2)');
   });
 });
@@ -135,7 +136,7 @@ describe('If you swap them', () => {
       { dojo: 'Team Kappa', a: side('b', 'Lena'), b: side('y', 'Yan'), earliest: meet('r2-m0', 2) },
     ];
     expect(separationSentences({ before, after }).map((l) => l.text)).toEqual([
-      'Team Omega: share Pool B → earliest Semifinals (later).',
+      'Team Omega: shared Pool B, now not before the Semifinals.',
       'Team Kappa: no change.',
     ]);
   });
@@ -145,7 +146,7 @@ describe('If you swap them', () => {
     const before = [pair('x', 'Xu', { earliest: meet('r2-m0', 2) }), pair('y', 'Yan', { earliest: meet('r2-m0', 2) })];
     const after = [pair('x', 'Xu', { samePool: 'Pool A' }), pair('y', 'Yan', { earliest: meet('r2-m0', 2) })];
     const lines = separationSentences({ before, after });
-    expect(lines).toEqual([{ dojo: 'D', text: 'D (Ann and Xu): earliest Final → share Pool A (earlier).', earlier: true }]);
+    expect(lines).toEqual([{ dojo: 'D', text: 'D (Ann and Xu): could first meet in the Final, now share Pool A.', earlier: true }]);
   });
 
   it('names the two tags to exchange, and nothing when the competition does not number', () => {
@@ -188,6 +189,6 @@ describe('If you swap them', () => {
 
   it('names a competitor by number then name', () => {
     expect(competitorLabel(side('a', 'Arthur', { number: 'K3' }))).toBe('K3 Arthur');
-    expect(meetingPhrase({})).toBe('cannot meet in the knockout');
+    expect(meetingChange({}, { earliest: meet('r0-m0', 0) }, false)).toBe('could not meet in the knockout, now as early as the Quarterfinals');
   });
 });

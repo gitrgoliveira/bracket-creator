@@ -19,8 +19,9 @@
 // filter, so the competitor-number search rule does not apply to them.
 
 import { competitionHasRecordedResult } from './recorded_result.jsx';
+import { andList } from './list_phrase.jsx';
 import {
-  DrawSwapCheck, effectiveFormat, drawEntrants, drawPlaceLabel, poolLabel, competitorLabel, meetingRoundName, meetingPhrase, swapDoneToast,
+  DrawSwapCheck, effectiveFormat, drawEntrants, drawPlaceLabel, poolLabel, competitorLabel, meetingRoundName, meetingChange, swapDoneToast,
 } from './admin_draw_swap_check.jsx';
 
 const { useState, useEffect } = React;
@@ -41,28 +42,31 @@ export function canFirstMeet(row) {
   return { first, second: later ? `${meetingRoundName(row.ifBothWin)} if both win their pools` : '' };
 }
 
-// pairText: the two competitors of a row, each with their number when the
-// competition numbers, joined by "·".
-export function pairText(row) {
-  return `${competitorLabel(row.a)} · ${competitorLabel(row.b)}`;
-}
-
-// stuckSentence: a dojo no suggested swap helps, and why that is all the app
-// can say about it.
-export function stuckSentence(stuck) {
-  const m = stuck.meeting || {};
-  if (m.samePool) return `${stuck.dojo}: no suggested swap takes them out of ${poolLabel(m.samePool)} without making another dojo meet earlier.`;
-  return `${stuck.dojo}: they can first meet in the ${meetingRoundName(m.earliest)}, and no suggested swap moves that later without making another dojo meet earlier.`;
+// stuckSentences: the dojos no suggested swap helps, and why that is all the
+// app can say about them. A dojo whose pair shares a pool keeps a line of its
+// own, since its pool is its reason; the others share one line, since the
+// table above already gives each its round.
+export function stuckSentences(stuck) {
+  const lines = [];
+  const meeting = [];
+  for (const st of stuck || []) {
+    const m = st.meeting || {};
+    if (m.samePool) lines.push(`${st.dojo}: no suggested swap takes them out of ${poolLabel(m.samePool)} without making another dojo meet earlier.`);
+    else meeting.push(st.dojo);
+  }
+  if (meeting.length > 0) lines.push(`For ${andList(meeting)}, no suggested swap makes their first meeting later without making another dojo meet earlier.`);
+  return lines;
 }
 
 // improvementSentence: one pair a suggestion keeps apart longer.
 export function improvementSentence(imp) {
-  return `${imp.dojo}: ${meetingPhrase(imp.before)} → ${meetingPhrase(imp.after)}.`;
+  return `${imp.dojo}: ${meetingChange(imp.before, imp.after, true)}.`;
 }
 
 // optionLabel: a competitor in a picker: number, name, dojo, a seed marked.
+// The seed is set off by a comma, never a middle dot (list_phrase.jsx).
 export function optionLabel(e) {
-  const seed = e.seed > 0 ? ` · seed ${e.seed}` : '';
+  const seed = e.seed > 0 ? `, seed ${e.seed}` : '';
   return `${competitorLabel(e)}${e.dojo ? ` (${e.dojo})` : ''}${seed}`;
 }
 
@@ -119,7 +123,10 @@ function SeparationTable({ meetings }) {
             return (
               <tr key={`${row.a.id}\u001f${row.b.id}`} data-testid="dojo-separation-row" className={row.samePool ? 'draw-review__row--same-pool' : undefined}>
                 <td>{row.dojo}</td>
-                <td>{pairText(row)}</td>
+                <td>
+                  <div className="draw-review__who">{competitorLabel(row.a)}</div>
+                  <div className="draw-review__who">{competitorLabel(row.b)}</div>
+                </td>
                 <td>
                   <div>{meet.first}</div>
                   {meet.second && <div className="draw-review__second">{meet.second}</div>}
@@ -163,7 +170,7 @@ function Suggestions({ answer, bracket, onPick }) {
       )}
       {stuck.length > 0 && (
         <ul className="draw-review__stuck" data-testid="swap-stuck">
-          {stuck.map((st) => <li key={st.dojo}>{stuckSentence(st)}</li>)}
+          {stuckSentences(stuck).map((line) => <li key={line}>{line}</li>)}
         </ul>
       )}
     </div>

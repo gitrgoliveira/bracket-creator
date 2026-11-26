@@ -105,13 +105,26 @@ export function meetingRoundName(meeting) {
   return bracketRoundLabel({ displayRound: meeting.displayRound }, meeting.round, meeting.rounds);
 }
 
-// meetingPhrase: where a pair of dojo-mates can first meet, in a few words for
-// a sentence ("share Pool B", "earliest Semifinals").
-export function meetingPhrase(row) {
-  if (!row) return '';
-  if (row.samePool) return `share ${poolLabel(row.samePool)}`;
-  if (row.earliest) return `earliest ${meetingRoundName(row.earliest)}`;
-  return 'cannot meet in the knockout';
+// meetingChange: how a pair of dojo-mates' first meeting moves, in words:
+// "could first meet in the Quarterfinals, now not before the Semifinals",
+// "shared Pool B, now not before the Semifinals" or "could first meet in the
+// Semifinals, now as early as the Quarterfinals". Words, never an arrow
+// between the two (Hallmark gate 63). `later` is true when the meeting moves
+// later, as separationChanges and the suggestions judge it.
+export function meetingChange(before, after, later) {
+  return `${meetingWas(before)}, ${meetingNow(after, later)}`;
+}
+
+function meetingWas(row) {
+  if (row && row.samePool) return `shared ${poolLabel(row.samePool)}`;
+  if (row && row.earliest) return `could first meet in the ${meetingRoundName(row.earliest)}`;
+  return 'could not meet in the knockout';
+}
+
+function meetingNow(row, later) {
+  if (row && row.samePool) return `now share ${poolLabel(row.samePool)}`;
+  if (row && row.earliest) return `now ${later ? 'not before' : 'as early as'} the ${meetingRoundName(row.earliest)}`;
+  return 'now cannot meet in the knockout';
 }
 
 // fromEnd: how many rounds before the final a meeting is (0 = the final).
@@ -171,8 +184,8 @@ export function separationChanges(separation) {
 }
 
 // separationSentences: separationChanges in words, one line per dojo:
-// "Team Omega: share Pool B → earliest Semifinals (later)." or "Team Kappa:
-// no change." A dojo of more than one pair names the pair.
+// "Team Omega: shared Pool B, now not before the Semifinals." or "Team
+// Kappa: no change." A dojo of more than one pair names the pair.
 export function separationSentences(separation) {
   const lines = [];
   for (const d of separationChanges(separation)) {
@@ -181,7 +194,7 @@ export function separationSentences(separation) {
       const who = d.pairs > 1 ? ` (${ch.a.name} and ${ch.b.name})` : '';
       lines.push({
         dojo: d.dojo,
-        text: `${d.dojo}${who}: ${meetingPhrase(ch.before)} → ${meetingPhrase(ch.after)} (${ch.later ? 'later' : 'earlier'}).`,
+        text: `${d.dojo}${who}: ${meetingChange(ch.before, ch.after, ch.later)}.`,
         earlier: !ch.later,
       });
     }

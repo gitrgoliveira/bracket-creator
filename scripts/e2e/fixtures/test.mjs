@@ -34,6 +34,9 @@ export { isCoarse };
 //               its page closed first stands in for the code, the rest still
 //               matching (a body missing for any other reason, a timeout or a
 //               failed read on a page still open, never does)
+//   codeField   which field of the body holds that code: `error` (the
+//               default, the sentence most refusals carry) or `code`, for an
+//               answer whose `error` sentence is shared with other refusals
 //   request     which request was refused (method and body), for an entry that
 //               is about one kind of write only
 //   whileOffline  only while the page's context is offline (or just back)
@@ -81,11 +84,54 @@ const CONSOLE_ALLOWLIST = [
     codeUnreadable: true,
     request: (r) => !!r && r.method === 'PUT',
   },
+  {
+    reason: 'A public page logs its tournament reload failing while the journey has the phone offline (the self-run offline journeys; load in app.jsx, which keeps the last good data and lets the connection indicator report the outage); it reloads again once back online.',
+    text: /^Failed to load tournament TypeError: Failed to fetch\b/,
+    url: /\/dist\/(?:[0-9a-f]+\/)?app\.jsx?$/,
+    whileOffline: true,
+  },
+  // The self-run public journey (self-run-public.public.spec.mjs) makes these
+  // refusals on purpose. A refused tap is a 200 per event and logs nothing.
+  {
+    reason: 'Two phones on a self-run match: phone A, offline, finishes a match phone B then finishes first, and the server refuses A\'s finishing write when it comes back online (409 result_finalized). Only a completed write over a finished match; any other /score write refused this way is a real error.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/competitions\/[^/]+\/matches\/[^/]+\/score$/,
+    code: /^result_finalized$/,
+    request: (r) => !!r && r.method === 'PUT' && writeStatus(r.postData) === 'completed',
+  },
+  {
+    reason: 'The self-run registration link of a TEAM competition (the self-run registration rule): the page asks for the registration form of a competition whose teams the organiser enters, and the server answers 404 team_competition on both the GET and the POST. Matched on the body\'s `code`, since its `error` sentence is also what the other 404 branches of the registration routes answer.',
+    text: /^Failed to load resource: the server responded with a status of 404 \(Not Found\)$/,
+    url: /\/api\/register\/competitions\/[^/]+$/,
+    code: /^team_competition$/,
+    codeField: 'code',
+  },
+  {
+    reason: 'The self-run registration link after the draw (the self-run registration rule): registering for a competition whose draw exists is refused 409 and the page says registration is closed.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/register\/competitions\/[^/]+$/,
+    code: /^registration is closed for this competition$/,
+    request: (r) => !!r && r.method === 'POST',
+  },
+  {
+    reason: 'A competitor saves the lineup of a self-run team match that has finished from the public score sheet (the self-run lineup rule): the participant\'s write is refused 409 result_finalized and the sheet tells them to ask the organizer.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/competitions\/[^/]+\/teams\/[^/]+\/match-lineups\/[^/]+$/,
+    code: /^result_finalized$/,
+    request: (r) => !!r && r.method === 'PUT',
+  },
+  {
+    reason: 'A competitor renames a team member who already has a name from the public score sheet (the self-run lineup rule): refused 409 member_already_named, which only the organiser changes.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/competitions\/[^/]+\/teams\/[^/]+\/members\/[^/]+$/,
+    code: /^member_already_named$/,
+    request: (r) => !!r && r.method === 'PUT',
+  },
 ];
 
-// The `error` field of a refusal body; read with a pattern, since the body is
-// kept only in part.
-const refusalCode = (body) => (/"error"\s*:\s*"([^"]+)"/.exec(body || '') || [])[1] || null;
+// A string field (`error` unless a rule names another) of a refusal body; read
+// with a pattern, since the body is kept only in part.
+const refusalCode = (body, field = 'error') => (new RegExp(`"${field}"\\s*:\\s*"([^"]+)"`).exec(body || '') || [])[1] || null;
 // The `status` a score write carries (its postData is JSON), or null.
 const writeStatus = (postData) => {
   try {
@@ -100,7 +146,7 @@ const writeStatus = (postData) => {
 const closedBeforeBody = (e) => e.body === null && e.bodyMissing === 'page-closed' && !!e.request;
 const allowed = (e) => e.kind === 'console' && CONSOLE_ALLOWLIST.find((r) => r.text.test(e.text)
   && (!r.url || r.url.test(e.url || ''))
-  && (!r.code || r.code.test(refusalCode(e.body) || '') || (r.codeUnreadable && closedBeforeBody(e)))
+  && (!r.code || r.code.test(refusalCode(e.body, r.codeField) || '') || (r.codeUnreadable && closedBeforeBody(e)))
   && (!r.request || r.request(e.request))
   && (!r.whileOffline || e.offline));
 
@@ -336,7 +382,7 @@ export const test = base.extend({
       const rule = allowed(e);
       // An entry let through for want of a body says so, in place of the
       // matched-code reason: nobody checked the code.
-      const unread = rule && rule.code && !rule.code.test(refusalCode(e.body) || '');
+      const unread = rule && rule.code && !rule.code.test(refusalCode(e.body, rule.codeField) || '');
       if (unread) testInfo.annotations.push({ type: 'console-allowed-unread', description: describeEntry(e) });
       console.log(`CONSOLE ${JSON.stringify({ test: testInfo.title, allowed: rule ? (unread ? ALLOWED_UNREAD_REASON : rule.reason) : null, ...e })}`);
     }

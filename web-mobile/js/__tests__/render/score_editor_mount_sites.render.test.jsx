@@ -487,7 +487,7 @@ describe('every mount site hands the editor what a write came back with (bc-strt
   it.each(sites)('%s', async (_name, mount) => {
     const landed = { status: 'running' };
     const write = vi.fn().mockResolvedValueOnce(landed).mockRejectedValueOnce(new Error('court busy'));
-    // The self-run surface reports a refused write itself (it has no toast).
+    // No surface raises a window.alert: a refused write is told by a toast or the editor.
     const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
     const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const recordScore = window.API.recordScore;
@@ -500,6 +500,7 @@ describe('every mount site hands the editor what a write came back with (bc-strt
       await act(async () => { res = await onSubmit({ status: 'running', winner: null }); });
       expect(res, 'a refused write').toBeUndefined();
       expect(write).toHaveBeenCalledTimes(2);
+      expect(alert, 'no window.alert').not.toHaveBeenCalled();
     } finally {
       window.API.recordScore = recordScore;
       alert.mockRestore();
@@ -613,9 +614,10 @@ describe('the self-run editor stays open through running writes (bc-dhas)', () =
 // bc-evts stage 3: the participant's write is the outbox's. The submit returns
 // the pending answer at once (never waiting on settled), and a refusal the
 // server sends later reaches the participant through onRefusal, told by the
-// page's one fallback (window.alert) as a direct refusal was.
+// outbox's one rule (an error toast, or the editor open on the match), never a
+// window.alert. The page claims nothing but the refusal the editor says itself.
 describe('the self-run editor is told of a refusal the outbox receives', () => {
-  it('passes an onRefusal that alerts the sentence and claims it, and never waits on settled', async () => {
+  it('passes only the editor\'s own claim, raises no alert and never waits on settled', async () => {
     let opts = null;
     const write = vi.fn((_c, _m, _p, _pw, _match, o) => {
       opts = o;
@@ -627,12 +629,11 @@ describe('the self-run editor is told of a refusal the outbox receives', () => {
     try {
       await mountSelfRun();
       await act(async () => { await probe.props.onSubmit({ status: 'running', ipponsA: ['M'] }); });
-      expect(opts && typeof opts.onRefusal, 'the write carries an onRefusal').toBe('function');
+      expect(opts && opts.onRefusal, 'the page claims nothing of its own').toBeUndefined();
+      const own = vi.fn(() => true);
+      await act(async () => { await probe.props.onSubmit({ status: 'running', ipponsA: ['M'] }, { onRefusal: own }); });
+      expect(opts.onRefusal, "the editor's own claim is passed through as it is").toBe(own);
       expect(alert).not.toHaveBeenCalled();
-      expect(opts.onRefusal(new Error('The match is finished. Tap Correct.'))).toBe(true);
-      expect(alert).toHaveBeenCalledWith('The match is finished. Tap Correct.');
-      expect(opts.onRefusal(null)).toBe(true);
-      expect(alert).toHaveBeenLastCalledWith("Couldn't save the result. Please try again.");
     } finally {
       window.API.recordScore = recordScore;
       alert.mockRestore();

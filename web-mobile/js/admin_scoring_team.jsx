@@ -42,7 +42,6 @@ import {
   HeldWriteDiscard,
   HeldWriteNotice,
   useClearPendingWhenNothingHeld,
-  useMatchHeldWrite,
   useTapOutcomeNote,
   tapBoardOf,
   useTapBoard,
@@ -87,6 +86,7 @@ import { SideLabel, sideWithColour } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
+import { useMatchHeldWrite } from './held_writes_panel.jsx';
 import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, writePending, writeHeldOnDeviceOnly, queuedNotice, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, decisionWord, FETCH_TIMEOUT_MS, TIMED_OUT, withinDeadline } from './write_result.jsx';
 
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, DEFAULT_WIN_IPPON, hanteiDecided } from './result_slot.jsx';
@@ -178,6 +178,12 @@ function positionLabelFor(teamSize, index, sub) {
 // words live here once because the slot that holds the line reserves the
 // tallest of them (stage 6 review 13, m5): a hint can be two or three lines on
 // a tablet, and the Encho clause is the longer form of the two it can end in.
+// The longest label End match shows armed ("Tap again: Aka wins", "... Shiro
+// wins" or "... Draw (hikiwake)"), reserved by .holds-label so the button keeps
+// its width between its two taps. Worked out from the one wording owner.
+const KACHINUKI_END_ARMED_RESERVE = [{ kind: "win", winnerSide: "a" }, { kind: "win", winnerSide: "b" }, { kind: "draw" }]
+  .map((o) => `Tap again: ${kachinukiEndOutcomeLabel(o)}`)
+  .reduce((longest, label) => (label.length > longest.length ? label : longest));
 const KACHINUKI_HINT_NOTHING = "Nothing recorded yet: score a bout before ending the match.";
 const kachinukiTiedHint = (enchoOffered) =>
   `Tied bout. End match records a drawn encounter. Record bout retires both and brings the next pair up.${enchoOffered ? " Encho keeps the same pair fighting when this pairing must produce a result." : ""}`;
@@ -3116,7 +3122,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   const openDoneBoutEdit = (idx) => {
     const t = subTotals[idx];
     setEditingDoneOriginal({ winner: t ? t.winner : null });
-    stampTap(boutListTapRef);
+    stampBoutList(null);
     setEditingDoneBoutIdx(idx);
   };
   // bc-kbrw: opening a fought bout expands it under the finger, so the second
@@ -3127,7 +3133,35 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // state, so a batched double tap cannot read a stale value. Keyboard
   // activation is never swallowed: a click synthesized from Enter/Space
   // carries detail === 0.
+  //
+  // A pick from a bout row's list (bc-flst) guards only the area the list was
+  // drawn over (`boutListGuardBoxRef`, the box LineupNameInput hands to
+  // onListPick): the bounce of the pick lands where the option was, and a tap
+  // elsewhere (another bout, straight after naming a fighter) is a deliberate
+  // one, which the whole-list guard swallowed (the self-run walk's S3). Opening
+  // a fought bout moves every row, so it guards the whole list (box null).
+  // The box's edges are relative to its anchor, the picked name box, read
+  // again when a tap comes, never kept in screen coordinates: a list that
+  // opened upward lay over the sheet, and bringing bout 1 into view scrolled
+  // its M under where the list had been on screen. A bounce never scrolls the
+  // sheet. An anchor no longer in the page drew no list under this tap.
   const boutListTapRef = useRef(null);
+  const boutListGuardBoxRef = useRef(null);
+  const stampBoutList = (box) => {
+    boutListGuardBoxRef.current = box || null;
+    stampTap(boutListTapRef);
+  };
+  const swallowBoutListBounce = (ev) => {
+    const box = boutListGuardBoxRef.current;
+    if (box) {
+      if (!box.anchor.isConnected) return;
+      const at = box.anchor.getBoundingClientRect();
+      const x = ev.clientX - at.left;
+      const y = ev.clientY - at.top;
+      if (!(x >= box.left && x <= box.right && y >= box.top && y <= box.bottom)) return;
+    }
+    swallowBounce(boutListTapRef)(ev);
+  };
   // bc-dtip: a bouncing thumb recorded two ippons (or two fouls, the second
   // awarding an H to the opponent) from one tap. A repeat POINTER tap on the
   // same bout side within TAP_BOUNCE_MS is ignored; keyed by the row side's
@@ -4387,7 +4421,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               body, under the team header and result band (.team-sheet-pin)
               and above the footer, which are pinned in every host and both
               layouts. */}
-          <div className="team-bouts-scroll" onClickCapture={swallowBounce(boutListTapRef)}>
+          <div className="team-bouts-scroll" onClickCapture={swallowBoutListBounce}>
           {[
             // mp-gmcg: operator-led completion. The banner reads "ended"
             // ONLY for a completed match (correction view): a running
@@ -4848,10 +4882,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                               // tap's second tap would score the ippon it
                               // uncovered (bc-flst). Only that pick stamps the
                               // bout list's bounce ref, as opening a fought bout
-                              // does (bc-kbrw): a typed name committed by tapping
-                              // an ippon button lands on a visible target, and
-                              // that tap must score.
-                              onListPick={() => stampTap(boutListTapRef)}
+                              // does (bc-kbrw), over the list's own box alone (a
+                              // tap on another bout counts, S3): a typed name
+                              // committed by tapping an ippon button lands on a
+                              // visible target, and that tap must score.
+                              onListPick={stampBoutList}
                               onSelect={sideActions[rs.key].onSelectName}
                             />
                           ) : (
@@ -5647,7 +5682,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     </button>
                   </>
                 )}
-                <button type="button" className={`btn ${endArmed ? "btn--confirm" : ""}`} data-testid="kachinuki-end-match-button" onClick={(ev) => {
+                <button type="button" className={`btn holds-label ${endArmed ? "btn--confirm" : ""}`} data-testid="kachinuki-end-match-button"
+                  // Holds its width between its two taps (.holds-label, as
+                  // Finish and Fusensho do): the longest armed label is laid
+                  // hidden beside the shown one, so tapping never widens or
+                  // wraps the button and a quick second tap lands on it again.
+                  data-reserve={KACHINUKI_END_ARMED_RESERVE}
+                  onClick={(ev) => {
                   if (kachinukiEndOutcome?.kind === "blocked") return;
                   if (!confirmEnd(ev)) { setFinishArmed(false); return; }
                   doSubmit(() => onSubmit(buildPatch("completed", { endOutcome: kachinukiEndOutcome })));
@@ -5659,10 +5700,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                           ? "No draws in a knockout: continue (next bout or encho) until there is a point"
                           : "No draws in a knockout: record the bout and continue until there is a point")
                     : "End the match on the last scored bout"}>
-                  {submitting ? "Saving…"
+                  <span className="holds-label__text">{submitting ? "Saving…"
                     : endArmed
                     ? `Tap again: ${kachinukiEndOutcomeLabel(kachinukiEndOutcome)}`
-                    : "End match"}
+                    : "End match"}</span>
                 </button>
                 </>
               ) : (isKachinuki && isComplete) ? null : (

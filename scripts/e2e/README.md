@@ -239,6 +239,18 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   search by number, name and dojo; the watchlist
                                   hero and the match card following an operator
                                   live; the match card from each door
+      self-run-public.public      a competitor's phone on a self-run
+                                  tournament (public project): Report result
+                                  from each door, then the result entered on
+                                  the phone for an individual, naginata, engi,
+                                  team, representative-bout and kachinuki
+                                  match, with a second phone following; a
+                                  result finished offline and refused because
+                                  another phone finished first; a result kept
+                                  offline and sent on return; who may register.
+                                  Competitions are seeded from a second
+                                  operator context; every result is entered on
+                                  a phone
     output/                 screenshots, audit.json and traces (below);
                             gitignored
 
@@ -259,10 +271,10 @@ Two projects, both Chromium:
   emulation and the test carries a `coarse-pointer` annotation saying so.
   Every journey runs here unless its file is named `*.public.spec.mjs`.
 - `public`: a phone in portrait (390x844), for journeys about a public surface
-  alone (`*.public.spec.mjs`). `spectator.public.spec.mjs` is the one journey
-  on this project: it seeds and scores from a second context opened with
-  `OPERATOR_DEVICE`. Other public checks stay on the `operator` project,
-  through a second context.
+  alone (`*.public.spec.mjs`): `spectator.public`, `league.public`,
+  `public-names.public` and `self-run-public.public`. Each seeds from a second
+  context opened with `OPERATOR_DEVICE`. Other public checks stay on the
+  `operator` project, through a second context.
 
 240 s is the default test timeout; some journeys raise it for a long test with
 `test.setTimeout`. `expect` waits 15 s (`EXPECT_TIMEOUT_MS` in

@@ -22,7 +22,7 @@ import {
     _openDequeueBatch, _closeDequeueBatch, _baseOf, _entriesFor, _keepForClock,
 } from './api_client_queue.jsx';
 import {
-    _shownMatchLabels, _whereOf, _recomputeSyncStatus, SERVER_REJECTION_NOTICE_THRESHOLD,
+    _shownMatchLabels, _whereOf, _recomputeSyncStatus, SERVER_REJECTION_NOTICE_THRESHOLD, _noteNotAppliedTap,
 } from './api_client_status.jsx';
 import { _latestDerived, _turnedAwaySeen, store, provide } from './api_client_store.jsx';
 
@@ -488,8 +488,7 @@ export async function _sendTapBatch(base, batch, pass) {
                     // such a tap answered again (F3).
                     _told.settle(compID, matchID, o.id);
                 } else {
-                    pass.notApplied++;
-                    pass.lastNotApplied = o;
+                    _noteNotAppliedTap(pass, base, first, o);
                     _emitOn(_tapOutcomeListeners, base, {
                         id: o.id, outcome: o.outcome, reason: o.reason, message: o.message,
                     });

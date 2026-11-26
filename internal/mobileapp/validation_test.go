@@ -1553,7 +1553,7 @@ func TestIsSelfRunReportableDecision(t *testing.T) {
 		{name: "kiken-injury rejected", decision: "kiken-injury", want: false},
 		{name: "fusenpai rejected", decision: "fusenpai", want: false},
 		{name: "daihyosen rejected", decision: "daihyosen", want: false},
-		{name: "kachinuki-exhaustion rejected", decision: "kachinuki-exhaustion", want: false},
+		{name: "kachinuki-exhaustion allowed (End match; the bout log decides the winner)", decision: "kachinuki-exhaustion", want: true},
 		{name: "unknown decision rejected", decision: "magic", want: false},
 		{name: "hanteiDecided=true rejects even allowed decision", decision: "fought", hanteiDecided: true, want: false},
 		{name: "hanteiDecided=false is ok", decision: "fought", hanteiDecided: false, want: true},

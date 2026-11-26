@@ -62,8 +62,8 @@ async function decideByHantei(page, side) {
 export const families = {
   ...adminFamilies,
 
-  // Self-run tournament with TWO individual competitions left in "setup"
-  // status (no draw generated) so shouldShowRegister (viewer_home.jsx) stays
+  // Self-run tournament with TWO individual competitions and ONE team
+  // competition left in "setup" status (no draw generated) so shouldShowRegister (viewer_home.jsx) stays
   // true:
   // mode === "self-run" && kind !== "team" && status is falsy/"setup".
   // A small roster is added so the public home page isn't bare, but nothing
@@ -98,6 +98,10 @@ export const families = {
         { name: 'Mika Suzuki', dojo: 'Harbor Dojo' },
         { name: 'Hana Sato', dojo: 'Northgate Dojo' },
       ] });
+      // A TEAM competition in setup, so selfrun-viewer-home shows the line a team
+      // card carries in place of the Register button ("Teams are entered by the
+      // tournament organizer."). Its caption in self-run.md says so.
+      await api.competition('team-open', 'Team Open', { teamSize: 3, courts: ['A'] });
       return { compId };
     },
   },

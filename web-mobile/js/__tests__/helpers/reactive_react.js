@@ -142,7 +142,16 @@ export function makeReactive() {
       }
       return hookSlots[i];
     },
-    useCallback: (fn) => { hookIndex++; return fn; },
+    // Kept while its deps hold, as React's is: a callback that is a new
+    // function every render sends an effect keyed on it round again, and a
+    // setter here always renders.
+    useCallback: (fn, deps) => {
+      const i = hookIndex++;
+      const slot = hookSlots[i];
+      if (slot && deps && slot.deps && slot.deps.length === deps.length && deps.every((d, k) => Object.is(d, slot.deps[k]))) return slot.fn;
+      hookSlots[i] = { fn, deps };
+      return fn;
+    },
     // A layout effect runs as useEffect does here: the code under test
     // writes refs in layout effects that its handlers read later.
     useLayoutEffect: (effect, deps) => reactive.useEffect(effect, deps),

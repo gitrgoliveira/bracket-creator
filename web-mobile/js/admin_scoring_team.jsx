@@ -575,7 +575,7 @@ function useMatchLineups(compId, matchId) {
   };
 }
 
-export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, startsNext = true, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false }) {
+export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, startsNext = true, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false, readOnly = false }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
   // shadows the prop so the removed bout disappears at once, and is cleared
@@ -3275,10 +3275,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     const bDisplayName = resolveBoutSideDisplayName({ squad: squadB, memberId: bMemberId, storedName: bName });
     const nameCls = (side) => "tsm-name__static" + (t.winner === side ? " tsm-name__static--win" : "");
     const row = (
-      <div className="team-sub-match team-sub-match--readonly team-sub-match--editable" data-testid={`kachinuki-done-bout-${idx}`}
-        role="button" tabIndex={0} aria-label={`Correct bout ${idx + 1}`} aria-expanded={false}
-        onClick={() => openDoneBoutEdit(idx)}
-        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDoneBoutEdit(idx); } }}>
+      <div className={`team-sub-match team-sub-match--readonly${readOnly ? "" : " team-sub-match--editable"}`} data-testid={`kachinuki-done-bout-${idx}`}
+        role={readOnly ? undefined : "button"} tabIndex={readOnly ? undefined : 0}
+        aria-label={readOnly ? undefined : `Correct bout ${idx + 1}`} aria-expanded={readOnly ? undefined : false}
+        onClick={readOnly ? undefined : () => openDoneBoutEdit(idx)}
+        onKeyDown={readOnly ? undefined : (e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDoneBoutEdit(idx); } })}>
         {/* Kachinuki: only the bout number (no FIK position handle — the winner
             stays on, so a bout is not "position vs same position"). */}
         <div className="team-sub-match__pos"><Icon name="chevron-right" size={12} className="tsm-caret" /><span className="team-sub-match__pos-num">{idx + 1}</span></div>
@@ -4181,7 +4182,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // shortcuts are wired ONLY for kachinuki bout mode (one current bout, an
   // unambiguous target — see scoreCurrentBoutWaza); fixed-format team scoring
   // is many sub-matches and stays tap-only, and Enter-to-finish isn't wired.
-  const kbRef = useLatestRef({ submitting, handleDismiss, canClose, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch, kachinukiBoutMode, isNaginataTeam, scoreCurrentBoutWaza });
+  const kbRef = useLatestRef({ submitting, readOnly, handleDismiss, canClose, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch, kachinukiBoutMode, isNaginataTeam, scoreCurrentBoutWaza });
   useEffect(() => {
     const onKeyDown = (ev) => {
       const s = kbRef.current;
@@ -4202,7 +4203,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
       // the individual editor: blocked when any interactive element
       // (input/button/link) has focus so name typing and native button
       // activation still work.
-      if (!s.kachinukiBoutMode || window.isInteractiveTarget(ev.target)) return;
+      if (s.readOnly || !s.kachinukiBoutMode || window.isInteractiveTarget(ev.target)) return;
       if (ev.key.length !== 1) return;
       const upper = ev.key.toUpperCase();
       if (getValidPointKeys(s.isNaginataTeam).includes(upper)) {
@@ -4403,6 +4404,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               body, under the team header and result band (.team-sheet-pin)
               and above the footer, which are pinned in every host and both
               layouts. */}
+          <fieldset className="shiaijo-control-scope" disabled={readOnly}>
           <div className="team-bouts-scroll" onClickCapture={swallowBoutListBounce}>
           {[
             // mp-gmcg: operator-led completion. The banner reads "ended"
@@ -4907,7 +4909,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                             {getIpponButtons(isNaginataTeam).map(cc => (
                               <button key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
                                 onClick={(ev) => tapIppon(ev, rs.tapKey, () => sideActions[rs.key].addPt(cc))}
-                                disabled={subBoutDecided || rowLocked}>{cc}</button>
+                                disabled={readOnly || subBoutDecided || rowLocked}>{cc}</button>
                             ))}
                           </div>
                           <div className="tsm-fusensho">
@@ -5223,10 +5225,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
           {editorErr && (
             <div data-testid="team-editor-error" className="daihyosen-controls__err" style={{ marginTop: 6 }}>{editorErr}</div>
           )}
+          </fieldset>
 
           {/* Ippon-type letter legend: same affordance as the individual
               editor; the per-bout buttons use the same M/K/D/T/H letters. */}
           <IpponLegend isNaginata={isNaginataTeam} />
+
+          <fieldset className="shiaijo-control-scope" disabled={readOnly}>
 
           {/* Decision (kiken/fusenpai) controls for the overall team match.
               Per-bout Fusensho lives on each sub-match row (the Fusensho
@@ -5330,10 +5335,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               setEnchoPeriodCount={changeEnchoPeriodCount}
             />
           )}
+          </fieldset>
 
         </div>
 
         <div className="editor-modal__foot editor-modal__foot--nav" ref={dockRef}>
+          <fieldset className="shiaijo-control-scope" disabled={readOnly}>
           {/* Audit reason prompt for team-match corrections: same contract
               as ScoreEditorModal: operator must confirm before the patch fires. */}
           {correctionPromptOpen && (
@@ -5350,6 +5357,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               onCancel={() => setReasonPromptKind("")}
             />
           )}
+          </fieldset>
           {/* While a reason prompt is open it owns the only Cancel/commit
               row: hide the footer's own nav+actions so the operator never sees
               two Cancels and two commit buttons at the highest-stakes moment
@@ -5440,7 +5448,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               never seen (bc-tmfn). The prefix names the editor's door; a
               kachinuki encounter keeps its existing ids whichever control
               reopened it. */}
+          <fieldset className="shiaijo-control-scope" disabled={readOnly}>
           <ReopenFeedback ctl={reopenCtl} testIdPrefix={isKachinuki ? "kachinuki-reopen" : "withdrawal-reopen"} />
+          </fieldset>
           {/* F5: "not saved" banner, shared class with ScoreEditorModal so both
               editors read identically. Placed once, above score-nav, which
               `inner` shares between the wide overlay and the narrow shiaijo
@@ -5483,10 +5493,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               action buttons were squeezed into one flex item there instead
               of reading as the full-width block it is everywhere else this
               component renders. */}
+          <fieldset className="shiaijo-control-scope" disabled={readOnly}>
           {m.status === "scheduled" && isBarredMatch(m) && (
             <BarredMatchNotice match={m} password={password} unsaved={unsavedRef} onDiscard={onDiscardUnsaved} />
           )}
           {own.kept && <DraftKeptNotice from={own.kept.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
+          </fieldset>
           <StartRefusedNotice text={own.refusal ? ownStartRefusalText(m, own.refusal) : ""} />
           {own.droppedShown && <DraftDroppedNotice />}
           <div className="score-nav">
@@ -5517,7 +5529,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   const banner = res && notLandedBanner(res);
                   if (banner) setWriteFailed(banner);
                   own.settle(token, res);
-                }} disabled={submitting}>Start match</button>
+                }} disabled={readOnly || submitting}>Start match</button>
               )}
               {/* mp-gmcg: mistake recovery on a completed kachinuki match:
                   status back to running, winner/decision cleared, bout log
@@ -5532,7 +5544,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   className="btn btn--sm btn--ghost"
                   data-testid="kachinuki-reopen-button"
                   onClick={() => reopenCtl.reopen()}
-                  disabled={submitting || reopenCtl.busy || reopenCtl.landed || decisionSubmitting}
+                  disabled={readOnly || submitting || reopenCtl.busy || reopenCtl.landed || decisionSubmitting}
                   title="Reopen: back to running, result cleared, bouts kept"
                 >
                   {reopenCtl.busy ? "Reopening…" : reopenCtl.landed ? "Reopened" : "Reopen match"}
@@ -5603,7 +5615,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     // banner for a queued write; returning nothing hid it.
                     return sent;
                   });
-                })(ev)} disabled={submitting
+                })(ev)} disabled={readOnly || submitting
                   // Held, as End match and Finish are, from a typed fighter's name until
                   // its lineup save is queued (namesTyping: the wait for the team's
                   // members, then the save), so the advance never runs ahead of it.
@@ -5636,7 +5648,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                       className={`btn${kachinukiEnchoOffered ? "" : " holds-space"}`}
                       data-testid="kachinuki-encho-button"
                       onClick={applyKachinukiEncho}
-                      disabled={submitting || !kachinukiEnchoOffered}
+                      disabled={readOnly || submitting || !kachinukiEnchoOffered}
                       title="Overtime: the same pair keeps fighting this bout"
                     >
                       Encho
@@ -5646,7 +5658,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                       className={`btn btn--ghost${kachinukiEnchoUndoable ? "" : " holds-space"}`}
                       data-testid="kachinuki-encho-undo-button"
                       onClick={undoKachinukiEncho}
-                      disabled={submitting || !kachinukiEnchoUndoable}
+                      disabled={readOnly || submitting || !kachinukiEnchoUndoable}
                       title="Take back one overtime period on this bout"
                     >
                       Undo encho
@@ -5663,7 +5675,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   if (kachinukiEndOutcome?.kind === "blocked") return;
                   if (!confirmEnd(ev)) { setFinishArmed(false); return; }
                   doSubmit(() => onSubmit(buildPatch("completed", { endOutcome: kachinukiEndOutcome })));
-                }} disabled={submitting || namesTyping || kachinukiEndOutcome?.kind === "blocked"}
+                }} disabled={readOnly || submitting || namesTyping || kachinukiEndOutcome?.kind === "blocked"}
                   title={kachinukiEndOutcome?.kind === "blocked"
                     ? (kachinukiEndOutcome.reason === "no-bouts"
                         ? "Score a bout before ending the match"
@@ -5692,7 +5704,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
                   if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => (isComplete || !onSubmitAndNext ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
-                }} disabled={submitting || koTieBlocked || namesTyping}
+                }} disabled={readOnly || submitting || koTieBlocked || namesTyping}
                   title={koTieBlocked ? koTieTitle : undefined}
                   // Holds its place while armed (.holds-label), as the
                   // individual editor's Finish does.

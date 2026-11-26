@@ -326,12 +326,12 @@ type CourtControlStore interface {
 	ClearCourtControl() error
 }
 
-// CourtControls is the consumer-boundary view of the court control registry
-// (bc-sseq FR9): which court console tab runs each shiaijo, and whether a
-// court console's write has the court's standing. The claim routes
-// (handlers_court_control.go), the whole-tournament replacements (a new
-// tournament, an import, a full restore) and the score and decision doors
-// reach it through this. *courtControlRegistry satisfies it.
+// CourtControls is the consumer-boundary view of the court control registry:
+// which court console tab runs each shiaijo, and whether a court console's
+// write has the court's standing. The claim routes (handlers_court_control.go)
+// and the whole-tournament replacements (a new tournament, an import, a full
+// restore) reach it through this; the score and decision doors are not wired
+// to it yet. *courtControlRegistry satisfies it.
 type CourtControls interface {
 	// Look is the shiaijo's control as any caller sees it.
 	Look(court string) (CourtControlAnswer, error)
@@ -340,10 +340,11 @@ type CourtControls interface {
 	// Release is the claim route's DELETE: it frees the shiaijo only when
 	// the tab holds it and names the current page load.
 	Release(court, tabID, pageID string) (CourtControlAnswer, error)
-	// WriteStanding judges a court console's write on arrival: true when
-	// the write's tablet runs the shiaijo and the write was made at or after
-	// the standing's start. A write naming a shiaijo nobody holds, from a tab
-	// and a tablet on neither displaced list, claims it first.
+	// WriteStanding reports whether a court console's write has the court's
+	// standing: true when the write's tablet runs the shiaijo and the write was
+	// made at or after the standing's start. A write naming a shiaijo nobody
+	// holds, from a tab and a tablet on neither displaced list, claims it
+	// first. Not called by the score or decision doors yet.
 	WriteStanding(court, tabID, deviceID string, stamp int64) (bool, error)
 	// Clear frees every shiaijo and forgets both displaced lists: the whole
 	// tournament was replaced.

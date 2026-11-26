@@ -187,3 +187,60 @@ describe('ScoreEditorModal: a decision refused because a later match is being fo
     }
   });
 });
+
+describe('ScoreEditorModal read-only (view-only console)', () => {
+  for (const [label, make] of [
+    ['individual', () => makeIndividualMatch({ compId: 'c1', status: 'scheduled' })],
+    ['team', () => makeTeamMatch({ compId: 'c1', status: 'scheduled', teamSize: 2 })],
+  ]) {
+    it(`${label}: keeps History toggle, Prev/Next, and Ippon key enabled while disabling write controls`, async () => {
+      const onPrev = vi.fn();
+      const onNext = vi.fn();
+      const prevMatch = makeIndividualMatch({ id: 'm0', sideA: { id: 'p3', name: 'Sato' }, sideB: { id: 'p4', name: 'Kato' } });
+      const nextMatch = makeIndividualMatch({ id: 'm9', sideA: { id: 'p5', name: 'Endo' }, sideB: { id: 'p6', name: 'Fujii' } });
+      let utils;
+      await act(async () => {
+        utils = render(
+          <ScoreEditorModal
+            match={make()}
+            onClose={vi.fn()}
+            onSubmit={vi.fn()}
+            prevMatch={prevMatch}
+            nextMatch={nextMatch}
+            onPrev={onPrev}
+            onNext={onNext}
+            password="pw"
+            readOnly={true}
+          />
+        );
+      });
+
+      const historyBtn = utils.getByTestId('match-history-toggle');
+      expect(historyBtn.disabled).toBe(false);
+      expect(historyBtn.matches(':disabled')).toBe(false);
+
+      const prevBtn = utils.getByRole('button', { name: 'Prev' });
+      const nextBtn = utils.getByRole('button', { name: 'Next' });
+      expect(prevBtn.disabled).toBe(false);
+      expect(prevBtn.matches(':disabled')).toBe(false);
+      expect(nextBtn.disabled).toBe(false);
+      expect(nextBtn.matches(':disabled')).toBe(false);
+      await act(async () => { fireEvent.click(prevBtn); });
+      await act(async () => { fireEvent.click(nextBtn); });
+      expect(onPrev).toHaveBeenCalledTimes(1);
+      expect(onNext).toHaveBeenCalledTimes(1);
+
+      const legend = utils.getByTestId('scoring-modal-ippon-legend');
+      expect(legend.closest('fieldset:disabled')).toBeNull();
+
+      const startBtn = utils.getByRole('button', { name: 'Start match' });
+      expect(startBtn.disabled).toBe(true);
+      expect(startBtn.matches(':disabled')).toBe(true);
+
+      const scoreBtn = utils.container.querySelector('.ipt-btn');
+      expect(scoreBtn).toBeTruthy();
+      expect(scoreBtn.disabled).toBe(true);
+      expect(scoreBtn.matches(':disabled')).toBe(true);
+    });
+  }
+});

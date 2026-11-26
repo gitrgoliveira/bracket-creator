@@ -387,6 +387,12 @@ func (o *mobileAppRestoreOptions) run(cmd *cobra.Command, archivePath string) (e
 		return fmt.Errorf("return restored running matches to queue: %w", err)
 	}
 
+	if restoredPlan.TournamentReplaced {
+		if err := store.ClearCourtControl(); err != nil {
+			return fmt.Errorf("clear court control: %w", err)
+		}
+	}
+
 	if _, err := fmt.Fprintln(out, "Restore completed successfully."); err != nil {
 		return err
 	}

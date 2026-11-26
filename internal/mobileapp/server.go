@@ -151,9 +151,10 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// the server was started with (in locked mode behind a digest cache).
 	names := newPublicNames(store, verifier)
 	hub.attachPublicNames(names)
-	// Who runs each shiaijo (bc-sseq FR9): one registry per router, reached
-	// by the claim routes, the score and decision doors, and through the hub
-	// by the whole-tournament replacements that free every shiaijo.
+	// Who runs each shiaijo: one registry per router, reached by the claim
+	// routes and, through the hub and restore handler, by the whole-tournament
+	// replacements that free every shiaijo. The score and decision doors are
+	// not wired to it yet.
 	courts := newCourtControlRegistry(store, hub)
 	hub.attachCourtControl(courts)
 

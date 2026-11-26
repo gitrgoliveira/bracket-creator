@@ -74,6 +74,14 @@ export function courtControlWrites(view) {
 export function courtControlBar(view, court, { now = serverNowMs(), checked = true, online = true } = {}) {
     const c = String(court || '');
     const state = view ? view.state : 'unknown';
+    if (view && view.refusedStatus === 401) {
+        return {
+            tone: 'warn',
+            text: `Your sign-in no longer works for shiaijo ${c}. Sign in again.`,
+            take: false,
+            ask: null,
+        };
+    }
     if (state === 'holds') {
         return { tone: 'holds', text: `This tablet runs shiaijo ${c}`, take: false, ask: null };
     }
@@ -106,12 +114,22 @@ export function courtControlBar(view, court, { now = serverNowMs(), checked = tr
     if (state === 'free-displaced') {
         return {
             tone: 'warn',
-            text: `Nobody runs shiaijo ${c} now. This tablet lost the control earlier; tap Take control to run it.`,
+            text: view.youWereDisplaced
+                ? `Nobody runs shiaijo ${c} now. This tablet lost the control earlier; tap Take control to run it.`
+                : `Nobody runs shiaijo ${c} now. Another tab on this tablet ran it earlier; tap Take control to run it here.`,
             take: true,
             ask: null,
         };
     }
-    // unknown: no answer yet, or none that names a holder.
+    // unknown: no answer yet, a refused check, or none that names a holder.
+    if (view && view.refusedStatus > 0) {
+        return {
+            tone: 'warn',
+            text: `Could not check who runs shiaijo ${c}: this console cannot tell. Reload the page.`,
+            take: false,
+            ask: null,
+        };
+    }
     if (view && view.connected) {
         return { tone: 'checking', text: `Checking who runs shiaijo ${c}…`, take: false, ask: null };
     }
@@ -194,7 +212,6 @@ export function ShiaijoControlBar({ court, control, showToast }) {
             if (mountedRef.current) setAsking(null);
         } catch (e) {
             if (typeof showToast === 'function') showToast((e && e.message) || 'Control was not taken. Try again.', 'error');
-            if (mountedRef.current) setAsking(null);
         } finally {
             if (mountedRef.current) setTaking(false);
         }

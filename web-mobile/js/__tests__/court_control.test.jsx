@@ -16,8 +16,8 @@ vi.mock('../api_client_events.jsx', async (orig) => ({
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const answer = (over = {}) => ({
-  court: 'A', holderKey: '', device: '', youHold: false, youWereDisplaced: false, sameDevice: false,
-  since: 0, lastActiveAt: 0, ...over,
+  court: 'A', holderKey: '', device: '', youHold: false, youWereDisplaced: false, tabWasDisplaced: false,
+  sameDevice: false, since: 0, lastActiveAt: 0, ...over,
 });
 const HOLDS = answer({ holderKey: 'aaaa', device: 'ipad', youHold: true, sameDevice: true, since: 5 });
 const OTHER = answer({ holderKey: 'bbbb', device: 'windows', lastActiveAt: 77, since: 9 });
@@ -184,7 +184,58 @@ describe('the claim and the state', () => {
     expect(courtControlState(OTHER)).toBe('other');
     expect(courtControlState(answer({ holderKey: 'aaaa', sameDevice: true }))).toBe('other');
     expect(courtControlState(answer({ youWereDisplaced: true }))).toBe('free-displaced');
+    expect(courtControlState(answer({ tabWasDisplaced: true }))).toBe('free-displaced');
     expect(courtControlState(answer())).toBe('unknown');
+  });
+
+  it('keeps tabWasDisplaced separately on free-displaced and held answers', async () => {
+    reply = () => ({ body: answer({ tabWasDisplaced: true }) });
+    const { mountCourtControl, consoleWriteRefusal, courtControlView } = await load();
+    const off = track(mountCourtControl('A', () => 'pw'));
+    await settle();
+    expect(courtControlView('A')).toMatchObject({
+      state: 'free-displaced', youWereDisplaced: false, tabWasDisplaced: true,
+    });
+    expect(consoleWriteRefusal()).toEqual({ applied: false, reason: 'court_not_held' });
+
+    reply = () => ({ body: answer({ holderKey: 'bbbb', device: 'ipad', tabWasDisplaced: true }) });
+    emit({ type: 'resync_required' });
+    await settle();
+    expect(courtControlView('A')).toMatchObject({
+      state: 'other', youWereDisplaced: false, tabWasDisplaced: true,
+    });
+    off();
+  });
+
+  it('records HTTP refusal status on 401 and 500 while 404 and network errors clear it', async () => {
+    reply = () => ({ status: 401, body: { error: 'Unauthorized' } });
+    const { mountCourtControl, consoleWriteRefusal, courtControlView } = await load();
+    const off = track(mountCourtControl('A', () => 'pw'));
+    await settle();
+    expect(courtControlView('A')).toMatchObject({ state: 'unknown', connected: false, refusedStatus: 401 });
+    expect(consoleWriteRefusal()).toBeNull();
+
+    reply = () => ({ status: 500, body: { error: 'boom' } });
+    emit({ type: 'resync_required' });
+    await settle();
+    expect(courtControlView('A')).toMatchObject({ state: 'unknown', connected: false, refusedStatus: 500 });
+    expect(consoleWriteRefusal()).toBeNull();
+
+    reply = () => ({ status: 404, body: { error: 'not found' } });
+    emit({ type: 'resync_required' });
+    await settle();
+    expect(courtControlView('A')).toMatchObject({ state: 'unknown', connected: true, refusedStatus: 0 });
+
+    reply = () => new TypeError('Failed to fetch');
+    emit({ type: 'resync_required' });
+    await settle();
+    expect(courtControlView('A')).toMatchObject({ state: 'unknown', connected: false, refusedStatus: 0 });
+
+    reply = () => ({ body: HOLDS });
+    emit({ type: 'resync_required' });
+    await settle();
+    expect(courtControlView('A')).toMatchObject({ state: 'holds', connected: true, refusedStatus: 0 });
+    off();
   });
 
   it('a holding console stamps its writes and is never refused', async () => {
@@ -278,7 +329,7 @@ describe('the claim and the state', () => {
     emit({ type: 'court_control_updated', data: { court: 'B', holderKey: 'x' } });
     await settle();
     expect(puts().length, 'another shiaijo').toBe(1);
-    emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
+    emit({ type: 'court_control_updated', data: { court: 'A', holderKey: 'other' } });
     await settle();
     expect(puts().length).toBe(2);
     emit({ type: 'resync_required' });
@@ -313,9 +364,145 @@ describe('the claim and the state', () => {
     await vi.advanceTimersByTimeAsync(COURT_HEARTBEAT_MS * 2);
     expect(puts().length).toBe(2);
   });
+
+  it('waits COURT_FREED_GRACE_MS before claiming after a freed-court event', async () => {
+    vi.useFakeTimers();
+    const { mountCourtControl, COURT_FREED_GRACE_MS } = await load();
+    const off = track(mountCourtControl('A', () => 'pw'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length).toBe(1);
+
+    emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
+    await vi.advanceTimersByTimeAsync(COURT_FREED_GRACE_MS - 1);
+    expect(puts().length).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length).toBe(2);
+    off();
+    await vi.advanceTimersByTimeAsync(1);
+  });
+
+  it('never claims after a freed-court event when unmounted during the grace period', async () => {
+    vi.useFakeTimers();
+    const { mountCourtControl, COURT_FREED_GRACE_MS } = await load();
+    const off = track(mountCourtControl('A', () => 'pw'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length).toBe(1);
+
+    emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
+    off();
+    await vi.advanceTimersByTimeAsync(COURT_FREED_GRACE_MS + 100);
+    expect(puts().length).toBe(1);
+  });
+
+  it('lets a reloading holder reclaim within TAB_CHECK_MS before a watching console takes the freed shiaijo', async () => {
+    vi.useFakeTimers();
+    global.BroadcastChannel = class {
+      constructor() { this.onmessage = null; }
+      postMessage() {}
+      close() {}
+    };
+    let holder = null;
+    reply = (url, init, body) => {
+      if (init.method === 'DELETE') {
+        if (holder && holder.tabId === body.tabId) {
+          holder = null;
+          queueMicrotask(() => emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } }));
+        }
+        return { body: {} };
+      }
+      if (!holder) {
+        holder = { tabId: body.tabId, holderKey: `key-${body.tabId}`, device: body.device };
+        const key = holder.holderKey;
+        queueMicrotask(() => emit({ type: 'court_control_updated', data: { court: 'A', holderKey: key } }));
+      }
+      return {
+        body: answer({
+          holderKey: holder.holderKey,
+          device: holder.device,
+          youHold: holder.tabId === body.tabId,
+        }),
+      };
+    };
+
+    const reloader1 = await load();
+    const offA1 = reloader1.mountCourtControl('A', () => 'pw');
+    await vi.advanceTimersByTimeAsync(reloader1.TAB_CHECK_MS + 1);
+    expect(reloader1.courtControlView('A').holds).toBe(true);
+    const tabA = sessionStorage.getItem(reloader1.COURT_TAB_KEY);
+    const deviceA = localStorage.getItem(reloader1.COURT_DEVICE_KEY);
+
+    // Mount a watching console with its own tab and tablet ids.
+    sessionStorage.clear();
+    localStorage.clear();
+    vi.resetModules();
+    const watcher = await load();
+    const offW = watcher.mountCourtControl('A', () => 'pw');
+    await vi.advanceTimersByTimeAsync(watcher.TAB_CHECK_MS + 1);
+    expect(watcher.courtControlView('A').state).toBe('other');
+
+    // Restore Console A's stored ids and fire pagehide to simulate reload.
+    sessionStorage.setItem(reloader1.COURT_TAB_KEY, tabA);
+    localStorage.setItem(reloader1.COURT_DEVICE_KEY, deviceA);
+    window.dispatchEvent(new Event('pagehide'));
+    offA1();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(holder).toBeNull();
+
+    // Reload Console A: it claims after TAB_CHECK_MS while the watcher is still in freed grace.
+    const putsBeforeReload = puts().length;
+    vi.resetModules();
+    const reloader2 = await load();
+    const offA2 = reloader2.mountCourtControl('A', () => 'pw');
+    await vi.advanceTimersByTimeAsync(reloader2.TAB_CHECK_MS + 1);
+    expect(reloader2.courtControlView('A').holds).toBe(true);
+    expect(holder && holder.tabId).toBe(tabA);
+    expect(puts().length).toBeGreaterThanOrEqual(putsBeforeReload + 1);
+
+    // Even after the grace period, Console A keeps holding and the watcher does not take it.
+    await vi.advanceTimersByTimeAsync(reloader2.COURT_FREED_GRACE_MS);
+    expect(holder && holder.tabId).toBe(tabA);
+    expect(reloader2.courtControlView('A').holds).toBe(true);
+    expect(watcher.courtControlView('A').state).toBe('other');
+
+    offW();
+    offA2();
+    await vi.advanceTimersByTimeAsync(1);
+  });
 });
 
 describe('Take control', () => {
+  it('aborts a hanging take after CLAIM_DEADLINE_MS and re-claims to learn who holds', async () => {
+    vi.useFakeTimers();
+    let heldAfter = false;
+    reply = () => ({ body: heldAfter ? HOLDS : OTHER });
+    global.fetch = vi.fn((url, init = {}) => {
+      const body = init.body ? JSON.parse(init.body) : null;
+      calls.push({ url, method: init.method || 'GET', body, init });
+      if (body && body.take) return new Promise(() => {});
+      const r = reply(url, init, body);
+      return Promise.resolve({ ok: (r.status || 200) < 400, status: r.status || 200, json: async () => r.body });
+    });
+
+    const { mountCourtControl, takeCourtControl, courtControlView, CLAIM_DEADLINE_MS, TAKE_TIMED_OUT } = await load();
+    const off = track(mountCourtControl('A', () => 'pw'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(courtControlView('A').state).toBe('other');
+
+    heldAfter = true;
+    let caught = null;
+    takeCourtControl('A').catch((e) => { caught = e; });
+
+    await vi.advanceTimersByTimeAsync(CLAIM_DEADLINE_MS - 1);
+    expect(caught).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught.message).toBe(TAKE_TIMED_OUT);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(courtControlView('A').state).toBe('holds');
+    off();
+    await vi.advanceTimersByTimeAsync(1);
+  });
   it('sends a take with the time on this tablet\'s clock and holds after it', async () => {
     reply = (url, init, body) => ({ body: body && body.take ? HOLDS : OTHER });
     const { mountCourtControl, takeCourtControl, courtControlView } = await load();

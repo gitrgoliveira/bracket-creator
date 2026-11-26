@@ -2042,9 +2042,10 @@ paths:
       summary: Who runs a shiaijo
       description: |
         The court console tab that runs the shiaijo, as any organiser sees it:
-        `youHold`, `sameDevice` and `youWereDisplaced` are false, since the
-        GET names no tab. A console learns its own place from the PUT, which
-        it sends as its claim and every 30 seconds as its heartbeat.
+        `youHold`, `sameDevice`, `youWereDisplaced` and `tabWasDisplaced` are
+        false, since the GET names no tab. A console learns its own place from
+        the PUT, which it sends as its claim and every 30 seconds as its
+        heartbeat.
 
         Organiser only, in a self-run tournament too.
       security:
@@ -2073,19 +2074,21 @@ paths:
       summary: Claim, keep or take a shiaijo
       description: |
         A court console's claim of the shiaijo it shows. One tab runs each
-        shiaijo (the green bar), and the court's standing belongs to the
-        tablet that tab is on: a result from any court console tab of that
-        tablet counts as the court's.
+        shiaijo (the green bar), and the server tracks the tablet that tab is
+        on and when its standing started (the score and decision endpoints do
+        not check court standing on writes yet).
 
         - A shiaijo nobody runs is taken at once, unless this tab or this
           tablet lost it earlier by a take: then only `take: true` takes it.
-        - The holder's own claim is its heartbeat: it refreshes `lastActiveAt`
-          and changes nothing else.
+        - The holder's own claim is its heartbeat: it refreshes `lastActiveAt`,
+          records `pageId`, `device` and `deviceId` when they changed, keeps
+          the standing where it was, and announces nothing (other consoles read
+          a new `device` word on their next claim).
         - A shiaijo another tab runs is taken only with `take: true` (Take
-          control). A take by another tablet starts the court's standing at
-          `takenAt`, so results the former tablet queued count like any other
-          device's; a take between two tabs of one tablet moves the green bar
-          and keeps the standing where it was.
+          control). A take by another tablet records the court's standing start
+          at `takenAt` and puts the former tablet on the displaced tablets
+          list; a take between two tabs of one tablet moves the green bar and
+          keeps the standing start where it was.
         - Claiming one shiaijo gives back any other this tab ran.
 
         The control never lapses on a timer. A change of holder is announced
@@ -2114,7 +2117,9 @@ paths:
                   type: string
                   description: >
                     The tablet's id, a lowercase UUID v4 shared by every tab of
-                    the browser. The court's standing is judged by it.
+                    the browser. Used to tell tabs of one tablet apart from
+                    another tablet; the score and decision endpoints do not
+                    judge court standing by it yet.
                 take:
                   type: boolean
                   description: Take control from whoever runs the shiaijo.
@@ -9881,8 +9886,13 @@ components:
         youWereDisplaced:
           type: boolean
           description: >
-            This tab or this tablet lost the shiaijo by a take. Always false
+            This tablet lost the shiaijo to another tablet's take. Always false
             while this tablet runs the shiaijo.
+        tabWasDisplaced:
+          type: boolean
+          description: >
+            This tab lost the shiaijo to another tab of the same tablet while
+            the tablet itself is not displaced and does not currently hold it.
         since:
           type: integer
           format: int64

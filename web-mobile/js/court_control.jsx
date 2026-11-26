@@ -1,11 +1,11 @@
-// court_control.jsx: the ONE client owner of "does this tab run the shiaijo"
-// (bc-sseq FR9). One tab runs each shiaijo; the court's standing belongs to the
-// tablet that tab is on.
+// court_control.jsx: the ONE client owner of "does this tab run the shiaijo".
+// One tab runs each shiaijo; the court's standing belongs to the tablet that
+// tab is on.
 //
 // The server keeps who runs each shiaijo (court-control.json, the routes
 // GET/PUT/DELETE /api/courts/:court/control). This module holds the ids a court
 // console sends, the claim, the heartbeat and the release, the last answer per
-// shiaijo, and the two mount-scoped questions the outbox asks:
+// shiaijo, and the mount-scoped write gate the outbox asks:
 //   - consoleWriteRefusal(): the ONE write gate. While a court console is on
 //     screen in this tab (a mount counter useCourtControl raises and lowers)
 //     and another device runs its shiaijo, or nobody does and this tablet lost
@@ -14,12 +14,11 @@
 //     that holds, it never refuses: the Scores tab and page, Pools, Bracket and
 //     the public page share this module but are never on screen beside the
 //     console, and keep today's rules.
-//   - courtControlFor(court): the `{tabId, deviceId}` a court write carries
-//     (FR8), only while the console is mounted and holds the shiaijo or has had
-//     no answer yet (an unconnected console's results claim a free shiaijo on
-//     arrival). Put the object on the payload AS IT IS: the outbox reads which
-//     shiaijo it was given for (courtOfControlStamp) to record it on the entry,
-//     which the release asks.
+//   - courtControlFor(court) and courtOfControlStamp(stamp): build and look up
+//     the `{tabId, deviceId}` stamp for a court write, only while the console
+//     is mounted and holds the shiaijo or has had no answer yet. Nothing
+//     outside tests calls courtControlFor yet, so no write carries a court
+//     control stamp yet and release is never held back for queued results yet.
 //
 // The ids, sent only to the server, which stores and compares only their
 // one-way keys (no answer or event carries one):
@@ -58,12 +57,15 @@ const TAB_CHANNEL = 'bc_court_tab_v1';
 // tab id is its own (a duplicated tab).
 export const TAB_CHECK_MS = 150;
 export const COURT_HEARTBEAT_MS = 30_000;
-// A claim that hangs is given up, so heartbeats never pile up behind it.
-const CLAIM_DEADLINE_MS = 12_000;
+// A claim or take that hangs is given up so neither piles up or locks the bar.
+export const CLAIM_DEADLINE_MS = 12_000;
+// Grace before claiming a newly freed shiaijo, so a reloading holder can reclaim it first.
+export const COURT_FREED_GRACE_MS = 5000;
 
 // The sentence Take control answers with when there is no connection: taking
 // control means nothing offline (the plan's assumption).
 export const TAKE_NEEDS_CONNECTION = 'Taking control needs a connection. Nothing changed; try again once connected.';
+export const TAKE_TIMED_OUT = 'No answer in time. Control may or may not have been taken; check the bar or try again.';
 
 const _pageId = { v: '' };
 let _tabId = '';
@@ -71,8 +73,8 @@ let _deviceId = '';
 let _tabCheck = null; // { ready: Promise, channel, loadedAt }
 let _listening = false;
 let _reqSeq = 0;
-// court -> { mounts, listeners:Set, answer, connected, answeredSeq, timer,
-//            unsubEvents, getPassword, releaseTimer }
+// court -> { mounts, listeners:Set, answer, connected, refusedStatus,
+//            answeredSeq, timer, freedTimer, unsubEvents, getPassword, releaseTimer }
 const _courts = new Map();
 // The stamps courtControlFor handed out, to the shiaijo each was for.
 const _stampCourts = new WeakMap();
@@ -204,7 +206,7 @@ export function courtControlState(answer) {
     if (!answer || typeof answer !== 'object') return 'unknown';
     if (answer.youHold === true) return 'holds';
     if (answer.holderKey) return 'other';
-    if (answer.youWereDisplaced === true) return 'free-displaced';
+    if (answer.youWereDisplaced === true || answer.tabWasDisplaced === true) return 'free-displaced';
     return 'unknown';
 }
 
@@ -215,11 +217,19 @@ function _rec(court) {
     if (!r) {
         r = {
             mounts: 0, listeners: new Set(), answer: _cachedAnswer(court), connected: false,
-            answeredSeq: 0, timer: null, unsubEvents: null, getPassword: () => '', releaseTimer: null,
+            refusedStatus: 0, answeredSeq: 0, timer: null, freedTimer: null, unsubEvents: null,
+            getPassword: () => '', releaseTimer: null,
         };
         _courts.set(court, r);
     }
     return r;
+}
+
+function _clearFreedTimer(r) {
+    if (r && r.freedTimer) {
+        clearTimeout(r.freedTimer);
+        r.freedTimer = null;
+    }
 }
 
 function _mounted(court) {
@@ -250,7 +260,9 @@ function _noteAnswer(court, seq, answer) {
     if (seq < r.answeredSeq) return;
     r.answeredSeq = seq;
     r.connected = true;
+    r.refusedStatus = 0;
     r.answer = answer;
+    if (answer && (answer.youHold === true || answer.holderKey)) _clearFreedTimer(r);
     try {
         if (answer) sessionStorage.setItem(COURT_ANSWER_PREFIX + court, JSON.stringify(answer));
         else sessionStorage.removeItem(COURT_ANSWER_PREFIX + court);
@@ -261,8 +273,20 @@ function _noteAnswer(court, seq, answer) {
 function _noteNoAnswer(court, seq) {
     const r = _rec(court);
     if (seq < r.answeredSeq) return;
-    if (r.connected) {
+    if (r.connected || r.refusedStatus !== 0) {
         r.connected = false;
+        r.refusedStatus = 0;
+        _notify(court);
+    }
+}
+
+function _noteRefusal(court, seq, status) {
+    const r = _rec(court);
+    if (seq < r.answeredSeq) return;
+    const s = Number(status) || 0;
+    if (r.connected || r.refusedStatus !== s) {
+        r.connected = false;
+        r.refusedStatus = s;
         _notify(court);
     }
 }
@@ -281,13 +305,23 @@ function _headers(court) {
     return { 'Content-Type': 'application/json', 'X-Tournament-Password': password };
 }
 
-function _deadline() {
-    try {
-        return typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
-            ? AbortSignal.timeout(CLAIM_DEADLINE_MS) : undefined;
-    } catch (_e) {
-        return undefined;
-    }
+function _withDeadline(fn) {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    let timer = null;
+    const timedOut = new Promise((_resolve, reject) => {
+        timer = setTimeout(() => {
+            if (controller) controller.abort();
+            reject(Object.assign(new Error(TAKE_TIMED_OUT), { timedOut: true }));
+        }, CLAIM_DEADLINE_MS);
+        if (timer && typeof timer.unref === 'function') timer.unref();
+    });
+    timedOut.catch(() => {});
+    return Promise.race([
+        Promise.resolve().then(() => fn(controller ? controller.signal : undefined)),
+        timedOut,
+    ]).finally(() => {
+        if (timer !== null) clearTimeout(timer);
+    });
 }
 
 // _claim: a claim (take false: also the heartbeat) or a take of `court`.
@@ -304,23 +338,26 @@ async function _claim(court, { take = false } = {}) {
     // taking tablet are ever compared with it.
     if (take) body.takenAt = Math.max(1, Math.floor(serverNowMs()));
     let res;
+    let data = null;
     try {
-        const signal = take ? undefined : _deadline();
-        res = await _directFetch(_url(court), {
-            method: 'PUT', headers: _headers(court), body: JSON.stringify(body), ...(signal ? { signal } : {}),
-        });
+        ({ res, data } = await _withDeadline(async (signal) => {
+            const r = await _directFetch(_url(court), {
+                method: 'PUT', headers: _headers(court), body: JSON.stringify(body), ...(signal ? { signal } : {}),
+            });
+            let d = null;
+            try { d = await r.json(); } catch (_e) { d = null; }
+            return { res: r, data: d };
+        }));
     } catch (e) {
         _noteNoAnswer(court, seq);
         if (take) throw e;
         return null;
     }
-    let data = null;
-    try { data = await res.json(); } catch (_e) { data = null; }
     if (!res.ok) {
-        // A shiaijo the tournament no longer lists, or a password refused:
-        // nothing this tab can run, and nothing it is told it lost.
+        // 404 means the tournament no longer lists the shiaijo; any other
+        // refusal keeps the HTTP status so the bar can tell the operator why.
         if (res.status === 404) _noteAnswer(court, seq, null);
-        else _noteNoAnswer(court, seq);
+        else _noteRefusal(court, seq, res.status);
         if (take) {
             throw Object.assign(new Error((data && data.error) || 'Control was not taken. Try again.'), {
                 code: data && data.code, status: res.status,
@@ -357,9 +394,9 @@ export async function takeCourtControl(court) {
     }
 }
 
-// _tabletQueuedFor: the tablet's outbox (every tab's entries, from storage,
-// and this tab's own) holds an entry stamped with the court's control for
-// `court`. Every such entry needs the tablet to keep running the shiaijo.
+// _tabletQueuedFor: checks whether the tablet's outbox holds an entry stamped
+// with courtControl for `court`. No write is stamped with the court control
+// yet, so this is always false for now.
 function _tabletQueuedFor(court) {
     const held = (d) => !!d && d.courtControlCourt === court && !!d.payload && !!d.payload.courtControl;
     for (const d of _writeQueue.values()) if (held(d)) return true;
@@ -367,14 +404,15 @@ function _tabletQueuedFor(court) {
     return false;
 }
 
-/** Whether this tab may give `court` back now: it runs it and the tablet has nothing queued for it. */
+/** Whether this tab may give `court` back now (always true while holding, since no write is stamped yet). */
 export function courtReleasable(court) {
     const r = _courts.get(court);
     return !!r && courtControlState(r.answer) === 'holds' && !_tabletQueuedFor(court);
 }
 
-// _release: gives `court` back when this tab runs it and the tablet has
-// nothing queued for it. `keepalive` for a page that is going.
+// _release: gives `court` back when courtReleasable allows it (no write is
+// stamped yet, so release is not held back for queued results yet).
+// `keepalive` for a page that is going.
 function _release(court, { keepalive = false } = {}) {
     if (!courtReleasable(court)) return;
     const r = _courts.get(court);
@@ -411,8 +449,9 @@ function _claimAllMounted() {
 function _listenOnce() {
     if (_listening || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
     _listening = true;
-    // Closing the tab gives the shiaijo back, unless the tablet still has
-    // something queued for it (those results need the control).
+    // Closing or reloading the tab gives the shiaijo back when courtReleasable
+    // allows it (no write is stamped yet, so release is not held back for
+    // queued results yet).
     window.addEventListener('pagehide', () => {
         for (const court of _courts.keys()) if (_mounted(court)) _release(court, { keepalive: true });
     });
@@ -438,9 +477,21 @@ function _startCourt(court) {
             if (!event || !_mounted(court)) return;
             // A new stream: what this tab knew may be stale.
             if (event.type === 'resync_required') { _claim(court); return; }
-            // The holder changed: ask again (a free shiaijo is taken at once,
-            // unless this tablet lost it by a take).
-            if (event.type === 'court_control_updated' && event.data && event.data.court === court) _claim(court);
+            if (event.type === 'court_control_updated' && event.data && event.data.court === court) {
+                _clearFreedTimer(r);
+                if (!event.data.holderKey) {
+                    const seqAtFreed = r.answeredSeq;
+                    r.freedTimer = setTimeout(() => {
+                        r.freedTimer = null;
+                        if (!_mounted(court)) return;
+                        if (r.answeredSeq > seqAtFreed && r.answer && (r.answer.youHold === true || r.answer.holderKey)) return;
+                        _claim(court);
+                    }, COURT_FREED_GRACE_MS);
+                    if (r.freedTimer && typeof r.freedTimer.unref === 'function') r.freedTimer.unref();
+                    return;
+                }
+                _claim(court);
+            }
         }, (status) => {
             if (status === 'error') wasDown = true;
             else if (status === 'open' && wasDown) { wasDown = false; _claim(court); }
@@ -456,6 +507,7 @@ function _stopCourt(court) {
     if (!r) return;
     if (r.timer) clearInterval(r.timer);
     r.timer = null;
+    _clearFreedTimer(r);
     if (typeof r.unsubEvents === 'function') r.unsubEvents();
     r.unsubEvents = null;
 }
@@ -502,8 +554,9 @@ export function mountCourtControl(court, getPassword, onChange) {
 
 /**
  * The court console's view of `court`: { holds, state, holderDevice,
- * sameDevice, youWereDisplaced, holderLastActiveAt, holderSince, connected,
- * take }. `state` is courtControlState's; `take()` is takeCourtControl.
+ * sameDevice, youWereDisplaced, tabWasDisplaced, holderLastActiveAt,
+ * holderSince, connected, refusedStatus, take }. `state` is courtControlState's;
+ * `take()` is takeCourtControl.
  */
 export function useCourtControl(court, password) {
     const c = String(court || '');
@@ -529,9 +582,11 @@ export function courtControlView(court, take = () => takeCourtControl(court)) {
         holderDevice: (a && a.device) || '',
         sameDevice: !!(a && a.sameDevice),
         youWereDisplaced: !!(a && a.youWereDisplaced),
+        tabWasDisplaced: !!(a && a.tabWasDisplaced),
         holderLastActiveAt: (a && Number(a.lastActiveAt)) || 0,
         holderSince: (a && Number(a.since)) || 0,
         connected: !!(r && r.connected),
+        refusedStatus: (r && r.refusedStatus) || 0,
         take,
     };
 }

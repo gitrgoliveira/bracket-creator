@@ -47,17 +47,20 @@ type CourtClaim struct {
 }
 
 // CourtControlAnswer is a shiaijo's control as one caller sees it. HolderKey
-// is "" while nobody runs it. YouWereDisplaced is true when the caller's tab
-// or tablet lost the shiaijo by a take, and false while the caller's tablet
-// holds it (a tab of the holding tablet is shown the "another tab on this
-// tablet" bar, never the "another device took it" warning). Times are unix
-// milliseconds on the server's clock.
+// is "" while nobody runs it. YouWereDisplaced is true when the caller's
+// tablet lost the shiaijo to another tablet; TabWasDisplaced is true when
+// only this tab lost it (to another tab of the same tablet, so the tablet
+// itself is not displaced). Both are false while the caller's tablet holds
+// it (a tab of the holding tablet is shown the "another tab on this tablet"
+// bar, never a displacement warning). Times are unix milliseconds on the
+// server's clock.
 type CourtControlAnswer struct {
 	Court            string `json:"court"`
 	HolderKey        string `json:"holderKey"`
 	Device           string `json:"device"`
 	YouHold          bool   `json:"youHold"`
 	YouWereDisplaced bool   `json:"youWereDisplaced"`
+	TabWasDisplaced  bool   `json:"tabWasDisplaced"`
 	SameDevice       bool   `json:"sameDevice"`
 	Since            int64  `json:"since"`
 	LastActiveAt     int64  `json:"lastActiveAt"`
@@ -73,8 +76,8 @@ type courtControlEvent struct {
 }
 
 // courtControlRegistry is the one owner of who runs each shiaijo. Its mutex
-// is taken under nothing but a competition transaction (a write judged on
-// arrival, WriteStanding) and holds only the court-control file's own leaf
+// is safe to take under a competition transaction (WriteStanding, when the
+// write doors call it) and holds only the court-control file's own leaf
 // mutex and the hub's, so the tournament is read before it is taken.
 type courtControlRegistry struct {
 	store CourtControlStore
@@ -145,7 +148,9 @@ func (r *courtControlRegistry) answerLocked(court string, h state.CourtHold, tab
 		sameDevice = devKey != "" && h.DeviceKey == devKey
 	}
 	a.SameDevice = sameDevice
-	a.YouWereDisplaced = !sameDevice && (h.IsDisplaced(tabKey) || h.IsDisplacedDevice(devKey))
+	displacedDevice := h.IsDisplacedDevice(devKey)
+	a.YouWereDisplaced = !sameDevice && displacedDevice
+	a.TabWasDisplaced = !sameDevice && !displacedDevice && h.IsDisplaced(tabKey)
 	return a
 }
 
@@ -182,8 +187,11 @@ func validCourtClaim(req CourtClaim) bool {
 //     lost the shiaijo by a take): then only an explicit take does it, with
 //     standingFrom the take's takenAt when the tablet lost it to another
 //     tablet (0 when only the tab lost it, to another tab of its tablet);
-//   - the holder's own claim (a heartbeat) refreshes its last activity, and
-//     its page load and device word, saved only when they changed;
+//   - the holder's own claim (a heartbeat) refreshes its last activity,
+//     records its page load, device word and tablet id when they changed
+//     (saved only when they did), keeps the standing where it was, and
+//     announces nothing (other consoles read a new device word on their next
+//     claim);
 //   - taking from another tab needs Take; the former holder's tab joins the
 //     displaced list. A take by ANOTHER tablet also puts the former holder's
 //     tablet on the displaced tablets list (the taker's leaves it) and starts
@@ -325,13 +333,15 @@ func (r *courtControlRegistry) standingLocked(court, devKey string, stamp int64)
 	return h.Held() && devKey != "" && h.DeviceKey == devKey && stamp >= h.StandingFrom
 }
 
-// WriteStanding judges a court console's write on arrival. Ids that are not
-// a console's, or a shiaijo the tournament does not list, have no standing.
-// A shiaijo nobody holds, from a tab and a tablet on neither displaced list
-// (a console opened offline), is claimed by the write with standingFrom 0,
-// as the claim route would claim it; its page load and device word arrive
-// with the console's next claim. One that another tab of the SAME tablet
-// holds has the standing and takes nothing. One that another tablet holds is
+// WriteStanding reports whether a court console's write has the court's
+// standing. It has no production caller yet: the score and decision doors do
+// not carry a court control or call WriteStanding yet. Ids that are not a
+// console's, or a shiaijo the tournament does not list, have no standing. A
+// shiaijo nobody holds, from a tab and a tablet on neither displaced list (a
+// console opened offline), is claimed by the write with standingFrom 0, as
+// the claim route would claim it; its page load and device word arrive with
+// the console's next claim. One that another tab of the SAME tablet holds
+// has the standing and takes nothing. One that another tablet holds is
 // ordinary. A write never releases another shiaijo its tab holds: it is no
 // switch of the console.
 func (r *courtControlRegistry) WriteStanding(court, tabID, deviceID string, stamp int64) (bool, error) {

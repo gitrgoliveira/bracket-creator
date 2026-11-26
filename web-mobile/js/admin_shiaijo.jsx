@@ -1350,13 +1350,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 bout makes allDone true, and the pin must still
                                 hold the editor open. */}
                             {(!allDone || correctingMatch) && selectedMatch && (
-                                // View only while this tab does not run the shiaijo
-                                // (bc-sseq FR9): the editor keeps what is on screen
-                                // and cannot save. Its window-level shortcuts and any
-                                // write it still makes are refused by the outbox's
-                                // gate, and a refused tap is noted beside the board.
-                                <fieldset className="shiaijo-control-scope shiaijo-control-scope--editor" disabled={!canWrite}>
+                                // View only while this tab does not run the shiaijo:
+                                // readOnly={!canWrite} disables write controls and
+                                // scoring shortcuts while keeping read-only controls
+                                // (History, Ippon key, Prev/Next, Discard held write)
+                                // usable; the outbox gate still refuses any write.
                                 <ScoreEditorModal
+                                    readOnly={!canWrite}
                                     hostUnsavedRef={editorUnsavedRef}
                                     // No subResults.length: see the same key in
                                     // admin_competition_bracket.jsx. Remounting
@@ -1469,7 +1469,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     }}
                                     password={password}
                                 />
-                                </fieldset>
                             )}
 
                             {correctingMatch && correctingMatch.status === "completed" && (

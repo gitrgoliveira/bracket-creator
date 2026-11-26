@@ -133,6 +133,26 @@ func TestCourtControl_AFreeShiaijoIsTakenAtOnceAndAHeartbeatSavesNothing(t *test
 	assert.Len(t, rig.rec.events, 1, "the holder did not change")
 }
 
+func TestCourtControl_HeartbeatWithChangedDeviceSavesWithoutBroadcast(t *testing.T) {
+	rig := newCourtRig(t)
+	rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+	require.Len(t, rig.rec.events, 1)
+
+	rig.clock = rig.clock.Add(30 * time.Second)
+	beat, err := rig.reg.Claim(CourtClaim{
+		Court: "A", TabID: ccTab1, DeviceID: ccTablet1, PageID: ccPage1, Device: "mac",
+	})
+	require.NoError(t, err)
+	assert.True(t, beat.YouHold)
+	assert.Equal(t, "mac", beat.Device)
+	assert.Equal(t, rig.clock.UnixMilli(), beat.LastActiveAt)
+	assert.Equal(t, "mac", rig.stored(t, "A").Device, "a changed device word is saved on heartbeat")
+	assert.Len(t, rig.rec.events, 1, "a heartbeat with a changed device word announces nothing")
+
+	other := rig.claim(t, "A", ccTab2, ccTablet2, ccPage2, false, 0)
+	assert.Equal(t, "mac", other.Device, "other consoles read the new device word on their next claim")
+}
+
 func TestCourtControl_AnotherTabsClaimNeverTakesItByItself(t *testing.T) {
 	rig := newCourtRig(t)
 	rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
@@ -202,6 +222,7 @@ func TestCourtControl_ASameTabletTakeKeepsTheStanding(t *testing.T) {
 	assert.False(t, old.YouHold)
 	assert.True(t, old.SameDevice)
 	assert.False(t, old.YouWereDisplaced, "while its tablet holds, the old tab is shown the grey bar, not the amber one")
+	assert.False(t, old.TabWasDisplaced)
 }
 
 func TestCourtControl_TakenAtIsClampedToTheServersNowPlusTheMargin(t *testing.T) {
@@ -283,9 +304,93 @@ func TestCourtControl_ATabThatLostItToItsOwnTabletKeepsTheStandingWhole(t *testi
 
 	free := rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
 	assert.False(t, free.YouHold, "the displaced tab takes it back only by a take")
-	assert.True(t, free.YouWereDisplaced)
+	assert.False(t, free.YouWereDisplaced, "the tablet never lost the shiaijo to another tablet")
+	assert.True(t, free.TabWasDisplaced, "only this tab lost the shiaijo")
 	rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, true, rig.clock.UnixMilli())
 	assert.Zero(t, rig.stored(t, "A").StandingFrom, "the tablet never lost the shiaijo to another tablet")
+}
+
+func TestCourtControl_DisplacementFlags(t *testing.T) {
+	tests := []struct {
+		name             string
+		act              func(t *testing.T, rig *courtRig) CourtControlAnswer
+		wantHold         bool
+		wantSameDevice   bool
+		wantDisplaced    bool
+		wantTabDisplaced bool
+	}{
+		{
+			name: "tab displaced by same-tablet tab that then releases sets TabWasDisplaced only",
+			act: func(t *testing.T, rig *courtRig) CourtControlAnswer {
+				rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+				rig.claim(t, "A", ccTab2, ccTablet1, ccPage2, true, rig.clock.UnixMilli())
+				_, err := rig.reg.Release("A", ccTab2, ccPage2)
+				require.NoError(t, err)
+				return rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+			},
+			wantTabDisplaced: true,
+		},
+		{
+			name: "tab displaced by same-tablet tab that still holds sets neither flag",
+			act: func(t *testing.T, rig *courtRig) CourtControlAnswer {
+				rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+				rig.claim(t, "A", ccTab2, ccTablet1, ccPage2, true, rig.clock.UnixMilli())
+				return rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+			},
+			wantSameDevice: true,
+		},
+		{
+			name: "take by another tablet sets YouWereDisplaced while other tablet holds",
+			act: func(t *testing.T, rig *courtRig) CourtControlAnswer {
+				rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+				rig.claim(t, "A", ccTab2, ccTablet2, ccPage2, true, rig.clock.UnixMilli())
+				return rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+			},
+			wantDisplaced: true,
+		},
+		{
+			name: "take by another tablet then release sets YouWereDisplaced only",
+			act: func(t *testing.T, rig *courtRig) CourtControlAnswer {
+				rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+				rig.claim(t, "A", ccTab2, ccTablet2, ccPage2, true, rig.clock.UnixMilli())
+				_, err := rig.reg.Release("A", ccTab2, ccPage2)
+				require.NoError(t, err)
+				return rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+			},
+			wantDisplaced: true,
+		},
+		{
+			name: "take by another tablet sets YouWereDisplaced for another tab of the displaced tablet",
+			act: func(t *testing.T, rig *courtRig) CourtControlAnswer {
+				rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+				rig.claim(t, "A", ccTab2, ccTablet2, ccPage2, true, rig.clock.UnixMilli())
+				return rig.claim(t, "A", ccTab3, ccTablet1, ccPage3, false, 0)
+			},
+			wantDisplaced: true,
+		},
+		{
+			name: "other-tablet take after same-tablet take sets YouWereDisplaced only",
+			act: func(t *testing.T, rig *courtRig) CourtControlAnswer {
+				rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+				rig.claim(t, "A", ccTab2, ccTablet1, ccPage2, true, rig.clock.UnixMilli())
+				rig.claim(t, "A", ccTab3, ccTablet2, ccPage3, true, rig.clock.UnixMilli())
+				_, err := rig.reg.Release("A", ccTab3, ccPage3)
+				require.NoError(t, err)
+				return rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+			},
+			wantDisplaced: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rig := newCourtRig(t)
+			got := tt.act(t, rig)
+			assert.Equal(t, tt.wantHold, got.YouHold)
+			assert.Equal(t, tt.wantSameDevice, got.SameDevice)
+			assert.Equal(t, tt.wantDisplaced, got.YouWereDisplaced)
+			assert.Equal(t, tt.wantTabDisplaced, got.TabWasDisplaced)
+		})
+	}
 }
 
 func TestCourtControl_AWriteClaimsAFreeShiaijo(t *testing.T) {

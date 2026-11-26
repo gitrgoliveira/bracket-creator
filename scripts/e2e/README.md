@@ -85,6 +85,14 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             control's line count (labelLines)
     fixtures/shiaijo.mjs    /admin/shiaijo/:court (queue, inline editor, which
                             match an editor holds)
+    fixtures/court-control.mjs  the court console's control bar (state, text,
+                            Take control) and releaseCourtControl /
+                            releaseOnClose: a closing tab gives its shiaijo
+                            back on pagehide, which Playwright context.close()
+                            does not fire, so releaseCourtControl leaves the
+                            page the way a closing tab does and
+                            fixtures/test.mjs calls it for every page before
+                            its context or page closes
     fixtures/scores.mjs     the Scores tab and its overlay editor
     fixtures/scoring.mjs    scoring an individual bout on either editor, Start
                             match (startMatch), clearMarks, Mark draw

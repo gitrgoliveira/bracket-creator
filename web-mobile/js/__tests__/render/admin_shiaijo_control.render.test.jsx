@@ -3,14 +3,15 @@
 // console handler that finds the control gone when it acts.
 import { act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { setupShiaijoConsole, mountCourt, courtMatch } from '../helpers/shiaijo_console.js';
+import { setupShiaijoConsole, mountCourt, courtMatch, probe } from '../helpers/shiaijo_console.js';
 import { courtControlBar, lastActivePhrase, refusedNotHeld } from '../../admin_shiaijo_control.jsx';
+import { CLAIM_DEADLINE_MS } from '../../court_control.jsx';
 
 setupShiaijoConsole();
 
 const answer = (over = {}) => ({
-  court: 'A', holderKey: '', device: '', youHold: false, youWereDisplaced: false, sameDevice: false,
-  since: 0, lastActiveAt: 0, ...over,
+  court: 'A', holderKey: '', device: '', youHold: false, youWereDisplaced: false, tabWasDisplaced: false,
+  sameDevice: false, since: 0, lastActiveAt: 0, ...over,
 });
 const HOLDS = answer({ holderKey: 'aaaa', device: 'ipad', youHold: true, sameDevice: true, since: 5 });
 const twoMinAgo = () => Date.now() - 2 * 60_000 - 5_000;
@@ -44,23 +45,28 @@ const mount = async () => {
 
 describe('the mark under the top bar', () => {
   it('holds: a green bar saying this tablet runs the shiaijo, and the queue can act', async () => {
-    const c = await mount();
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
+    await settle(200);
     try {
       expect(bar(c).textContent).toBe('This tablet runs shiaijo A');
       expect(bar(c).className).toContain('shiaijo-control--holds');
       expect(bar(c).querySelector('.shiaijo-control__dot')).toBeTruthy();
       expect(within(bar(c)).queryByRole('button', { name: 'Take control' })).toBeNull();
       expect(queueScope(c).disabled).toBe(false);
+      expect(probe.props.readOnly).toBe(false);
+      expect(c.utils.container.querySelector('fieldset.shiaijo-control-scope--editor')).toBeNull();
     } finally { c.restore(); c.utils.unmount(); }
   });
 
   it('another device: a grey bar naming its kind and when it was last active, the queue view only, and Take control asks once', async () => {
     reply = (url, init, body) => (body && body.take ? { body: HOLDS } : { body: answer({ holderKey: 'bbbb', device: 'ipad', lastActiveAt: twoMinAgo() }) });
-    const c = await mount();
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
+    await settle(200);
     try {
       expect(bar(c).textContent).toContain('Shiaijo A is run from another device (an iPad, last active 2 min ago)');
       expect(bar(c).className).toContain('shiaijo-control--other');
       expect(queueScope(c).disabled).toBe(true);
+      expect(probe.props.readOnly).toBe(true);
 
       await act(async () => { within(bar(c)).getByRole('button', { name: 'Take control' }).click(); });
       const ask = c.utils.getByTestId('take-control-ask');
@@ -128,6 +134,59 @@ describe('the mark under the top bar', () => {
     } finally { c.restore(); c.utils.unmount(); }
   });
 
+  it('free after another tab on this tablet lost it: says another tab ran it earlier, and Take control takes it with no question', async () => {
+    reply = (url, init, body) => (body && body.take ? { body: HOLDS } : { body: answer({ tabWasDisplaced: true }) });
+    const c = await mount();
+    try {
+      expect(bar(c).textContent).toContain('Nobody runs shiaijo A now. Another tab on this tablet ran it earlier; tap Take control to run it here.');
+      expect(bar(c).className).toContain('shiaijo-control--warn');
+      expect(bar(c).getAttribute('data-state')).toBe('free-displaced');
+      expect(queueScope(c).disabled).toBe(true);
+      await act(async () => { within(bar(c)).getByRole('button', { name: 'Take control' }).click(); });
+      await settle();
+      expect(c.utils.queryByTestId('take-control-ask')).toBeNull();
+      expect(takes()).toHaveLength(1);
+      expect(bar(c).textContent).toBe('This tablet runs shiaijo A');
+    } finally { c.restore(); c.utils.unmount(); }
+  });
+
+  it('401 refusal: says sign-in no longer works and to sign in again, while still allowing writes', async () => {
+    reply = () => ({ status: 401, body: { error: 'Unauthorized' } });
+    sessionStorage.clear();
+    await settle(10);
+    const c = await mount();
+    try {
+      expect(bar(c).textContent).toBe('Your sign-in no longer works for shiaijo A. Sign in again.');
+      expect(bar(c).className).toContain('shiaijo-control--warn');
+      expect(bar(c).getAttribute('data-state')).toBe('unknown');
+      expect(queueScope(c).disabled).toBe(false);
+    } finally { c.restore(); c.utils.unmount(); }
+  });
+
+  it('500 refusal: says it could not check who runs the shiaijo and to reload', async () => {
+    reply = () => ({ status: 500, body: { error: 'boom' } });
+    sessionStorage.clear();
+    await settle(10);
+    const c = await mount();
+    try {
+      expect(bar(c).textContent).toBe('Could not check who runs shiaijo A: this console cannot tell. Reload the page.');
+      expect(bar(c).className).toContain('shiaijo-control--warn');
+      expect(bar(c).getAttribute('data-state')).toBe('unknown');
+      expect(queueScope(c).disabled).toBe(false);
+    } finally { c.restore(); c.utils.unmount(); }
+  });
+
+  it('404 keeps the checking wording', async () => {
+    reply = () => ({ status: 404, body: { error: 'not found' } });
+    await settle(10);
+    const c = await mount();
+    try {
+      expect(bar(c).textContent).toBe('Checking who runs shiaijo A…');
+      expect(bar(c).className).toContain('shiaijo-control--checking');
+      expect(bar(c).getAttribute('data-state')).toBe('unknown');
+    } finally { c.restore(); c.utils.unmount(); }
+  });
+
   it('no connection: "Checking" at first, then the amber not-connected line, and the console still acts', async () => {
     reply = () => new TypeError('Failed to fetch');
     // The last test's console gives the shiaijo back first (its release runs
@@ -167,6 +226,44 @@ describe('a console handler checks the control when it acts', () => {
       expect(c.utils.getByRole('button', { name: 'Send back to queue' }).disabled).toBe(true);
     } finally { c.restore(); c.utils.unmount(); }
   });
+
+  it('a hanging Take control ends after CLAIM_DEADLINE_MS so Cancel works again', async () => {
+    vi.useFakeTimers();
+    let c = null;
+    try {
+      reply = () => ({ body: answer({ holderKey: 'bbbb', device: 'ipad' }) });
+      global.fetch = vi.fn((url, init = {}) => {
+        const body = init.body ? JSON.parse(init.body) : null;
+        calls.push({ url: String(url), method: init.method || 'GET', body });
+        if (body && body.take) return new Promise(() => {});
+        const r = reply(String(url), init, body);
+        return Promise.resolve({ ok: (r.status || 200) < 400, status: r.status || 200, json: async () => r.body });
+      });
+
+      c = await mountCourt([courtMatch('m1', 'scheduled'), courtMatch('m2', 'scheduled')]);
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(bar(c).getAttribute('data-state')).toBe('other');
+
+      await act(async () => { within(bar(c)).getByRole('button', { name: 'Take control' }).click(); });
+      const ask = c.utils.getByTestId('take-control-ask');
+      await act(async () => { within(ask).getByRole('button', { name: 'Take control' }).click(); });
+      expect(within(ask).getByRole('button', { name: 'Cancel' }).disabled).toBe(true);
+      expect(ask.textContent).toContain('Taking control…');
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(CLAIM_DEADLINE_MS); });
+      expect(c.showToast).toHaveBeenCalledWith(expect.stringContaining('No answer in time'), 'error');
+      expect(within(ask).getByRole('button', { name: 'Cancel' }).disabled).toBe(false);
+      expect(within(ask).getByRole('button', { name: 'Take control' })).toBeTruthy();
+
+      await act(async () => { within(ask).getByRole('button', { name: 'Cancel' }).click(); });
+      expect(c.utils.queryByTestId('take-control-ask')).toBeNull();
+    } finally {
+      if (c) { c.restore(); c.utils.unmount(); }
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+      vi.useRealTimers();
+      await settle(10);
+    }
+  });
 });
 
 describe('the words and the check', () => {
@@ -179,8 +276,15 @@ describe('the words and the check', () => {
   });
 
   it('names no device for one the server reads as other', () => {
-    const view = { state: 'other', holderDevice: 'other', holderLastActiveAt: 0, sameDevice: false, youWereDisplaced: false };
+    const view = { state: 'other', holderDevice: 'other', holderLastActiveAt: 0, sameDevice: false, youWereDisplaced: false, tabWasDisplaced: false };
     expect(courtControlBar(view, 'B').text).toBe('Shiaijo B is run from another device');
+  });
+
+  it('tabWasDisplaced alone does not raise the tablet-displacement warning when held by another device', () => {
+    const view = { state: 'other', holderDevice: 'ipad', holderLastActiveAt: 0, sameDevice: false, youWereDisplaced: false, tabWasDisplaced: true };
+    const barView = courtControlBar(view, 'A');
+    expect(barView.tone).toBe('other');
+    expect(barView.text).toBe('Shiaijo A is run from another device (an iPad)');
   });
 
   it('refusedNotHeld refuses only a tab that may not write, quietly when asked', () => {

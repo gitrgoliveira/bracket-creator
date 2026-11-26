@@ -568,9 +568,13 @@ func TestCourtControl_ANewTournamentFreesEveryShiaijo(t *testing.T) {
 	assert.Empty(t, holderOfA(t, rig), "the new tournament's shiaijo A is run by nobody")
 }
 
-func TestCourtControl_AnImportFreesEveryShiaijo(t *testing.T) {
+// An import only adds competitions next to the existing ones (a duplicate id is
+// refused), so it never replaces the tournament and nobody loses a shiaijo.
+func TestCourtControl_AnImportLeavesEveryShiaijoHeld(t *testing.T) {
 	rig := newBackupRig(t)
 	claimA(t, rig)
+	held := holderOfA(t, rig)
+	require.NotEmpty(t, held)
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 	fw, err := mw.CreateFormFile("files", "manifest.yaml")
@@ -585,7 +589,7 @@ func TestCourtControl_AnImportFreesEveryShiaijo(t *testing.T) {
 	rig.r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.NotContains(t, w.Body.String(), `"error"`, "the competition imported")
-	assert.Empty(t, holderOfA(t, rig))
+	assert.Equal(t, held, holderOfA(t, rig), "the import frees no shiaijo")
 }
 
 func TestCourtControl_AFullRestoreFreesEveryShiaijoAndACompetitionRestoreDoesNot(t *testing.T) {

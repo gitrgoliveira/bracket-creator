@@ -10,7 +10,6 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
-	"slices"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -138,12 +137,6 @@ func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			results = append(results, r)
 		}
 
-		// The import replaced the tournament's competitions, so whoever ran
-		// a shiaijo before runs nothing now (bc-sseq FR9). An import of which
-		// no row landed replaced nothing.
-		if slices.ContainsFunc(results, func(r ImportResult) bool { return r.Error == "" }) {
-			clearCourtControlAfterReplace(hub.courtControl(), "import")
-		}
 		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusOK, gin.H{"results": results})
 	})

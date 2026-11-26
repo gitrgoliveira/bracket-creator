@@ -166,6 +166,47 @@ describe('createRefetchGate', () => {
     expect(h.gate.event(1)).toBe(true); // nothing counts as applied
   });
 
+  it('an answer behind an event seen before its fetch was sent is fetched once more, and only once', async () => {
+    // The fetch joined a build the server elected before event 5: it names 4.
+    const h = harness();
+    h.gate.event(5);
+    h.fireTimers();
+    await h.answer(answerAt(4));
+    expect(h.gate.appliedSeq()).toBe(4);
+    expect(h.timers).toHaveLength(1);
+    h.fireTimers();
+    await h.answer(answerAt(5));
+    expect(h.gate.appliedSeq()).toBe(5);
+    expect(h.timers).toHaveLength(0);
+    expect(h.sent).toHaveLength(2);
+
+    // A server whose seq restarted below the page's answers behind every time:
+    // the repeat is the only one.
+    const restarted = harness();
+    restarted.gate.event(50);
+    restarted.fireTimers();
+    await restarted.answer(answerAt(3));
+    expect(restarted.timers).toHaveLength(1);
+    restarted.fireTimers();
+    await restarted.answer(answerAt(3));
+    expect(restarted.timers).toHaveLength(0);
+    expect(restarted.sent).toHaveLength(2);
+  });
+
+  it('an answer covering the events seen before its fetch was sent asks for nothing, and a missing header is not behind', async () => {
+    const covered = harness();
+    covered.gate.event(5);
+    covered.fireTimers();
+    await covered.answer(answerAt(5));
+    expect(covered.timers).toHaveLength(0);
+
+    const bare = harness();
+    bare.gate.event(5);
+    bare.fireTimers();
+    await bare.answer(answerAt(null));
+    expect(bare.timers).toHaveLength(0);
+  });
+
   it('now() asks for one whatever the seq, still coalescing', async () => {
     const h = harness();
     h.gate.event(1);

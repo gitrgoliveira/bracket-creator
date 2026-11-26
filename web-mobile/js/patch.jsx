@@ -267,6 +267,10 @@ const HELD_PUSH_WAIT_MS = 300;
 //   - while one is out, it keeps the highest seq seen, and once the answer
 //     lands it schedules one more only if that answer names a lower seq (or
 //     none: a missing header covers nothing);
+//   - an answer that names a lower seq than the highest event seen before
+//     its fetch was sent was built before that event (a fetch can join a
+//     build the server elected earlier): one more refetch is asked for, and
+//     only one, since a fetch that repeats it never asks again;
 //   - now() (reconnect, tab resume, a gap) asks for one whatever the seq,
 //     still coalescing;
 //   - an answer naming a lower seq than the applied one (a server restart, a
@@ -292,6 +296,9 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
     let again = false;    // a refetch was asked for while one was out
     let flightSeq = 0;    // highest event seq seen while the fetch was out
     let flightUnknown = false; // an event with no seq arrived while it was out
+    let flightSent = 0;   // highest event seq seen when the fetch was sent
+    let flightRecheck = false; // the fetch out is the repeat of one that answered behind
+    let recheck = false;  // the refetch wanted is that repeat
     let forced = false;   // the refetch wanted is one applied() cannot cancel
     let generation = 0;
 
@@ -330,6 +337,11 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
         if (gen === generation && ok) {
             if (flightUnknown) more = force = true;
             else if (flightSeq > 0 && !(isSeq(seq) && seq >= flightSeq)) more = true;
+            // An answer behind an event seen before the fetch was sent was
+            // built before that event (it joined an earlier build): fetch
+            // once more. Only once, so a server whose seq restarted below
+            // the page's cannot loop it.
+            else if (!flightRecheck && isSeq(seq) && seq < flightSent) more = recheck = true;
             if (adopt(seq)) more = force = true;
         } else if (flightUnknown || flightSeq > 0) {
             more = force = true;
@@ -344,11 +356,15 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
         if (inflight) { again = true; return; }
         // An answer applied since the refetch was asked for may cover every
         // event seen: then there is nothing left to fetch.
+        const repeat = recheck;
+        recheck = false;
         if (!forced && seen <= applied) return;
         forced = false;
         inflight = true;
         flightSeq = 0;
         flightUnknown = false;
+        flightSent = seen;
+        flightRecheck = repeat;
         const gen = generation;
         let apply;
         let sent;

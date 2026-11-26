@@ -260,7 +260,10 @@ const HELD_PUSH_WAIT_MS = 300;
 //   - onError(err): a failed fetch or take (console.error by default).
 // The gate's answers, in order:
 //   - an event at or below the applied answer's seq needs no refetch;
-//   - while a refetch is scheduled and not sent, more events add nothing;
+//   - while a refetch is scheduled and not sent, more events add nothing, and
+//     an applied answer that covers every event seen (an out-of-gate read,
+//     such as the save's own refresh) cancels it; one asked for by now() or by
+//     an event with no seq is sent whatever was applied;
 //   - while one is out, it keeps the highest seq seen, and once the answer
 //     lands it schedules one more only if that answer names a lower seq (or
 //     none: a missing header covers nothing);
@@ -274,7 +277,9 @@ const HELD_PUSH_WAIT_MS = 300;
 //     adopted. The host asks for its refetch with now().
 // Every fetch that applies the same state outside the gate (a first load, a
 // refresh after a save) reports the seq of the value its fetcher returned,
-// before any merge: `applied(readSeqOf(fetched))`.
+// before any merge: `applied(readSeqOf(fetched))`. The gate's own fetch never
+// reports: the answer it returns is read by the gate itself, which drops one
+// sent before forget().
 // event() answers true when the event asked for (or joined) a refetch, false
 // when an applied answer already covers it.
 function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_MS, random = Math.random, onError } = {}) {
@@ -287,6 +292,7 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
     let again = false;    // a refetch was asked for while one was out
     let flightSeq = 0;    // highest event seq seen while the fetch was out
     let flightUnknown = false; // an event with no seq arrived while it was out
+    let forced = false;   // the refetch wanted is one applied() cannot cancel
     let generation = 0;
 
     const isSeq = (seq) => typeof seq === 'number' && Number.isSafeInteger(seq) && seq > 0;
@@ -305,7 +311,11 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
         return false;
     };
 
-    const want = () => {
+    // forced: the refetch asked for is one an applied answer cannot cancel
+    // (now(), an event with no seq, a new stream, a failed fetch): fire()
+    // sends it whatever has been applied since.
+    const want = (force) => {
+        if (force) forced = true;
         if (scheduled) return;
         if (inflight) { again = true; return; }
         scheduled = true;
@@ -315,21 +325,27 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
     const settle = (gen, seq, ok) => {
         inflight = false;
         let more = again;
+        let force = false;
         again = false;
         if (gen === generation && ok) {
-            if (flightUnknown || (flightSeq > 0 && !(isSeq(seq) && seq >= flightSeq))) more = true;
-            if (adopt(seq)) more = true;
+            if (flightUnknown) more = force = true;
+            else if (flightSeq > 0 && !(isSeq(seq) && seq >= flightSeq)) more = true;
+            if (adopt(seq)) more = force = true;
         } else if (flightUnknown || flightSeq > 0) {
-            more = true;
+            more = force = true;
         }
         flightSeq = 0;
         flightUnknown = false;
-        if (more) want();
+        if (more) want(force);
     };
 
     function fire() {
         scheduled = false;
         if (inflight) { again = true; return; }
+        // An answer applied since the refetch was asked for may cover every
+        // event seen: then there is nothing left to fetch.
+        if (!forced && seen <= applied) return;
+        forced = false;
         inflight = true;
         flightSeq = 0;
         flightUnknown = false;
@@ -368,12 +384,12 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
                 else if (seq > flightSeq) flightSeq = seq;
                 return true;
             }
-            want();
+            want(!isSeq(seq));
             return true;
         },
-        now() { want(); },
+        now() { want(true); },
         applied(seq) {
-            if (adopt(seq)) want();
+            if (adopt(seq)) want(true);
         },
         forget() {
             generation += 1;

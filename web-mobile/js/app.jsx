@@ -949,7 +949,9 @@ function App() {
   const detailGateRef = useRef(null);
   const listReadRef = useRef(null);
 
-  const load = async () => {
+  // `viaGate` is the list gate's own fetch: it takes the seq off listReadRef,
+  // so the read is not also reported to the gate here.
+  const load = async (viaGate) => {
     // bc-hnam: an answer read as another audience than the page reads as by
     // the time it lands (the route changed meanwhile) is dropped: the change
     // of audience reads again. It answers true when the page now holds an
@@ -978,7 +980,7 @@ function App() {
         // lower of their seqs (bc-sseq FR4): that read is the one reported.
         const lower = readSeqOf(t) <= readSeqOf(comps) ? t : comps;
         listReadRef.current = lower;
-        if (listGateRef.current) listGateRef.current.applied(readSeqOf(lower));
+        if (!viaGate && listGateRef.current) listGateRef.current.applied(readSeqOf(lower));
       }
       return true;
     } catch (e) {
@@ -1307,9 +1309,9 @@ function App() {
     // score for no benefit (mp-9h1f). `mode` is fresh (effect dep); the active
     // admin view is read from the ref so this closure need not be recreated on
     // navigation. Every other mode/view loads exactly as before.
-    const maybeLoad = () => {
+    const maybeLoad = (viaGate) => {
         if (mode === "admin" && adminViewRef.current && adminViewRef.current.kind === "shiaijo") return undefined;
-        return loadRef.current();
+        return loadRef.current(viaGate);
     };
 
     // bc-sseq FR4: one refetch per burst. Every event that used to schedule
@@ -1329,7 +1331,7 @@ function App() {
         schedule: timerPool.schedule,
         fetch: () => {
             listReadRef.current = null;
-            return Promise.resolve(maybeLoad()).then(() => listReadRef.current);
+            return Promise.resolve(maybeLoad(true)).then(() => listReadRef.current);
         },
         maxDelayMs: 2000,
         // Read at each schedule, so a test's Math.random stub reaches it.

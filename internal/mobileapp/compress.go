@@ -151,10 +151,18 @@ func GzipMiddleware() gin.HandlerFunc {
 				// stays answered 200, where a 500 would have the outbox retry
 				// it. Anything else held (nothing written, or a body cut
 				// short) is dropped, so Recovery's 500 reaches the caller.
-				// A writer mid-stream is not returned to the pool.
+				// An answer already past gzipMinBytes has sent its headers: its
+				// stream is closed, so the caller reads what was written
+				// whole, never a gzip body cut short. A writer mid-stream is
+				// not returned to the pool.
 				if gw.wroteHeader && !gw.decided && json.Valid(gw.buf) {
 					if err := gw.decide(false); err != nil {
 						slog.Debug("mobileapp: gzip answer", "err", err)
+					}
+				}
+				if gw.zw != nil {
+					if err := gw.zw.Close(); err != nil {
+						slog.Debug("mobileapp: gzip close", "err", err)
 					}
 				}
 				gw.zw = nil

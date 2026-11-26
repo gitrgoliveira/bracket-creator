@@ -134,7 +134,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const feedGateRef = useRef(null);
     // It answers the feed it applied (whose seq readSeqOf reads), or nothing
     // when none was.
-    const refreshCourt = useCallback(() => {
+    // `viaGate` is the feed gate's own fetch: it reads the answer's seq itself,
+    // so the answer is not also reported to it here.
+    const refreshCourt = useCallback((viaGate) => {
         if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return Promise.resolve(null);
         // A refetch never puts a row back to an older state
         // (keepNewerCompetitions, patch.jsx; the rule showRunningPush applies
@@ -146,7 +148,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 setCourtComps((prev) => keep(prev, comps));
                 forgetTieBreakerStandings(comps);
                 const held = feedGateRef.current;
-                if (held && held.court === court) held.gate.applied(readSeqOf(comps));
+                if (!viaGate && held && held.court === court) held.gate.applied(readSeqOf(comps));
                 return comps;
             })
             .catch(err => { console.error("Failed to fetch court matches", err); return null; });
@@ -265,7 +267,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // none for an event the feed applied already holds.
         const feedGate = createRefetchGate({
             schedule: timerPool.schedule,
-            fetch: () => (cancelled ? null : refreshCourt()),
+            fetch: () => (cancelled ? null : refreshCourt(true)),
             maxDelayMs: 600,
             // Read at each schedule, so a test's Math.random stub reaches it.
             random: () => Math.random(),

@@ -227,6 +227,33 @@ describe('createRefetchGate', () => {
     expect(h.gate.appliedSeq()).toBe(6);
   });
 
+  it('an applied answer that covers every event seen cancels the refetch already scheduled', () => {
+    const h = harness();
+    expect(h.gate.event(5)).toBe(true);
+    expect(h.timers).toHaveLength(1);
+    h.gate.applied(5); // the save's own read holds the event
+    h.fireTimers();
+    expect(h.sent).toHaveLength(0);
+    // An event above the answer still gets its fetch.
+    h.gate.event(6);
+    h.gate.applied(5);
+    h.fireTimers();
+    expect(h.sent).toHaveLength(1);
+  });
+
+  it('an applied answer never cancels a refetch asked for by now() or by an event with no seq', () => {
+    const h = harness();
+    h.gate.now();
+    h.gate.applied(5);
+    h.fireTimers();
+    expect(h.sent).toHaveLength(1);
+    const g = harness();
+    g.gate.event(undefined);
+    g.gate.applied(5);
+    g.fireTimers();
+    expect(g.sent).toHaveLength(1);
+  });
+
   it('a merged apply through take still covers the events its answer named', async () => {
     let held = null;
     const timers = [];

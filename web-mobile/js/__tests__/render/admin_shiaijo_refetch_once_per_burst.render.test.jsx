@@ -86,4 +86,65 @@ describe('the court console reads its feed once per burst (bc-sseq FR4)', () => 
       vi.useRealTimers();
     }
   });
+
+  it('an answer to a feed read sent before a resync is not adopted (the gate forgot it)', async () => {
+    vi.useFakeTimers();
+    const side = (id, name) => ({ id, name });
+    const match = {
+      id: 'm1', status: 'running', phase: 'pool', poolName: 'Pool A', court: 'A', scheduledAt: '09:00',
+      sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'), ipponsA: [], ipponsB: [], modifiedAt: 100,
+    };
+    const feed = (seq) => withSeq([{ id: 'c1', name: 'Cup', status: 'pools', poolMatches: [match] }], seq);
+    let emit = () => {};
+    let manual = false;
+    const pending = [];
+    const prev = {
+      fetch: window.API.fetchCourtMatches, sub: window.API.subscribeToEvents,
+      tm: window.tournamentMatches, fbc: window.filterMatchesByCourt,
+    };
+    const fetchCourtMatches = vi.fn().mockImplementation(() => (
+      manual ? new Promise((resolve) => pending.push(resolve)) : Promise.resolve(feed(20))));
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    window.API.subscribeToEvents = (cb) => { emit = cb; return () => {}; };
+    window.tournamentMatches = (t) => (t.competitions || [])
+      .flatMap((c) => (c.poolMatches || []).map((m) => ({ ...m, compId: c.id, compName: c.name })));
+    window.filterMatchesByCourt = (matches) => matches;
+    const send = (event) => act(async () => { emit(event); });
+    const pastWindow = async () => {
+      await act(async () => { vi.advanceTimersByTime(700); });
+      await act(async () => { await Promise.resolve(); });
+    };
+    const answer = async (index, value) => {
+      await act(async () => { pending[index](value); });
+      await act(async () => { await Promise.resolve(); });
+    };
+    try {
+      await act(async () => { renderPage(makeMinimalTournament(), 'A'); });
+      await act(async () => { await Promise.resolve(); });
+      const first = fetchCourtMatches.mock.calls.length;
+
+      // A read is out when the server says the stream restarted.
+      manual = true;
+      await send({ type: 'match_updated', seq: 21, data: { competitionId: 'c1', matchId: 'm1', result: match } });
+      await pastWindow();
+      expect(fetchCourtMatches.mock.calls.length, 'the event asked for its read').toBe(first + 1);
+      await send({ type: 'resync_required' });
+      // The old stream's answer lands: it names a seq of the stream that ended.
+      await answer(0, feed(90));
+      await pastWindow();
+      expect(fetchCourtMatches.mock.calls.length, 'the read the resync asked for').toBe(first + 2);
+      // An event of the new stream arrives while that read is out, above
+      // the seq the read answers with: the old answer must not have hidden it.
+      await send({ type: 'match_updated', seq: 50, data: { competitionId: 'c1', matchId: 'm1', result: match } });
+      await answer(1, feed(40));
+      await pastWindow();
+      expect(fetchCourtMatches.mock.calls.length, 'the new stream\'s event is fetched').toBe(first + 3);
+    } finally {
+      window.API.fetchCourtMatches = prev.fetch;
+      window.API.subscribeToEvents = prev.sub;
+      window.tournamentMatches = prev.tm;
+      window.filterMatchesByCourt = prev.fbc;
+      vi.useRealTimers();
+    }
+  });
 });

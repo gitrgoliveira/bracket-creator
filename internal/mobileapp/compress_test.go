@@ -198,6 +198,25 @@ func TestGzip_PanicAfterACompleteAnswerKeepsTheAnswer(t *testing.T) {
 	assert.Empty(t, w.Header().Get("Content-Encoding"))
 }
 
+// The same panic after an answer past the compression threshold: its headers
+// are out, so the caller gets a gzip body that reads whole to its end.
+func TestGzip_PanicAfterALargeAnswerLeavesAWellFormedGzipBody(t *testing.T) {
+	r := gzipTestRouter(func(r *gin.Engine) {
+		r.GET("/api/late-large", func(c *gin.Context) {
+			c.JSON(http.StatusCreated, gin.H{"ok": true, "pad": strings.Repeat("x", 4*gzipMinBytes)})
+			panic("after the answer")
+		})
+	})
+	w := gzipGet(r, http.MethodGet, "/api/late-large", "gzip")
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, "gzip", w.Header().Get("Content-Encoding"))
+	zr, err := gzip.NewReader(w.Body)
+	require.NoError(t, err)
+	body, err := io.ReadAll(zr)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"ok":true`)
+}
+
 func TestGzip_VaryMergesWithWhatTheHandlerSet(t *testing.T) {
 	body := bigJSON(t, 200)
 	r := gzipTestRouter(func(r *gin.Engine) {

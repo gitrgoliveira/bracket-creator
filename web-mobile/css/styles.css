@@ -12806,7 +12806,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-top: 16px;
 }
 .draw-review__section + .draw-review__section {
-  margin-top: 18px;
+  margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid var(--line-2);
 }

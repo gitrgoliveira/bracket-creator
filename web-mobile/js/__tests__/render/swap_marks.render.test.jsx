@@ -113,9 +113,10 @@ for (const [tab, mount] of Object.entries(tabs)) {
       await tap(target('Elijah Everdeen'));
       expect(window.API.fetchSwapCandidates).toHaveBeenCalledWith('c1', 'p1', 'pw');
       // The key line is there from the pick on, every sentence it can say
-      // drawn and none shown, so the read answering moves nothing below it.
-      expect(keyLines().map((l) => l.dataset.key)).toEqual(['both', 'better', 'worse', 'same', 'failed']);
-      expect(shownKey()).toBeNull();
+      // drawn and only the loading one shown, so the read answering moves
+      // nothing below it.
+      expect(keyLines().map((l) => l.dataset.key)).toEqual(['loading', 'both', 'better', 'worse', 'same', 'failed']);
+      expect(shownKey()).toBe('Marking the swaps…');
       const lineBefore = screen.getByTestId('swap-mode-line').textContent;
       // While the read is out, every pick keeps its plain edge.
       expect(['Arthur Dick', 'Lena Park', 'Omar Sy'].map((n) => markOf(target(n)))).toEqual([null, null, null]);
@@ -128,7 +129,7 @@ for (const [tab, mount] of Object.entries(tabs)) {
       expect(shownWord(target('Omar Sy'))).toBeNull();
       expect(markOf(target('Elijah Everdeen')), 'the pick itself is not marked').toBeNull();
       expect(screen.getByTestId('swap-mode-line').textContent, 'the pick line does not change').toBe(lineBefore);
-      expect(keyLines()).toHaveLength(5);
+      expect(keyLines()).toHaveLength(6);
       expect(keyLines().filter((l) => l.classList.contains('is-shown'))).toHaveLength(1);
       expect(screen.getByTestId('swap-mode-line').textContent).toContain('with… tap another competitor.');
       expect(shownKey()).toBe('Green keeps dojo-mates apart longer, amber brings some closer.');
@@ -174,7 +175,7 @@ for (const [tab, mount] of Object.entries(tabs)) {
       await tap(target('Elijah Everdeen'));
       expect(target('Elijah Everdeen')).toHaveAttribute('aria-pressed', 'true');
       expect(shownKey()).toBe('The swaps could not be marked.');
-      expect(keyLines()).toHaveLength(5);
+      expect(keyLines()).toHaveLength(6);
       expect(screen.getByTestId('swap-mode-line').textContent).toContain('with… tap another competitor.');
       expect(markOf(target('Arthur Dick'))).toBeNull();
       await tap(target('Lena Park'));

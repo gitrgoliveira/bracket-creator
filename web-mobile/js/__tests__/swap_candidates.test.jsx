@@ -42,7 +42,8 @@ describe('what the banner says of the marks', () => {
     expect(MARK_KEYS.same).toEqual({ text: 'No swap changes when dojo-mates can meet.', quiet: true });
     expect(marksKey({ marks: null, failed: true })).toBe('failed');
     expect(MARK_KEYS.failed).toEqual({ text: 'The swaps could not be marked.', quiet: true });
-    expect(marksKey({ marks: null, failed: false })).toBeNull();
+    expect(marksKey({ marks: null, failed: false })).toBe('loading');
+    expect(MARK_KEYS.loading).toEqual({ text: 'Marking the swaps…', quiet: true });
   });
 
   it('keeps the pick line the same length whatever the marks say', () => {

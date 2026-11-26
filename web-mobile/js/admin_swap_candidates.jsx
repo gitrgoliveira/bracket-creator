@@ -38,10 +38,12 @@ export function candidateVerdicts(answer, pickId) {
   return marks;
 }
 
-// MARK_KEYS: every sentence the banner's key line can say once the marks are
-// read: which colours show and what they mean, that no swap changes
-// anything, or that the swaps could not be marked (the last two quiet).
+// MARK_KEYS: every sentence the banner's key line can say: that the marks
+// are on their way while the read is out, then which colours show and what
+// they mean, that no swap changes anything, or that the swaps could not be
+// marked (the first and the last two quiet).
 export const MARK_KEYS = {
+  loading: { text: 'Marking the swaps…', quiet: true },
   both: { text: 'Green keeps dojo-mates apart longer, amber brings some closer.', quiet: false },
   better: { text: 'Green keeps dojo-mates apart longer.', quiet: false },
   worse: { text: 'Amber brings some dojo-mates closer.', quiet: false },
@@ -50,10 +52,10 @@ export const MARK_KEYS = {
 };
 
 // marksKey: which of MARK_KEYS the key line shows for the marks as read, or
-// null while the read is out.
+// 'loading' while the read is out.
 export function marksKey({ marks, failed }) {
   if (failed) return 'failed';
-  if (!marks) return null;
+  if (!marks) return 'loading';
   const vs = [...marks.values()];
   const better = vs.includes('better');
   const worse = vs.includes('worse');
@@ -64,9 +66,10 @@ export function marksKey({ marks, failed }) {
 
 // SwapMarksKey: the banner's key line, drawn from the pick on with EVERY
 // sentence of MARK_KEYS stacked in one grid cell and only the current one
-// visible (none while the read is out), so the line holds the height of its
-// longest sentence before the read answers and nothing below it moves when
-// it does, fails, or finds no swap that changes anything.
+// visible ('loading' while the read is out; none while the swap check is
+// open), so the line holds the height of its longest sentence from the pick
+// on and nothing below it moves when the read answers, fails, or finds no
+// swap that changes anything.
 export function SwapMarksKey({ current }) {
   return (
     <div className="swap-mode__key" aria-live="polite" data-testid="swap-marks-key">

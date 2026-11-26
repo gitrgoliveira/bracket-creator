@@ -220,7 +220,7 @@ describe('Save', () => {
 
   it('is greyed while nothing is unsaved, and sends nothing', async () => {
     mount();
-    expect(status()).toBe('Saved');
+    expect(status()).toBe('');
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     await tap('Save');
     expect(onSave).not.toHaveBeenCalled();
@@ -231,7 +231,7 @@ describe('Save', () => {
   it('trailing spaces alone are not a change', async () => {
     mount(base({ posters: { viewer: { heading: 'Scan me' } } }));
     type(headingBox(), 'Scan me  ');
-    expect(status()).toBe('Saved');
+    expect(status()).toBe('');
   });
 
   it('clearing the last choice sends posters: {}, never an omitted key', async () => {
@@ -416,7 +416,7 @@ describe('text over a limit', () => {
     type(headingBox(), 'x'.repeat(POSTER_RULES.headingMaxLength));
     expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
     expect(headingBox()).not.toHaveAttribute('aria-invalid');
-    expect(screen.queryByTestId('posters-too-long')).toBeNull();
+    expect(screen.getByTestId('posters-too-long').textContent).toBe('');
     await tap('Save');
     expect(onSave).toHaveBeenCalledTimes(1);
   });
@@ -511,33 +511,53 @@ describe('Print', () => {
     expect(document.body).not.toHaveClass(PRINTING_CLASS);
   });
 
+  const askAll = () => screen.getByRole('dialog', { name: 'Print all posters?' });
+
   it('Print all asks first, naming the sheets and the address, and prints nothing on Cancel', async () => {
-    window.confirmDialog = vi.fn(async () => false);
     mount(base({ publicURL: '' }));
     await tap('Print all posters');
-    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
-    const asked = window.confirmDialog.mock.calls[0][0];
-    expect(asked).toMatchObject({ title: 'Print all posters?', confirmLabel: 'Print all' });
-    expect(asked.message).toContain('This prints 3 A4 sheets, one poster on each.');
-    expect(asked.message).toContain(`The codes open pages under ${window.location.origin}.`);
-    expect(asked.message).toContain('scan it with a phone first');
-    expect(asked.message).not.toContain('not saved');
+    const asked = askAll();
+    expect(asked).toHaveTextContent('This prints 3 A4 sheets, one poster on each.');
+    expect(asked).toHaveTextContent(`The codes open pages under ${window.location.origin}.`);
+    expect(asked).not.toHaveTextContent('scan it with a phone first');
+    expect(asked).not.toHaveTextContent('not saved');
+    await tap('Cancel');
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(printRoot()).toBeNull();
     expect(window.print).not.toHaveBeenCalled();
   });
 
+  it('Print all warns first when no public address is set, and Set the address leads to Edit details', async () => {
+    mount(base({ publicURL: '' }));
+    await tap('Print all posters');
+    const warning = screen.getByTestId('posters-print-all-warning');
+    expect(warning).toHaveClass('alert', 'alert--warn');
+    expect(warning).toHaveTextContent('No public address is set, so phones may not open these codes.');
+    // The warning comes before the sheet count.
+    expect(warning.compareDocumentPosition(askAll().querySelector('.dialog-msg')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await tap('Set the address');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(onEditTournament).toHaveBeenCalledTimes(1);
+  });
+
+  it('Print all has no warning with a public address set', async () => {
+    mount();
+    await tap('Print all posters');
+    expect(screen.queryByTestId('posters-print-all-warning')).toBeNull();
+  });
+
   it('Print all says when the sheets carry changes that are not saved', async () => {
-    window.confirmDialog = vi.fn(async () => false);
     mount();
     type(headingBox(), 'Scan me');
     await tap('Print all posters');
-    expect(window.confirmDialog.mock.calls[0][0].message).toContain('These include changes you have not saved.');
+    expect(askAll()).toHaveTextContent('These include changes you have not saved.');
   });
 
   it('Print all renders every poster, in order, into the print root', async () => {
     mount();
     await tap('Print all posters');
-    expect(window.confirmDialog.mock.calls[0][0].message).toContain('The codes open pages under https://kendo.example.org.');
+    expect(askAll()).toHaveTextContent('The codes open pages under https://kendo.example.org.');
+    await tap('Print all');
     expect([...printRoot().querySelectorAll('.poster')].map((p) => p.getAttribute('data-poster'))).toEqual(['viewer', 'court:A', 'court:B']);
     await waitFor(() => expect(window.print).toHaveBeenCalledTimes(1));
     await act(async () => { window.dispatchEvent(new Event('afterprint')); });
@@ -554,5 +574,118 @@ describe('the phone preview', () => {
     expect(dialog.querySelector('.poster__heading').textContent).toBe('Scan me');
     await tap('Close');
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+describe('the pinned row', () => {
+  const primaries = () => [...document.querySelectorAll('.posters-save-row .btn--primary')].map((b) => b.textContent.trim());
+
+  it('fills one button at a time: Print this poster with nothing unsaved, Save while something is', async () => {
+    mount();
+    expect(primaries()).toEqual(['Print this poster']);
+    type(headingBox(), 'Scan me');
+    expect(primaries()).toEqual(['Save']);
+    await tap('Save');
+    await act(async () => { saves[0].opts.onSettled({ tournamentVersion: 'v2' }); });
+    expect(primaries()).toEqual(['Print this poster']);
+  });
+
+  it('holds both Print buttons beside Save', () => {
+    mount();
+    const row = document.querySelector('.posters-save-row');
+    expect(row).toContainElement(screen.getByRole('button', { name: 'Print this poster' }));
+    expect(row).toContainElement(screen.getByRole('button', { name: 'Print all posters' }));
+  });
+
+  it('says nothing on first load, and the status once something changed', async () => {
+    mount();
+    expect(status()).toBe('');
+    type(headingBox(), 'Scan me');
+    expect(status()).toBe('Unsaved changes');
+    type(headingBox(), '');
+    expect(status()).toBe('Saved');
+  });
+
+  it('keeps the place of the over-limit sentence while nothing is over', () => {
+    mount();
+    expect(screen.getByTestId('posters-too-long')).toBeInTheDocument();
+    expect(screen.getByTestId('posters-too-long').textContent).toBe('');
+  });
+});
+
+describe('the address the code opens', () => {
+  it('Change leads to Edit details, where the Public URL is set', async () => {
+    mount();
+    const address = screen.getByTestId('posters-address');
+    expect(address).toHaveTextContent('https://kendo.example.org');
+    await act(async () => { fireEvent.click(address.querySelector('button')); });
+    expect(address.querySelector('button').textContent).toBe('Change');
+    expect(onEditTournament).toHaveBeenCalledTimes(1);
+  });
+
+  it('Change asks first while something is unsaved', async () => {
+    window.confirmDialog = vi.fn(async () => false);
+    mount();
+    type(headingBox(), 'Scan me');
+    await tap('Change');
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(onEditTournament).not.toHaveBeenCalled();
+  });
+});
+
+describe('the browser\'s own Print (Cmd+P)', () => {
+  const standby = () => document.body.querySelector(':scope > .poster-print-standby');
+  const printEvent = async (name) => { await act(async () => { window.dispatchEvent(new Event(name)); }); };
+
+  it('prints the poster on screen, with its draft, and stops when the print is done', async () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Shiaijo B' }));
+    type(headingBox(), 'Draft for B');
+    await printEvent('beforeprint');
+    expect(document.body).toHaveClass(PRINTING_CLASS);
+    const posters = standby().querySelectorAll('.poster');
+    expect(posters).toHaveLength(1);
+    expect(posters[0].getAttribute('data-poster')).toBe('court:B');
+    expect(posters[0].querySelector('.poster__heading').textContent).toBe('Draft for B');
+    await printEvent('afterprint');
+    expect(document.body).not.toHaveClass(PRINTING_CLASS);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('says which poster to shorten instead of printing one over a limit', async () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Shiaijo A' }));
+    type(headingBox(), 'x'.repeat(POSTER_RULES.headingMaxLength + 1));
+    await printEvent('beforeprint');
+    expect(standby().querySelector('.poster')).toBeNull();
+    expect(standby().textContent).toBe('Over a limit on Shiaijo A: shorten it to save or print.');
+    await printEvent('afterprint');
+  });
+
+  it('leaves a Print button\'s own print alone', async () => {
+    mount();
+    await tap('Print this poster');
+    await printEvent('beforeprint');
+    expect(standby().childElementCount).toBe(0);
+    await printEvent('afterprint');
+    expect(document.body).not.toHaveClass(PRINTING_CLASS);
+  });
+
+  it('listens only while the page is mounted', async () => {
+    const view = mount();
+    expect(standby()).not.toBeNull();
+    view.unmount();
+    expect(standby()).toBeNull();
+    await printEvent('beforeprint');
+    expect(document.body).not.toHaveClass(PRINTING_CLASS);
+    await printEvent('afterprint');
+  });
+
+  it('takes the print class away if the page closes mid-print', async () => {
+    const view = mount();
+    await printEvent('beforeprint');
+    expect(document.body).toHaveClass(PRINTING_CLASS);
+    view.unmount();
+    expect(document.body).not.toHaveClass(PRINTING_CLASS);
   });
 });

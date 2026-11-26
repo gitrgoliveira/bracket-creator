@@ -7,7 +7,9 @@
 // judged on the PDF Chromium makes of the print root: one A4 portrait page per
 // poster, no blank page after the last, and the band's colour on paper with
 // background graphics off (print-color-adjust: exact), against a control
-// print with that rule taken away.
+// print with that rule taken away. The browser's own Print (page.pdf() with no
+// Print button, as Cmd+P) prints the poster on screen, or only a note while a
+// text is over its limit.
 //
 // Everything is seeded through the interface: the first-run form, a primary
 // colour, the logo and six sponsors on Edit tournament details, the poster text
@@ -246,5 +248,26 @@ test.describe('venue posters', () => {
       expect(plain.pages).toBe(1 + COURTS);
       expect(hasFill(plain, band)).toBe(false);
     });
+  });
+  test('the browser\'s own Print (Cmd+P) prints the poster on screen, and only a note while a text is over its limit', async ({ page }) => {
+    await login(page);
+    await openPosters(page);
+    const poster = await choosePoster(page, 'Shiaijo A');
+    await imagesSettled(poster);
+    const band = rgbUnit((await posterBoxes(poster)).band);
+    // page.pdf() prints the way Cmd+P does: no Print button, beforeprint and
+    // afterprint around it.
+    const pdf = readPdf(await page.pdf({ preferCSSPageSize: true, printBackground: false }));
+    record({ journey: 'posters', step: 'browser print', pages: pdf.pages, bandPrinted: hasFill(pdf, band) });
+    expect(pdf.pages, 'one sheet: the poster on screen').toBe(1);
+    expect(hasFill(pdf, band), 'the poster itself printed').toBe(true);
+    await expect(page.locator('body.printing-posters')).toHaveCount(0);
+
+    await page.getByLabel('Heading', { exact: true }).fill(`${HEADING_80}!`);
+    await expect(page.getByTestId('posters-too-long')).toHaveText('Over a limit on Shiaijo A: shorten it to save or print.');
+    const note = readPdf(await page.pdf({ preferCSSPageSize: true, printBackground: false }));
+    record({ journey: 'posters', step: 'browser print over a limit', pages: note.pages, bandPrinted: hasFill(note, band) });
+    expect(note.pages, 'one sheet: the note').toBe(1);
+    expect(hasFill(note, band), 'no poster printed').toBe(false);
   });
 });

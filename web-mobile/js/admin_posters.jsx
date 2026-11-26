@@ -11,7 +11,9 @@
 //     options) against the version last read or saved, so one editing session
 //     is one reload on the other devices. A refusal keeps the draft on screen.
 //   - Print: prints the draft, saved or not, through the browser's own dialog
-//     over the print sheet in css/posters.css. It never saves and never asks.
+//     over the print sheet in css/posters.css. It never saves; Print all asks
+//     first. The browser's own Print (Cmd+P, Ctrl+P) prints what Print this
+//     poster prints, or, while a text is over its limit, a sheet that says so.
 // Leaving with unsaved changes asks first (the unsaved-entries warning), and a
 // reload or a closed tab gets the browser's own prompt.
 
@@ -37,13 +39,19 @@ import { isNonPublicOrigin, linkBase } from "./viewer_utils.jsx";
 import { confirmDiscardUnsaved, whenConfirmed } from "./unsaved_entries.jsx";
 import { Icon } from "./icon.jsx";
 import { useLatestRef } from "./latest_ref.jsx";
+import { publishHeight } from "./published_height.jsx";
+import { useDialogFocus } from "./dialog_focus.jsx";
 
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useLayoutEffect, useRef } = React;
 
 export const LEAVE_POSTERS_ANYWAY = "Leave Posters anyway?";
 export const POSTERS_CHANGED_ELSEWHERE =
   "Not saved: the tournament settings were changed on another device. Your poster text is still here.";
 export const POSTER_STATUS = Object.freeze({ unsaved: "Unsaved changes", saving: "Saving", saved: "Saved" });
+
+// The width under which the pinned row is one slim line and Print all moves to
+// the end of the form (the max-width: 640px rules of css/posters.css).
+const PHONE_QUERY = "(max-width: 640px)";
 
 // The class the print sheet keys on, and how long Print waits for the images of
 // the posters to decode before it opens the dialog anyway (a missing sponsor
@@ -78,16 +86,34 @@ function Counter({ id, text, max, empty }) {
 }
 
 // The Print all question: how many sheets, whether they carry unsaved changes,
-// the address the codes open, a warning when phones at the venue may not reach
-// it, and the advice to test one.
-export function printAllMessage(count, base, unreachable, unsaved) {
+// and the address the codes open. The warning on an address phones may not
+// reach is a box of its own above it.
+export function printAllMessage(count, base, unsaved) {
   return [
     `This prints ${count} A4 sheets, one poster on each.`,
     unsaved ? "These include changes you have not saved." : "",
     `The codes open pages under ${base}.`,
-    unreachable ? "No public address is set, so phones at the venue may not reach it." : "",
-    "Print one poster and scan it with a phone first, to check the code opens the right page.",
   ].filter(Boolean).join(" ");
+}
+
+// The sentence for posters with text over a limit: by the Save button, and on
+// the sheet the browser's own Print makes while one is over.
+export function overLimitSentence(labels) {
+  return `Over a limit on ${labels.join(", ")}: shorten it to save or print.`;
+}
+
+// usePhone: whether the page is at phone width, following the window.
+function usePhone() {
+  const query = () => !!(window.matchMedia && window.matchMedia(PHONE_QUERY).matches);
+  const [phone, setPhone] = useState(query);
+  useEffect(() => {
+    if (!window.matchMedia) return undefined;
+    const mql = window.matchMedia(PHONE_QUERY);
+    const follow = () => setPhone(mql.matches);
+    mql.addEventListener("change", follow);
+    return () => mql.removeEventListener("change", follow);
+  }, []);
+  return phone;
 }
 
 // AdminPostersPage
@@ -119,6 +145,26 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
   // Fixed when the page opens: a logo replaced before then never prints stale
   // from a cache (logoURL).
   const [logoKey] = useState(() => Date.now());
+  // The Print all question, open or not.
+  const [askAll, setAskAll] = useState(false);
+  const askRef = useRef(null);
+  useDialogFocus(askRef, askAll);
+  // Whether anything changed or was saved during this visit: the status says
+  // nothing until then.
+  const [touched, setTouched] = useState(false);
+  const phone = usePhone();
+  // The pinned row's height, for the scroll margin that keeps a field reached
+  // by Tab clear of it (css/posters.css).
+  const pinRef = useRef(null);
+  useLayoutEffect(() => publishHeight(pinRef.current, document.documentElement, "--posters-pin-h"), []);
+  // The browser's own Print (Cmd+P, Ctrl+P) prints what Print this poster
+  // prints: the poster on screen, drawn into a print root of its own that the
+  // print sheet shows only while it prints.
+  const [standby] = useState(() => {
+    const node = document.createElement("div");
+    node.className = "poster-print-standby";
+    return node;
+  });
 
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
@@ -132,6 +178,32 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
 
   const dirty = postersChanged(draft, savedBlock);
   const dirtyRef = useLatestRef(dirty);
+  useEffect(() => { if (dirty || saving) setTouched(true); }, [dirty, saving]);
+
+  // While the page is mounted, a print the page did not start itself shows the
+  // standby root; a print started by a Print button has its own root.
+  useEffect(() => {
+    document.body.appendChild(standby);
+    let ours = false;
+    const before = () => {
+      if (printingRef.current) return;
+      ours = true;
+      document.body.classList.add(PRINTING_CLASS);
+    };
+    const after = () => {
+      if (!ours) return;
+      ours = false;
+      document.body.classList.remove(PRINTING_CLASS);
+    };
+    window.addEventListener("beforeprint", before);
+    window.addEventListener("afterprint", after);
+    return () => {
+      window.removeEventListener("beforeprint", before);
+      window.removeEventListener("afterprint", after);
+      after();
+      standby.remove();
+    };
+  }, [standby]);
 
   // A reload or a closed tab with unsaved changes gets the browser's prompt.
   useEffect(() => {
@@ -249,7 +321,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
     if (others.length === 0) { setApplyNote("Every shiaijo poster already has these choices."); return; }
     const ok = await window.confirmDialog({
       title: "Use these choices on every shiaijo?",
-      message: `The heading, call to action, logo place and sponsors of ${selected.label} replace those on ${others.map((p) => p.label).join(", ")}. Nothing is saved until you tap Save.`,
+      message: `The heading, call to action, logo place and sponsors of ${selected.label} replace those on ${others.map((p) => p.label).join(", ")}. Nothing is saved until you save.`,
       confirmLabel: "Use on every shiaijo",
     });
     if (!ok || !mountedRef.current) return;
@@ -259,14 +331,9 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
 
   // Print all asks first: it is many sheets, and every code on them opens the
   // address the page names.
-  const printAll = async () => {
+  const printAll = () => {
     if (printingRef.current || tooLong) return;
-    const ok = await window.confirmDialog({
-      title: "Print all posters?",
-      message: printAllMessage(list.length, linkBase(t).replace(/\/+$/, ""), showAddressWarning, dirty),
-      confirmLabel: "Print all",
-    });
-    if (ok && mountedRef.current) print(list);
+    setAskAll(true);
   };
   useEffect(() => {
     if (!printJob) return undefined;
@@ -288,7 +355,16 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
   const ctaOver = textLength(trimText(choices.callToAction)) > POSTER_RULES.callToActionMaxLength;
   // Save waits for something to save, except Save again after a refusal.
   const saveAgain = !!(refusal && refusal.changed);
-  const status = saving ? POSTER_STATUS.saving : dirty ? POSTER_STATUS.unsaved : POSTER_STATUS.saved;
+  const status = !touched ? "" : saving ? POSTER_STATUS.saving : dirty ? POSTER_STATUS.unsaved : POSTER_STATUS.saved;
+  // One filled button at a time: Save while something is unsaved, Print this
+  // poster otherwise.
+  const saveLeads = dirty || saveAgain;
+  const printAllButton = (
+    <button type="button" className="btn posters-print-all" onClick={printAll} disabled={!!printJob || tooLong}>
+      <Icon name="printer" /> Print all posters
+    </button>
+  );
+  const editDetails = guarded(onEditTournament);
   const idBase = "poster-" + selected.key.replace(/[^A-Za-z0-9]/g, "-");
   const logoValue = choices.logo === "above" || !lp.centreAvailable ? "above" : "centre";
 
@@ -299,7 +375,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
         {Breadcrumbs && (
           <Breadcrumbs items={[{ label: t.name || "Tournament", onClick: guarded(onBack) }, { label: "Posters" }]} />
         )}
-        <div className="page-head">
+        <div className="page-head posters-head">
           <div>
             <h1 className="page-head__title">Posters</h1>
             <div className="page-head__sub">QR-code posters for the venue: one for the viewer home and one for each shiaijo.</div>
@@ -312,7 +388,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
         {showAddressWarning && (
           <div className="alert alert--warn poster-no-print" role="note" data-testid="posters-address-warning">
             No public address is set, so the codes open this device&apos;s address ({window.location.origin}), which phones at the venue may not reach.{" "}
-            <button type="button" className="btn btn--sm" onClick={guarded(onEditTournament)}>Set it in Edit details</button>
+            <button type="button" className="btn btn--sm" onClick={editDetails}>Set it in Edit details</button>
           </div>
         )}
 
@@ -326,7 +402,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
               onClick={() => setSelectedKey(p.key)}
             >
               {p.label}
-              {flags.get(p.key).tooLong ? (
+              <span className="posters-mark-slot">{flags.get(p.key).tooLong ? (
                 <span className="posters-mark posters-mark--error" data-testid={"posters-mark-" + p.key}>
                   <span aria-hidden="true">!</span><span className="sr-only"> (over a limit)</span>
                 </span>
@@ -334,7 +410,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                 <span className="posters-mark" data-testid={"posters-mark-" + p.key}>
                   <span aria-hidden="true">•</span><span className="sr-only"> (unsaved)</span>
                 </span>
-              ) : null}
+              ) : null}</span>
             </button>
           ))}
         </div>
@@ -342,22 +418,26 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
         <div className="posters-grid">
           <div className="card">
             <div className="card__body">
-              <div className="posters-save-row">
-                <button type="button" className="btn btn--primary" disabled={tooLong || (!dirty && !saveAgain)} onClick={() => save(saveAgain)}>
+              <div className="posters-save-row" ref={pinRef}>
+                <button type="button" className={saveLeads ? "btn btn--primary" : "btn"} disabled={tooLong || (!dirty && !saveAgain)} onClick={() => save(saveAgain)}>
                   {saveAgain ? "Save again" : "Save"}
                 </button>
-                <span role="status" aria-live="polite" data-testid="posters-status">{status}</span>
+                <span className="posters-status" role="status" aria-live="polite" data-testid="posters-status">{status}</span>
                 {/* On a phone the preview is out of sight once the form scrolls,
                     so the pinned row names the poster and opens it over the form. */}
-                <span className="posters-save-row__phone" aria-hidden="true">{selected.label}</span>
+                <span className="posters-save-row__phone posters-save-row__name" aria-hidden="true">{selected.label}</span>
                 <button type="button" className="btn posters-save-row__phone posters-preview-open" onClick={() => setPreviewOpen(true)}>
                   Preview
                 </button>
-                {tooLong && (
-                  <span className="posters-too-long" data-testid="posters-too-long">
-                    Over a limit on {overLabels.join(", ")}: shorten it to save or print.
-                  </span>
-                )}
+                <button type="button" className={saveLeads ? "btn posters-print-this" : "btn btn--primary posters-print-this"} aria-label="Print this poster" onClick={() => print([selected])} disabled={!!printJob || tooLong}>
+                  <Icon name="printer" /> <span>Print<span className="posters-print-this__rest"> this poster</span></span>
+                </button>
+                {!phone && printAllButton}
+                {/* Its place is kept, so the form does not move when a text
+                    crosses its limit. */}
+                <div className="posters-too-long" data-testid="posters-too-long">
+                  {tooLong ? overLimitSentence(overLabels) : ""}
+                </div>
               </div>
               <h2 className="posters-editing">{selected.label} poster</h2>
               {refusal && (
@@ -429,6 +509,13 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                 </div>
               )}
 
+              <div className="field__hint posters-branding" data-testid="posters-branding">
+                {lp.offered || sponsorsOffered
+                  ? "The logo and the sponsor images come from the Branding and Sponsors sections of Edit details."
+                  : "To put a logo or sponsor images on the posters, add them in the Branding and Sponsors sections of Edit details."}{" "}
+                <button type="button" className="btn btn--sm" onClick={editDetails}>Open Edit details</button>
+              </div>
+
               {selected.kind === "court" && courtCount > 1 && (
                 <div className="field posters-apply">
                   <button type="button" className="btn btn--sm" onClick={applyToEveryCourt}>Use these choices on every shiaijo</button>
@@ -436,27 +523,26 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                 </div>
               )}
 
-              <div className="field__hint posters-branding" data-testid="posters-branding">
-                {lp.offered || sponsorsOffered
-                  ? "The logo and the sponsor images come from the Branding and Sponsors sections of Edit details."
-                  : "To put a logo or sponsor images on the posters, add them in the Branding and Sponsors sections of Edit details."}{" "}
-                <button type="button" className="btn btn--sm" onClick={guarded(onEditTournament)}>Open Edit details</button>
-              </div>
-
               <div className="field posters-address" data-testid="posters-address">
                 <div className="field__label">The code opens</div>
-                <code className="posters-address__url">{address}</code>
+                <div className="posters-address__line">
+                  <code className="posters-address__url">{address}</code>
+                  {/* The address comes from the tournament's Public URL. */}
+                  <button type="button" className="btn btn--sm" onClick={editDetails}>Change</button>
+                </div>
               </div>
 
-              <div className="posters-print-row">
-                <button type="button" className="btn" onClick={() => print([selected])} disabled={!!printJob || tooLong}>
-                  <Icon name="printer" /> Print this poster
-                </button>
-                <button type="button" className="btn" onClick={printAll} disabled={!!printJob || tooLong}>
-                  <Icon name="printer" /> Print all posters
-                </button>
-              </div>
-              <div className="field__hint posters-print-hint">Print one poster and scan it with a phone before printing them all. Prints on A4; for A3, choose A3 paper and scale to fit in the print dialog. The colours print without turning on background graphics.</div>
+              {phone && <div className="posters-print-row">{printAllButton}</div>}
+
+              <details className="posters-tips">
+                <summary>Printing tips</summary>
+                <ul className="field__hint posters-tips__list">
+                  <li>Print one poster and scan it with a phone before printing them all.</li>
+                  <li>Posters print on A4. For A3, choose A3 paper and scale to fit in the print dialog.</li>
+                  <li>The colours print without turning on background graphics.</li>
+                  <li>Your browser&apos;s own Print (Cmd+P or Ctrl+P) prints the poster on screen.</li>
+                </ul>
+              </details>
             </div>
           </div>
 
@@ -469,6 +555,34 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
         <Modal title={`${selected.label} poster`} onClose={() => setPreviewOpen(false)} className="posters-preview-modal">
           <Poster tournament={draftT} poster={selected} choices={choices} logoKey={logoKey} />
         </Modal>
+      )}
+      {askAll && (
+        <div ref={askRef}>
+          <Modal
+            title="Print all posters?"
+            onClose={() => setAskAll(false)}
+            footer={(
+              <>
+                <button type="button" className="btn btn--ghost" onClick={() => setAskAll(false)}>Cancel</button>
+                <button type="button" className="btn btn--primary" onClick={() => { setAskAll(false); print(list); }}>Print all</button>
+              </>
+            )}
+          >
+            {showAddressWarning && (
+              <div className="alert alert--warn posters-print-all-warning" role="note" data-testid="posters-print-all-warning">
+                No public address is set, so phones may not open these codes.{" "}
+                <button type="button" className="btn btn--sm" onClick={() => { setAskAll(false); editDetails(); }}>Set the address</button>
+              </div>
+            )}
+            <p className="dialog-msg">{printAllMessage(list.length, linkBase(t).replace(/\/+$/, ""), dirty)}</p>
+          </Modal>
+        </div>
+      )}
+      {!printJob && window.ReactDOM.createPortal(
+        tooLong
+          ? <p className="poster-print-refusal">{overLimitSentence(overLabels)}</p>
+          : <Poster tournament={draftT} poster={selected} choices={choices} logoKey={logoKey} />,
+        standby,
       )}
       {printJob && window.ReactDOM.createPortal(
         printJob.posters.map((p) => (

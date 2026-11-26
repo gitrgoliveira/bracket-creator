@@ -283,9 +283,16 @@
  * organiser can find it from the picker. */
 .posters-mark {
   display: inline-block;
-  margin-left: 6px;
   color: var(--accent);
   font-weight: 700;
+}
+
+/* The mark's place is kept on every button, so a mark appearing never widens
+ * the button and moves the ones after it. */
+.posters-mark-slot {
+  display: inline-block;
+  width: 22px;
+  text-align: right;
 }
 
 .posters-mark--error {
@@ -337,16 +344,84 @@
   display: none;
 }
 
+/* The status ends the line, so nothing moves as it changes and the line has no
+ * hole while it says nothing. */
+.posters-status {
+  order: 1;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.posters-too-long {
+  order: 2;
+}
+
+/* Its two lines are always kept, so the form never moves when a text crosses
+ * its limit; a longer list of posters is cut at two lines. */
 .posters-too-long {
   flex-basis: 100%;
+  min-height: calc(2 * 1.35em);
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.35;
   color: var(--red);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
 
 .posters-print-row {
   gap: 8px;
   margin-top: 16px;
+}
+
+/* A field reached by Tab stops with its label clear of the topbar and the
+ * pinned row (--posters-pin-h, published by the page). */
+.posters-page .card__body .input,
+.posters-page .card__body .btn,
+.posters-page .card__body .checkbox input,
+.posters-page .card__body summary {
+  scroll-margin-top: calc(var(--topbar-stack-h, 0px) + var(--posters-pin-h, 0px) + 32px);
+}
+
+/* The URL and its Change button on one line, the button at its end. */
+.posters-address__line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.posters-address__line .posters-address__url {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The printing advice, closed until asked for, at a readable measure. */
+.posters-tips {
+  margin-top: 16px;
+}
+
+.posters-tips summary {
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.posters-tips__list {
+  max-width: 65ch;
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.posters-tips__list li + li {
+  margin-top: 4px;
+}
+
+/* Print all's warning box keeps its distance from the question under it. */
+.posters-print-all-warning {
+  margin-bottom: 12px;
 }
 
 .posters-logo-field {
@@ -361,6 +436,9 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
+  /* Set apart from the choices it copies. */
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
 
 /* The hint on where the logo and the sponsors come from closes the choices,
@@ -373,15 +451,9 @@
   margin-bottom: 14px;
 }
 
-/* The address warning and the print hint keep their distance from what is
- * next to them. */
+/* The address warning keeps its distance from the picker under it. */
 .posters-page > .alert {
   margin-bottom: 12px;
-}
-
-.posters-print-hint {
-  max-width: 70ch;
-  margin-top: 8px;
 }
 
 .posters-address__url {
@@ -406,7 +478,8 @@
 @media (pointer: coarse) {
   .posters-page .seg button,
   .posters-page .btn,
-  .posters-page .checkbox {
+  .posters-page .checkbox,
+  .posters-page .input {
     min-height: 44px;
   }
   .posters-page .checkbox input {
@@ -430,23 +503,83 @@
     margin-left: auto;
     margin-right: auto;
   }
-  /* Too wide to share Save's line, so the name and Preview take the next one
-   * together: the name fills it and Preview sits at its end. */
-  span.posters-save-row__phone {
-    display: inline;
+  /* Back stays on the title's line, the subtitle under both. */
+  .posters-head {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 2px 12px;
+  }
+  .posters-head > div:first-child { display: contents; }
+  .posters-head .page-head__sub { grid-column: 1 / -1; grid-row: 2; }
+
+  /* One slim line over the form: Save and its status, the poster's name,
+   * Preview and Print. It is opaque and ruled off, so the name never reads as
+   * the label of the field under it. Print all is at the end of the form. */
+  .posters-save-row {
+    flex-wrap: nowrap;
+    gap: 4px;
+    min-height: 44px;
+    margin: -4px -4px 12px;
+    padding: 0 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .posters-save-row .btn {
+    flex: none;
+    padding: 6px 8px;
+  }
+  /* Beside Save, its width kept, so nothing moves as it changes. */
+  .posters-status {
+    order: 0;
+    flex: none;
+    width: 4.4em;
+    font-size: 11px;
+    line-height: 1.2;
+  }
+  span.posters-save-row__name {
+    display: block;
     flex: 1 1 auto;
-    min-width: calc(100% - 120px);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
     font-weight: 600;
   }
   button.posters-save-row__phone {
     display: inline-flex;
   }
+  /* "Print" on the line; the rest of its name is read out, not shown. */
+  .posters-print-this__rest {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+  /* The over-limit sentence hangs under the line instead of growing it, so
+   * neither the line nor the form moves. */
+  .posters-too-long {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    min-height: 0;
+    padding: 4px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+  }
+  .posters-too-long:empty { display: none; }
 }
 
 /* ---- print -------------------------------------------------------------- */
 
-/* The print root is built only to print: it never shows on the page. */
-.poster-print-root { display: none; }
+/* The print roots are built only to print: they never show on the page. The
+ * standby root holds what the browser's own Print (Cmd+P) prints. */
+.poster-print-root,
+.poster-print-standby { display: none; }
 
 /* A named page, so only the print root's pages are A4 with these margins: every
  * other print from the app keeps the browser's own page. */
@@ -456,7 +589,8 @@
 }
 
 @media print {
-  .poster-print-root { page: poster; }
+  .poster-print-root,
+  .poster-print-standby { page: poster; }
 
   /* styles.css pins the page to the viewport height and clips the overflow,
    * which would print a multi-page job as its first page. Only while posters
@@ -469,8 +603,20 @@
 
   /* Nothing of the app prints but the posters: no topbar, menu, choices or
    * warnings. */
-  body.printing-posters > *:not(.poster-print-root) { display: none !important; }
-  body.printing-posters .poster-print-root { display: block; }
+  body.printing-posters > *:not(.poster-print-root):not(.poster-print-standby) { display: none !important; }
+  body.printing-posters .poster-print-root,
+  body.printing-posters .poster-print-standby { display: block; }
+
+  /* While a text is over its limit, the browser's own Print says which poster
+   * to shorten instead of printing it. */
+  .poster-print-refusal {
+    margin: 40mm 0 0;
+    font-size: 20pt;
+    font-weight: 700;
+    line-height: 1.3;
+    text-align: center;
+    color: #000;
+  }
 
   /* A piece of the Posters page that must never reach paper. */
   .poster-no-print { display: none !important; }
@@ -478,7 +624,8 @@
   /* Each poster fills one sheet, sized by the smaller of the page's sides, so a
    * browser that ignores @page size, or a dialog with larger margins, still fits
    * it on one page. */
-  .poster-print-root .poster {
+  .poster-print-root .poster,
+  .poster-print-standby .poster {
     width: min(100%, calc(100vh * 210 / 297));
     margin: 0 auto;
     box-shadow: none;

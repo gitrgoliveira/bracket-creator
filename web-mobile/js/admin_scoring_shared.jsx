@@ -768,9 +768,12 @@ function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeri
   // log line count the editor showed, so a correction over a finished match
   // carries a basis that says it saw the result (I1).
   const seen = Number(opts.seenScoreVersion) || 0;
+  // bc-sseq FR8: the match's shiaijo, so a decision made from the court
+  // console that runs it carries the console's court control (recordDecision).
+  const court = typeof opts.court === 'string' && opts.court ? { court: opts.court } : {};
   return attemptScoreWrite({
     recordScore: (cId, mId, result, pwd, _match, o) => window.API.recordDecision(
-      cId, mId, result, pwd, { ...o, ...(seen > 0 ? { seen } : {}) },
+      cId, mId, result, pwd, { ...o, ...(seen > 0 ? { seen } : {}), ...court },
     ),
     confirmDialog: window.confirmDialog,
     compId, matchId, result: body, password: resolveDecisionPassword(password),
@@ -853,7 +856,7 @@ function makeSubmitDecision({
     try {
       const updated = await submitDecisionRequest(
         match.compId, match.id, kind, { decisionBy, decisionReason }, encho, password,
-        { seenModifiedAt: match.modifiedAt || 0, seenScoreVersion: (seenScoreVersion !== undefined ? seenScoreVersion : match.scoreVersion) || 0 },
+        { seenModifiedAt: match.modifiedAt || 0, seenScoreVersion: (seenScoreVersion !== undefined ? seenScoreVersion : match.scoreVersion) || 0, court: match.court },
       );
       if (!mountedRef.current) {
         // The host read the decision from the outbox as it was queued, and

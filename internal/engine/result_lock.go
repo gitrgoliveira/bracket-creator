@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"log"
 	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -30,9 +31,12 @@ const HoldReasonResultLocked = "the next round was already fought"
 // under way.
 const HoldReasonResultLockedRunning = "the next round has already started"
 
-// rivalDisplacesResult reports whether the merge moved a finished stored result
+// displacesUnseenResult reports whether the merge moved a finished stored result
 // out for a write that did not see it: an older-stamped finish or decision (a
-// rival under I1, never a correction) that arrived after a newer result. The
+// rival under I1, never a correction) that arrived after a newer result, or a
+// court result (bc-sseq FR8: the court's standing, ScoreBaseline.Court) over an
+// ordinary result it never saw, whichever was stamped first. Either is held by
+// the lock rather than refused, and never reopens a played knockout match. The
 // stored result is the whole of it (verdict, scoreline, overtime, flags, bouts),
 // so ANY displaced group counts, not the verdict alone; but a result must BE in
 // force to be locked: a match reopened or sent back to the queue holds none, and
@@ -40,7 +44,7 @@ const HoldReasonResultLockedRunning = "the next round has already started"
 // "Did not see it" and "in force" are the replay's own reading of the log as the
 // write found it (ResultInForceAt, set on the report by the merge): a correction
 // is informed, and so is a SENT basis that holds the line of the result in force.
-func rivalDisplacesResult(rep *state.MergeReport) bool {
+func displacesUnseenResult(rep *state.MergeReport) bool {
 	if rep == nil || rep.Baseline == nil || rep.Baseline.Informed || len(rep.DisplacedGroups()) == 0 {
 		return false
 	}
@@ -95,15 +99,18 @@ func holdAsLocked(result, from *state.MatchResult, code string) {
 		rep.HeldValues[g] = state.GroupValue(from, g)
 	}
 	rep.Applied, rep.Unchanged, rep.Displaced = nil, nil, nil
-	rep.ResultChanged, rep.MatchClosed, rep.Replayed = false, false, false
+	rep.ResultChanged, rep.MatchClosed, rep.CourtResult, rep.Replayed = false, false, false, false
 	rep.Baseline, rep.LogPrefix, rep.Prior, rep.Replay = nil, nil, nil, nil
 	rep.HoldReason, rep.ResultLocked = lockReason(code), code
 }
 
 // lockReason is the history reason of a hold: what locked the result.
 func lockReason(code string) string {
-	if code == state.HeldReasonDownstreamRunning {
+	switch code {
+	case state.HeldReasonDownstreamRunning:
 		return HoldReasonResultLockedRunning
+	case state.HeldReasonBuiltOn:
+		return HoldReasonResultBuiltOn
 	}
 	return HoldReasonResultLocked
 }
@@ -131,8 +138,16 @@ func (e *Engine) knockoutLockCode(tx state.StoreTx, compID, matchID string) stri
 // that refuses because a seated knockout match was played or started, the
 // write is held (the refusal has rolled the match back), never forced through:
 // force belongs to an explicit correction. values, when set, supplies the held
-// groups' values instead of the result itself (the engi finish's probe).
+// groups' values instead of the result itself (the engi finish's probe). Every
+// write's door passes through it (a non-mixed competition requalifies
+// nothing), so the built-on hold (holdBuiltOnResult) is asked here first.
 func (e *Engine) requalifyMixedPoolWriteLocked(tx state.StoreTx, compID string, comp *state.Competition, matchID string, written, prior, result, values *state.MatchResult, fo ForceOptions, rival bool) error {
+	// The built-on hold first (a no-op for every write but a court result that
+	// replaces one it never saw): a requalification that had run and repainted
+	// the knockout could not be taken back by the row-only rollback.
+	if err := e.holdBuiltOnResult(tx, compID, comp, matchID, prior, result, values); err != nil {
+		return err
+	}
 	if rival {
 		fo.Force = false
 	}
@@ -183,4 +198,187 @@ func sameHeldLine(p state.MatchHistoryEntry, rep *state.MergeReport, door, sessi
 		}
 	}
 	return true
+}
+
+// THE BUILT-ON HOLD (bc-sseq FR8, operator answer of round bc-sseq-plan-2 and
+// round bc-sseq-plan-3). A result with the court's standing (a finish or
+// decision from the court console of the tablet that runs the shiaijo,
+// ScoreBaseline.Court) replaces an ordinary result it never saw. When other
+// matches were already built on that result, the court's result WAITS instead,
+// exactly as any late result waits once the next knockout match was played
+// (the knockout lock above): it is held whole, kept in the match's history once
+// however often it is resent, logged as no score-log line, and answered 200
+// superseded with heldReason downstream_built_on and ResultBuiltOnMessage, so
+// nothing built on the stored result changes silently and the operator corrects
+// from the note. Built on means one of:
+//
+//   - a Swiss match of round r, and the competition holds a match of a later
+//     round: that round was paired from it;
+//   - a regular pool or league match, and its pool holds a tie-break or a
+//     representative row: it was added from the standings the result fed;
+//   - the competition has finished.
+//
+// The wait is the COURT's alone: an ordinary device's late result (the Scores
+// tab and page, Pools, Bracket, the public page) keeps today's rules exactly,
+// the first recorded result standing and only the knockout lock holding it. An
+// explicit correction (a reason, clearWithdrawal, a basis that saw the result)
+// is informed and keeps today's rules too. It judges only the write that
+// arrives: a result displaced before any of these existed is left as it is.
+
+// BuiltOnKind names what was built on the result a court write would replace.
+type BuiltOnKind string
+
+// The cases of the built-on hold.
+const (
+	BuiltOnSwissRound BuiltOnKind = "swiss_round"
+	BuiltOnStandings  BuiltOnKind = "standings"
+	BuiltOnFinished   BuiltOnKind = "finished"
+)
+
+// BuiltOn is what the built-on hold found: Kind "" when nothing was built on
+// the result. Round is the later Swiss round already paired (BuiltOnSwissRound);
+// Reopens says a correction reopens the finished competition (a league,
+// reopenLeagueTx), for BuiltOnFinished.
+type BuiltOn struct {
+	Kind    BuiltOnKind
+	Round   int
+	Reopens bool
+}
+
+// courtDisplacesUnseen reports whether a write is the one the built-on hold
+// asks about: it has the court's standing (judged by the door on arrival, its
+// baseline's Court) and displaces a finished result in force it never saw
+// (displacesUnseenResult) that an ORDINARY device recorded
+// (replacesOrdinaryResult). An ordinary write is never asked, and neither is a
+// court result over another court result, which keeps I1 as two ordinary
+// results do.
+func courtDisplacesUnseen(rep *state.MergeReport) bool {
+	return rep != nil && rep.Baseline != nil && rep.Baseline.Court && displacesUnseenResult(rep) && replacesOrdinaryResult(rep)
+}
+
+// replacesOrdinaryResult reports whether the replay that decided the write
+// (MergeReport.Replay) took a result line without the court's standing out of
+// force: a line of the log as the merge read it, or a migration or drift line
+// the merge added before the write's own (which no court wrote), that the write
+// left held with its result group, as replaced by the court's result (a court
+// line stamped after it) or as a rival of the write (a court line stamped
+// before it, I1). A held result line the log already held before this write
+// counts too: the hold then errs toward waiting, which the operator undoes with
+// Correct.
+func replacesOrdinaryResult(rep *state.MergeReport) bool {
+	mr, _ := rep.Replay.(*mergeReplay)
+	if mr == nil {
+		return false
+	}
+	for i, h := range mr.after.Held {
+		if i >= mr.lines || !(h.MatchClosed || h.CourtResult) || !slices.Contains(h.Groups, state.GroupResult) {
+			continue
+		}
+		if i >= len(mr.found) || mr.found[i].Baseline == nil || !mr.found[i].Baseline.Court {
+			return true
+		}
+	}
+	return false
+}
+
+// builtOnOf judges what was built on the stored result of matchID, read in the
+// write's transaction. comp is the competition the write loaded (read here
+// when nil). The cases are asked in the order of the most concrete first: a
+// paired Swiss round, a finished competition, a row added from the standings.
+func builtOnOf(tx state.StoreTx, compID string, comp *state.Competition, matchID string) (BuiltOn, error) {
+	if comp == nil {
+		c, err := tx.LoadCompetition(compID)
+		if err != nil {
+			return BuiltOn{}, err
+		}
+		comp = c
+	}
+	swissRound, isSwiss := parseSwissMatchRound(matchID)
+	pool, inPool := "", false
+	if IsPoolMatchID(matchID) && !state.IsPoolSupplementaryMatchID(matchID) {
+		pool, inPool = poolNameFromMatchID(matchID)
+	}
+	var matches []state.MatchResult
+	if isSwiss || inPool {
+		ms, err := tx.LoadPoolMatches(compID)
+		if err != nil {
+			return BuiltOn{}, err
+		}
+		matches = ms
+	}
+	if isSwiss {
+		later := 0
+		for _, m := range matches {
+			if r, ok := parseSwissMatchRound(m.ID); ok && r > swissRound && (later == 0 || r < later) {
+				later = r
+			}
+		}
+		if later > 0 {
+			return BuiltOn{Kind: BuiltOnSwissRound, Round: later}, nil
+		}
+	}
+	if comp != nil && comp.Status == state.CompStatusComplete {
+		return BuiltOn{Kind: BuiltOnFinished, Reopens: comp.Format == state.CompFormatLeague}, nil
+	}
+	if inPool {
+		for _, m := range matches {
+			if !state.IsPoolSupplementaryMatchID(m.ID) {
+				continue
+			}
+			if p, ok := poolNameFromMatchID(m.ID); ok && p == pool {
+				return BuiltOn{Kind: BuiltOnStandings}, nil
+			}
+		}
+	}
+	return BuiltOn{}, nil
+}
+
+// holdBuiltOnResult is the built-on hold, run once the write has landed in the
+// transaction (the requalification's place, so it serves the score, decision
+// and engi doors of a pool, league, Swiss and knockout match alike, after the
+// knockout arms' own lock). A court write that replaces a result it never saw,
+// on which something was built, is rolled back to prior (the match as stored
+// before it; the merge's own copy when the door kept none, as the engi seam
+// outside a mixed pool does) and held whole, like holdAsLocked's knockout lock:
+// the answer is ErrMatchSuperseded with heldReason downstream_built_on. Every
+// other write returns nil and goes on.
+func (e *Engine) holdBuiltOnResult(tx state.StoreTx, compID string, comp *state.Competition, matchID string, prior, result, values *state.MatchResult) error {
+	if !courtDisplacesUnseen(result.Merge) {
+		return nil
+	}
+	b, err := builtOnOf(tx, compID, comp, matchID)
+	if err != nil {
+		return err
+	}
+	if b.Kind == "" {
+		return nil
+	}
+	undo := prior
+	if undo == nil && result.Merge.Prior != nil {
+		p := *result.Merge.Prior
+		undo = &p
+	}
+	if undo == nil {
+		// A result in force was displaced, so the log held its line and the
+		// merge kept its copy of the stored match (MergeReport.Prior).
+		log.Printf("engine: BUG: %s/%s: the court's result would replace a result %s was built on, with no stored copy to roll back to; it is applied", compID, matchID, b.Kind)
+		return nil
+	}
+	e.rollbackMatchResultTx(tx, compID, matchID, undo)
+	holdAsLocked(result, values, state.HeldReasonBuiltOn)
+	e.recordSupersededWriteHistory(tx, compID, matchID, result)
+	return supersededBy(result)
+}
+
+// ResultBuiltOnMessageTx is the sentence a court write held by the built-on
+// hold is answered with (ResultBuiltOnMessage), judged in the answering
+// transaction by the same owner the hold asked (builtOnOf), so the two never
+// disagree. "" when nothing is built on matchID's result (or it cannot be read).
+func ResultBuiltOnMessageTx(tx state.StoreTx, compID, matchID string) string {
+	b, err := builtOnOf(tx, compID, nil, matchID)
+	if err != nil {
+		log.Printf("engine: %s/%s: read what was built on the result for the answer: %v", compID, matchID, err)
+		return ""
+	}
+	return ResultBuiltOnMessage(b)
 }

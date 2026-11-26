@@ -78,6 +78,9 @@ export function BarredMatchNotice({ match, password, onDone, unsaved = false, on
       // refusal the outbox brings back later is put back on this notice.
       const res = await window.API.recordDecision(match.compId, match.id, seen > 0 ? { ...body, seenModifiedAt: seen } : body, pw, {
         seen: match.scoreVersion || 0,
+        // bc-sseq FR8: from the court console that runs the match's shiaijo,
+        // the decision carries its court control (recordDecision).
+        court: match.court,
         onRefusal: (e) => {
           if (!mountedRef.current) return false;
           setLanded(false);

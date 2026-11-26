@@ -5813,6 +5813,688 @@
      ]
     }
    }
+  },
+  {
+   "name": "S2 (court): the court's finish replaces an ordinary finish it never saw, so the court's taps after that finish count and the other device's tap the court never saw is turned away",
+   "jsMirror": true,
+   "shape": {
+    "kind": "individual",
+    "knockout": true
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Aka",
+    "sideB": "Shiro",
+    "sideAId": "pa",
+    "sideBId": "pb",
+    "winner": "Shiro",
+    "ipponsA": [],
+    "ipponsB": [
+     "M"
+    ],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "completed",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": "",
+    "winnerId": "pb"
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "points": {
+        "ipponsA": [],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    },
+    {
+     "v": 1,
+     "baseline": {
+      "id": "o",
+      "door": "score",
+      "stamp": 100,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Aka",
+        "decision": "",
+        "winnerId": "pa"
+       },
+       "points": {
+        "ipponsA": [
+         "K"
+        ],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0
+       }
+      },
+      "basis": {
+       "seen": 1
+      },
+      "basisSent": true
+     }
+    },
+    {
+     "v": 1,
+     "baseline": {
+      "id": "c",
+      "door": "score",
+      "stamp": 300,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Shiro",
+        "decision": "",
+        "winnerId": "pb"
+       }
+      },
+      "basis": {
+       "seen": 1,
+       "own": [
+        "c1"
+       ]
+      },
+      "basisSent": true,
+      "court": true
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "event": {
+      "id": "c1",
+      "session": "s-c",
+      "seq": 1,
+      "stamp": 200,
+      "kind": "ippon.add",
+      "side": "b",
+      "letter": "M"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "x1",
+      "session": "s-x",
+      "seq": 1,
+      "stamp": 150,
+      "kind": "ippon.add",
+      "side": "a",
+      "letter": "D"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "status": "completed",
+     "winner": "Shiro",
+     "winnerId": "pb",
+     "ipponsA": [],
+     "ipponsB": [
+      "M"
+     ],
+     "markIds": {
+      "b": [
+       "c1"
+      ]
+     },
+     "scoreVersion": 5,
+     "modifiedAt": 300,
+     "groupStamps": {
+      "points": 200,
+      "result": 300
+     }
+    },
+    "outcomes": {
+     "c1": [
+      "applied"
+     ],
+     "x1": [
+      "beforeBaseline"
+     ]
+    }
+   }
+  },
+  {
+   "name": "S2 (court): an ordinary finish arriving after the court's finish, in either order, is replaced by it, and the court's tap between the two counts",
+   "jsMirror": false,
+   "shape": {
+    "kind": "individual",
+    "knockout": true
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Aka",
+    "sideB": "Shiro",
+    "sideAId": "pa",
+    "sideBId": "pb",
+    "winner": "Shiro",
+    "ipponsA": [],
+    "ipponsB": [
+     "M"
+    ],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "completed",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": "",
+    "winnerId": "pb"
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "points": {
+        "ipponsA": [],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "o",
+      "door": "score",
+      "stamp": 100,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Aka",
+        "decision": "",
+        "winnerId": "pa"
+       },
+       "points": {
+        "ipponsA": [
+         "K"
+        ],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0
+       }
+      },
+      "basis": {
+       "seen": 1
+      },
+      "basisSent": true
+     }
+    },
+    {
+     "v": 1,
+     "baseline": {
+      "id": "c",
+      "door": "score",
+      "stamp": 300,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Shiro",
+        "decision": "",
+        "winnerId": "pb"
+       }
+      },
+      "basis": {
+       "seen": 1,
+       "own": [
+        "c1"
+       ]
+      },
+      "basisSent": true,
+      "court": true
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "c1",
+      "session": "s-c",
+      "seq": 1,
+      "stamp": 200,
+      "kind": "ippon.add",
+      "side": "b",
+      "letter": "M"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "status": "completed",
+     "winner": "Shiro",
+     "winnerId": "pb",
+     "ipponsA": [],
+     "ipponsB": [
+      "M"
+     ],
+     "scoreVersion": 4,
+     "modifiedAt": 300,
+     "groupStamps": {
+      "points": 200,
+      "result": 300
+     }
+    },
+    "outcomes": {
+     "c1": [
+      "applied"
+     ]
+    }
+   }
+  },
+  {
+   "name": "S2 (court): an ordinary finish stamped after the court's finish is a rival and is turned away (I1), and so is the other device's later tap",
+   "jsMirror": false,
+   "shape": {
+    "kind": "individual",
+    "knockout": true
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Aka",
+    "sideB": "Shiro",
+    "sideAId": "pa",
+    "sideBId": "pb",
+    "winner": "Shiro",
+    "ipponsA": [],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "completed",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": "",
+    "winnerId": "pb"
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "points": {
+        "ipponsA": [],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    },
+    {
+     "v": 1,
+     "baseline": {
+      "id": "c",
+      "door": "score",
+      "stamp": 100,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Shiro",
+        "decision": "",
+        "winnerId": "pb"
+       }
+      },
+      "basis": {
+       "seen": 1
+      },
+      "basisSent": true,
+      "court": true
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "o",
+      "door": "score",
+      "stamp": 200,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Aka",
+        "decision": "",
+        "winnerId": "pa"
+       },
+       "points": {
+        "ipponsA": [
+         "K"
+        ],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0
+       }
+      },
+      "basis": {
+       "seen": 1
+      },
+      "basisSent": true
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "x1",
+      "session": "s-x",
+      "seq": 1,
+      "stamp": 150,
+      "kind": "ippon.add",
+      "side": "a",
+      "letter": "D"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "status": "completed",
+     "winner": "Shiro",
+     "winnerId": "pb",
+     "ipponsA": [],
+     "ipponsB": [],
+     "scoreVersion": 4,
+     "modifiedAt": 100,
+     "groupStamps": {
+      "points": 10,
+      "result": 100
+     }
+    },
+    "outcomes": {
+     "x1": [
+      "matchClosed"
+     ]
+    }
+   }
+  },
+  {
+   "name": "S2 (court): a court finish that saw the ordinary finish corrects it, so a court tap between the two was made on a finished match and is turned away",
+   "jsMirror": false,
+   "shape": {
+    "kind": "individual",
+    "knockout": true
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Aka",
+    "sideB": "Shiro",
+    "sideAId": "pa",
+    "sideBId": "pb",
+    "winner": "Shiro",
+    "ipponsA": [
+     "K"
+    ],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "completed",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": "",
+    "winnerId": "pb"
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "points": {
+        "ipponsA": [],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    },
+    {
+     "v": 1,
+     "baseline": {
+      "id": "o",
+      "door": "score",
+      "stamp": 100,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Aka",
+        "decision": "",
+        "winnerId": "pa"
+       },
+       "points": {
+        "ipponsA": [
+         "K"
+        ],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0
+       }
+      },
+      "basis": {
+       "seen": 1
+      },
+      "basisSent": true
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "c",
+      "door": "score",
+      "stamp": 300,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Shiro",
+        "decision": "",
+        "winnerId": "pb"
+       }
+      },
+      "basis": {
+       "seen": 2,
+       "own": [
+        "c1"
+       ]
+      },
+      "basisSent": true,
+      "court": true
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "c1",
+      "session": "s-c",
+      "seq": 1,
+      "stamp": 200,
+      "kind": "ippon.add",
+      "side": "b",
+      "letter": "M"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "status": "completed",
+     "winner": "Shiro",
+     "winnerId": "pb",
+     "ipponsA": [
+      "K"
+     ],
+     "ipponsB": [],
+     "scoreVersion": 4,
+     "modifiedAt": 300,
+     "groupStamps": {
+      "points": 100,
+      "result": 300
+     }
+    },
+    "outcomes": {
+     "c1": [
+      "matchClosed"
+     ]
+    }
+   }
+  },
+  {
+   "name": "S2 (court): two court finishes keep the first recorded result (I1), whichever arrives first",
+   "jsMirror": false,
+   "shape": {
+    "kind": "individual",
+    "knockout": true
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Aka",
+    "sideB": "Shiro",
+    "sideAId": "pa",
+    "sideBId": "pb",
+    "winner": "Aka",
+    "ipponsA": [],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "completed",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": "",
+    "winnerId": "pa"
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "points": {
+        "ipponsA": [],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "c1f",
+      "door": "score",
+      "stamp": 100,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Aka",
+        "decision": "",
+        "winnerId": "pa"
+       }
+      },
+      "basis": {
+       "seen": 1
+      },
+      "basisSent": true,
+      "court": true
+     }
+    },
+    {
+     "v": 1,
+     "baseline": {
+      "id": "c2f",
+      "door": "score",
+      "stamp": 300,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Shiro",
+        "decision": "",
+        "winnerId": "pb"
+       }
+      },
+      "basis": {
+       "seen": 1
+      },
+      "basisSent": true,
+      "court": true
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "x1",
+      "session": "s-x",
+      "seq": 1,
+      "stamp": 200,
+      "kind": "ippon.add",
+      "side": "a",
+      "letter": "D"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "status": "completed",
+     "winner": "Aka",
+     "winnerId": "pa",
+     "scoreVersion": 4,
+     "modifiedAt": 100,
+     "groupStamps": {
+      "points": 10,
+      "result": 100
+     }
+    },
+    "outcomes": {
+     "x1": [
+      "matchClosed"
+     ]
+    }
+   }
   }
  ]
 }

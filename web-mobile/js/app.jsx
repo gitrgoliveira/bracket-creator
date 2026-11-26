@@ -8,7 +8,9 @@ import { createTimerPool } from './timer_pool.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
-import { queuedWritesNoun, supersededAlertText, displacedAlertText, tapNotAppliedAlertText, tapNotAppliedText } from './write_result.jsx';
+import {
+  queuedWritesNoun, supersededAlertText, displacedAlertText, tapNotAppliedAlertText, tapNotAppliedText, courtReplacedAlertText,
+} from './write_result.jsx';
 import { VersionBanner } from './version_banner.jsx';
 import { PublicHeldWrites } from './held_writes_panel.jsx';
 import { useUnsavedInput } from './app_version.jsx';
@@ -518,6 +520,12 @@ export function queueAlertMessage(alert) {
     // its history. Recorded, so not an error: the history has the change.
     case "displaced":
       return displacedAlertText(n, one);
+    // bc-sseq FR8: a result this device recorded, applied, that the court
+    // running the match's shiaijo replaced with its own later result. Told
+    // once per replaced write, as information: the court's result counts and
+    // this one is in the match's history, so there is nothing to correct.
+    case "court_replaced":
+      return courtReplacedAlertText({ court: alert.court || "" }, alert.where || "");
     // bc-evts: taps the server did not apply this pass, one alert a match
     // (decision q-f6-one-message), naming the match; a single one says why in
     // the server's words or the outcome's, and several end on those words
@@ -538,10 +546,11 @@ export function queueAlertMessage(alert) {
 
 // queueAlertToastType: how the one subscriber below shows a queue alert. Only
 // 'sent' is good news, and 'displaced' is information (the result was saved;
-// the change it moved aside is in the history); every other kind stays an
-// error. Exported for test.
+// the change it moved aside is in the history), as is 'court_replaced' (the
+// court's result counts and this device's is in the history); every other
+// kind stays an error. Exported for test.
 export function queueAlertToastType(alert) {
-  if (alert && (alert.kind === "displaced" || alert.kind === "tap_applied")) return "info";
+  if (alert && (alert.kind === "displaced" || alert.kind === "tap_applied" || alert.kind === "court_replaced")) return "info";
   // The change was kept; a carried lineup could not follow it (F5). A
   // check-in another desk changed later stands as that desk left it: the
   // screen changed under the operator, which they are warned of.

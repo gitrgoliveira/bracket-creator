@@ -222,7 +222,7 @@ flowchart TB
 
 | Device | What it runs | Notes |
 |---|---|---|
-| Operator console (1 per court) | admin scoring SPA | tablet/desktop surface; authenticates with the admin password; scores its own shiai-jo |
+| Operator console (1 per court) | admin scoring SPA | tablet/desktop surface; authenticates with the admin password; scores its own shiai-jo. One tablet runs each shiai-jo at a time (a console opened on another device watches only until its operator taps **Take control**), and its finishes and decisions have the last word on that shiai-jo's results (refer to [Order of writes](network-architecture.md#order-of-writes)) |
 | Display screen (1 per court, optional) | public display / scoreboard view | a browser at a display URL; read-only, no auth. **Preferred: drive it from the operator console's own machine** via an HDMI cable to a TV or monitor, so the board survives a Wi-Fi outage (refer to [Keep the court scoreboard alive on the same machine](#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi)). A standalone smart-TV browser or separate mini-PC also works but loses that offline path |
 | Spectator phones | public viewer (mobile-first) | can be on cellular; they don't need venue Wi-Fi when the app is cloud-hosted |
 
@@ -250,7 +250,7 @@ scoreboard freezes during a Wi-Fi outage:
 
 - **Same machine as the operator console (recommended).** Connect a TV or monitor to the
   operator's laptop or mini-PC with an **HDMI cable**, extend the desktop, and open the court's
-  display URL in a second browser window on that same machine. The operator console and the display board are then two tabs in the same browser on the same computer. They share a private same-origin channel, so every score the operator records reaches the board **directly, on the machine, with no network hop**. If the venue Wi-Fi drops mid-match, that court's
+  display URL in a second browser window on that same machine. The operator console and the display board are then two tabs in the same browser on the same computer (the display takes no control of the shiai-jo, so it never stops the console from scoring). They share a private same-origin channel, so every score the operator records reaches the board **directly, on the machine, with no network hop**. If the venue Wi-Fi drops mid-match, that court's
   scoreboard keeps updating from the operator's entries for as long as the scoring tab stays
   open. The board shows a small amber dot while it is running on this local feed (refer to
   [the scoreboard status dot](../user-guide/spectators/following.md#scoreboards-and-court-displays)).
@@ -307,6 +307,7 @@ model lists every file and what its columns mean.
   append-only log of its scoring taps and its writes (JSON lines) beside its audit history. Every write made
   inside a transaction is made durable through a write-ahead log replayed on startup. The disk survives reboots and stop/start.
 - **Backups.** The app takes a daily copy of the whole tournament into `tournament-data/backups/` when the data changed, and another at a normal shutdown if anything changed since the newest daily copy. The admin console also downloads a backup on demand. Those copies sit on the same disk, so keep a downloaded archive or a disk snapshot off the VM as well. A plain copy of `tournament-data/` taken while the server runs can catch a multi-file write half done; stop the server first. Refer to [Backup and restore](../user-guide/organisers/backup-and-restore.md).
+- **Who runs each shiai-jo is on disk too.** `court-control.json` at the root of `tournament-data/` records which tablet runs each shiai-jo, so a server restart changes nothing for the court consoles. It is not part of any backup, and replacing the whole tournament clears it (refer to [The court-control.json file](data-model.md#the-court-controljson-file)).
 - **Disk sizing is not about data volume.** Tournament state is tiny (KB–MB). The cloud disks
   (30 GB on GCP, 50 GB on Oracle) are the free-tier **boot-disk** allowances (they hold the OS,
   Docker, and the app image, with `tournament-data/` alongside). The module uses the free

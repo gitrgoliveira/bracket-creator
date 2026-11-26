@@ -344,7 +344,8 @@ type CourtControls interface {
 	// standing: true when the write's tablet runs the shiaijo and the write was
 	// made at or after the standing's start. A write naming a shiaijo nobody
 	// holds, from a tab and a tablet on neither displaced list, claims it
-	// first. Not called by the score or decision doors yet.
+	// first. Called by the score and decision doors (judgeCourtStanding,
+	// write_tag.go) in the write's transaction.
 	WriteStanding(court, tabID, deviceID string, stamp int64) (bool, error)
 	// Clear frees every shiaijo and forgets both displaced lists: the whole
 	// tournament was replaced.

@@ -78,7 +78,10 @@ flowchart TB
   whole writes of a match, lineups, team members, reinstatements and pool rank orders) and
   check-in, court calls, the tournament settings and the fighting-spirit awards go through the
   device's outbox (§4); other setup edits, such as the password change, competition settings,
-  the roster, seeds, the draw and import, are direct calls that are not kept for later. Auth is
+  the roster, seeds, the draw and import, are direct calls that are not kept for later. So are
+  the court control calls on `/api/courts/{court}/control` (`GET`, a `PUT` that claims the
+  shiai-jo, takes it with Take control or beats every 30 s while the console is shown, and a
+  `DELETE` that gives it back), since taking control means nothing offline. Auth is
   handled through the `X-Tournament-Password` header (two modes, §5; self-run mode allows
   unauthenticated scoring). Every response carries the `X-App-Build` header naming the git
   commit of the server build (or `unknown`), allowing clients to detect when a new server build
@@ -86,7 +89,9 @@ flowchart TB
 - **SSE**: one stream per client carrying `match_updated`, `competition_started`,
   `competition_completed`, `competitor_status_updated`, `participants_updated`,
   `tournament_updated`, `schedule_updated`, `lineup_updated`, `draw_generated`, `draw_discarded`,
-  `swiss_round_generated`, `announcement`, `password_reset` and `bracket_quarantined`, plus the
+  `swiss_round_generated`, `announcement`, `password_reset`, `bracket_quarantined` and
+  `court_control_updated` (sent to organiser streams only, when another tab or tablet runs a
+  shiai-jo, or nobody does; a heartbeat announces nothing), plus the
   resilience control events `resync_required` and `heartbeat`. Every real event is stamped with a
   monotonic `seq` written as the SSE `id:` line, so the browser's `Last-Event-ID` advances
   automatically. A tap does not push by itself: the server replays the match and pushes the
@@ -412,6 +417,8 @@ Taps are replayed by their stamps on the server, and a whole write names the gro
 Once a finish or a decision is recorded, a tap or a scoring write made after it is not applied either: the finish stands, the change is kept in the history, and the answer adds `heldReason: "match_closed"` (a tap's outcome is `matchClosed`), on which the editor tells the operator that the match is finished and to tap Correct. Arrival order does not change the outcome. A tap that reached the server before a finish made earlier is applied at first; when the finish arrives, the tap is moved to the history (an entry of its own, at its own time) and the finish is answered applied, naming it in `displacedGroups` with `heldReason: "match_closed"` and no `heldGroups`; the editor says "Saved" and what was moved, and a held finish replayed this way raises one information alert.
 
 The first recorded result stands: a later finish or decision from a device that did not see the result in force is held in the same way, whichever arrived first, and so is one that would replace a knockout result after the next match was played or started (`heldReason` `downstream_knockout_played` or `downstream_knockout_running`). A representative pick made after its representative bout was removed is moved to the history the same way when the removal arrives, and that answer names it in `displacedGroups` with no `heldReason`. Where the outbox folds a queued running update into a later one, the later one names every group either changed.
+
+One writer has the last word on a match's result: the court console of the tablet that runs the match's shiai-jo. Only one console tab runs a shiai-jo at a time, and a console that does not run it queues nothing. The holding console stamps each finish and decision with `courtControl: {tabId, deviceId}`, its tab's id and its tablet's (both kept in browser storage; the tablet id is shared by the tablet's tabs, as the outbox is), and the stamp stays with the write while the outbox holds it. The server judges the stamp when the write arrives, never when it was made: the write has the court's standing when its tablet runs the shiai-jo the match is on at that moment, from any of its court console tabs, and it was not made before that tablet took the shiai-jo from another tablet. So a tablet's results queued offline keep the standing after a take between two of its own tabs, and lose it once another tablet has taken the shiai-jo. A result with the standing replaces a result another device recorded that it never saw, in either arrival order. A replaced result that had already been answered as applied is named on every later copy of the match (`replacedResult`, its write id), so the device that sent it tells its operator once; one that arrives after the court's is answered `heldReason: "court_result"`. When other matches were already built on the result the court's would replace (a later Swiss round paired, a tie-break or representative match added, the competition finished), the court's result is held with `heldReason: "downstream_built_on"` and a sentence that points at Correct. A write from any other screen keeps the rules above.
 
 The same holds for the writes that are not score sheets: an older save the same device had already followed with a newer one (an out-of-order delivery after a reconnect) is kept whole in the history as an "older revision of this board"; an engi result is ordered by when it was saved, its flags and the winner they decide kept together. A queued decision or finish whose first send landed but whose answer was lost is answered as recorded when it is sent again: the same write under the same stamp changes nothing, so it is not asked for a correction reason and nothing is written to the match; the match's history gains a line saying the write arrived and changed nothing.
 

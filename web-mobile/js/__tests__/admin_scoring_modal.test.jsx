@@ -1174,6 +1174,22 @@ describe('item 7: non-points decisions advance to next match', () => {
       expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-p', { decision: 'fusenpai', decisionBy: 'shiro' }, 'pw', expect.objectContaining({ onRefusal: expect.any(Function) }));
     });
 
+    // bc-sseq FR8: the decision names the match's shiaijo to recordDecision,
+    // which stamps the court console's court control only while the console
+    // running it is on screen; the body never carries it. A match with no
+    // court names none.
+    it("the decision names the match's shiaijo, outside its body", async () => {
+      const submit = makeSubmitDecision({ match: { ...makeMatch('m-c'), court: 'B' }, enchoPeriodCount: 0, password: 'pw', ...makeSetters(), onClose: vi.fn() });
+      await submit('fusenpai', { decisionBy: 'shiro', decisionReason: '' });
+      const [, , body, , opts] = window.API.recordDecision.mock.calls[0];
+      expect(opts).toEqual(expect.objectContaining({ court: 'B' }));
+      expect(body).not.toHaveProperty('court');
+      window.API.recordDecision.mockClear();
+      const none = makeSubmitDecision({ match: makeMatch('m-n'), enchoPeriodCount: 0, password: 'pw', ...makeSetters(), onClose: vi.fn() });
+      await none('fusenpai', { decisionBy: 'shiro', decisionReason: '' });
+      expect(window.API.recordDecision.mock.calls[0][4]).not.toHaveProperty('court');
+    });
+
     // Stage 6 review 8 (M4): the court console reads the decision this device
     // made from the outbox, so the decided match leaves the live slot, and the
     // editor goes, as the decision is queued. The host still moves on to the

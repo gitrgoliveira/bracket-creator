@@ -28,6 +28,24 @@ import { _noteShownMatch, _noteMatchLabel } from './api_client_status.jsx';
 import { _outboxWrite, _lastEntryKey, _daihyosenRequest } from './api_client_enqueue.jsx';
 import { queuedWritesOf } from './api_client_outbox.jsx';
 import { store } from './api_client_store.jsx';
+import { courtControlFor } from './court_control.jsx';
+
+// _stampCourtControl (bc-sseq FR8): the court console's stamp on a score or
+// decision write, `{tabId, deviceId}` from courtControlFor (court_control.jsx),
+// put on the payload as the write is made. Only while the court console of the
+// match's shiaijo is on screen in this tab and holds it (or has had no answer
+// yet, so a console opened offline claims a free shiaijo on arrival); an admin
+// host's write is never stamped. Request-only: the server judges it on arrival
+// (the court's standing) and never stores it. Kept with the entry through the
+// outbox (persisted, checked on rehydrate, _storedEntryProblem, adopted across
+// tabs), never published to a display (_broadcastPatch). The same object
+// courtControlFor handed out, so the outbox can name the shiaijo it was for
+// (courtOfControlStamp).
+function _stampCourtControl(payload, court) {
+    const cc = courtControlFor(court);
+    if (cc) payload.courtControl = cc;
+    return payload;
+}
 
 export const matchesApi = {
     /**
@@ -69,6 +87,8 @@ export const matchesApi = {
         // so the outbox's order and the stamps agree.
         const seen = _seenOfScore(result, match);
         _stampPayload(payload, _serverNowMs(), seen);
+        // bc-sseq FR8: the court console's write carries its court control.
+        _stampCourtControl(payload, match && match.court);
 
         // C2: stamp monotonic rev on running-status writes so the server's
         // rev-guard can hold out-of-order deliveries (e.g. from reconnect flush).
@@ -98,12 +118,13 @@ export const matchesApi = {
         // states the flag counts the match it starts already holds: the
         // display reads a result naming a status that omits a count as 0
         // (mergeMatchPatch), which turned a kept 2-1 into 0-0. `startOnly` and
-        // `forceCourt` (and `confirmFinished`) are request-only and stay off the display's copy.
+        // `forceCourt` (and `confirmFinished`, and the court console's
+        // `courtControl`, bc-sseq FR8) are request-only and stay off the display's copy.
         const _broadcastPatch = (fields) => {
             const {
                 rev: _r, revSession: _rs, changed: _ch,
                 writeId: _w, basis: _b, session: _s, forceDownstreamReopen: _f,
-                startOnly, forceCourt: _fc, confirmFinished: _cf, confirmLots: _cl, ...rest
+                startOnly, forceCourt: _fc, confirmFinished: _cf, confirmLots: _cl, courtControl: _cc, ...rest
             } = fields || {};
             if (startOnly) {
                 for (const k of START_BROADCAST_DROPS) delete rest[k];
@@ -161,6 +182,10 @@ export const matchesApi = {
     // on the DIRECT call) always throw: the score editor relies on a thrown 409
     // to show the refusal. A queued replay's 409 is reported too
     // (_flushQueue), never taken as success (bc-mrgc phase 3).
+    //
+    // `opts.court` (bc-sseq FR8) is the match's shiaijo as the caller shows it:
+    // a decision made from the court console that runs it carries the
+    // console's court control, as recordScore's does (_stampCourtControl).
     async recordDecision(compID, matchID, body, password, opts = {}) {
         const decisionUrl = `/api/competitions/${compID}/matches/${matchID}/decision`;
         // Stamp in server-relative time, exactly as recordScore does (mp-y3nk),
@@ -171,6 +196,7 @@ export const matchesApi = {
         // sent.
         const { seenModifiedAt: seen, ...rest } = body || {};
         const payload = _stampPayload({ ...rest }, _serverNowMs(), seen);
+        _stampCourtControl(payload, opts && opts.court);
         // bc-evts: the outbox's, at once, behind this device's earlier writes
         // for the match. `opts.seen` is the score log line count the screen
         // showed (the match's scoreVersion): a correction over a finished match

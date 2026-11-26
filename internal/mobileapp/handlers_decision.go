@@ -61,6 +61,12 @@ type DecisionRequest struct {
 	// writeTag is the optional writeId and basis (bc-evts F1): a resend of a
 	// decision the match's score event log holds answers as recorded.
 	writeTag
+	// courtWrite is the optional courtControl {tabId, deviceId} a court
+	// console stamps its decision with (bc-sseq FR8), judged on arrival for
+	// the court's standing, which rides to the baseline through tagInto.
+	// Request-only, never stored. The both-barred draw, which only ends a
+	// match nothing was recorded on, does not judge it.
+	courtWrite
 }
 
 // decisionCorrects reads a decision over the stored match as a correction
@@ -122,6 +128,9 @@ func (r *DecisionRequest) Validate() error {
 	}
 	if err := r.validateTag(); err != nil {
 		return &ValidationError{Field: "writeId", Message: err.Error()}
+	}
+	if err := r.validateCourtControl(); err != nil {
+		return &ValidationError{Field: "courtControl", Message: err.Error()}
 	}
 	return nil
 }
@@ -214,8 +223,11 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// when req.ForceDownstreamReopen actually unblocked one.
 			reopenedDownstream []engine.ReopenedMatch
 			// supersededMatch is the stored match a held decision lost to,
-			// read in the write's transaction for the answer's `match`.
-			supersededMatch *state.MatchResult
+			// read in the write's transaction for the answer's `match`, and
+			// supersededMessage the answer's sentence, judged there too
+			// (supersededMessageTx, bc-sseq FR8).
+			supersededMatch   *state.MatchResult
+			supersededMessage string
 		)
 		reason := strings.TrimSpace(req.DecisionReason)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
@@ -234,6 +246,14 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			if snapErr != nil {
 				return snapErr
 			}
+			// bc-sseq FR8: the court's standing, judged on arrival against who
+			// runs the match's shiaijo as stored here.
+			tl, _ := store.(TournamentLoader)
+			standing, standErr := req.judgeCourtStanding(stx, id, mid, snap, courtsOf(hub), tl, req.ModifiedAt)
+			if standErr != nil {
+				return standErr
+			}
+			req.CourtStanding = standing
 			// A decision correcting a finished league's result is warned
 			// about first, as on PUT /score. Only a league
 			// pays for the check, and the check judges whether it has finished:
@@ -242,7 +262,6 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// cannot change, the status can).
 			if comp != nil && comp.Format == state.CompFormatLeague && !req.ConfirmFinished {
 				score := &seenResultCheck{stx: stx, compID: id, matchID: mid}
-				tl, _ := store.(TournamentLoader)
 				if err := refuseFinishedLeagueCorrection(stx, tl, id, mid, decisionCorrects(snap, req, comp, score), false); err != nil {
 					var refusal *leagueFinishedRefusal
 					if errors.As(err, &refusal) {
@@ -273,6 +292,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 				req.tagInto(fo), req.ModifiedAt)
 			if errors.Is(engErr, engine.ErrMatchSuperseded) {
 				supersededMatch = storedMatchForAnswer(stx, id, mid, false)
+				supersededMessage = supersededMessageTx(stx, id, mid, engine.HeldReasonOf(engErr), supersededMatch)
 			}
 			if result != nil && result.ResultSource == "" {
 				result.ResultSource = "admin"
@@ -299,7 +319,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// in common (superseded, downstream_knockout_running/played,
 			// corrupt overrides) identically rather than the carve-out
 			// falling through respondEngineError's 500 default for them.
-			respondDecisionEngineError(c, store, id, mid, supersededMatch, engErr)
+			respondDecisionEngineError(c, store, id, mid, supersededMatch, supersededMessage, engErr)
 			return
 		}
 
@@ -346,7 +366,10 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 //
 // stored is the match as stored once a superseded write was held, read in the
 // write's transaction (storedMatchForAnswer); nil for any other refusal.
-func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, matchID string, stored *state.MatchResult, engErr error) {
+// heldMessage is the superseded answer's sentence judged there too
+// (supersededMessageTx); "" words it from the code, as the both-barred
+// carve-out, which never holds a court result, passes.
+func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, matchID string, stored *state.MatchResult, heldMessage string, engErr error) {
 	// Map engine.ValidationError → 400, NotFoundError → 404,
 	// IneligibleCompetitorError → 409 (FR-035).
 	var alreadyIneligErr *engine.AlreadyIneligibleError
@@ -370,7 +393,7 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		// supersede here would not merely mis-report a dropped write,
 		// it would poison the offline queue with one that can never
 		// succeed.
-		respondSupersededError(c, stored, engErr)
+		respondSupersededSaying(c, stored, engine.HeldGroupsOf(engErr), engine.HeldReasonOf(engErr), heldMessage, engErr)
 	case respondIfLeagueFinished(c, engErr):
 		// A correction of a finished league's result: resent with
 		// confirmFinished once the organiser confirms.
@@ -565,7 +588,7 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 			// or trip a downstream-knockout guard exactly like the main flow,
 			// and respondEngineError's 500 default for those would poison the
 			// SPA's offline write queue instead of answering them terminally.
-			respondDecisionEngineError(c, store, compID, matchID, stored, writeErr)
+			respondDecisionEngineError(c, store, compID, matchID, stored, "", writeErr)
 			return true
 		}
 		return false

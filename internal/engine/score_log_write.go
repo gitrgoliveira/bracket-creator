@@ -439,6 +439,9 @@ type writeBaseline struct {
 	basis   *state.ScoreBasis
 	// session is the writer's event session, for the basis's Seq arm.
 	session string
+	// court is the write's court standing (MatchResult.CourtStanding,
+	// bc-sseq FR8), for a baseline the merge did not judge (sent nil).
+	court bool
 	// prefix are the lines the replay that decided the write needed ahead of
 	// its baseline (MergeReport.LogPrefix): logged first, so a scoring
 	// snapshot always leaves the log it was decided on.
@@ -506,7 +509,7 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 	}
 	note := e.noteWriteBaseline(h, compID, matchID, writeBaseline{
 		door: doorOf(result), stamp: rep.Stamp, named: rep.Applied,
-		writeID: result.WriteID, basis: result.Basis, session: result.WriteSession,
+		writeID: result.WriteID, basis: result.Basis, session: result.WriteSession, court: result.CourtStanding,
 		prefix: rep.LogPrefix, revSession: result.RevSession, rev: result.Rev,
 		sent: sentBaseline(rep), prior: rep.Prior, replay: mergeReplayOf(rep),
 	})
@@ -516,6 +519,7 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 	rep.EventsNotApplied = note.notApplied
 	result.ScoreVersion = note.match.ScoreVersion
 	result.TurnedAway = maps.Clone(note.match.TurnedAway)
+	result.ReplacedResult = note.match.ReplacedResult.Clone()
 	takeDerivedMarks(&result.MarkIDs, result.SubResults, &note.match)
 }
 
@@ -526,7 +530,7 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 func (e *Engine) recordSupersededWriteHistory(h state.StoreTx, compID, matchID string, result *state.MatchResult) {
 	// What the answer says of the match's turned-away taps is the server's,
 	// never a value the write carried (supersededBy reads these).
-	result.TurnedAway, result.ScoreVersion = nil, 0
+	result.TurnedAway, result.ScoreVersion, result.ReplacedResult = nil, 0, nil
 	if result.Merge != nil && result.Merge.ResultLocked != "" {
 		// Held by the result lock (K1): kept once, whatever the resends.
 		e.recordLockedHoldHistory(h, compID, matchID, result)
@@ -566,6 +570,7 @@ func (e *Engine) recordSupersededWriteHistory(h state.StoreTx, compID, matchID s
 	// push (stage 6 review 6).
 	result.ScoreVersion = note.match.ScoreVersion
 	result.TurnedAway = maps.Clone(note.match.TurnedAway)
+	result.ReplacedResult = note.match.ReplacedResult.Clone()
 }
 
 // sentBaseline is the baseline the replay judged for a write, nil for a write
@@ -682,6 +687,9 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 			// line's Seen is bounded by the log's length when it is written.
 			after = mr.after
 			after.Match = cloneMatchForReplay(mr.after.Match)
+			// The merge replayed the baseline before it carried its write
+			// id, which names the result the court replaced (bc-sseq FR8).
+			after.Match.ReplacedResult = replacedResultOf(append(slices.Clone(lines), line), after.displaced)
 		} else {
 			after = ReplayScoring(post, append(slices.Clone(lines), line), shape)
 		}
@@ -741,6 +749,7 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 				}
 			}
 			bl.WriteID, bl.Session, bl.ReceivedAt = wb.writeID, wb.session, serverNowMs()
+			bl.Court = wb.court
 			if wb.rev > 0 && wb.revSession != "" {
 				bl.RevSession, bl.Rev = wb.revSession, wb.rev
 			}
@@ -958,6 +967,7 @@ func (e *Engine) takeReplayDerived(h state.StoreTx, compID, matchID string, inPo
 			r.ScoreVersion = derived.ScoreVersion
 			r.EventSeqs = state.CloneGroupStamps(derived.EventSeqs)
 			r.TurnedAway = maps.Clone(derived.TurnedAway)
+			r.ReplacedResult = derived.ReplacedResult.Clone()
 			takeDerivedMarks(&r.MarkIDs, r.SubResults, derived)
 			return nil
 		})
@@ -966,6 +976,7 @@ func (e *Engine) takeReplayDerived(h state.StoreTx, compID, matchID string, inPo
 			bm.ScoreVersion = derived.ScoreVersion
 			bm.EventSeqs = state.CloneGroupStamps(derived.EventSeqs)
 			bm.TurnedAway = maps.Clone(derived.TurnedAway)
+			bm.ReplacedResult = derived.ReplacedResult.Clone()
 			takeDerivedMarks(&bm.MarkIDs, bm.SubResults, derived)
 		})
 	}

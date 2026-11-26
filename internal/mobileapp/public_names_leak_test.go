@@ -34,6 +34,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -1109,4 +1110,38 @@ func TestPublicNamesLeak_SelfRunOverHidingCompetitionsShowsNames(t *testing.T) {
 	rec := f.send(http.MethodGet, "/api/viewer/competitions", "", nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.NotContains(t, rec.Body.String(), `"namesHidden":true`)
+}
+
+// replacedResultCarriesNoName classifies every field of the result the court's
+// result replaced (state.ReplacedResult, bc-sseq FR8), which every copy of a
+// match carries, public ones included: none can hold a name, so the public
+// mask passes it unchanged (the self-run page needs it to tell its own
+// device). A field added there fails TestPublicNamesLeak_ReplacedResultPassesTheMask
+// until it is classified here.
+var replacedResultCarriesNoName = map[string]string{
+	"WriteID": "the client's id for its write, minted by the device (a UUID)",
+	"Stamp":   "the replaced result's stamp, unix milliseconds",
+}
+
+func TestPublicNamesLeak_ReplacedResultPassesTheMask(t *testing.T) {
+	rt := reflect.TypeOf(state.ReplacedResult{})
+	for i := range rt.NumField() {
+		if _, ok := replacedResultCarriesNoName[rt.Field(i).Name]; !ok {
+			t.Errorf("state.ReplacedResult.%s is not classified: decide whether it can carry a name before the public mask passes it", rt.Field(i).Name)
+		}
+	}
+	require.Len(t, replacedResultCarriesNoName, rt.NumField(), "a classified field that state.ReplacedResult no longer has")
+
+	want := &state.ReplacedResult{WriteID: "3f0c1a52-9d4e-4b7a-8c21-6e5f0a9b7d10", Stamp: 1_800_000_060_000}
+	v := maskView{m: individualMask()}
+	m := state.MatchResult{ID: "Pool A-0", SideA: "Alice Arai", SideAID: pnAlice, SideB: "Bob Baba", SideBID: pnBob,
+		Winner: "Bob Baba", WinnerID: pnBob, ReplacedResult: want.Clone()}
+	v.match(&m)
+	assert.Equal(t, "K2", m.Winner, "the match is masked")
+	assert.Equal(t, want, m.ReplacedResult, "a pool match keeps it")
+	bm := state.BracketMatch{ID: "m-r1-0", SideA: "Alice Arai", SideAID: pnAlice, SideB: "Bob Baba", SideBID: pnBob,
+		Winner: "Bob Baba", WinnerID: pnBob, ReplacedResult: want.Clone()}
+	v.bracketMatch(&bm)
+	assert.Equal(t, "K2", bm.Winner, "the knockout match is masked")
+	assert.Equal(t, want, bm.ReplacedResult, "a knockout match keeps it")
 }

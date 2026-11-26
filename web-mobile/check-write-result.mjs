@@ -212,6 +212,17 @@ export const FORBIDDEN = [
     why: 'reads a retired held reason; the server answers match_closed (writeMatchClosed, write_result.jsx)',
   },
   {
+    // bc-sseq FR8: the two held reasons of the court's result have ONE reader
+    // each in write_result.jsx: writeCourtResult for court_result (a result
+    // the court's replaced) and writeResultLocked for downstream_built_on (a
+    // court result held because other matches were built on the one it would
+    // replace). Any other file spelling either code is comparing it by hand.
+    name: 'court-held-reasons',
+    re: /['"`](court_result|downstream_built_on)['"`]/,
+    exempt: ['write_result.jsx'],
+    why: 'reads a court held reason by hand; ask writeCourtResult(res) or writeResultLocked(res) (write_result.jsx) instead',
+  },
+  {
     // bc-evts stage 3 (S6): the individual editor scores a RUNNING match by
     // tap events (API.recordTap), so it has no autosave to debounce or land
     // and no unsaved running edit for an adopt to keep. Widened to the engi

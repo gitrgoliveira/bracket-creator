@@ -367,6 +367,12 @@ type ForceOptions struct {
 	// Session is the client's event session, carried with Basis onto the
 	// baseline (bc-evts S8 b) so the basis's Seq arm can count its events.
 	Session string
+	// CourtStanding is the court's standing of a door's server-built write
+	// (a decision from the court console of the tablet that runs the
+	// shiaijo, bc-sseq FR8), judged by the door on arrival, carried onto the
+	// baseline (ScoreBaseline.Court) as MatchResult.CourtStanding carries a
+	// write the client builds. Request-only, never stored.
+	CourtStanding bool
 	// ReopenReason is the reason a decision that ends a match reopened with no
 	// reason keeps as the match's correction reason. It rides on the write
 	// itself, so the baseline the write leaves in the score event log holds it:

@@ -27,8 +27,8 @@
 
 import { IPPON_PLACEHOLDER } from './result_slot.jsx';
 import {
-    MATCH_CLOSED_NOTE, RESULT_LOCKED_PLAYED_REASON, RESULT_LOCKED_RUNNING_REASON, MATCH_CLOSED_ADVICE,
-    writeMatchClosed, writeResultLocked,
+    MATCH_CLOSED_NOTE, MATCH_CLOSED_ADVICE, COURT_RESULT_REASON,
+    writeMatchClosed, writeResultLocked, resultLockedReason, writeCourtResult, writeDisplacedByCourtResult,
     writePartlyHeld, writeHeldGroups, writeDisplacedGroups, writeDisplacedForClosedMatch,
 } from './write_result.jsx';
 
@@ -129,15 +129,26 @@ export function heldGroupsNote(groups, why = null) {
 // later change of the match to its history (write_result.jsx
 // writeDisplacedGroups). `afterFinish` (writeDisplacedForClosedMatch) when the
 // answer says the change was made after the match was finished (heldReason
-// "match_closed"); a change moved for another reason (a representative's pick
-// stamped after the representative bout's removal) is worded plainly. null
-// when nothing was moved.
-export function displacedGroupsNote(groups, afterFinish = false) {
+// "match_closed"); `byCourt` (writeDisplacedByCourtResult, bc-sseq FR8) when
+// the write was the court's result and replaced a result another device had
+// recorded first, which is no later change; a change moved for another reason
+// (a representative's pick stamped after the representative bout's removal)
+// is worded plainly. null when nothing was moved.
+export function displacedGroupsNote(groups, afterFinish = false, byCourt = false) {
     const words = groupsLabel(groups);
     if (!words) return null;
+    if (byCourt) return COURT_RESULT_DISPLACED_NOTE;
     return afterFinish
         ? `Saved. A later change to ${words} was made after the match was finished, so it was moved to the match's history.`
         : `Saved. A later change to ${words} was moved to the match's history.`;
+}
+
+// The note for the court's result that replaced another device's: "Saved"
+// leads, since this write was recorded, and nothing needs entering again.
+export const COURT_RESULT_DISPLACED_NOTE = "Saved: the court's result counts. The result another device recorded for this match first was moved to the match's history.";
+
+function capitalised(s) {
+    return String(s || '').replace(/^./, (c) => c.toUpperCase());
 }
 
 // keptInHistoryNote: the ONE note a score editor (useKeptInHistoryNote) or
@@ -150,11 +161,14 @@ export function keptInHistoryNote(res) {
     const locked = writeResultLocked(res);
     if (writePartlyHeld(res) || writeMatchClosed(res) || locked) {
         const why = locked
-            ? `${(locked === 'played' ? RESULT_LOCKED_PLAYED_REASON : RESULT_LOCKED_RUNNING_REASON).replace(/^./, (c) => c.toUpperCase())}. ${MATCH_CLOSED_ADVICE}`
-            : writeMatchClosed(res) ? MATCH_CLOSED_NOTE : null;
+            ? `${capitalised(resultLockedReason(locked))}. ${MATCH_CLOSED_ADVICE}`
+            : writeMatchClosed(res) ? MATCH_CLOSED_NOTE
+                // bc-sseq FR8: this write's result was replaced by the
+                // court's; nothing to correct or enter again.
+                : writeCourtResult(res) ? `${capitalised(COURT_RESULT_REASON)}.` : null;
         parts.push(heldGroupsNote(writeHeldGroups(res), why));
     }
-    parts.push(displacedGroupsNote(writeDisplacedGroups(res), writeDisplacedForClosedMatch(res)));
+    parts.push(displacedGroupsNote(writeDisplacedGroups(res), writeDisplacedForClosedMatch(res), writeDisplacedByCourtResult(res)));
     const text = parts.filter(Boolean).join(' ');
     return text || null;
 }

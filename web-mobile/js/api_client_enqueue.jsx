@@ -288,7 +288,27 @@ export function _storedEntryProblem(descriptor) {
     // A tap is sent to the score-events door and nowhere else.
     if (descriptor.kind === 'evt' && (descriptor.method !== 'POST'
         || !String(descriptor.url).split('?')[0].endsWith('/score-events'))) return 'unreadable';
+    // bc-sseq FR8: the court console's stamp gives a result the court's
+    // standing, so only one courtControlFor made can be sent: both ids lowercase
+    // UUID v4 (the server answers anything else 400), on a score or decision
+    // write, with the shiaijo it was given for named beside it. Storage is
+    // tamperable; a hand-made stamp is never sent.
+    if (_courtControlProblem(descriptor)) return 'unreadable';
     return null;
+}
+
+const COURT_CONTROL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+// _courtControlProblem: whether a stored entry's court control stamp (or the
+// shiaijo it names, `courtControlCourt`) is not one this build made.
+function _courtControlProblem(descriptor) {
+    const p = descriptor.payload;
+    const cc = p && typeof p === 'object' ? p.courtControl : undefined;
+    if (cc === undefined || cc === null) return descriptor.courtControlCourt !== undefined;
+    if (descriptor.kind !== 'score' && descriptor.kind !== 'decision') return true;
+    if (typeof cc !== 'object' || Array.isArray(cc)) return true;
+    const keys = Object.keys(cc);
+    if (keys.length !== 2 || !COURT_CONTROL_ID.test(String(cc.tabId)) || !COURT_CONTROL_ID.test(String(cc.deviceId))) return true;
+    return typeof descriptor.courtControlCourt !== 'string' || descriptor.courtControlCourt === '';
 }
 
 // Shared post-enqueue tail for every queue path: place the write in its
@@ -423,6 +443,10 @@ function _placeWrite(base, descriptor) {
     }
     // Whatever the replaced write had to follow, this one follows too.
     for (const k of _afterKeys(prev)) _addAfter(descriptor, k);
+    // The court console's court control is NOT carried (bc-sseq FR8): the
+    // NEWER write's stands, so a write made after this tab lost the shiaijo
+    // never inherits the court's standing from one it replaces. The payload
+    // above is the new write's own, `courtControl` included or absent.
     descriptor.payload = payload;
     return key;
 }

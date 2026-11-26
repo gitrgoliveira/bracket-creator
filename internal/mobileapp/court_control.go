@@ -334,8 +334,8 @@ func (r *courtControlRegistry) standingLocked(court, devKey string, stamp int64)
 }
 
 // WriteStanding reports whether a court console's write has the court's
-// standing. It has no production caller yet: the score and decision doors do
-// not carry a court control or call WriteStanding yet. Ids that are not a
+// standing. The score and decision doors call it for a write that carries a
+// court control (judgeCourtStanding, write_tag.go). Ids that are not a
 // console's, or a shiaijo the tournament does not list, have no standing. A
 // shiaijo nobody holds, from a tab and a tablet on neither displaced list (a
 // console opened offline), is claimed by the write with standingFrom 0, as

@@ -2,10 +2,12 @@ package engine
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1287,6 +1289,318 @@ func TestMatchWriteReopenFastClockTapConverges(t *testing.T) {
 		}
 		if len(seen) != 1 {
 			t.Errorf("ko=%v: arrival order changed the outcome: %v", ko, seen)
+		}
+	}
+}
+
+// The court's standing in the matrix (bc-sseq FR8). A result from the court
+// console of the tablet that runs the shiaijo (MatchResult.CourtStanding,
+// ForceOptions.CourtStanding, judged by the door on arrival) counts even when
+// another device recorded a different result first that the court never saw,
+// whatever order the two arrive in; the other device's result is kept in the
+// history as replaced by the court's (HoldReasonCourtResult). The court's points
+// count too (S2): its taps between the other device's finish and its own count,
+// and the other device's taps the court never saw are turned away. Two court
+// results, and two ordinary results, keep the first recorded result (I1).
+
+func pmCourtFin(at int64, win string, a, b []string) pmStep {
+	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
+		w := mmRunning(h, at, state.GroupPoints, state.GroupResult)
+		w.Status, w.Winner, w.IpponsA, w.IpponsB = state.MatchStatusCompleted, win, a, b
+		w.Basis, w.CourtStanding = &state.ScoreBasis{}, true
+		return pmWrite(h, w)
+	}}
+}
+
+// pmOrdFin is a finish from a device without the court's standing that saw no
+// other result (it sent a basis holding nothing).
+func pmOrdFin(at int64, win string, a, b []string) pmStep {
+	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
+		w := mmRunning(h, at, state.GroupPoints, state.GroupResult)
+		w.Status, w.Winner, w.IpponsA, w.IpponsB = state.MatchStatusCompleted, win, a, b
+		w.Basis = &state.ScoreBasis{}
+		return pmWrite(h, w)
+	}}
+}
+
+// pmCourtFinOwn is the court's Finish on its running board: it names the result
+// alone, on top of the court's own taps (own).
+func pmCourtFinOwn(at int64, win string, own ...string) pmStep {
+	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
+		w := mmRunning(h, at, state.GroupResult)
+		w.Status, w.Winner = state.MatchStatusCompleted, win
+		w.Basis, w.CourtStanding = &state.ScoreBasis{Own: own}, true
+		return pmWrite(h, w)
+	}}
+}
+
+func pmDecWith(at int64, d, by string, court bool) pmStep {
+	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
+		res, _, e := h.eng.RecordDecisionWithOptions(h.compID, h.matchID, d, by, "", nil,
+			ForceOptions{Basis: &state.ScoreBasis{}, CourtStanding: court}, at)
+		return pmWriteAnswer(res, e)
+	}}
+}
+
+// pmTeamFinWith is a team finish carrying its bout rows, from a device with or
+// without the court's standing that saw no other result.
+func pmTeamFinWith(at int64, win string, court bool, subs ...state.SubMatchResult) pmStep {
+	sets := []string{state.GroupResult}
+	for _, s := range subs {
+		sets = append(sets, state.BoutGroup(s.Position))
+	}
+	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
+		w := mmRunning(h, at, sets...)
+		w.Status, w.Winner, w.SubResults = state.MatchStatusCompleted, win, subs
+		w.Basis, w.CourtStanding = &state.ScoreBasis{}, court
+		return pmWrite(h, w)
+	}}
+}
+
+func pmEngiFinWith(at int64, flagsA, flagsB int, court bool) pmStep {
+	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
+		w := mmEngiFinish(h, at, flagsA, flagsB)
+		w.Basis, w.CourtStanding = &state.ScoreBasis{}, court
+		return pmWrite(h, w)
+	}}
+}
+
+// pmCourtReplaced reports whether the match's history keeps a line the court's
+// result replaced.
+func pmCourtReplaced(t *testing.T, h mmHome) bool {
+	hist, err := h.store.LoadMatchHistory(h.compID, h.matchID)
+	require.NoError(t, err)
+	return slices.ContainsFunc(hist, func(e state.MatchHistoryEntry) bool { return e.Reason == HoldReasonCourtResult })
+}
+
+func TestMatchWriteCourtStandingPermutations(t *testing.T) {
+	M, K := []string{"M"}, []string{"K"}
+	bt := func(pos int, a, bb []string, w string) state.SubMatchResult {
+		return state.SubMatchResult{Position: pos, SideA: wrTeamA, SideB: wrTeamB, IpponsA: a, IpponsB: bb, Winner: w}
+	}
+	cases := []struct {
+		name  string
+		engi  bool
+		team  bool
+		steps []pmStep
+		// want: substrings of pmState every arrival order leaves; wantNot:
+		// substrings none leaves.
+		want, wantNot []string
+		// next is the side the knockout's next match holds once every write
+		// has arrived (the winner advancing), checked in the knockout run.
+		next string
+		// replaced: the history keeps a result the court's replaced.
+		replaced bool
+		// lastAnswer pins the answer of step i when it arrives last: an
+		// ordinary result the court's replaced is answered court_result
+		// (state.HeldReasonCourtResult).
+		lastAnswer map[int]string
+	}{
+		{name: "a court finish stamped after an ordinary finish it never saw counts",
+			steps:    []pmStep{pmOrdFin(mmT1, wrTeamA, M, nil), pmCourtFin(mmT3, wrTeamB, nil, K)},
+			want:     []string{`st=completed w="` + wrTeamB + `"`, "A=[] B=[K]"},
+			replaced: true, lastAnswer: map[int]string{0: "superseded:court_result", 1: "applied"}},
+		{name: "a court finish stamped before an ordinary finish counts (I1)",
+			steps:      []pmStep{pmCourtFin(mmT1, wrTeamB, nil, K), pmOrdFin(mmT3, wrTeamA, M, nil)},
+			want:       []string{`st=completed w="` + wrTeamB + `"`, "A=[] B=[K]"},
+			lastAnswer: map[int]string{1: "superseded:match_closed"}},
+		{name: "court after court keeps the first recorded result (I1)",
+			steps:      []pmStep{pmCourtFin(mmT1, wrTeamA, M, nil), pmCourtFin(mmT3, wrTeamB, nil, K)},
+			want:       []string{`st=completed w="` + wrTeamA + `"`, "A=[M] B=[]"},
+			lastAnswer: map[int]string{1: "superseded:match_closed"}},
+		{name: "two ordinary finishes keep the first recorded result, as today",
+			steps:      []pmStep{pmOrdFin(mmT1, wrTeamA, M, nil), pmOrdFin(mmT3, wrTeamB, nil, K)},
+			want:       []string{`st=completed w="` + wrTeamA + `"`, "A=[M] B=[]"},
+			lastAnswer: map[int]string{1: "superseded:match_closed"}},
+		{name: "S2: the court's taps after the other device's finish count, the other device's later tap the court never saw does not",
+			steps: []pmStep{
+				pmOrdFin(mmT1, wrTeamA, M, nil),
+				pmEvent("ct1", "s-court", 1, mmT2, 0, "b", "K"),
+				pmEvent("ot1", "s-other", 1, mmT2+30_000, 0, "a", "D"),
+				pmCourtFinOwn(mmT3, wrTeamB, "ct1"),
+			},
+			want:     []string{`st=completed w="` + wrTeamB + `"`, "A=[] B=[K]"},
+			replaced: true},
+		{name: "a court kiken stamped after an ordinary finish it never saw counts, and its winner is seated in the next round",
+			steps:    []pmStep{pmOrdFin(mmT1, wrTeamA, M, nil), pmDecWith(mmT3, "kiken-voluntary", "aka", true)},
+			want:     []string{`st=completed w="` + wrTeamB + `" d="kiken-voluntary"`, "cs=[" + wrTeamAID + ":out("},
+			next:     wrTeamB,
+			replaced: true},
+		{name: "a court finish stamped after an ordinary kiken it never saw counts, and the kiken's bar is undone",
+			steps:    []pmStep{pmDecWith(mmT1, "kiken-voluntary", "aka", false), pmCourtFin(mmT3, wrTeamA, M, nil)},
+			want:     []string{`st=completed w="` + wrTeamA + `" d=""`, "A=[M] B=[]", "cs=[]"},
+			next:     wrTeamA,
+			replaced: true},
+		{name: "a court team finish replaces an ordinary team finish it never saw, bout rows and all", team: true,
+			steps:    []pmStep{pmTeamFinWith(mmT1, wrTeamA, false, bt(1, M, nil, wrTeamA)), pmTeamFinWith(mmT3, wrTeamB, true, bt(2, nil, K, wrTeamB))},
+			want:     []string{`st=completed w="` + wrTeamB + `"`, `[2 []-[K] w="` + wrTeamB + `" d=""]`},
+			wantNot:  []string{`[1 [M]-[]`},
+			next:     wrTeamB,
+			replaced: true},
+		{name: "T1: an ordinary team finish stamped after the court's match-level kiken loses its result, and its bout lands", team: true,
+			steps: []pmStep{pmDecWith(mmT1, "kiken-voluntary", "aka", true), pmTeamFinWith(mmT3, wrTeamA, false, bt(1, M, nil, wrTeamA))},
+			want:  []string{`st=completed w="` + wrTeamB + `" d="kiken-voluntary" by="aka"`, `[1 [M]-[] w="` + wrTeamA + `" d=""]`},
+			next:  wrTeamB},
+		{name: "a court match-level kiken replaces an ordinary team finish it never saw, bout rows and all (stamped before it, D5)", team: true,
+			steps:    []pmStep{pmTeamFinWith(mmT1, wrTeamA, false, bt(1, M, nil, wrTeamA)), pmDecWith(mmT3, "kiken-voluntary", "aka", true)},
+			want:     []string{`st=completed w="` + wrTeamB + `" d="kiken-voluntary" by="aka"`, "cs=[" + wrTeamAID + ":out("},
+			wantNot:  []string{`[1 [M]-[]`},
+			next:     wrTeamB,
+			replaced: true},
+		{name: "a court team finish replaces an ordinary match-level kiken it never saw, and the bar is undone", team: true,
+			steps:    []pmStep{pmDecWith(mmT1, "kiken-voluntary", "aka", false), pmTeamFinWith(mmT3, wrTeamA, true, bt(1, M, nil, wrTeamA))},
+			want:     []string{`st=completed w="` + wrTeamA + `" d=""`, `[1 [M]-[] w="` + wrTeamA + `" d=""]`, "cs=[]"},
+			next:     wrTeamA,
+			replaced: true},
+		{name: "an ordinary kiken stamped after the court's finish is turned away (I1)",
+			steps: []pmStep{pmCourtFin(mmT1, wrTeamA, M, nil), pmDecWith(mmT3, "kiken-voluntary", "aka", false)},
+			want:  []string{`st=completed w="` + wrTeamA + `" d=""`, "A=[M] B=[]"}},
+		{name: "a court engi finish stamped after an ordinary engi finish it never saw counts", engi: true,
+			steps:    []pmStep{pmEngiFinWith(mmT1, 2, 1, false), pmEngiFinWith(mmT3, 1, 2, true)},
+			want:     []string{`st=completed w="` + wrTeamB + `"`},
+			replaced: true},
+	}
+	for _, c := range cases {
+		for _, ko := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/ko=%v", c.name, ko), func(t *testing.T) {
+				seen := map[string][]int{}
+				for _, order := range pmPerms(len(c.steps)) {
+					h := pmHome(t, pmCase{engi: c.engi, team: c.team}, ko)
+					var answers []string
+					for _, i := range order {
+						answers = append(answers, c.steps[i].run(h))
+					}
+					got := pmState(h, t)
+					for _, w := range c.want {
+						assert.Contains(t, got, w, "order %v", order)
+					}
+					for _, w := range c.wantNot {
+						assert.NotContains(t, got, w, "order %v", order)
+					}
+					if ko && c.next != "" {
+						assert.Contains(t, got, "next="+strconv.Quote(c.next)+"/", "order %v: the winner is seated in the next round", order)
+					}
+					assert.Empty(t, pmReplay(h, t), "order %v: the log replays to the stored match", order)
+					assert.Equal(t, c.replaced, pmCourtReplaced(t, h), "order %v: the replaced result is kept in the history", order)
+					last := order[len(order)-1]
+					if want, ok := c.lastAnswer[last]; ok {
+						assert.Equal(t, want, answers[len(answers)-1], "order %v: the answer of step %d arriving last", order, last)
+					}
+					seen[got] = order
+				}
+				assert.Len(t, seen, 1, "arrival order changed the outcome: %v", seen)
+			})
+		}
+	}
+}
+
+// The court's standing is request-only (bc-sseq FR8): no body can set it, and
+// no stored copy or server-built write inherits it.
+func TestCourtStandingIsRequestOnly(t *testing.T) {
+	var m state.MatchResult
+	require.NoError(t, json.Unmarshal([]byte(`{"courtStanding":true,"CourtStanding":true,"status":"completed"}`), &m))
+	assert.False(t, m.CourtStanding, "a body cannot give a write the court's standing")
+	m.CourtStanding = true
+	raw, err := json.Marshal(m)
+	require.NoError(t, err)
+	assert.NotContains(t, strings.ToLower(string(raw)), "courtstanding", "the standing is never written out")
+	m.ClearRequestFields()
+	assert.False(t, m.CourtStanding, "ClearRequestFields drops it")
+}
+
+// A court result over an ordinary result it never saw, once the next knockout
+// match was played on that result, is held like a rival (displacesUnseenResult):
+// the played round is never changed silently, and the court's result is kept in
+// the history for Correct.
+func TestMatchWriteCourtResultHeldByAPlayedKnockoutMatch(t *testing.T) {
+	for _, mode := range []string{"played", "running"} {
+		t.Run(mode, func(t *testing.T) {
+			h := pmHome(t, pmCase{}, true)
+			require.Equal(t, "applied", pmOrdFin(mmT1, wrTeamA, []string{"M"}, nil).run(h))
+			lkNext(t, mode).run(h)
+			ans := pmCourtFin(mmT3, wrTeamB, nil, []string{"K"}).run(h)
+			assert.Equal(t, "superseded:downstream_knockout_"+mode, ans)
+			got := pmState(h, t)
+			assert.Contains(t, got, `w="`+wrTeamA+`"`)
+			assert.Contains(t, got, "A=[M] B=[]")
+			assert.Empty(t, pmReplay(h, t))
+		})
+	}
+}
+
+// A court result over an ordinary pool result it never saw, once a knockout
+// match seated from that pool was played, is held like a rival
+// (requalifyMixedPoolWriteLocked): the requalification runs without force
+// whatever the court's write sent, the played knockout match is not reopened,
+// and the stored pool result stands, kept in the history for Correct.
+func TestMatchWriteCourtResultHeldByAPlayedMixedPoolKnockout(t *testing.T) {
+	f := newRQFixture(t, "rq-court-lock", 2, [][]string{{"A1", "A2"}, {"B1", "B2"}})
+	stamped := func(at int64, winner string, court bool) *state.MatchResult {
+		r := f.poolResult("Pool A-0", winner)
+		r.ModifiedAt, r.WriteDoor, r.Changed = at, DoorScore, []string{state.GroupPoints, state.GroupResult}
+		r.Basis, r.CourtStanding = &state.ScoreBasis{}, court
+		return r
+	}
+	require.NoError(t, f.write("Pool A-0", stamped(mmT1, "A1", false)))
+	f.scorePool("Pool B-0", "B1")
+	f.resolve()
+	m1, _ := f.slot("Pool A-1st")
+	require.NoError(t, f.scoreKO(m1.ID, "A1"))
+
+	held := f.write("Pool A-0", stamped(mmT3, "A2", true), ForceOptions{Force: true})
+	require.ErrorIs(t, held, ErrMatchSuperseded)
+	assert.Equal(t, state.HeldReasonDownstreamPlayed, HeldReasonOf(held))
+	assert.Equal(t, "A1", loadPoolMatchByID(t, f.store, f.compID, "Pool A-0").Winner, "the stored pool result stands")
+	after, _ := f.slot("Pool A-1st")
+	assert.Equal(t, state.MatchStatusCompleted, after.Status, "the played knockout match is not reopened")
+}
+
+// The built-on hold in the matrix (bc-sseq FR8, round bc-sseq-plan-3): once a
+// later Swiss round was paired from the stored result, a tie-break row was
+// added from the standings, or the competition finished, ONLY a court result
+// replacing an ordinary result it never saw waits (downstream_built_on), in
+// both stamp orders. Every other pair keeps exactly today's outcome: an ordinary
+// result the court's later-stamped result replaces is answered court_result,
+// one stamped after the court's is turned away, two ordinary results and two
+// court results keep the first recorded result (I1). The first write arrives,
+// the result is built on, then the second arrives.
+func TestMatchWriteBuiltOnPermutations(t *testing.T) {
+	M, K := []string{"M"}, []string{"K"}
+	cases := []struct {
+		name          string
+		first, second pmStep
+		winner, ans   string
+	}{
+		{"a court result stamped after an ordinary result it never saw waits",
+			pmOrdFin(mmT1, wrTeamA, M, nil), pmCourtFin(mmT3, wrTeamB, nil, K), wrTeamA, "superseded:" + state.HeldReasonBuiltOn},
+		{"a court result stamped before an ordinary result it never saw waits",
+			pmOrdFin(mmT3, wrTeamA, M, nil), pmCourtFin(mmT1, wrTeamB, nil, K), wrTeamA, "superseded:" + state.HeldReasonBuiltOn},
+		{"an ordinary result stamped before the court's, arriving after it, is replaced as today",
+			pmCourtFin(mmT3, wrTeamB, nil, K), pmOrdFin(mmT1, wrTeamA, M, nil), wrTeamB, "superseded:" + state.HeldReasonCourtResult},
+		{"an ordinary result stamped after the court's is turned away as today",
+			pmCourtFin(mmT1, wrTeamB, nil, K), pmOrdFin(mmT3, wrTeamA, M, nil), wrTeamB, "superseded:" + state.HeldReasonMatchClosed},
+		{"an ordinary result stamped first, arriving second, still replaces the stored one (I1, not held)",
+			pmOrdFin(mmT3, wrTeamA, M, nil), pmOrdFin(mmT1, wrTeamB, nil, K), wrTeamB, "applied"},
+		{"an ordinary result stamped second, arriving second, is turned away as today",
+			pmOrdFin(mmT1, wrTeamA, M, nil), pmOrdFin(mmT3, wrTeamB, nil, K), wrTeamA, "superseded:" + state.HeldReasonMatchClosed},
+		{"a court result stamped first over another court result keeps I1 (not held)",
+			pmCourtFin(mmT3, wrTeamA, M, nil), pmCourtFin(mmT1, wrTeamB, nil, K), wrTeamB, "applied"},
+	}
+	for _, kind := range builtOnKinds {
+		for _, c := range cases {
+			t.Run(string(kind)+"/"+c.name, func(t *testing.T) {
+				h := boHome(t, kind, false)
+				require.Equal(t, "applied", c.first.run(h))
+				boBuild(t, h, kind)
+				assert.Equal(t, c.ans, c.second.run(h))
+				assert.Contains(t, pmState(h, t), `w="`+c.winner+`"`)
+				assert.Empty(t, pmReplay(h, t), "the log replays to the stored match")
+				held := 0
+				if c.ans == "superseded:"+state.HeldReasonBuiltOn {
+					held = 1
+				}
+				assert.Equal(t, held, boHeldLines(t, h), "only the court's waiting result is kept as built on")
+			})
 		}
 	}
 }

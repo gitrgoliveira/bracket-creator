@@ -769,6 +769,13 @@ type MergeReport struct {
 	// history and the answer carries heldReason "match_closed", so the device
 	// is told the match is finished and to tap Correct.
 	MatchClosed bool
+	// CourtResult reports that the write's own result was held because the
+	// court's result replaced it (bc-sseq FR8): a later-stamped result line
+	// with the court's standing that never saw it (engine.HoldReasonCourtResult).
+	// The answer then carries heldReason "court_result" rather than
+	// "match_closed": the device is told the court's result counts, and its
+	// own is kept in the match's history.
+	CourtResult bool
 	// Displaced are STORED changes this write moved to the history: a finish
 	// or a decision that arrives after scoring stamped later than it closes
 	// that scoring out, exactly as the same scoring arriving after the finish
@@ -819,7 +826,7 @@ type MergeReport struct {
 	// correction: whether a finished result was in force at the log's end (the
 	// stored result the write would displace; none after a reopen or a send
 	// back to the queue), and whether the write's SENT basis holds the line
-	// that set it. The result lock reads them (engine.rivalDisplacesResult).
+	// that set it. The result lock reads them (engine.displacesUnseenResult).
 	StoredResultInForce bool `json:"-"`
 	StoredResultSeen    bool `json:"-"`
 }
@@ -870,6 +877,9 @@ const HeldReasonMatchClosed = "match_closed"
 func (r *MergeReport) HeldReason() string {
 	if r != nil && r.ResultLocked != "" && len(r.Held) > 0 {
 		return r.ResultLocked
+	}
+	if r != nil && r.CourtResult && len(r.Held) > 0 {
+		return HeldReasonCourtResult
 	}
 	if r == nil || len(r.Held)+len(r.Displaced) == 0 || !r.MatchClosed {
 		return ""

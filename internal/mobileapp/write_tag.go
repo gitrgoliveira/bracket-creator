@@ -30,6 +30,12 @@ type writeTag struct {
 	// the baseline carries it and basis.seq counts that device's own events
 	// up to seq as seen (bc-evts S8 b). Meaningless without a basis.
 	Session string `json:"session,omitempty"`
+	// CourtStanding is the court's standing (bc-sseq FR8), never read from a
+	// body: the door sets it once it has judged that the write came from a
+	// court console of the tablet that runs the match's shiaijo, and it rides
+	// to the baseline beside the write's id (MatchResult.CourtStanding,
+	// ForceOptions.CourtStanding).
+	CourtStanding bool `json:"-"`
 }
 
 // validateTag refuses a tag no write could carry (a 400 for the request).
@@ -66,12 +72,91 @@ func (w writeTag) validateTag() error {
 // tagOnto puts the tag on a write the client built.
 func (w writeTag) tagOnto(m *state.MatchResult) {
 	m.WriteID, m.Basis, m.WriteSession = w.WriteID, w.Basis, w.Session
+	m.CourtStanding = w.CourtStanding
 }
 
 // tagInto puts the tag on the options of a write a door builds on the server.
 func (w writeTag) tagInto(fo engine.ForceOptions) engine.ForceOptions {
 	fo.WriteID, fo.Basis, fo.Session = w.WriteID, w.Basis, w.Session
+	fo.CourtStanding = w.CourtStanding
 	return fo
+}
+
+// courtControlStamp is a court console's stamp on a /score or /decision write
+// (bc-sseq FR8): the tab that made the write and the tablet that tab belongs
+// to (court_control.jsx's tab id and deviceId), both lowercase UUID v4.
+// Request-only: the door judges it on arrival (courtWrite.judgeCourtStanding)
+// and never stores it; only the registry keeps their one-way keys.
+type courtControlStamp struct {
+	TabID    string `json:"tabId"`
+	DeviceID string `json:"deviceId"`
+}
+
+// courtWrite is the optional court control the two result doors (/score and
+// /decision) take beside their tag. The other doors that take a tag take no
+// court control: only a result has the court's standing.
+type courtWrite struct {
+	CourtControl *courtControlStamp `json:"courtControl,omitempty"`
+}
+
+// validateCourtControl refuses a court control no court console could send
+// (a 400 for the request): both ids are the lowercase UUID v4 a console mints.
+func (w courtWrite) validateCourtControl() error {
+	if w.CourtControl == nil {
+		return nil
+	}
+	if !state.IsClientUUID(w.CourtControl.TabID) || !state.IsClientUUID(w.CourtControl.DeviceID) {
+		return errors.New("courtControl: tabId and deviceId must be lowercase UUID v4")
+	}
+	return nil
+}
+
+// judgeCourtStanding is the court's standing of a write stamped at stamp to
+// the stored match snap, judged on arrival in the write's transaction stx: the
+// shiaijo is the match's as stored there, so a court move made before the
+// write arrived is judged by the shiaijo it moved to. Through
+// CourtControls.WriteStanding: the write's tablet runs the shiaijo, through
+// whichever of its tabs, and the write was made at or after the standing's
+// start; a shiaijo nobody holds, from a tab and a tablet on neither displaced
+// list, is claimed by the write first, while one another tab of the same
+// tablet holds is left with that tab. None without a court control, a
+// registry, a stored match or a shiaijo, and never in a self-run tournament,
+// whose results carry no court's standing.
+func (w courtWrite) judgeCourtStanding(stx state.StoreTx, compID, matchID string, snap matchSnapshot, courts CourtControls, tl TournamentLoader, stamp int64) (bool, error) {
+	if w.CourtControl == nil || courts == nil || tl == nil || snap.Stored == nil {
+		return false, nil
+	}
+	court := snap.Stored.Court
+	if snap.InBracket {
+		// engine.BracketMatchAsResult leaves the slot out (storedMatchForAnswer).
+		bracket, err := stx.LoadBracket(compID)
+		if err != nil {
+			return false, err
+		}
+		court, _ = bracketSlot(bracket, matchID)
+	}
+	if court == "" {
+		return false, nil
+	}
+	t, err := tl.LoadTournament()
+	if err != nil {
+		return false, err
+	}
+	if t != nil && t.Mode == state.TournamentModeSelfRun {
+		return false, nil
+	}
+	return courts.WriteStanding(court, w.CourtControl.TabID, w.CourtControl.DeviceID, stamp)
+}
+
+// courtsOf is the court control registry the router attached to its hub,
+// read per request: nil on a bare hub (a test's), where no write has the
+// court's standing.
+func courtsOf(hub Broadcaster) CourtControls {
+	h, ok := hub.(*Hub)
+	if !ok {
+		return nil
+	}
+	return h.courtControl()
 }
 
 // bindOptionalWriteTag reads the optional {writeId, basis} body of a door

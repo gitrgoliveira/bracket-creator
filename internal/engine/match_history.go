@@ -269,6 +269,9 @@ type SupersededError struct {
 	// review 6). Empty when the write logged nothing.
 	TurnedAway   map[string]string
 	ScoreVersion int
+	// ReplacedResult is the match's (MatchResult.ReplacedResult) as the log
+	// stands after the write, beside TurnedAway (bc-sseq FR8).
+	ReplacedResult *state.ReplacedResult
 }
 
 func (e *SupersededError) Error() string { return ErrMatchSuperseded.Error() }
@@ -279,10 +282,11 @@ func (e *SupersededError) Is(target error) bool { return target == ErrMatchSuper
 // supersededBy is the error a write whose every change was held returns.
 func supersededBy(result *state.MatchResult) error {
 	return &SupersededError{
-		Held:         result.Merge.HeldGroups(),
-		HeldReason:   result.Merge.HeldReason(),
-		TurnedAway:   maps.Clone(result.TurnedAway),
-		ScoreVersion: result.ScoreVersion,
+		Held:           result.Merge.HeldGroups(),
+		HeldReason:     result.Merge.HeldReason(),
+		TurnedAway:     maps.Clone(result.TurnedAway),
+		ScoreVersion:   result.ScoreVersion,
+		ReplacedResult: result.ReplacedResult.Clone(),
 	}
 }
 
@@ -294,6 +298,16 @@ func TurnedAwayOf(err error) (map[string]string, int) {
 		return se.TurnedAway, se.ScoreVersion
 	}
 	return nil, 0
+}
+
+// ReplacedResultOf returns a superseded write's
+// SupersededError.ReplacedResult, or nil.
+func ReplacedResultOf(err error) *state.ReplacedResult {
+	var se *SupersededError
+	if errors.As(err, &se) {
+		return se.ReplacedResult
+	}
+	return nil
 }
 
 // HeldReasonOf returns why a superseded write's groups were held (see

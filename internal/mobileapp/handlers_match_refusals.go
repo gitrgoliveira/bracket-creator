@@ -26,7 +26,7 @@ import (
 //
 // In officiated mode this is a pass-through that returns "admin", true.
 // On LoadTournament error the function fails closed (500).
-func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier, req *ScoreRequest, forceCourt *bool) (string, bool) {
+func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier, req *ScoreRequest, forceCourt *bool, court *courtWrite) (string, bool) {
 	anonymous, ok := selfRunAnonymous(c, tl, verifier)
 	if !ok {
 		return "", false
@@ -59,6 +59,9 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 	// bc-adna: forcing a start on a busy court is the organiser's alone; a
 	// participant's forceCourt is dropped, so their start is court_busy.
 	*forceCourt = false
+	// bc-sseq FR8: a participant's write never has the court's standing, and
+	// never claims a shiaijo; its court control is dropped.
+	court.CourtControl = nil
 	return "self-reported", true
 }
 

@@ -830,6 +830,36 @@ const ENDED_WITHOUT_FIGHT = new Set(['kiken', 'kiken-voluntary', 'kiken-injury',
 // (keepLoserPoints, repairFillsIDs): Go only.
 const GO_ONLY_DOORS = new Set(['decision', 'repair']);
 
+// engine.canRival: the doors whose result can be a rival of the result in force.
+const RIVAL_DOORS = new Set(['score', 'engi', 'decision']);
+
+// engine.courtDisplaced (bc-sseq FR8, S2): every ordinary result line (a finish
+// or a decision from a door that can rival, recorded without the court's
+// standing) that a later-stamped court result line (baseline.court) follows
+// without having seen it, with no reopen, send back or start between them.
+// Such a line is held whole and closes nothing (closingResults skips it). The
+// log's every line counts as one a basis can have seen, as the Go replay's
+// does when it is not told the log's own length.
+function courtDisplaced(log, items) {
+  const out = new Set();
+  let pending = [];
+  for (const it of items) {
+    const b = log[it.line].baseline;
+    if (!b || !(it.groups || []).includes(GROUP_RESULT)) continue;
+    const r = (b.values || {})[GROUP_RESULT];
+    if (!r || !r.status) continue;
+    if (r.status !== 'completed') { pending = []; continue; }
+    if (b.court) {
+      const seen = Math.min((b.basis || {}).seen || 0, log.length);
+      for (const o of pending) if (o >= seen) out.add(o);
+      pending = [];
+      continue;
+    }
+    if (RIVAL_DOORS.has(b.door) && !pending.includes(it.line)) pending.push(it.line);
+  }
+  return out;
+}
+
 // ScoreEventGroup: the change group an event changes.
 function groupOf(e) {
   switch (e.kind) {
@@ -1036,6 +1066,10 @@ export function replayHead(match, head, lines, opts = {}) {
     delete stamps[g];
   }
   items.sort(compareItems);
+  // engine.courtDisplaced (bc-sseq FR8, S2): the result lines the court's
+  // later-stamped result replaced without having seen them are held whole and
+  // close nothing, so the court's taps after them count.
+  const displaced = courtDisplaced(log, items);
   // engine.closingResults: per event line, the baseline line of the first
   // result after it in stamp order that finishes the match.
   const closer = {};
@@ -1044,7 +1078,7 @@ export function replayHead(match, head, lines, opts = {}) {
     const it = items[k];
     const l = log[it.line];
     if (l.baseline) {
-      if ((it.groups || []).includes(GROUP_RESULT)) {
+      if ((it.groups || []).includes(GROUP_RESULT) && !displaced.has(it.line)) {
         const r = (l.baseline.values || {})[GROUP_RESULT];
         if (r && r.status === 'completed') nextCloser = it.line;
       }
@@ -1135,6 +1169,7 @@ export function replayHead(match, head, lines, opts = {}) {
 
   for (const it of items) {
     const l = log[it.line];
+    if (l.baseline && displaced.has(it.line)) continue;
     if (l.baseline) applyBaseline(it.line, l.baseline, it.groups);
     else if (firstLine[l.event.id] !== it.line) outcome[it.line] = DUPLICATE;
     else applyEvent(it.line, l.event);

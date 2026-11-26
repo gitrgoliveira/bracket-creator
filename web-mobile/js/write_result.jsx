@@ -99,6 +99,7 @@ export function writeKeepsEditorOpen(patch, res) {
 // leads with "Not applied", not "Not saved", says nothing is lost, and sends
 // the operator to the match and its history before entering anything again.
 export const SUPERSEDED_LEAD = 'Not applied';
+const SUPERSEDED_SENTENCE_LEAD = /^Not applied:\s*/;
 export const SUPERSEDED_REASON = "a newer change to the same thing was recorded first, so this one was kept in the match's history and nothing is lost";
 export const SUPERSEDED_ADVICE = 'Check the match and its history before entering anything again: entering it again would replace the newer change.';
 
@@ -131,6 +132,18 @@ export function supersededAlertText(n, one, matchClosed = false) {
 export const HELD_REASON_MATCH_CLOSED = 'match_closed';
 export const HELD_REASON_RESULT_LOCKED_PLAYED = 'downstream_knockout_played';
 export const HELD_REASON_RESULT_LOCKED_RUNNING = 'downstream_knockout_running';
+// bc-sseq FR8: a court result (from the court console of the tablet that runs
+// the match's shiaijo) that would replace a result other matches were already
+// built on (a later Swiss round paired from it, a tie-break or representative
+// match added from the standings it fed, the competition finished on it) is
+// held whole like a played knockout match: writeResultLocked answers
+// 'built_on', and the server's sentence says which case it was.
+export const HELD_REASON_BUILT_ON = 'downstream_built_on';
+// bc-sseq FR8: a result from a device without the court's standing that a
+// later-stamped court result replaced, whichever arrived first
+// (writeCourtResult). The court's result counts; this one is kept in the
+// match's history, and Correct is not the remedy.
+export const HELD_REASON_COURT_RESULT = 'court_result';
 export const MATCH_CLOSED_REASON = "the match is finished, so this change was kept in the match's history";
 export const MATCH_CLOSED_ADVICE = 'To change the result, tap Correct.';
 // The sentence the partial-apply note (heldGroupsNote) ends on instead of
@@ -138,6 +151,12 @@ export const MATCH_CLOSED_ADVICE = 'To change the result, tap Correct.';
 export const MATCH_CLOSED_NOTE = 'The match is finished: to change the result, tap Correct.';
 export const RESULT_LOCKED_PLAYED_REASON = 'the next round was already fought, so the recorded result stands';
 export const RESULT_LOCKED_RUNNING_REASON = 'the next round has already started, so the recorded result stands';
+// The words for a court result the built-on hold kept, when the server sends
+// no sentence of its own (it always does: ResultBuiltOnMessage names the case).
+export const RESULT_BUILT_ON_REASON = "other matches were already built on the result recorded for this match, so it stands and the court's result was kept in the match's history";
+// The words for a result the court's result replaced, when the server sends
+// no sentence (CourtResultMessage names the shiaijo).
+export const COURT_RESULT_REASON = "the court running this match's shiaijo recorded a different result for this match, and the court's result counts. Yours was kept in the match's history";
 
 export function writeDisplacedGroups(res) {
     return res && Array.isArray(res.displacedGroups) ? res.displacedGroups.filter((g) => typeof g === 'string') : [];
@@ -156,12 +175,52 @@ export function writeDisplacedForClosedMatch(res) {
     return !!res && res.heldReason === HELD_REASON_MATCH_CLOSED && writeDisplacedGroups(res).length > 0;
 }
 // writeResultLocked: 'played' or 'running' when the write was held because the
-// next knockout round already depends on the stored result, else null.
+// next knockout round already depends on the stored result, 'built_on' when a
+// court result was held because other matches were built on the result it
+// would replace (bc-sseq FR8), else null. One remedy for all three: Correct.
 export function writeResultLocked(res) {
     if (!res) return null;
     if (res.heldReason === HELD_REASON_RESULT_LOCKED_PLAYED) return 'played';
     if (res.heldReason === HELD_REASON_RESULT_LOCKED_RUNNING) return 'running';
+    if (res.heldReason === HELD_REASON_BUILT_ON) return 'built_on';
     return null;
+}
+// resultLockedReason: the words for a writeResultLocked kind, when the server
+// sends no sentence of its own.
+export function resultLockedReason(locked) {
+    if (locked === 'played') return RESULT_LOCKED_PLAYED_REASON;
+    if (locked === 'running') return RESULT_LOCKED_RUNNING_REASON;
+    if (locked === 'built_on') return RESULT_BUILT_ON_REASON;
+    return null;
+}
+// writeCourtResult (bc-sseq FR8): this write's result was replaced by the
+// court's: a later-stamped result from the court console of the tablet that
+// runs the match's shiaijo, which never saw it. The ONE reader of the code
+// (check-write-result.mjs forbids the literal elsewhere).
+export function writeCourtResult(res) {
+    return !!res && res.heldReason === HELD_REASON_COURT_RESULT;
+}
+// courtReplacedAlertText (bc-sseq FR8): the information alert (kind
+// `court_replaced`) a device raises once when a copy of a match names, as its
+// `replacedResult`, a result this device sent and the server applied: the
+// court running the match's shiaijo recorded a later result that never saw it,
+// and the court's result counts. `match` is the copy (its `court`), `where` the
+// match's label as the score list gives it.
+export function courtReplacedAlertText(match, where = '') {
+    const court = match && typeof match.court === 'string' ? match.court.trim() : '';
+    const who = court ? `Shiaijo ${court}'s court` : "The shiaijo's court";
+    const what = where ? `for ${where}` : 'for a match';
+    return `${who} replaced the result you recorded ${what}. The court's result counts; yours is in the match's history.`;
+}
+// writeDisplacedByCourtResult (bc-sseq FR8): this write, the court's result,
+// was recorded and replaced a result another device had recorded FIRST,
+// which went to the match's history: an applied answer whose displacedGroups
+// name the result with no match_closed reason (the server sets none for it;
+// a result the closed-match rule moved, stamped after the write's own, says
+// match_closed). Not a later change, so it is worded apart.
+export function writeDisplacedByCourtResult(res) {
+    return !!res && res.heldReason !== HELD_REASON_MATCH_CLOSED
+        && writeDisplacedGroups(res).includes('result');
 }
 // The court console's write gate (court_control.jsx, bc-sseq FR9): while the
 // console is on screen and another device runs its shiaijo (or nobody does
@@ -277,19 +336,19 @@ export function decisionWord(code) {
 export function supersededBanner(res) {
     // Not a superseded write at all: it was never queued (writeCourtNotHeld).
     if (writeCourtNotHeld(res)) return { reason: COURT_NOT_HELD_SENTENCE, sentence: true };
-    const sentence = res && typeof res.message === 'string' && res.message;
+    // The server's sentence leads with the same word the banner does ("Not
+    // applied: ..."), so it is said once.
+    const sentence = res && typeof res.message === 'string' && res.message
+        && res.message.replace(SUPERSEDED_SENTENCE_LEAD, '');
     const locked = writeResultLocked(res);
     if (locked || writeMatchClosed(res)) {
         if (sentence) return { lead: SUPERSEDED_LEAD, reason: sentence, sentence: true };
-        if (locked) {
-            return {
-                lead: SUPERSEDED_LEAD,
-                reason: locked === 'played' ? RESULT_LOCKED_PLAYED_REASON : RESULT_LOCKED_RUNNING_REASON,
-                advice: MATCH_CLOSED_ADVICE,
-            };
-        }
+        if (locked) return { lead: SUPERSEDED_LEAD, reason: resultLockedReason(locked), advice: MATCH_CLOSED_ADVICE };
         return { lead: SUPERSEDED_LEAD, reason: MATCH_CLOSED_REASON, advice: MATCH_CLOSED_ADVICE };
     }
+    // Replaced by the court's result: nothing to correct and nothing to enter
+    // again, so no advice beyond the sentence.
+    if (writeCourtResult(res)) return { lead: SUPERSEDED_LEAD, reason: sentence || `${COURT_RESULT_REASON}.`, sentence: true };
     return { lead: SUPERSEDED_LEAD, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE };
 }
 
@@ -681,6 +740,14 @@ export function isFinishedResultWrite(d) {
         case 'score': case undefined: case null: case '': return !!d.terminal;
         default: return false;
     }
+}
+// isCourtResultWrite (bc-sseq FR8): a queued finished result the court console
+// stamped with its court control (`courtControl`, api_client_matches.jsx): the
+// result the server gives the court's standing when its tablet runs the
+// match's shiaijo. While one is queued, the court's own taps the server turned
+// away for the result in force wait for it (api_client_taps.jsx).
+export function isCourtResultWrite(d) {
+    return isFinishedResultWrite(d) && !!d.payload && !!d.payload.courtControl && typeof d.payload.courtControl === 'object';
 }
 
 // heldWritesText: the admin topbar's held-writes indicator (bc-offl), shown

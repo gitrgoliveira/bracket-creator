@@ -8,7 +8,9 @@
 // statements, the API object and the window mirrors live in api_client.jsx; never
 // import api_client.jsx from here (it would run the outbox twice).
 
-import { tapOutcomeQuiet } from './write_result.jsx';
+import {
+    tapOutcomeQuiet, isCourtResultWrite, isFinishedResultWrite, writeHeldGroups, writeWasRefusedForClock, writeDidNotLand,
+} from './write_result.jsx';
 import { CLOCK_SKEW as TAP_CLOCK_SKEW } from './score_events.jsx';
 import { createLandedTaps } from './landed_taps.jsx';
 import { createToldTaps } from './told_taps.jsx';
@@ -19,12 +21,12 @@ import {
 } from './api_client_clock.jsx';
 import {
     _revKey, _isAllowedTerminalRequest, _notifyQueueAlert, _persistQueue, _writeQueue, _dequeue,
-    _openDequeueBatch, _closeDequeueBatch, _baseOf, _entriesFor, _keepForClock,
+    _openDequeueBatch, _closeDequeueBatch, _baseOf, _entriesFor, _keepForClock, _openSettlement,
 } from './api_client_queue.jsx';
 import {
     _shownMatchLabels, _whereOf, _recomputeSyncStatus, SERVER_REJECTION_NOTICE_THRESHOLD, _noteNotAppliedTap,
 } from './api_client_status.jsx';
-import { _latestDerived, _turnedAwaySeen, store, provide } from './api_client_store.jsx';
+import { _latestDerived, _turnedAwaySeen, _appliedResults, store, provide } from './api_client_store.jsx';
 
 // ---------------------------------------------------------------------------
 // bc-evts stage 3: the outbox. EVERY rule-bound write (a tap, a Finish, a
@@ -110,6 +112,10 @@ export function _forgetTurnedAwayAndTold() {
     _turnedAwaySeen.clear();
     _toldHere.clear();
     _told.forget();
+    // The applied results go with the operator who sent them (bc-sseq FR8):
+    // this tab's, and those this tab would tell (a gone tab's).
+    _appliedResults.forget((e) => e.tab === _landed.tab || _landed.tellsFor(e.tab));
+    _watchedResults.clear();
 }
 export function _forgetDerivedCopies() {
     _latestDerived.clear();
@@ -281,6 +287,7 @@ export function _landedBeat() {
     _forgetToldHere(_told.beat());
     for (const seen of _turnedAwaySeen.values()) {
         if (seen && seen.away && seen.compID && seen.matchID) _tellAway(seen.compID, seen.matchID, seen.away);
+        if (seen && seen.replaced && seen.compID && seen.matchID) _tellReplaced(seen.compID, seen.matchID, seen);
     }
 }
 // _forgetLandedTaps: on a sign-out the record goes with the operator who made
@@ -311,7 +318,8 @@ function _rememberTurnedAway(compID, matchID, match) {
     const away = raw && typeof raw === 'object' && Object.keys(raw).length > 0 ? raw : null;
     const prev = _turnedAwaySeen.get(base);
     const v = match.scoreVersion;
-    const keep = (seen) => _turnedAwaySeen.set(base, { ...seen, compID, matchID });
+    // What the entry keeps of the copy's replacedResult stays (_rememberReplaced).
+    const keep = (seen) => _turnedAwaySeen.set(base, { ...prev, ...seen, compID, matchID });
     if (!Number.isFinite(v)) {
         // A copy that names no version cannot be ordered: it never replaces
         // a list kept, and its list is kept only while none is (stage 6
@@ -345,14 +353,23 @@ export function _tellTurnedAway(compID, matchID, match) {
     if (!compID || !matchID) return;
     const base = _revKey(compID, matchID);
     _rememberTurnedAway(compID, matchID, match);
+    _rememberReplaced(compID, matchID, match);
+    // Every copy of a match is read here, the answer to each of its writes
+    // included (the flush asks before the entry leaves the queue): this
+    // device's queued finished results are watched for their answer.
+    _watchOwnResults(compID, matchID);
     // Told from the newest copy seen, never from an older one.
     const seen = _turnedAwaySeen.get(base);
     if (seen && seen.away) _tellAway(compID, matchID, seen.away);
+    if (seen && seen.replaced) _tellReplaced(compID, matchID, seen);
 }
 function _tellAway(compID, matchID, away) {
     if (!compID || !matchID || !away || typeof away !== 'object') return;
     const ids = Object.keys(away);
     if (ids.length === 0) return;
+    // The court's result is still queued: whether these taps count is its to
+    // say (S2), so they are told, if at all, once it has settled.
+    if (_heldForCourtResult(compID, matchID)) return;
     // Taken out of the record before it is told: one notice per tap.
     const told = _landed.claim(compID, matchID, ids).map((t) => ({ ...t, outcome: away[t.id] }));
     if (told.length === 0) return;
@@ -366,13 +383,131 @@ function _tellAway(compID, matchID, away) {
         outcome: { id: last.id, outcome: last.outcome }, where, tap, turnedAway: true,
     });
 }
+// bc-sseq FR8: the device whose result the court replaced is told once. A
+// finish or decision this device sent was applied, and its own answer said
+// so; a later-stamped result from the court console of the tablet running the
+// match's shiaijo, which never saw it, then replaced it. The server names the
+// replaced result's write id on every copy of the match (`replacedResult`), so
+// this device keeps the write ids of its own applied results (_appliedResults,
+// api_client_store.jsx) and tells its operator once, from whatever copy names
+// one first (a push, a fetch, an answer), after a reload too.
+// The answer of each queued finished result is watched by its queue key: the
+// write id it was sent with and the match's label, read again on every copy
+// of the match, so a write that took a queued one's place is noted under the
+// id it was sent with.
+const _watchedResults = new Map();
+function _watchOwnResults(compID, matchID) {
+    for (const [k, d] of _entriesFor(_revKey(compID, matchID))) {
+        if (!isFinishedResultWrite(d)) continue;
+        const writeId = d.payload && d.payload.writeId;
+        if (typeof writeId !== 'string' || !writeId) continue;
+        const known = _watchedResults.has(k);
+        _watchedResults.set(k, { writeId, where: _whereOf(d) });
+        if (known) continue;
+        // The entry's door promise settles as it leaves the queue (_dequeue),
+        // with the server's answer, or as discarded.
+        const done = (answer) => {
+            const w = _watchedResults.get(k);
+            _watchedResults.delete(k);
+            if (w && _resultApplied(answer)) _noteAppliedResult(compID, matchID, w);
+        };
+        _openSettlement(k).then(done, () => _watchedResults.delete(k));
+    }
+}
+// _resultApplied: the answer says the write's result was applied (a partial
+// apply that held the result group, a supersede, a clock refusal or a discard
+// says it was not).
+function _resultApplied(answer) {
+    if (!answer || typeof answer !== 'object') return false;
+    if (answer.discarded === true || writeDidNotLand(answer) || writeWasRefusedForClock(answer)) return false;
+    return !writeHeldGroups(answer).includes('result');
+}
+function _noteAppliedResult(compID, matchID, w) {
+    _appliedResults.note({ id: w.writeId, c: compID, m: matchID, where: w.where || '', tab: _landed.tab });
+    // The newest copy of the match seen before the answer may name it.
+    const seen = _turnedAwaySeen.get(_revKey(compID, matchID));
+    if (seen && seen.replaced) _tellReplaced(compID, matchID, seen);
+}
+// _rememberReplaced keeps the newest `replacedResult` seen on a copy of the
+// match, ordered by scoreVersion as the turned-away list is: a lower version
+// never replaces it, a copy naming no version never wipes it, and a newer copy
+// that names none ends it.
+function _rememberReplaced(compID, matchID, match) {
+    if (!match || typeof match !== 'object') return;
+    const base = _revKey(compID, matchID);
+    const prev = _turnedAwaySeen.get(base);
+    const raw = match.replacedResult;
+    const replaced = raw && typeof raw === 'object' && typeof raw.writeId === 'string' && raw.writeId
+        ? { writeId: raw.writeId, stamp: Number(raw.stamp) || 0 }
+        : null;
+    const court = typeof match.court === 'string' && match.court ? match.court : ((prev && prev.court) || '');
+    const keep = (rv) => _turnedAwaySeen.set(base, { v: NaN, away: null, ...prev, rv, replaced, court, compID, matchID });
+    const v = match.scoreVersion;
+    if (!Number.isFinite(v)) {
+        if (replaced && !(prev && prev.replaced)) keep(prev ? prev.rv : NaN);
+        return;
+    }
+    if (prev && Number.isFinite(prev.rv) && (v < prev.rv || (v === prev.rv && !replaced))) return;
+    keep(v);
+}
+// _tellReplaced tells the operator once that the court's result replaced a
+// result of this device: one information alert, kind `court_replaced`
+// (courtReplacedAlertText, write_result.jsx). The entry is taken out of the
+// record before it is told, by the device's one telling tab (the tab that
+// noted it while shown, else the shown tab with the lowest id); a write id
+// this device never sent, or one already told, tells nothing.
+function _tellReplaced(compID, matchID, seen) {
+    const r = seen && seen.replaced;
+    if (!r || !r.writeId) return;
+    const rec = _appliedResults.take(r.writeId, (e) => e.c === compID && e.m === matchID && _landed.tellsFor(e.tab));
+    if (!rec) return;
+    _notifyQueueAlert({
+        kind: 'court_replaced', count: 1, terminalCount: 1, compID, matchID,
+        court: seen.court || '', where: rec.where || _shownMatchLabels.get(_revKey(compID, matchID)) || '',
+        writeId: r.writeId,
+    });
+}
+// bc-sseq FR8 (S2): the court's own taps while its result is queued. The court
+// console scores a match another device has already finished: each tap is
+// answered matchClosed by the result in force, but the court's result, queued
+// behind the taps, replaces that result when it lands, and the taps stamped
+// after the replaced result then count. So while this tab's outbox holds a
+// court result for the match (isCourtResultWrite: a finished result stamped
+// with the court control), a tap answered matchClosed is noted as landed, not
+// told, and no tap of the match is told turned away (_tellAway); once that
+// result settles (applied, held by a lock or the built-on hold, refused,
+// discarded, or sent by another tab), the newest copy of the match seen says
+// which are still turned away, and those are told, once.
+function _courtResultKeyFor(base) {
+    for (const [k, d] of _entriesFor(base)) if (isCourtResultWrite(d)) return k;
+    return '';
+}
+// The court results whose settling a telling already waits on.
+const _courtResultWaits = new Set();
+function _heldForCourtResult(compID, matchID) {
+    const key = _courtResultKeyFor(_revKey(compID, matchID));
+    if (!key) return false;
+    if (!_courtResultWaits.has(key)) {
+        _courtResultWaits.add(key);
+        // The entry has left the queue when its door's promise settles
+        // (_dequeue settles it last); another court result still queued for
+        // the match holds the telling again.
+        const retell = () => {
+            _courtResultWaits.delete(key);
+            _tellTurnedAway(compID, matchID);
+        };
+        _openSettlement(key).then(retell, retell);
+    }
+    return true;
+}
+
 // _tellTurnedAwayIn reads every match a fetched competition holds.
 export function _tellTurnedAwayIn(comp, compID) {
     if (!comp || !compID) return;
     // Every copy that names a version is remembered (a newer one that lists
     // nothing ends what an older one listed), and one with a list is told.
     const look = (m) => {
-        if (m && m.id && (m.turnedAway || Number.isFinite(m.scoreVersion))) _tellTurnedAway(compID, m.id, m);
+        if (m && m.id && (m.turnedAway || m.replacedResult || Number.isFinite(m.scoreVersion))) _tellTurnedAway(compID, m.id, m);
     };
     for (const m of comp.poolMatches || []) look(m);
     for (const p of comp.pools || []) for (const m of (p && p.matches) || []) look(m);
@@ -501,6 +636,11 @@ export async function _sendTapBatch(base, batch, pass) {
                     // duplicate the newest copy still lists turned away is
                     // such a tap answered again (F3).
                     _told.settle(compID, matchID, o.id);
+                } else if (o.outcome === 'matchClosed' && _courtResultKeyFor(base)) {
+                    // S2: the court's result queued behind it decides whether
+                    // it counts (_heldForCourtResult); told later only if the
+                    // newest copy still lists it turned away.
+                    landed.push(d);
                 } else {
                     _noteNotAppliedTap(pass, base, first, o);
                     _emitOn(_tapOutcomeListeners, base, {

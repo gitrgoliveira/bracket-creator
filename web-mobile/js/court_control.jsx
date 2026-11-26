@@ -16,9 +16,10 @@
 //     console, and keep today's rules.
 //   - courtControlFor(court) and courtOfControlStamp(stamp): build and look up
 //     the `{tabId, deviceId}` stamp for a court write, only while the console
-//     is mounted and holds the shiaijo or has had no answer yet. Nothing
-//     outside tests calls courtControlFor yet, so no write carries a court
-//     control stamp yet and release is never held back for queued results yet.
+//     is mounted and holds the shiaijo or has had no answer yet. The score and
+//     decision doors (api_client_matches.jsx _stampCourtControl) put it on the
+//     court console's writes, so the tab's release waits while the tablet's
+//     outbox still holds a write stamped for that shiaijo (courtReleasable).
 //
 // The ids, sent only to the server, which stores and compares only their
 // one-way keys (no answer or event carries one):
@@ -416,8 +417,8 @@ export async function takeCourtControl(court) {
 }
 
 // _tabletQueuedFor: checks whether the tablet's outbox holds an entry stamped
-// with courtControl for `court`. No write is stamped with the court control
-// yet, so this is always false for now.
+// with courtControl for `court`, in this tab or any other tab of the tablet
+// (the stored queue), so a result still to be sent keeps the court's standing.
 function _tabletQueuedFor(court) {
     const held = (d) => !!d && d.courtControlCourt === court && !!d.payload && !!d.payload.courtControl;
     for (const d of _writeQueue.values()) if (held(d)) return true;
@@ -425,14 +426,14 @@ function _tabletQueuedFor(court) {
     return false;
 }
 
-/** Whether this tab may give `court` back now (always true while holding, since no write is stamped yet). */
+/** Whether this tab may give `court` back now: it holds it and the tablet has no result stamped for it still queued. */
 export function courtReleasable(court) {
     const r = _courts.get(court);
     return !!r && courtControlState(r.answer) === 'holds' && !_tabletQueuedFor(court);
 }
 
-// _release: gives `court` back when courtReleasable allows it (no write is
-// stamped yet, so release is not held back for queued results yet).
+// _release: gives `court` back when courtReleasable allows it (never while
+// the tablet still holds a result stamped for it).
 // `keepalive` for a page that is going.
 function _release(court, { keepalive = false } = {}) {
     if (!courtReleasable(court)) return;
@@ -471,8 +472,7 @@ function _listenOnce() {
     if (_listening || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
     _listening = true;
     // Closing or reloading the tab gives the shiaijo back when courtReleasable
-    // allows it (no write is stamped yet, so release is not held back for
-    // queued results yet).
+    // allows it (not while the tablet still holds a result stamped for it).
     window.addEventListener('pagehide', () => {
         for (const court of _courts.keys()) if (_mounted(court)) _release(court, { keepalive: true });
     });

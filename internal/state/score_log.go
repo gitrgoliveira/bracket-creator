@@ -85,6 +85,14 @@ type ScoreBaseline struct {
 	// rather than the server making one up for it: only then does Basis say
 	// whether the writer saw an earlier line (the result in force).
 	BasisSent bool `json:"basisSent,omitempty"`
+	// Court is set when the write had the court's standing on arrival
+	// (bc-sseq FR8): it came from a court console of the tablet that ran the
+	// match's shiaijo, judged by the door against the court control. The
+	// engine keeps the judgment, never the tab or tablet id. A court result
+	// line is no rival of a result in force set by a line without it: it
+	// displaces it (score_replay.go). A line written before the field reads
+	// false, which is how it was recorded.
+	Court bool `json:"court,omitempty"`
 }
 
 // ScoreBasis says which events a baseline was built with: the first Seen

@@ -88,6 +88,11 @@ type Replay struct {
 	// not apply because a result stamped before them had closed the match
 	// (BaselineHold).
 	Held map[int]BaselineHold
+	// displaced is the replay's courtDisplaced (result line: the court line
+	// that displaced it), kept so a caller that logs a replayed baseline
+	// with its write id can name the result the court replaced
+	// (replacedResultOf) without replaying again.
+	displaced map[int]int
 }
 
 // Outcome is the outcome of the event line with id, "" when there is none.
@@ -455,6 +460,10 @@ type BaselineHold struct {
 	// MatchClosed: a finish or a decision stamped before the baseline had
 	// closed the match.
 	MatchClosed bool
+	// CourtResult: the baseline is a result the court's later-stamped result
+	// replaced without having seen it (courtDisplaced, bc-sseq FR8). It is
+	// held whole, MatchClosed with it, under HoldReasonCourtResult.
+	CourtResult bool
 }
 
 // compareReplayItems is THE replay order: stamp, then events before
@@ -490,6 +499,7 @@ func cloneMatchForReplay(m state.MatchResult) state.MatchResult {
 	c.MarkIDs = m.MarkIDs.Clone()
 	c.EventSeqs = state.CloneGroupStamps(m.EventSeqs)
 	c.TurnedAway = maps.Clone(m.TurnedAway)
+	c.ReplacedResult = m.ReplacedResult.Clone()
 	c.GroupStamps = state.CloneGroupStamps(m.GroupStamps)
 	return c
 }
@@ -519,6 +529,10 @@ type replayer struct {
 	// next result after it in stamp order, when that result finishes the
 	// match (a finish or a decision): see closedBefore.
 	closer map[int]int
+	// displaced maps each result line the court's result replaced
+	// (courtDisplaced) to the court line that replaced it: each is held whole
+	// and never closes the match.
+	displaced map[int]int
 }
 
 // closingResults is, for every event line, the baseline line of the first
@@ -527,7 +541,7 @@ type replayer struct {
 // shields nothing: a tap stamped before it is still one the finish after it
 // did or did not have in view. A tap stamped between a finish and a reopen is
 // the closed-match rule's other half (closed: matchClosed).
-func closingResults(lines []state.ScoreLogLine, items []replayItem, stopAt *replayItem) map[int]int {
+func closingResults(lines []state.ScoreLogLine, items []replayItem, stopAt *replayItem, displaced map[int]int) map[int]int {
 	out := map[int]int{}
 	next := -1
 	for k := len(items) - 1; k >= 0; k-- {
@@ -539,7 +553,9 @@ func closingResults(lines []state.ScoreLogLine, items []replayItem, stopAt *repl
 		}
 		l := lines[it.line]
 		if l.Baseline != nil {
-			if slices.Contains(it.groups, state.GroupResult) {
+			// A result the court's result replaced closes nothing: the court's
+			// taps after it count (courtDisplaced).
+			if _, gone := displaced[it.line]; slices.Contains(it.groups, state.GroupResult) && !gone {
 				var verdict state.MatchResult
 				if state.SetGroupFromValue(&verdict, state.GroupResult, l.Baseline.Values[state.GroupResult]) == nil && verdict.Status == state.MatchStatusCompleted {
 					next = it.line
@@ -552,6 +568,87 @@ func closingResults(lines []state.ScoreLogLine, items []replayItem, stopAt *repl
 		}
 	}
 	return out
+}
+
+// courtDisplaced marks each ordinary result line (a finish or a decision from
+// a door that can rival, recorded without the court's standing) that a
+// later-stamped court result line follows without having seen it (basisSawLine),
+// with no reopen, send back or start between them (bc-sseq FR8, S2: the court's
+// points count too). Such a line is held whole (applyBaseline), never governs
+// the result and never closes the match (closingResults skips it), so the
+// court's own taps after it apply and those before it are judged by the court's
+// own basis. A court line that saw the result corrected it instead, and two
+// court lines keep the first recorded result (I1). The JS mirror is
+// courtDisplaced in score_events.jsx.
+func courtDisplaced(lines []state.ScoreLogLine, items []replayItem, stopAt *replayItem, logLines int) map[int]int {
+	var out map[int]int
+	var pending []int
+	for _, it := range items {
+		if stopAt != nil && compareReplayItems(it, *stopAt) >= 0 {
+			break
+		}
+		b := lines[it.line].Baseline
+		if b == nil || !slices.Contains(it.groups, state.GroupResult) {
+			continue
+		}
+		switch baselineResultStatus(b) {
+		case state.MatchStatusCompleted:
+		case "":
+			continue
+		default:
+			// A reopen, a send back to the queue or a start opens the match:
+			// a court result after it replaces nothing before it.
+			pending = nil
+			continue
+		}
+		if b.Court {
+			for _, o := range pending {
+				if !basisSawLine(&b.Basis, logLines, o) {
+					if out == nil {
+						out = map[int]int{}
+					}
+					out[o] = it.line
+				}
+			}
+			pending = nil
+			continue
+		}
+		if canRival(b.Door) && !slices.Contains(pending, it.line) {
+			pending = append(pending, it.line)
+		}
+	}
+	return out
+}
+
+// replacedResultOf is MatchResult.ReplacedResult (bc-sseq FR8): of the result
+// lines a court line displaced (courtDisplaced), the newest by its result's
+// stamp (the later line on a tie) among those sent with a write id, since a
+// device recognises its own result only by the id it sent. nil when no court
+// line displaced one.
+func replacedResultOf(lines []state.ScoreLogLine, displaced map[int]int) *state.ReplacedResult {
+	var out *state.ReplacedResult
+	at := -1
+	for line := range displaced {
+		b := lines[line].Baseline
+		if b == nil || b.WriteID == "" {
+			continue
+		}
+		stamp := baselineGroupStamp(b, state.GroupResult)
+		if out == nil || stamp > out.Stamp || (stamp == out.Stamp && line > at) {
+			out, at = &state.ReplacedResult{WriteID: b.WriteID, Stamp: stamp}, line
+		}
+	}
+	return out
+}
+
+// canRival reports whether a baseline's door is one whose result can be a rival
+// of the result in force: the score, engi and decision doors (rivalResult).
+func canRival(door string) bool {
+	switch door {
+	case DoorScore, doorEngi, DoorDecision:
+		return true
+	}
+	return false
 }
 
 // closedBefore is the closed-match rule's other half (D5, match-writes.md):
@@ -693,7 +790,12 @@ func replayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 	}
 	rp.startMadeRowsEmpty()
 	slices.SortFunc(items, compareReplayItems)
-	rp.closer = closingResults(lines, items, stopAt)
+	logLines := len(lines)
+	if shape.logKnown {
+		logLines = shape.logLines
+	}
+	rp.displaced = courtDisplaced(lines, items, stopAt, logLines)
+	rp.closer = closingResults(lines, items, stopAt, rp.displaced)
 	for _, it := range items {
 		if stopAt != nil && compareReplayItems(it, *stopAt) >= 0 {
 			break
@@ -711,7 +813,7 @@ func replayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 	rp.settleEarly()
 	rp.padDefaultWin()
 
-	out := Replay{Match: rp.cur.m, Held: rp.held}
+	out := Replay{Match: rp.cur.m, Held: rp.held, displaced: rp.displaced}
 	out.Match.GroupStamps = rp.stamps
 	if len(rp.stamps) == 0 {
 		out.Match.GroupStamps = nil
@@ -727,6 +829,7 @@ func replayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 	out.Match.ScoreVersion = len(lines)
 	out.Match.EventSeqs = ScoreLogEventSeqs(lines)
 	out.Match.TurnedAway = turnedAwayOf(lines, rp.outcome)
+	out.Match.ReplacedResult = replacedResultOf(lines, rp.displaced)
 	for i, l := range lines {
 		if l.Event != nil {
 			out.Outcomes = append(out.Outcomes, EventOutcome{ID: l.Event.ID, Line: i, Outcome: rp.outcome[i]})
@@ -787,32 +890,52 @@ func BasisContains(b *state.ScoreBaseline, i int, e *domain.ScoreEvent) bool {
 }
 
 func (rp *replayer) applyBaseline(line int, b *state.ScoreBaseline, groups []string) {
-	m := &rp.cur.m
+	// A result the court's result replaced (courtDisplaced) is held whole:
+	// every group it sets, but a fixed-order team match's bouts a match-level
+	// kiken, fusenpai or fusensho leaves open (T1, rivalHeldGroups). A bout
+	// it set that is stamped before the court's result is then judged by the
+	// court's basis, as any change stamped before a result is (D5).
+	if _, ok := rp.displaced[line]; ok {
+		groups = rp.holdBaseline(line, groups, BaselineHold{Groups: rp.rivalHeldGroups(groups), Reason: HoldReasonCourtResult, MatchClosed: true, CourtResult: true})
+	}
 	// A baseline that carries scoring, and not the result, onto a match the
 	// log has already closed is turned away as an event is (the closed-match
 	// rule).
 	if hold := rp.judgeOverFinished(line, b, groups); hold != nil {
-		groups = slices.DeleteFunc(slices.Clone(groups), func(g string) bool { return slices.Contains(hold.Groups, g) })
-		if rp.held == nil {
-			rp.held = map[int]BaselineHold{}
-		}
-		prev := rp.held[line]
-		hold.Groups = unionGroups(prev.Groups, hold.Groups)
-		rp.held[line] = *hold
-		// A bout no line has set yet is not in the match at this point: the
-		// cache's row is the final one, a copy of what an earlier arrival of
-		// this same line landed.
-		for _, g := range hold.Groups {
-			pos, isBout := state.ParseBoutGroup(g)
-			if _, governed := rp.govern[g]; !isBout || governed {
-				continue
-			}
-			m.SubResults = slices.DeleteFunc(m.SubResults, func(r state.SubMatchResult) bool { return r.Position == pos })
-			delete(rp.cur.bouts, pos)
-			delete(rp.stamps, g)
-		}
+		groups = rp.holdBaseline(line, groups, *hold)
 	}
 	rp.applyBaselineGroups(line, b, groups)
+}
+
+// holdBaseline records hold for the baseline at line and answers the groups
+// of groups it leaves to apply.
+func (rp *replayer) holdBaseline(line int, groups []string, hold BaselineHold) []string {
+	m := &rp.cur.m
+	groups = slices.DeleteFunc(slices.Clone(groups), func(g string) bool { return slices.Contains(hold.Groups, g) })
+	if rp.held == nil {
+		rp.held = map[int]BaselineHold{}
+	}
+	prev := rp.held[line]
+	hold.Groups = unionGroups(prev.Groups, hold.Groups)
+	if prev.CourtResult {
+		// A line the court's result replaced keeps that reason for every
+		// group it holds.
+		hold.Reason, hold.CourtResult = prev.Reason, true
+	}
+	rp.held[line] = hold
+	// A bout no line has set yet is not in the match at this point: the
+	// cache's row is the final one, a copy of what an earlier arrival of
+	// this same line landed.
+	for _, g := range hold.Groups {
+		pos, isBout := state.ParseBoutGroup(g)
+		if _, governed := rp.govern[g]; !isBout || governed {
+			continue
+		}
+		m.SubResults = slices.DeleteFunc(m.SubResults, func(r state.SubMatchResult) bool { return r.Position == pos })
+		delete(rp.cur.bouts, pos)
+		delete(rp.stamps, g)
+	}
+	return groups
 }
 
 // decisionLoserSide is the side whose struck points a decision on group g
@@ -1025,6 +1148,16 @@ func (rp *replayer) judgeOverFinished(line int, b *state.ScoreBaseline, groups [
 	return &BaselineHold{Groups: scoring, Reason: HoldReasonMatchClosed, MatchClosed: true}
 }
 
+// lineHasCourtStanding reports whether the baseline at line was recorded with
+// the court's standing (ScoreBaseline.Court).
+func (rp *replayer) lineHasCourtStanding(line int) bool {
+	if line < 0 || line >= len(rp.lines) {
+		return false
+	}
+	b := rp.lines[line].Baseline
+	return b != nil && b.Court
+}
+
 // rivalResult reports whether baseline b, which carries a result onto a match
 // the log has already closed, is a RIVAL of the result in force: a finish or a
 // decision from a device that did not see it. THE FIRST RECORDED RESULT STANDS
@@ -1040,7 +1173,9 @@ func (rp *replayer) judgeOverFinished(line int, b *state.ScoreBaseline, groups [
 // engine's own callers, bulk and quick score: an organiser acting on what the
 // screen shows) is no rival either. Only a finish or a decision from the
 // score, engi or decision doors is, and a drift line that carries a result is
-// judged by the same rule (see the DoorDrift arm below).
+// judged by the same rule (see the DoorDrift arm below). A court result line
+// (ScoreBaseline.Court, bc-sseq FR8) is no rival of a result in force set by a
+// line without the court's standing: it displaces it.
 func (rp *replayer) rivalResult(line int, b *state.ScoreBaseline) bool {
 	switch b.Door {
 	case DoorScore, doorEngi, DoorDecision:
@@ -1054,6 +1189,11 @@ func (rp *replayer) rivalResult(line int, b *state.ScoreBaseline) bool {
 	}
 	inForce, ok := rp.resultInForce()
 	if !ok || inForce == line || b.Informed || baselineResultStatus(b) != state.MatchStatusCompleted {
+		return false
+	}
+	// A court result line is no rival of a result set by a line without the
+	// court's standing: it displaces it (bc-sseq FR8).
+	if b.Court && !rp.lineHasCourtStanding(inForce) {
 		return false
 	}
 	logLines := len(rp.lines)
@@ -1114,7 +1254,7 @@ func baselineResultStatus(b *state.ScoreBaseline) state.MatchStatus {
 // set it, and whether the write's basis (capped to the lines the log really
 // holds) holds that line, so the writer saw it. It is the ONE answer every
 // caller reads: the replay's rival test (rivalResult), the result lock
-// (rivalDisplacesResult), the padding gate (writesAsRival) and the /score
+// (displacesUnseenResult), the padding gate (writesAsRival) and the /score
 // handler's reason check (ResultInForceAt).
 type ResultInForce struct {
 	InForce bool
@@ -1187,6 +1327,9 @@ func writesAsRival(w, stored *state.MatchResult, lines []state.ScoreLogLine, com
 	if w.ModifiedAt <= 0 || w.CorrectionReason != "" || w.ClearsWithdrawal {
 		return false
 	}
+	// A court result (bc-sseq FR8) that did not see the ordinary result in
+	// force displaces it rather than rivals it, but for the padding the two
+	// are one: it keeps nothing of the ruling and pads nothing of its own.
 	if w.Basis == nil {
 		return true
 	}

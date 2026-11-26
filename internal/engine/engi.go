@@ -88,6 +88,9 @@ func engiFinishProbe(prior, result *state.MatchResult) state.MatchResult {
 	// would read as one that saw nothing and a tap its writer's screen showed
 	// would end beforeBaseline or recorded by arrival order.
 	p.Basis, p.WriteSession = result.Basis, result.WriteSession
+	// And the court's standing (bc-sseq FR8), or a court finish would read as
+	// a rival of an ordinary finish it displaces.
+	p.CourtStanding = result.CourtStanding
 	return p
 }
 

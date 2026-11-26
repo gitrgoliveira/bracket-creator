@@ -271,6 +271,10 @@ type scoreRequestBody struct {
 	// writeTag is the optional writeId and basis (bc-evts F1): a resend of
 	// a write the match's score event log holds answers as recorded.
 	writeTag
+	// courtWrite is the optional courtControl {tabId, deviceId} a court
+	// console stamps its write with (bc-sseq FR8), judged on arrival for the
+	// court's standing (judgeCourtStanding). Request-only, never stored.
+	courtWrite
 	// KachinukiBoutFinal marks an explicit operator "record bout" submit
 	// on a kachinuki team match. Only a flagged write triggers
 	// MaybeAdvanceKachinuki; unflagged running writes (autosave fires
@@ -472,6 +476,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if err := body.validateCourtControl(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		body.tagOnto((*state.MatchResult)(&req))
 		// A start changes the status alone: the score the stored match holds
 		// is kept (keepQueuedScore), so the merge must not apply the
@@ -543,7 +551,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 
 		// mp-ba3: self-run decision allowlist + result provenance. Runs
 		// after Validate() so the request is structurally valid.
-		resultSource, ok := enforceSelfRunPolicy(c, tl, verifier, &req, &body.ForceCourt)
+		resultSource, ok := enforceSelfRunPolicy(c, tl, verifier, &req, &body.ForceCourt, &body.courtWrite)
 		if !ok {
 			return
 		}
@@ -646,8 +654,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			// corrected match's own.
 			reopenedDownstream []engine.ReopenedMatch
 			// supersededMatch is the stored match a held write lost to,
-			// read in the write's transaction for the answer's `match`.
-			supersededMatch *state.MatchResult
+			// read in the write's transaction for the answer's `match`, and
+			// supersededMessage the answer's sentence, judged there too
+			// (supersededMessageTx, bc-sseq FR8).
+			supersededMatch   *state.MatchResult
+			supersededMessage string
 		)
 		txErr := tx.WithCourtExclusivityLock(func() error {
 			// bc-adna: the court is judged only on a write that moves the
@@ -690,6 +701,17 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				comp, compErr := stx.LoadCompetition(id)
 				if compErr != nil {
 					return compErr
+				}
+				// bc-sseq FR8: the court's standing, judged on arrival against
+				// who runs the match's shiaijo as stored here (an anonymous
+				// self-run caller's court control was dropped above). It rides
+				// to the baseline the write leaves (ScoreBaseline.Court).
+				if found {
+					standing, standErr := body.judgeCourtStanding(stx, id, mid, snap, courtsOf(hub), tl, result.ModifiedAt)
+					if standErr != nil {
+						return standErr
+					}
+					result.CourtStanding = standing
 				}
 				// mp-ba3, bc-dhas: the self-run judge runs under the per-comp
 				// lock, so concurrent anonymous submissions cannot race it. It
@@ -788,6 +810,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				})
 				if errors.Is(engErr, engine.ErrMatchSuperseded) {
 					supersededMatch = storedMatchForAnswer(stx, id, mid, selfReported)
+					supersededMessage = supersededMessageTx(stx, id, mid, result.Merge.HeldReason(), supersededMatch)
 				}
 				// engErr is a normal application-level signal (AlreadyIneligible
 				// → 409, validation/not-found → other codes); we surface it
@@ -854,7 +877,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// the shape the override endpoint already uses for this exact
 				// condition, and the client keys on it.
 
-				respondSuperseded(c, supersededMatch, result.Merge.HeldGroups(), result.Merge.HeldReason(), engErr)
+				respondSupersededSaying(c, supersededMatch, result.Merge.HeldGroups(), result.Merge.HeldReason(), supersededMessage, engErr)
 				return
 			}
 			var refusal *selfRunRefusal

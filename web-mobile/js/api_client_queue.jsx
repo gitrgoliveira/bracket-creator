@@ -120,6 +120,18 @@ export function _revKey(compID, matchID) { return `${compID}:${matchID}`; }
  *                     same 401 until API.resumeAfterAuth() re-stamps it. Persisted
  *                     with the entry, so a parked write survives a reload and is
  *                     resumed when the operator next authenticates.
+ *   courtControlCourt: the shiaijo the payload's `courtControl` was given for
+ *                     (bc-sseq FR8): a score or decision write the court
+ *                     console made while it ran that shiaijo carries
+ *                     `payload.courtControl` {tabId, deviceId}
+ *                     (api_client_matches.jsx), which the server judges on
+ *                     arrival for the court's standing. Both are persisted,
+ *                     adopted across tabs and checked on rehydrate
+ *                     (_storedEntryProblem: a stamp this build did not make is
+ *                     unreadable), so the tablet keeps the shiaijo while any
+ *                     tab still holds one (court_control.jsx courtReleasable).
+ *                     A write that takes a queued one's place keeps its own
+ *                     stamp, never the replaced one's (_placeWrite).
  *
  * Running score descriptors set terminal=false and do not use method/url
  * (they are always PUT to the score endpoint: _flushQueue hard-codes that

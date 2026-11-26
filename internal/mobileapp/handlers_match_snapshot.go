@@ -237,6 +237,17 @@ func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matc
 // two never disagree. nil when it could not be read: the answer then carries
 // no `match`, and the device keeps the copy it had until the next push.
 func respondSuperseded(c *gin.Context, stored *state.MatchResult, heldGroups []string, heldReason string, from ...error) {
+	respondSupersededSaying(c, stored, heldGroups, heldReason, "", from...)
+}
+
+// respondSupersededSaying is respondSuperseded with the sentence the door
+// judged in the write's own transaction (supersededMessageTx), for the one
+// reason a sentence needs that transaction: a court result held because other
+// matches were built on the result it would replace (downstream_built_on,
+// bc-sseq FR8), which names what was built on it. An empty message is worded
+// from the code and the stored match (heldReasonMessage), as respondSuperseded
+// does.
+func respondSupersededSaying(c *gin.Context, stored *state.MatchResult, heldGroups []string, heldReason, message string, from ...error) {
 	// LOGGED because this is the one successful-looking response whose work
 	// an operator does not see on the match. Since bc-mrgc the held values are
 	// in the match's history, but the line still names the request, which is
@@ -254,7 +265,10 @@ func respondSuperseded(c *gin.Context, stored *state.MatchResult, heldGroups []s
 	}
 	if heldReason != "" {
 		body["heldReason"] = heldReason
-		body["message"] = messageForHeldReason(heldReason)
+		if message == "" {
+			message = heldReasonMessage(heldReason, stored)
+		}
+		body["message"] = message
 	}
 	if stored != nil {
 		body["match"] = stored
@@ -268,6 +282,10 @@ func respondSuperseded(c *gin.Context, stored *state.MatchResult, heldGroups []s
 			if version > 0 {
 				body["scoreVersion"] = version
 			}
+		}
+		// Likewise the result the court's result replaced (bc-sseq FR8).
+		if replaced := engine.ReplacedResultOf(err); replaced != nil {
+			body["replacedResult"] = replaced
 		}
 	}
 	c.JSON(http.StatusOK, body)
@@ -355,8 +373,42 @@ func messageForHeldReason(heldReason string) string {
 		return ResultLockedPlayedMessage
 	case state.HeldReasonDownstreamRunning:
 		return ResultLockedRunningMessage
+	case state.HeldReasonCourtResult:
+		// The bulk-score path knows no shiaijo; a door that holds the stored
+		// match names it (heldReasonMessage).
+		return engine.CourtResultMessage("")
 	}
+	// downstream_built_on lands here only on a path that has no transaction
+	// to judge what was built on the result (supersededMessageTx). Only the
+	// score and decision doors can hold a court result that way, and both
+	// judge it in theirs.
 	return SupersededMessage
+}
+
+// heldReasonMessage is messageForHeldReason for a door that holds the stored
+// match it answers with: the court's result names the match's shiaijo
+// (bc-sseq FR8). stored may be nil; the sentence is then worded without it.
+func heldReasonMessage(heldReason string, stored *state.MatchResult) string {
+	if heldReason == state.HeldReasonCourtResult && stored != nil {
+		return engine.CourtResultMessage(stored.Court)
+	}
+	return messageForHeldReason(heldReason)
+}
+
+// supersededMessageTx is the sentence a held write is answered with, judged in
+// the write's own transaction, where the door already read the stored match
+// for the answer (storedMatchForAnswer): a court result held because other
+// matches were built on the result it would replace names which case it was
+// (engine.ResultBuiltOnMessageTx, the owner the hold itself asked), and the
+// court's result names the match's shiaijo. Every other code is worded as
+// messageForHeldReason words it.
+func supersededMessageTx(stx state.StoreTx, compID, matchID, heldReason string, stored *state.MatchResult) string {
+	if heldReason == state.HeldReasonBuiltOn {
+		if msg := engine.ResultBuiltOnMessageTx(stx, compID, matchID); msg != "" {
+			return msg
+		}
+	}
+	return heldReasonMessage(heldReason, stored)
 }
 
 // ResultLockedPlayedMessage and ResultLockedRunningMessage are the sentences a

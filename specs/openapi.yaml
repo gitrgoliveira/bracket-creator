@@ -4259,6 +4259,19 @@ paths:
           never showed is kept in the history as not applied
           (`beforeBaseline`). A write without them is judged as before.
 
+          `courtControl` (also request-only, optional, a CourtControlStamp)
+          is the court console's `{tabId, deviceId}`. With the court's
+          standing (the tablet runs the match's shiaijo and the write was
+          made at or after the standing's start; see CourtControlStamp) a
+          finish replaces a result another device recorded that it never
+          saw, which is then kept in the history and answered
+          `heldReason: court_result` should it arrive later, instead of
+          being turned away as its rival; such a finish over a result other
+          matches were built on is held `downstream_built_on`. A shiaijo
+          nobody runs is claimed by the write. Without the standing the
+          write is an ordinary one. An id that is not a lowercase UUID v4 is
+          a 400.
+
           `changed` (also request-only) names the GROUPS this write changes,
           and the server merges the write group by group (see the MergeGroup
           schema): each named group applies only when the write's
@@ -5855,7 +5868,7 @@ paths:
                           description: On a `superseded` entry, the groups held.
                         heldReason:
                           type: string
-                          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
+                          enum: [match_closed, downstream_knockout_played, downstream_knockout_running, court_result, downstream_built_on]
                           description: >
                             On a `superseded` entry held because a finish or a
                             decision stamped before it had already closed the
@@ -5891,7 +5904,7 @@ paths:
                           description: As MatchResult.displacedGroups.
                         heldReason:
                           type: string
-                          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
+                          enum: [match_closed, downstream_knockout_played, downstream_knockout_running, court_result, downstream_built_on]
                           description: As RefusedWrite.heldReason.
                   warnings:
                     type: array
@@ -6078,6 +6091,17 @@ paths:
                   $ref: '#/components/schemas/ScoreBasis'
                 session:
                   $ref: '#/components/schemas/WriteSession'
+                courtControl:
+                  allOf:
+                    - $ref: '#/components/schemas/CourtControlStamp'
+                  description: >
+                    Optional, request-only, never stored: the court console's
+                    stamp, judged on arrival as on PUT .../score (see
+                    CourtControlStamp). With the court's standing the decision
+                    replaces a result another device recorded that it never
+                    saw, instead of being turned away as its rival. The
+                    both-sides-barred `hikiwake` does not judge it. An id that
+                    is not a lowercase UUID v4 is a 400.
                 decision:
                   type: string
                   enum: [kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, hikiwake, daihyosen]
@@ -6293,7 +6317,7 @@ paths:
                           and kept in the match's history. As RefusedWrite.heldGroups.
                       heldReason:
                         type: string
-                        enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
+                        enum: [match_closed, downstream_knockout_played, downstream_knockout_running, court_result, downstream_built_on]
                         description: As RefusedWrite.heldReason.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
@@ -6425,7 +6449,7 @@ paths:
                           `heldReason`. As MatchResult.displacedGroups.
                       heldReason:
                         type: string
-                        enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
+                        enum: [match_closed, downstream_knockout_played, downstream_knockout_running, court_result, downstream_built_on]
                         description: As RefusedWrite.heldReason.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
@@ -8768,7 +8792,7 @@ components:
             of them held and kept in the match's history.
         heldReason:
           type: string
-          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
+          enum: [match_closed, downstream_knockout_played, downstream_knockout_running, court_result, downstream_built_on]
           description: >
             Present on `superseded` when the groups were held not because a
             newer change is stored but because a finish or a decision stamped
@@ -8781,7 +8805,24 @@ components:
             finish or decision stamped before it, from a device that did not
             see it, was held because the next knockout match had already been
             played or started. The stored result stands and the write is kept
-            in the history.
+            in the history. `court_result` says a result from a device without
+            the court's standing was replaced by a later-stamped result from
+            the court console of the tablet that runs the match's shiaijo,
+            which never saw it (it arrived after the court's result, or the
+            court's arrived after it); the court's result counts, this one
+            is kept in the history, and `message` names the match's shiaijo
+            (bulk-score's entry, which knows no shiaijo, words it without
+            one). `downstream_built_on` is answered to that
+            court result instead when other matches were already built on the
+            result it would replace: a later Swiss round was paired from it,
+            a tie-break or representative match was added from the standings
+            it fed, or the competition finished on it. The stored result
+            stands, the court's result is kept in the history, and `message`
+            says which case it was and that Correct uses it. Only a write with
+            the court's standing is held so; any other device's later result
+            keeps the closed-match rule (`match_closed`).
+        replacedResult:
+          $ref: '#/components/schemas/ReplacedResult'
         turnedAway:
           type: object
           readOnly: true
@@ -10900,6 +10941,8 @@ components:
             later taps never push a device's own out) and 512 in all. Absent
             when none. Derived by the server; a value a
             write carries is ignored.
+        replacedResult:
+          $ref: '#/components/schemas/ReplacedResult'
         groupStamps:
           type: object
           readOnly: true
@@ -10926,7 +10969,7 @@ components:
         heldReason:
           type: string
           readOnly: true
-          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
+          enum: [match_closed, downstream_knockout_played, downstream_knockout_running, court_result, downstream_built_on]
           description: >
             On a write's response only, beside `heldGroups` or
             `displacedGroups`: present when they were held or moved because a
@@ -11482,6 +11525,8 @@ components:
           additionalProperties:
             type: string
           description: See MatchResult.turnedAway.
+        replacedResult:
+          $ref: '#/components/schemas/ReplacedResult'
         placeholderA:
           type: string
           readOnly: true
@@ -11502,6 +11547,63 @@ components:
           description: >
             The draw-time counterpart of `winner`, non-empty only where the draw
             pre-filled a bye winner. See `placeholderA`.
+
+    ReplacedResult:
+      type: object
+      readOnly: true
+      description: >
+        The newest result the court's result replaced: a finish or a decision
+        another device recorded, applied on arrival, that a later-stamped
+        result from the court console of the tablet running the match's
+        shiaijo displaced without having seen it. Its own answer said applied,
+        so the device that made it reads the change here, on whatever copy of
+        the match reaches it next, by the write id it kept, and tells its
+        operator once. Carries no name, so a public read shows it unchanged.
+        Absent when no court result displaced one, or the one displaced was
+        sent without a `writeId`. Derived by the server; a value a write
+        carries is ignored.
+      properties:
+        writeId:
+          type: string
+          description: The `writeId` the replaced result was sent with.
+        stamp:
+          type: integer
+          format: int64
+          description: The stamp (server-relative unix ms) the replaced result was made at.
+
+    CourtControlStamp:
+      type: object
+      description: >
+        A court console's stamp on a result write (PUT .../score, POST
+        .../decision): the tab that made it and the tablet that tab belongs to,
+        the same ids the console claims its shiaijo with (PUT
+        /api/courts/{court}/control). Request-only, never stored or echoed.
+        The server judges it on arrival against who runs the match's shiaijo
+        as it is stored then: the write has the court's standing when its
+        tablet runs the shiaijo, through whichever of its tabs, and it was
+        made (`modifiedAt`) at or after the standing's start (the take, when
+        another tablet took the shiaijo; from the first claim otherwise). A
+        shiaijo nobody runs is claimed by the write, from a tab and a tablet
+        that did not lose it by a take, with the writing tab as its holder
+        (a console opened offline). A shiaijo another tab of the same tablet
+        runs is left with that tab, and the write still has the standing. A
+        shiaijo another tablet runs makes the write an ordinary one. A result
+        with the court's standing replaces a result another device recorded
+        that it never saw, rather than being turned away as its rival
+        (`match_closed`); one that would replace a result other matches were
+        built on is held `downstream_built_on`. Never judged in a self-run
+        tournament; a participant's (an empty `X-Tournament-Password`) is
+        dropped.
+      required: [tabId, deviceId]
+      properties:
+        tabId:
+          type: string
+          format: uuid
+          description: The court console tab's id, a lowercase UUID v4.
+        deviceId:
+          type: string
+          format: uuid
+          description: The tablet's id, shared by its tabs, a lowercase UUID v4.
 
     CourtMatchSide:
       type: object

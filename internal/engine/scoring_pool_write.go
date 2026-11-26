@@ -126,7 +126,7 @@ func applyPoolWriteLog(stored, result *state.MatchResult, policy matchWritePolic
 		result.SubResultsUnreadable = false
 	}
 	prior := derivedScoreOf(stored.IpponsA, stored.IpponsB, stored.MarkIDs, stored.SubResults, stored.ScoreVersion, stored.EventSeqs)
-	priorTurnedAway := stored.TurnedAway
+	priorTurnedAway, priorReplaced := stored.TurnedAway, stored.ReplacedResult
 	*stored = *result
 	// The write's own merge inputs and report stay on the incoming result for
 	// the caller; the stored copy must not carry them to a later writer.
@@ -143,19 +143,23 @@ func applyPoolWriteLog(stored, result *state.MatchResult, policy matchWritePolic
 		stored.MarkIDs = result.MarkIDs.Clone()
 		stored.EventSeqs = state.CloneGroupStamps(result.EventSeqs)
 		stored.TurnedAway = maps.Clone(result.TurnedAway)
+		stored.ReplacedResult = result.ReplacedResult.Clone()
 	case result.WriteDoor == DoorEvent:
 		stored.MarkIDs = result.MarkIDs.Clone()
 		stored.ScoreVersion = max(prior.version, result.ScoreVersion)
 		stored.EventSeqs = mergeEventSeqs(prior.eventSeqs, result.EventSeqs)
 		stored.TurnedAway = maps.Clone(result.TurnedAway)
+		stored.ReplacedResult = result.ReplacedResult.Clone()
 	default:
 		stored.MarkIDs = prior.carry(stored.IpponsA, stored.IpponsB, stored.SubResults)
 		stored.ScoreVersion = prior.version
 		stored.EventSeqs = state.CloneGroupStamps(prior.eventSeqs)
 		stored.TurnedAway = maps.Clone(priorTurnedAway)
+		stored.ReplacedResult = priorReplaced.Clone()
 		result.MarkIDs, result.ScoreVersion = stored.MarkIDs.Clone(), stored.ScoreVersion
 		result.EventSeqs = state.CloneGroupStamps(stored.EventSeqs)
 		result.TurnedAway = maps.Clone(stored.TurnedAway)
+		result.ReplacedResult = stored.ReplacedResult.Clone()
 	}
 	return false, false, inherited, nil
 }

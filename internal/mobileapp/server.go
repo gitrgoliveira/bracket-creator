@@ -153,8 +153,9 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	hub.attachPublicNames(names)
 	// Who runs each shiaijo: one registry per router, reached by the claim
 	// routes and, through the hub and restore handler, by the whole-tournament
-	// replacements that free every shiaijo. The score and decision doors are
-	// not wired to it yet.
+	// replacements that free every shiaijo, and by the score and decision
+	// doors, which judge a court console's write for the court's standing
+	// (judgeCourtStanding, write_tag.go).
 	courts := newCourtControlRegistry(store, hub)
 	hub.attachCourtControl(courts)
 

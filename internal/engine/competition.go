@@ -420,13 +420,10 @@ func (e *Engine) maybeAutoCompletePools(compID string, poolsMayHaveMoved bool) (
 	}
 	reopened, comp, err := e.leagueBackInPlay(compID, comp)
 	if err != nil {
-		return AutoCompleteNoChange, err
+		return startOutcome(started, reopened, AutoCompleteNoChange), err
 	}
 	outcome, err := e.maybeAutoCompletePoolsRunning(compID, comp, poolsMayHaveMoved)
-	if err != nil {
-		return outcome, err
-	}
-	return startOutcome(started, reopened, outcome), nil
+	return startOutcome(started, reopened, outcome), err
 }
 
 // startOutcome reports a start this pass made: a draw-ready competition

@@ -188,6 +188,7 @@ var autoCompleteAnnouncements = []struct {
 	{"pools resolved", engine.AutoCompletePoolsResolved, nil, []EventType{EventMatchUpdated, EventScheduleUpdated}},
 	{"league tie-break awaited", engine.AutoCompleteAwaitingLeagueTiebreak, nil, []EventType{EventMatchUpdated, EventScheduleUpdated}},
 	{"the pass failed", engine.AutoCompleteNoChange, errors.New("disk refused"), []EventType{EventMatchUpdated, EventScheduleUpdated}},
+	{"the pass failed after a start", engine.AutoCompleteStarted, errors.New("disk refused"), []EventType{EventCompetitionStarted, EventMatchUpdated, EventScheduleUpdated}},
 }
 
 // TestAnswerAutoComplete_AnnouncesEveryOutcome pins the one tail every door

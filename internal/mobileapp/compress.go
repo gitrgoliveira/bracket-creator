@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"bufio"
 	"compress/gzip"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"mime"
@@ -144,10 +145,18 @@ func GzipMiddleware() gin.HandlerFunc {
 		defer func() {
 			c.Writer = orig
 			if !completed {
-				// A panic is unwinding to Recovery. Whatever was held is
-				// dropped and the original writer is back in place, so
-				// Recovery's 500 reaches the caller when nothing has gone out
-				// yet. A writer mid-stream is not returned to the pool.
+				// A panic is unwinding to Recovery, with the original writer
+				// back in place. A complete JSON answer the handler had
+				// already written is sent as it stands: a write that landed
+				// stays answered 200, where a 500 would have the outbox retry
+				// it. Anything else held (nothing written, or a body cut
+				// short) is dropped, so Recovery's 500 reaches the caller.
+				// A writer mid-stream is not returned to the pool.
+				if gw.wroteHeader && !gw.decided && json.Valid(gw.buf) {
+					if err := gw.decide(false); err != nil {
+						slog.Debug("mobileapp: gzip answer", "err", err)
+					}
+				}
 				gw.zw = nil
 				return
 			}

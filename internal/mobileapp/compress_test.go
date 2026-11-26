@@ -182,6 +182,22 @@ func TestGzip_HandlerPanicStillAnswers500(t *testing.T) {
 	}
 }
 
+// A panic after a handler wrote its whole answer (work done after c.JSON)
+// leaves the answer the caller got: the write landed, and a 500 would have
+// the outbox retry it.
+func TestGzip_PanicAfterACompleteAnswerKeepsTheAnswer(t *testing.T) {
+	r := gzipTestRouter(func(r *gin.Engine) {
+		r.GET("/api/late", func(c *gin.Context) {
+			c.JSON(http.StatusCreated, gin.H{"ok": true})
+			panic("after the answer")
+		})
+	})
+	w := gzipGet(r, http.MethodGet, "/api/late", "gzip")
+	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.JSONEq(t, `{"ok":true}`, w.Body.String())
+	assert.Empty(t, w.Header().Get("Content-Encoding"))
+}
+
 func TestGzip_VaryMergesWithWhatTheHandlerSet(t *testing.T) {
 	body := bigJSON(t, 200)
 	r := gzipTestRouter(func(r *gin.Engine) {

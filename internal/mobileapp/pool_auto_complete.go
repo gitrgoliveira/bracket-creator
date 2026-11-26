@@ -81,6 +81,11 @@ func answerAutoComplete(c *gin.Context, hub Broadcaster, compID string, outcome 
 	if err != nil {
 		log.Printf("MaybeAutoCompletePools(%s): %v", compID, err)
 		c.Header(AutoCompleteErrorHeader, AutoCompleteErrorValue)
+		if outcome == engine.AutoCompleteStarted {
+			// The start committed before the step that failed: announce it
+			// as the success arm does.
+			hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": compID})
+		}
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID})
 		hub.Broadcast(EventScheduleUpdated, nil)
 		return

@@ -8366,8 +8366,9 @@ components:
         read began, `0` before the first. Every event is sent after its change
         is saved, so the answer already holds every change announced at or
         below this seq: a page that applied it needs no refetch for those
-        events. A seq lower than one the page already holds means the server
-        restarted (its stream starts again from 1). Callers that share one
+        events. A seq lower than one the page already holds means only that
+        this answer's build began before an event the page has since
+        received, so it may be stale for that event. Callers that share one
         build of the answer are told the same seq. Exposed to browsers
         through `Access-Control-Expose-Headers`.
       schema:

@@ -3,7 +3,7 @@
 //
 // A generated draw starts hidden: a spectator's phone reads the competition as
 // one still being prepared (no Pools or Bracket tab, no competitor number, a
-// "Draw being prepared" card and badge), and the court's TV board shows none of
+// "Draw being prepared" card and no header badge, since the card says it), and the court's TV board shows none of
 // its matches. The organiser taps Publish draw on the draw preview header and
 // the phone shows the draw without a reload; Unpublish takes it away again,
 // a phone on the Pools tab landing back on the Overview. Starting a hidden
@@ -118,7 +118,7 @@ test.describe('a draft draw kept off the public pages until it is published', ()
     await test.step('the competition page: the "Draw being prepared" card, no Pools or Bracket tab, no number', async () => {
       await openViewer(page, id);
       await expectPreparing(page);
-      await expect(page.locator('.viewer__head .badge--draw-preparing')).toHaveText(PREPARING);
+      await expect(page.locator('.viewer__head .badge')).toHaveCount(0);
       await shot(page, 'public-preparing', { fullPage: true });
     });
 

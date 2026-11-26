@@ -657,7 +657,7 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 		}
 		byStamp := map[displacedKey]map[string]json.RawMessage{}
 		for line, h := range after.Held {
-			if !(h.MatchClosed || h.CourtResult) || line == len(all)-1 {
+			if (!h.MatchClosed && !h.CourtResult) || line == len(all)-1 {
 				continue
 			}
 			for _, g := range h.Groups {

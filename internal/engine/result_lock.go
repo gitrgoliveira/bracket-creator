@@ -271,7 +271,7 @@ func replacesOrdinaryResult(rep *state.MergeReport) bool {
 		return false
 	}
 	for i, h := range mr.after.Held {
-		if i >= mr.lines || !(h.MatchClosed || h.CourtResult) || !slices.Contains(h.Groups, state.GroupResult) {
+		if i >= mr.lines || (!h.MatchClosed && !h.CourtResult) || !slices.Contains(h.Groups, state.GroupResult) {
 			continue
 		}
 		if i >= len(mr.found) || mr.found[i].Baseline == nil || !mr.found[i].Baseline.Court {

@@ -29,8 +29,8 @@ let reply;
 const settle = () => new Promise((r) => setTimeout(r, 0));
 const puts = () => calls.filter((c) => c.method === 'PUT');
 const deletes = () => calls.filter((c) => c.method === 'DELETE');
-const emit = (event) => { for (const r of [...events]) r.cb(event); };
-const status = (s) => { for (const r of [...events]) if (r.onStatus) r.onStatus(s); };
+const emit = (event) => { for (const r of Array.from(events)) r.cb(event); };
+const status = (s) => { for (const r of Array.from(events)) if (r.onStatus) r.onStatus(s); };
 
 let cc;
 const load = async () => { cc = await import('../court_control.jsx'); return cc; };
@@ -333,7 +333,7 @@ describe('the claim and the state', () => {
   it('an answer older than the last one is not taken', async () => {
     let n = 0;
     const slow = [];
-    global.fetch = vi.fn((url, init) => new Promise((res) => {
+    global.fetch = vi.fn(() => new Promise((res) => {
       const body = n++ === 0 ? OTHER : HOLDS;
       slow.push(() => res({ ok: true, status: 200, json: async () => body }));
     }));

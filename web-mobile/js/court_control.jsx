@@ -613,7 +613,7 @@ export function useCourtControl(court, password) {
     const c = String(court || '');
     const [, bump] = React.useReducer((x) => x + 1, 0);
     const passwordRef = React.useRef(password);
-    passwordRef.current = password;
+    React.useLayoutEffect(() => { passwordRef.current = password; });
     const prevPasswordRef = React.useRef(password);
     React.useEffect(() => {
         if (!c) return undefined;

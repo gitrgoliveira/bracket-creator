@@ -168,10 +168,12 @@ export function useShiaijoControl(court, password, showToast) {
     }, [court]);
     const canWrite = !court || courtControlWrites(view);
     const controlRef = useRef(null);
-    controlRef.current = {
-        canWrite,
-        tell: () => { if (typeof showToast === 'function') showToast(courtNotHeldError().message, 'error'); },
-    };
+    useLayoutEffect(() => {
+        controlRef.current = {
+            canWrite,
+            tell: () => { if (typeof showToast === 'function') showToast(courtNotHeldError().message, 'error'); },
+        };
+    });
     return { view, canWrite, checked, controlRef };
 }
 

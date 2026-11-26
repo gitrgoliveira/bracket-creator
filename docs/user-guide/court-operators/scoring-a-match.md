@@ -17,6 +17,8 @@ Each shiai-jo is run by one tablet or laptop at a time, and only its court conso
 | Amber: "Nobody runs shiaijo A now. This tablet lost the control earlier; tap Take control to run it." | The shiai-jo is free, and this tablet lost it to another device earlier, so it does not take it back by itself. | Watch only, until you tap **Take control**. |
 | Amber: "Not connected: this tablet runs shiaijo A once it connects, unless another device already does." | The console opened with no connection. | Score as usual. Once connected the bar turns green, or grey if another device runs the shiai-jo. |
 
+![The court console of Shiaijo A on a tablet that does not run it: a grey bar under the top reads "Shiaijo A is run from another device (an iPad, last active just now)." with a Take control button, and the queue's Start match buttons are greyed out.](../../screenshots/console-run-from-another-device.png)
+
 If a tap still reaches the board while the console does not run its shiai-jo (a keyboard shortcut, for example), nothing is recorded and the note beside the board says so: "this tablet does not run this shiaijo, so nothing was recorded. To run it, tap Take control at the top of the screen, then enter the change again."
 
 How the control moves:

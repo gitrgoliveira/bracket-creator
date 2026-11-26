@@ -507,7 +507,7 @@ and fetching once per burst of events matter.
 ### A burst of points
 
 A court scores in bursts: an ippon, then another a moment later, each announced by its own event.
-A page no longer fetches once per event. Each answer it reads carries `X-Event-Seq`, the number of
+A page does not fetch once per event. Each answer it reads carries `X-Event-Seq`, the number of
 the newest event the server had sent when the read began, so an event at or below that number is
 already in the answer and fetches nothing. Events that arrive close together share one fetch, sent
 300 ms to 500 ms after the first of them on a competition page, 300 ms to 2 s for the tournament

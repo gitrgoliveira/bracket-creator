@@ -64,6 +64,7 @@ export function posterBoxes(poster) {
         .map((el) => ({ cls: el.className, px: parseFloat(getComputedStyle(el).fontSize) })),
       code: box(q('.poster__code')),
       address: box(q('.poster__address')),
+      corner: box(q('.poster__logo-corner')),
       strip: box(q('.poster__sponsors')),
       sponsors: [...root.querySelectorAll('.poster__sponsor')]
         .filter((el) => el.style.display !== 'none')

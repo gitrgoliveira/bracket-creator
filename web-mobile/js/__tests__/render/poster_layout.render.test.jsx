@@ -236,11 +236,16 @@ describe('Poster logo', () => {
     expect(nodes[0]).toBe(above);
   });
 
-  it('sits between the court letter and the code on a court poster', () => {
+  it('sits in the top corner beside the letter on a court poster, not above the code', () => {
     const t = { ...base, posters: { courts: { B: { logo: 'above' } } } };
     const root = draw(t, courtB);
-    const order = [...root.querySelectorAll('.poster__court-letter, .poster__logo-above, .poster__code')].map((n) => n.className.split(' ')[0]);
-    expect(order).toEqual(['poster__court-letter', 'poster__logo-above', 'poster__code']);
+    expect(root.querySelector('.poster').getAttribute('data-placement')).toBe('above');
+    expect(root.querySelector('.poster__logo-above')).toBeNull();
+    const corner = root.querySelector('.poster__court > img.poster__logo-corner');
+    expect(corner.getAttribute('src')).toBe('/api/branding/logo?v=3');
+    const style = root.querySelector('.poster').style;
+    expect(style.getPropertyValue('--poster-logo-corner')).toBe(POSTER_SIZES.courtLogoCorner + 'cqw');
+    expect(style.getPropertyValue('--poster-logo-corner-width')).toBe(POSTER_SIZES.courtLogoCornerWidth + 'cqw');
   });
 
   it('draws no logo and a level M code when the tournament has none', () => {

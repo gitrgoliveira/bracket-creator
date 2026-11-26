@@ -120,6 +120,9 @@ describe('the poster list and the choices', () => {
     fireEvent.click(screen.getByLabelText('Logo above the code'));
     fireEvent.click(screen.getByRole('button', { name: 'Shiaijo A' }));
     expect(screen.getByLabelText('Logo in the centre of the code')).toBeChecked();
+    // A court poster offers the other place as the top corner.
+    expect(screen.getByLabelText('Logo in the top corner')).not.toBeChecked();
+    expect(screen.queryByLabelText('Logo above the code')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /^Viewer home/ }));
     expect(screen.getByLabelText('Logo above the code')).toBeChecked();
     expect(screen.getByLabelText('Logo in the centre of the code')).not.toBeChecked();
@@ -215,12 +218,14 @@ describe('Save', () => {
     expect(saves[1].patch.tournamentVersion).toBe('v2');
   });
 
-  it('sends nothing when nothing is unsaved', async () => {
+  it('is greyed while nothing is unsaved, and sends nothing', async () => {
     mount();
     expect(status()).toBe('Saved');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     await tap('Save');
     expect(onSave).not.toHaveBeenCalled();
-    expect(status()).toBe('Saved');
+    type(headingBox(), 'Scan me');
+    expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
   });
 
   it('trailing spaces alone are not a change', async () => {
@@ -345,14 +350,14 @@ describe('use these choices on every shiaijo', () => {
     mount(base({ courts: ['A', 'B', 'C'], posters: { courts: { C: { heading: 'Mine' } } } }));
     fireEvent.click(screen.getByRole('button', { name: 'Shiaijo A' }));
     type(headingBox(), 'Scan for this shiaijo');
-    fireEvent.click(screen.getByLabelText('Logo above the code'));
+    fireEvent.click(screen.getByLabelText('Logo in the top corner'));
     await tap('Use these choices on every shiaijo');
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
     expect(window.confirmDialog.mock.calls[0][0].message).toContain('replace those on Shiaijo B, Shiaijo C.');
     expect(screen.getByTestId('posters-apply-note').textContent).toBe('Copied to Shiaijo B, Shiaijo C.');
     fireEvent.click(screen.getByRole('button', { name: /^Shiaijo C/ }));
     expect(headingBox()).toHaveValue('Scan for this shiaijo');
-    expect(screen.getByLabelText('Logo above the code')).toBeChecked();
+    expect(screen.getByLabelText('Logo in the top corner')).toBeChecked();
     expect(onSave).not.toHaveBeenCalled();
     await tap('Save');
     expect(saves[0].patch.posters.courts).toEqual({
@@ -406,8 +411,11 @@ describe('text over a limit', () => {
     type(headingBox(), 'x'.repeat(POSTER_RULES.headingMaxLength + 1));
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     expect(screen.getByTestId('posters-too-long')).toBeInTheDocument();
+    expect(headingBox()).toHaveAttribute('aria-invalid', 'true');
+    expect(ctaBox()).not.toHaveAttribute('aria-invalid');
     type(headingBox(), 'x'.repeat(POSTER_RULES.headingMaxLength));
     expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
+    expect(headingBox()).not.toHaveAttribute('aria-invalid');
     expect(screen.queryByTestId('posters-too-long')).toBeNull();
     await tap('Save');
     expect(onSave).toHaveBeenCalledTimes(1);
@@ -513,8 +521,17 @@ describe('Print', () => {
     expect(asked.message).toContain('This prints 3 A4 sheets, one poster on each.');
     expect(asked.message).toContain(`The codes open pages under ${window.location.origin}.`);
     expect(asked.message).toContain('scan it with a phone first');
+    expect(asked.message).not.toContain('not saved');
     expect(printRoot()).toBeNull();
     expect(window.print).not.toHaveBeenCalled();
+  });
+
+  it('Print all says when the sheets carry changes that are not saved', async () => {
+    window.confirmDialog = vi.fn(async () => false);
+    mount();
+    type(headingBox(), 'Scan me');
+    await tap('Print all posters');
+    expect(window.confirmDialog.mock.calls[0][0].message).toContain('These include changes you have not saved.');
   });
 
   it('Print all renders every poster, in order, into the print root', async () => {
@@ -525,5 +542,17 @@ describe('Print', () => {
     await waitFor(() => expect(window.print).toHaveBeenCalledTimes(1));
     await act(async () => { window.dispatchEvent(new Event('afterprint')); });
     expect(printRoot()).toBeNull();
+  });
+});
+
+describe('the phone preview', () => {
+  it('opens the poster being edited, with the draft, over the form, and closes', async () => {
+    mount();
+    type(headingBox(), 'Scan me');
+    await tap('Preview');
+    const dialog = screen.getByRole('dialog', { name: 'Viewer home poster' });
+    expect(dialog.querySelector('.poster__heading').textContent).toBe('Scan me');
+    await tap('Close');
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

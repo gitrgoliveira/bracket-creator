@@ -143,13 +143,13 @@ test.describe('venue posters', () => {
     });
   });
 
-  test('the longest text the server allows, the logo above and six sponsors, still fit a court poster', async ({ page }) => {
+  test('the longest text the server allows, the logo in the corner and six sponsors, still fit a court poster', async ({ page }) => {
     await login(page);
     await openPosters(page);
     const poster = await choosePoster(page, 'Shiaijo B');
     await page.getByLabel('Heading', { exact: true }).fill(HEADING_80);
     await page.getByLabel(/^Call to action/).fill(CTA_120);
-    await page.getByRole('radio', { name: /above/i }).check();
+    await page.getByRole('radio', { name: 'Logo in the top corner' }).check();
     await expect(page.getByText('80 of 80 characters')).toBeVisible();
     await expect(page.getByText('120 of 120 characters')).toBeVisible();
     await expect(poster).toHaveAttribute('data-placement', 'above');
@@ -167,6 +167,16 @@ test.describe('venue posters', () => {
     expect(b.strip.top, 'the sponsor strip clears the address').toBeGreaterThanOrEqual(b.address.bottom);
     expect(b.strip.bottom, 'the sponsor strip is on the sheet').toBeLessThanOrEqual(b.poster.bottom + 0.5);
     for (const p of b.pieces) expect(b.letter.height, `the letter still leads ${p.cls}`).toBeGreaterThan(p.height);
+    // The corner logo: beside the letter and clear of it, under the band, above
+    // the code, and smaller than the letter.
+    const band = b.pieces.find((p) => /poster__band/.test(p.cls));
+    record({ journey: 'posters', step: 'corner logo', corner: b.corner, letter: b.letter });
+    expect(b.corner, 'a corner logo is drawn').not.toBeNull();
+    expect(b.corner.right, 'the corner logo clears the letter').toBeLessThanOrEqual(b.letter.left);
+    expect(b.corner.left, 'the corner logo is on the sheet').toBeGreaterThanOrEqual(b.poster.left);
+    expect(b.corner.top, 'the corner logo is under the band').toBeGreaterThanOrEqual(band.bottom);
+    expect(b.corner.bottom, 'the corner logo is above the code').toBeLessThanOrEqual(b.code.top);
+    expect(b.letter.height).toBeGreaterThan(b.corner.height);
     await shot(page, 'court-poster-longest');
   });
 

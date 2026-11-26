@@ -112,7 +112,7 @@ export const recipes = [
     waitFor: READY,
   },
   {
-    // The Shiaijo A poster: the court letter, with the logo above the code.
+    // The Shiaijo A poster: the court letter, with the logo in the top corner.
     name: 'posters-court',
     family: 'posters',
     route: '/admin/posters',

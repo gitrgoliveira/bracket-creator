@@ -128,7 +128,10 @@ export function Poster({ tournament, poster, choices, logoKey }) {
   const primary = posterPrimary(t);
   const sponsors = posterSponsors(t, c);
   const fits = qrFits(address, { level: lp.level });
-  const logoAbove = lp.placement === "above";
+  // The "above" choice: above the code on the viewer home poster, in the top
+  // corner beside the letter on a court poster (logoElsewhere).
+  const logoAbove = lp.offered && lp.placement === "above" && !isCourt;
+  const logoCorner = lp.offered && lp.placement === "above" && isCourt;
 
   const style = {
     "--poster-primary": primary,
@@ -136,7 +139,9 @@ export function Poster({ tournament, poster, choices, logoKey }) {
     "--poster-band-ink": bandTextColour(primary),
     "--poster-code": (isCourt ? POSTER_SIZES.courtCode : POSTER_SIZES.viewerCode) + "cqw",
     "--poster-letter": POSTER_SIZES.courtLetter + "cqw",
-    "--poster-logo-above": (isCourt ? POSTER_SIZES.courtLogoAbove : POSTER_SIZES.viewerLogoAbove) + "cqw",
+    "--poster-logo-above": POSTER_SIZES.viewerLogoAbove + "cqw",
+    "--poster-logo-corner": POSTER_SIZES.courtLogoCorner + "cqw",
+    "--poster-logo-corner-width": POSTER_SIZES.courtLogoCornerWidth + "cqw",
   };
 
   return (
@@ -156,6 +161,7 @@ export function Poster({ tournament, poster, choices, logoKey }) {
             <div className="poster__court">
               <span className="poster__court-label">Shiaijo</span>
               <span className="poster__court-letter">{poster.letter}</span>
+              {logoCorner && <img className="poster__logo-corner" src={logoURL(logoKey)} alt="Tournament logo" />}
             </div>
           )}
           <div className="poster__titles">
@@ -164,7 +170,7 @@ export function Poster({ tournament, poster, choices, logoKey }) {
               <p className={"poster__cta poster__cta--" + sizeClass(c.callToActionText, 50, 80)}>{c.callToActionText}</p>
             )}
           </div>
-          {logoAbove && lp.offered && (
+          {logoAbove && (
             <img className="poster__logo-above" src={logoURL(logoKey)} alt="Tournament logo" />
           )}
           <div className="poster__code-group">

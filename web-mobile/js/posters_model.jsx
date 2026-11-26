@@ -35,7 +35,7 @@ export const POSTER_RULES = Object.freeze({
 // and the court code stays over 8 cm wide on A4 (43 of the 190 mm between the
 // print margins is 82 mm). The court sizes are the largest that still let a
 // court poster at every limit the server allows (a two-line tournament name, the
-// logo above the code, the longest heading and call to action, six sponsors)
+// logo in its corner, the longest heading and call to action, six sponsors)
 // fit its sheet: measured in a browser at A4, with the sponsor strip clear of
 // the address by a few millimetres. Raise one only after measuring that again.
 export const POSTER_SIZES = Object.freeze({
@@ -43,7 +43,11 @@ export const POSTER_SIZES = Object.freeze({
   courtCode: 43,
   courtLetter: 44,
   viewerLogoAbove: 15,
-  courtLogoAbove: 5.5,
+  // A court poster's "above" logo sits in the empty top corner beside the
+  // letter, as tall as this and at most courtLogoCornerWidth wide, so it never
+  // reaches the letter and takes no height from the letter or the code.
+  courtLogoCorner: 17,
+  courtLogoCornerWidth: 20,
   // The tallest a sponsor logo grows, by the number of sponsors (one to six):
   // the strip takes the space the rest of the poster leaves, so a poster with a
   // short heading gets large logos, and fewer sponsors get taller ones. At the
@@ -62,8 +66,15 @@ export const POSTER_QUIET_MODULES = 4;
 // has no codewords to spare.
 const CENTRE_PAD_SIDE = 0.4;
 
-export const CENTRE_TOO_LONG_SENTENCE =
-  "This address is too long to carry a logo in the middle of the code. The logo goes above the code instead. A shorter public address in the tournament settings fixes it.";
+// Where the "above" choice puts the logo: above the code on the viewer home
+// poster, in the top corner beside the letter on a court poster.
+export function logoElsewhere(poster) {
+  return poster && poster.kind === "court" ? "in the top corner" : "above the code";
+}
+
+export function centreTooLongSentence(poster) {
+  return `This address is too long to carry a logo in the middle of the code. The logo goes ${logoElsewhere(poster)} instead. A shorter public address in the tournament settings fixes it.`;
+}
 
 export const CODE_TOO_LONG_SENTENCE =
   "This address is too long for a QR code. A shorter public address in the tournament settings fixes it.";
@@ -169,7 +180,7 @@ export function logoPlacement(t, poster, choices) {
     level: placement === "centre" ? "H" : "M",
     centreAvailable,
     // Only a Centre the organiser asked for (or left as the default) was refused.
-    centreRefusedSentence: wantsCentre && !centreAvailable ? CENTRE_TOO_LONG_SENTENCE : "",
+    centreRefusedSentence: wantsCentre && !centreAvailable ? centreTooLongSentence(poster) : "",
   };
 }
 

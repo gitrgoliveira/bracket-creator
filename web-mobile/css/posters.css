@@ -7,7 +7,9 @@
  * that matter to scanning and passes them in as custom properties:
  *   --poster-code        the code's side (with its quiet zone)
  *   --poster-letter      the court letter's height
- *   --poster-logo-above  the logo's height when it sits above the code
+ *   --poster-logo-above  the logo's height above the code (viewer home poster)
+ *   --poster-logo-corner the logo's height in a court poster's top corner, and
+ *   --poster-logo-corner-width  its widest
  *   --poster-ink         the colour of the text set on the white paper, the
  *                        primary colour darkened until it reads
  * The paper and the code are fixed white and black, in light and dark mode. */
@@ -70,9 +72,25 @@
 
 .poster__court {
   flex: none;
+  position: relative;
+  align-self: stretch;
   display: flex;
   flex-direction: column;
   align-items: center;
+}
+
+/* A court poster's logo, in the empty top corner beside the letter: level
+ * with the letter's top, held to the left of it by its widest. */
+.poster__logo-corner {
+  position: absolute;
+  top: 6cqw;
+  left: 0;
+  display: block;
+  height: var(--poster-logo-corner);
+  width: auto;
+  max-width: var(--poster-logo-corner-width);
+  object-fit: contain;
+  object-position: left top;
 }
 
 .poster__court-label {
@@ -306,6 +324,11 @@
   background: var(--surface);
 }
 
+/* The poster's name and its Preview button, for a phone only (below). */
+.posters-save-row__phone {
+  display: none;
+}
+
 .posters-too-long {
   flex-basis: 100%;
   font-size: 12px;
@@ -364,6 +387,11 @@
   width: 100%;
 }
 
+/* A box over its limit is marked on the box itself, not only by its counter. */
+.posters-page .input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
 /* A finger's worth of target on a touch screen (44px), for every control of
  * the page. */
 @media (pointer: coarse) {
@@ -384,6 +412,17 @@
     order: -1;
     max-width: 240px;
     margin: 0 auto;
+  }
+  /* Too wide to share Save's line, so the name and Preview take the next one
+   * together: the name fills it and Preview sits at its end. */
+  span.posters-save-row__phone {
+    display: inline;
+    flex: 1 1 auto;
+    min-width: calc(100% - 120px);
+    font-weight: 600;
+  }
+  button.posters-save-row__phone {
+    display: inline-flex;
   }
 }
 

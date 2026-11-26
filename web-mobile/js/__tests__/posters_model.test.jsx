@@ -24,7 +24,8 @@ import {
   textLength,
   trimText,
   logoURL,
-  CENTRE_TOO_LONG_SENTENCE,
+  centreTooLongSentence,
+  logoElsewhere,
 } from '../posters_model.jsx';
 import { qrMatrix } from '../qr.jsx';
 
@@ -175,9 +176,16 @@ describe('logoPlacement', () => {
     expect(codeFits(posterAddress(t, viewer))).toBe(true);
     const lp = logoPlacement(t, viewer);
     expect(lp).toMatchObject({ offered: true, placement: 'above', level: 'M', centreAvailable: false });
-    expect(lp.centreRefusedSentence).toBe(CENTRE_TOO_LONG_SENTENCE);
+    expect(lp.centreRefusedSentence).toBe(centreTooLongSentence(viewer));
+    expect(lp.centreRefusedSentence).toContain('The logo goes above the code instead.');
     // The default choice is refused the same way.
     expect(logoPlacement({ ...base, publicURL: LONG }, viewer).placement).toBe('above');
+  });
+
+  it('puts the logo elsewhere above the code on the viewer poster and in the top corner on a court poster', () => {
+    expect(logoElsewhere(viewer)).toBe('above the code');
+    expect(logoElsewhere({ kind: 'court', key: 'court:A', letter: 'A', label: 'Shiaijo A' })).toBe('in the top corner');
+    expect(centreTooLongSentence({ kind: 'court' })).toContain('The logo goes in the top corner instead.');
   });
 
   it('does not present a chosen Above as a refused centre', () => {

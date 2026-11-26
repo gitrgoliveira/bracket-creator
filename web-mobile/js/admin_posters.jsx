@@ -19,6 +19,7 @@ import { Poster } from "./poster_layout.jsx";
 import {
   POSTER_RULES,
   defaultHeading,
+  logoElsewhere,
   logoPlacement,
   normalisePosters,
   posterAddress,
@@ -76,11 +77,13 @@ function Counter({ id, text, max, empty }) {
   );
 }
 
-// The Print all question: how many sheets, the address the codes open, a
-// warning when phones at the venue may not reach it, and the advice to test one.
-export function printAllMessage(count, base, unreachable) {
+// The Print all question: how many sheets, whether they carry unsaved changes,
+// the address the codes open, a warning when phones at the venue may not reach
+// it, and the advice to test one.
+export function printAllMessage(count, base, unreachable, unsaved) {
   return [
     `This prints ${count} A4 sheets, one poster on each.`,
+    unsaved ? "These include changes you have not saved." : "",
     `The codes open pages under ${base}.`,
     unreachable ? "No public address is set, so phones at the venue may not reach it." : "",
     "Print one poster and scan it with a phone first, to check the code opens the right page.",
@@ -95,6 +98,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
   const t = tournament || {};
   const AdminTopbar = window.AdminTopbar;
   const Breadcrumbs = window.Breadcrumbs;
+  const Modal = window.Modal;
 
   // The draft is the page's own: read from the tournament once, then never
   // derived from it again, so a copy the app takes back after a refusal does not
@@ -110,6 +114,8 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
   const [selectedKey, setSelectedKey] = useState("viewer");
   // The print in progress: its posters and the print root they are drawn into.
   const [printJob, setPrintJob] = useState(null);
+  // The phone's preview over the form (the Preview button of the pinned row).
+  const [previewOpen, setPreviewOpen] = useState(false);
   // Fixed when the page opens: a logo replaced before then never prints stale
   // from a cache (logoURL).
   const [logoKey] = useState(() => Date.now());
@@ -257,7 +263,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
     if (printingRef.current || tooLong) return;
     const ok = await window.confirmDialog({
       title: "Print all posters?",
-      message: printAllMessage(list.length, linkBase(t).replace(/\/+$/, ""), showAddressWarning),
+      message: printAllMessage(list.length, linkBase(t).replace(/\/+$/, ""), showAddressWarning, dirty),
       confirmLabel: "Print all",
     });
     if (ok && mountedRef.current) print(list);
@@ -278,6 +284,10 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
     };
   }, [printJob]);
 
+  const headingOver = textLength(trimText(choices.heading)) > POSTER_RULES.headingMaxLength;
+  const ctaOver = textLength(trimText(choices.callToAction)) > POSTER_RULES.callToActionMaxLength;
+  // Save waits for something to save, except Save again after a refusal.
+  const saveAgain = !!(refusal && refusal.changed);
   const status = saving ? POSTER_STATUS.saving : dirty ? POSTER_STATUS.unsaved : POSTER_STATUS.saved;
   const idBase = "poster-" + selected.key.replace(/[^A-Za-z0-9]/g, "-");
   const logoValue = choices.logo === "above" || !lp.centreAvailable ? "above" : "centre";
@@ -333,10 +343,16 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
           <div className="card">
             <div className="card__body">
               <div className="posters-save-row">
-                <button type="button" className="btn btn--primary" disabled={tooLong} onClick={() => save(!!(refusal && refusal.changed))}>
-                  {refusal && refusal.changed ? "Save again" : "Save"}
+                <button type="button" className="btn btn--primary" disabled={tooLong || (!dirty && !saveAgain)} onClick={() => save(saveAgain)}>
+                  {saveAgain ? "Save again" : "Save"}
                 </button>
                 <span role="status" aria-live="polite" data-testid="posters-status">{status}</span>
+                {/* On a phone the preview is out of sight once the form scrolls,
+                    so the pinned row names the poster and opens it over the form. */}
+                <span className="posters-save-row__phone" aria-hidden="true">{selected.label}</span>
+                <button type="button" className="btn posters-save-row__phone posters-preview-open" onClick={() => setPreviewOpen(true)}>
+                  Preview
+                </button>
                 {tooLong && (
                   <span className="posters-too-long" data-testid="posters-too-long">
                     Over a limit on {overLabels.join(", ")}: shorten it to save or print.
@@ -356,6 +372,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                   value={choices.heading}
                   placeholder={defaultHeading(selected)}
                   aria-describedby={idBase + "-heading-count"}
+                  aria-invalid={headingOver ? "true" : undefined}
                   onChange={(e) => change({ heading: e.target.value })}
                 />
                 <Counter id={idBase + "-heading-count"} text={trimText(choices.heading)} max={POSTER_RULES.headingMaxLength} empty={`Prints \u201c${defaultHeading(selected)}\u201d.`} />
@@ -369,6 +386,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                   value={choices.callToAction}
                   placeholder="For example: Scan for live results"
                   aria-describedby={idBase + "-cta-count"}
+                  aria-invalid={ctaOver ? "true" : undefined}
                   onChange={(e) => change({ callToAction: e.target.value })}
                 />
                 <Counter id={idBase + "-cta-count"} text={trimText(choices.callToAction)} max={POSTER_RULES.callToActionMaxLength} empty="Nothing prints here." />
@@ -396,7 +414,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                       checked={logoValue === "above"}
                       onChange={() => change({ logo: "above" })}
                     />
-                    Logo above the code
+                    Logo {logoElsewhere(selected)}
                   </label>
                   {lp.centreRefusedSentence && <div className="field__hint field__hint--warn">{lp.centreRefusedSentence}</div>}
                 </fieldset>
@@ -447,6 +465,11 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
           </div>
         </div>
       </div>
+      {previewOpen && (
+        <Modal title={`${selected.label} poster`} onClose={() => setPreviewOpen(false)} className="posters-preview-modal">
+          <Poster tournament={draftT} poster={selected} choices={choices} logoKey={logoKey} />
+        </Modal>
+      )}
       {printJob && window.ReactDOM.createPortal(
         printJob.posters.map((p) => (
           <Poster key={p.key} tournament={draftT} poster={p} choices={posterChoices(draftT, p)} logoKey={logoKey} />

@@ -2910,13 +2910,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// A pools competition that generated zero matches (e.g. single
 		// participant) has nothing to score, so trip the auto-complete check
 		// at start time. The non-zero case will trip via score handlers.
-		// Same sanitized-header contract as tryAutoCompletePools, see
-		// AutoCompleteErrorHeader/Value in hub.go.
-		if outcome, err := eng.MaybeAutoCompletePools(id); err != nil {
-			log.Printf("MaybeAutoCompletePools(%s) after start: %v", id, err)
-			c.Header(AutoCompleteErrorHeader, AutoCompleteErrorValue)
-		} else if outcome == engine.AutoCompleteTransitioned {
-			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
+		// The outcome is announced by answerAutoComplete, the one owner the
+		// score doors use, so every outcome that writes (an injected
+		// tie-break, a seated or started knockout, a league waiting on its
+		// tie-breaker) is followed by its event here too, not only the
+		// completion; its error arm sets the same sanitized header.
+		outcome, acErr := eng.MaybeAutoCompletePools(id)
+		answerAutoComplete(c, hub, id, outcome, acErr)
+		if acErr == nil && outcome == engine.AutoCompleteTransitioned {
 			// Reflect the auto-complete in the response body so the caller doesn't
 			// see a stale "pools" status. The persisted file is already updated.
 			comp.Status = state.CompStatusComplete

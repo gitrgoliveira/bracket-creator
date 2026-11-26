@@ -23,7 +23,6 @@ package mobileapp
 import (
 	"errors"
 	"io"
-	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -571,26 +570,14 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			"result":        matchForBroadcast(updated),
 		})
 
-		// Inline auto-complete check (same pattern as
-		// tryAutoCompletePoolsAfterWrite). A rep bout is only ever added to a
-		// knockout match, so in knockout status this skips the pool pass.
+		// The auto-complete check, answered by the score doors' own tail, so
+		// every outcome is announced as it is there. A rep bout is only ever
+		// added to a knockout match, so in knockout status this skips the
+		// pool pass. An added rep bout left the match running, which is a
+		// recorded result, so a still-draw-ready competition is started by it
+		// (bc-prow, AutoCompleteStarted).
 		outcome, autoErr := eng.MaybeAutoCompletePoolsAfterWrite(id, updated)
-		switch {
-		case autoErr != nil:
-			log.Printf("MaybeAutoCompletePools(%s) after daihyosen: %v", id, autoErr)
-			c.Header(AutoCompleteErrorHeader, AutoCompleteErrorValue)
-		case outcome == engine.AutoCompleteTransitioned:
-			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
-		case outcome == engine.AutoCompleteTiebreakInjected:
-			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id})
-			hub.Broadcast(EventScheduleUpdated, nil)
-		case outcome == engine.AutoCompleteStarted:
-			// The added rep bout left the match running, which is a recorded
-			// result, so a still-draw-ready competition was started by it
-			// (bc-prow). Same events as tryAutoCompletePools' own branch.
-			hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
-			hub.Broadcast(EventScheduleUpdated, nil)
-		}
+		answerAutoComplete(c, hub, id, outcome, autoErr)
 
 		c.JSON(http.StatusOK, withHeldGroups(gin.H{"subResult": subOut, "result": matchForBroadcast(updated)}, updated.Merge))
 	})

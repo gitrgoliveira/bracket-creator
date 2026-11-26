@@ -70,10 +70,19 @@ func tryAutoCompletePoolsAfterWrite(c *gin.Context, eng ScoringEngine, hub Broad
 
 // answerAutoComplete is both doors' shared tail: the sanitized error header,
 // or the broadcasts the outcome calls for.
+//
+// A failed pass may still have committed part of its work before the step
+// that failed (a draw-ready competition started, a league reopened, a
+// tie-break injected, a pool seated), and it cannot say which. So the error
+// arm announces the widest of the pass's own refreshes, the one
+// AutoCompletePoolsResolved sends: a page that skips nothing then reads the
+// competition again, and one that changed nothing costs one refetch.
 func answerAutoComplete(c *gin.Context, hub Broadcaster, compID string, outcome engine.AutoCompleteOutcome, err error) {
 	if err != nil {
 		log.Printf("MaybeAutoCompletePools(%s): %v", compID, err)
 		c.Header(AutoCompleteErrorHeader, AutoCompleteErrorValue)
+		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID})
+		hub.Broadcast(EventScheduleUpdated, nil)
 		return
 	}
 	switch outcome {

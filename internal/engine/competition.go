@@ -571,7 +571,25 @@ func recordedResultIn(poolMatches []state.MatchResult, bracket *state.Bracket) b
 // competition exists), so the two halves share one read. poolsMayHaveMoved
 // is false only when the caller knows its write cannot have moved pool
 // standings (MaybeAutoCompletePoolsAfterWrite).
-func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Competition, poolsMayHaveMoved bool) (AutoCompleteOutcome, error) {
+func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Competition, poolsMayHaveMoved bool) (outcome AutoCompleteOutcome, err error) {
+	// The injector can write with nothing to show for it in the outcome: the
+	// engi pre-heal below removes rows (and may inject while it does), and the
+	// injection pass's own heal saves the healed rows with zero injected. A
+	// pass that then ends with no change reports what it wrote, so the doors
+	// announce it (answerAutoComplete): the bouts it injected, else the rows
+	// it removed.
+	var tbInjected, tbHealed bool
+	defer func() {
+		if err != nil || outcome != AutoCompleteNoChange {
+			return
+		}
+		switch {
+		case tbInjected:
+			outcome = AutoCompleteTiebreakInjected
+		case tbHealed:
+			outcome = AutoCompletePoolsResolved
+		}
+	}()
 	// A competition deleted between the write and this pass has nothing to complete.
 	if comp == nil {
 		return AutoCompleteNoChange, nil
@@ -628,9 +646,12 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 			return AutoCompleteNoChange, healErr
 		}
 		if owed {
-			if _, healErr := e.InjectTiebreakerMatches(compID); healErr != nil {
+			injectedNow, healedNow, healErr := e.injectTiebreakerMatches(compID)
+			if healErr != nil {
 				return AutoCompleteNoChange, healErr
 			}
+			tbInjected = len(injectedNow) > 0
+			tbHealed = healedNow
 			matches, err = e.store.LoadPoolMatches(compID)
 			if err != nil {
 				return AutoCompleteNoChange, err
@@ -731,13 +752,14 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 					return AutoCompleteTiebreakInjected, nil
 				}
 			} else {
-				injected, injErr := e.InjectTiebreakerMatches(compID)
+				injected, healedNow, injErr := e.injectTiebreakerMatches(compID)
 				if injErr != nil {
 					return AutoCompleteNoChange, injErr
 				}
 				if len(injected) > 0 {
 					return AutoCompleteTiebreakInjected, nil
 				}
+				tbHealed = tbHealed || healedNow
 			}
 		}
 	}
@@ -804,7 +826,10 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 // bracket/schedule changed), or AutoCompleteNoChange (nothing new this score).
 func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (AutoCompleteOutcome, error) {
 	// 1. Inject tie-break matches for tied pools (idempotent; per-tied-pool).
+	// An engi self-heal that removed rows and injected none is a write too
+	// (healed), reported below like an injection.
 	injected := 0
+	healed := false
 	if comp.IsTeam() {
 		m, err := e.InjectPoolDaihyosenMatches(compID)
 		if err != nil {
@@ -812,11 +837,12 @@ func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (Auto
 		}
 		injected = len(m)
 	} else {
-		m, err := e.InjectTiebreakerMatches(compID)
+		m, h, err := e.injectTiebreakerMatches(compID)
 		if err != nil {
 			return AutoCompleteNoChange, err
 		}
 		injected = len(m)
+		healed = h
 	}
 
 	// 2. Seed every completed pool into the bracket (no all-pools gate).
@@ -842,7 +868,7 @@ func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (Auto
 		}
 	}
 
-	if resolvedNow > 0 || injected > 0 {
+	if resolvedNow > 0 || injected > 0 || healed {
 		return AutoCompletePoolsResolved, nil
 	}
 	return AutoCompleteNoChange, nil

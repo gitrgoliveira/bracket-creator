@@ -1797,6 +1797,38 @@ a:hover {
    or the competition starts (draw_visibility.jsx owns the rule and the words).
    Every class the screens need lives here. */
 
+/* The draw preview header's buttons (Discard draw, Publish draw or
+   Unpublish, Start competition) over the hint line, right-aligned. On a phone
+   they stack full width, Start competition on top, so every label keeps one
+   line and Discard draw sits furthest from the primary button. */
+.draw-ready-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.draw-ready-actions__buttons {
+  display: flex;
+  gap: 8px;
+}
+@media (max-width: 480px) {
+  /* The header's actions box sizes to its content when it wraps under the
+     title, so it is widened too, or the stack stops at the hint's width. */
+  .page-head__actions:has(> .draw-ready-actions) {
+    width: 100%;
+  }
+  .draw-ready-actions {
+    align-items: stretch;
+    width: 100%;
+  }
+  .draw-ready-actions__buttons {
+    flex-direction: column-reverse;
+  }
+  .draw-ready-actions__buttons .btn {
+    justify-content: center;
+  }
+}
+
 /* The public status badge of a hidden draft: "Draw being prepared". A dashed
    hairline marks it as not yet settled; the organiser's badge keeps
    .badge--draw-ready. */
@@ -1814,8 +1846,9 @@ a:hover {
   align-items: flex-start;
   gap: 6px;
   max-width: 46ch;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
+  font-weight: 600;
   color: var(--ink-3);
   /* Left-aligned, so a wrapped line keeps the icon beside its first word. */
   text-align: left;
@@ -1826,7 +1859,6 @@ a:hover {
 }
 .draw-visibility-hint--hidden {
   color: var(--ink-2);
-  font-weight: 600;
 }
 .draw-visibility-hint--published {
   color: var(--ok-ink);
@@ -1838,7 +1870,7 @@ a:hover {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--ink-3);
 }
@@ -10455,6 +10487,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* ---------- Start-all confirm/progress/result modal ---------- */
 .start-all__lead { margin: 0 0 12px; font-size: 14px; color: var(--ink-2); }
+/* bc-drpb: the hidden-draws note follows the list, which has no margin. */
+.start-all__hidden-note { margin-top: 12px; }
 .start-all__list {
   margin: 0;
   padding-left: 20px;

@@ -111,6 +111,7 @@ describe('Dashboard card: Start on a hidden draft asks first (FR9)', () => {
     await act(async () => { fireEvent.click(startButton(container)); });
     expect(confirmDialog).toHaveBeenCalledTimes(1);
     const opts = confirmDialog.mock.calls[0][0];
+    expect(opts.title).toBe('Start Mudansha?');
     expect(opts.message).toBe(startHiddenDrawMessage('Mudansha'));
     expect(opts.confirmLabel).toBe('Start competition');
     expect(opts.cancelLabel).toBe('Cancel');
@@ -190,7 +191,7 @@ describe('Start all: names the hidden draws it makes public (FR10)', () => {
   it('names every hidden draft it would start, in list order, and no other', async () => {
     await mountStartAll({ comps: [hiddenA, published, setup, hiddenB] });
     expect(note()).not.toBeNull();
-    expect(note().textContent).toBe('Starting makes these hidden draws public: Mudansha, Kyu grades.');
+    expect(note().textContent).toBe('Starting makes these draws visible to the public: Mudansha, Kyu grades.');
     expect(note().textContent).toBe(startAllHiddenDrawsNote(OFFICIATED, [hiddenA, published, setup, hiddenB]));
   });
 

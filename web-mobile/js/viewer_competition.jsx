@@ -369,8 +369,10 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
           {/* Suppress the "League" badge during pools: the active tab already
               reads "League", so the badge is pure redundancy. Other statuses
               (Knockout / Completed) still carry information, so keep those. */}
-          {!(c.status === "pools" && c.format === "league") && (
-            <StatusBadge status={c.status} showRunningDot format={c.format} drawPreparing={drawPreparing} />
+          {/* A hidden draft's card already says "Draw being prepared", so the
+              header carries no badge for it (bc-drpb). */}
+          {!(c.status === "pools" && c.format === "league") && !drawPreparing && (
+            <StatusBadge status={c.status} showRunningDot format={c.format} />
           )}
           {authed && onEditCompetition && (
             <button type="button" className="viewer__admin-pill" onClick={() => onEditCompetition(c.id)}><Icon name="pen" size={12} />Edit</button>
@@ -413,7 +415,8 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
           </div>
         )}
         <div className="viewer__body">
-          {c.namesHidden && (
+          {/* Numbers show once the draw does: a hidden draft lists no one. */}
+          {c.namesHidden && !drawPreparing && (
             <p className="names-hidden-note" data-testid="names-hidden-note">
               Names are hidden in this competition. Competitors appear by their number.
             </p>

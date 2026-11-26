@@ -82,7 +82,8 @@ export function drawVisibilityCardLine(tournament, comp) {
 }
 
 // What the public pages call a hidden draft: the status badge on the home
-// list and the competition header, the watchlist line, the card's title. The
+// list, the watchlist line, the competition page's card title (that page's
+// header carries no badge for it, since the card already says it). The
 // organiser's own badge keeps "Draw ready".
 export const PUBLIC_DRAW_PREPARING = "Draw being prepared";
 
@@ -97,7 +98,10 @@ export function publicDrawPreparingMessage(comp, count) {
   return `${start}${n} ${noun} entered. The draw shows here once it is published.`;
 }
 
-// The Start confirm on a hidden draft.
+// The Start confirm on a hidden draft: its title, then its message.
+export function startHiddenDrawTitle(name) {
+  return `Start ${name || ""}?`;
+}
 export function startHiddenDrawMessage(name) {
   return `The draw for "${name || ""}" is still hidden from the public. Starting the competition makes it public at once.`;
 }
@@ -108,13 +112,13 @@ export function discardPublishedDrawMessage(name) {
   return `The public has already seen this draw. Discard the draw for "${name || ""}"? The pools and bracket are removed so you can edit participants and settings, and the new draw starts hidden.`;
 }
 
-// Start all's line beside its list, naming the hidden draws it makes public;
-// null when it makes none public.
+// Start all's line under its list, naming the hidden draws a start makes
+// visible to the public; null when it makes none visible.
 export function startAllHiddenDrawsNote(tournament, comps) {
   const names = (Array.isArray(comps) ? comps : [])
     .filter((c) => drawHiddenFromPublic(tournament, c))
     .map((c) => c.name || "");
-  return names.length ? `Starting makes these hidden draws public: ${names.join(", ")}.` : null;
+  return names.length ? `Starting makes these draws visible to the public: ${names.join(", ")}.` : null;
 }
 
 // The court console's call of a hidden draft's match: a warning, never a
@@ -133,6 +137,7 @@ export function callHiddenDrawMessage(competitionName) {
 export function confirmStartHiddenDraw(tournament, comp) {
   if (!drawHiddenFromPublic(tournament, comp)) return Promise.resolve(true);
   return window.confirmDialog({
+    title: startHiddenDrawTitle(comp.name),
     message: startHiddenDrawMessage(comp.name),
     confirmLabel: "Start competition",
     cancelLabel: "Cancel",

@@ -100,7 +100,7 @@ describe('the words', () => {
 
   it('names the hidden draws Start all makes public, and nothing when there are none', () => {
     const other = { ...hidden, id: 'd', name: 'Kyu D' };
-    expect(startAllHiddenDrawsNote(officiated, [hidden, published, other])).toBe('Starting makes these hidden draws public: Kyu A, Kyu D.');
+    expect(startAllHiddenDrawsNote(officiated, [hidden, published, other])).toBe('Starting makes these draws visible to the public: Kyu A, Kyu D.');
     expect(startAllHiddenDrawsNote(officiated, [published])).toBe(null);
     expect(startAllHiddenDrawsNote(selfRun, [hidden])).toBe(null);
   });
@@ -165,6 +165,7 @@ describe('confirmStartHiddenDraw', () => {
     await expect(confirmStartHiddenDraw(officiated, hidden)).resolves.toBe(false);
     await expect(confirmStartHiddenDraw(officiated, hidden)).resolves.toBe(true);
     expect(window.confirmDialog).toHaveBeenCalledWith({
+      title: 'Start Kyu A?',
       message: startHiddenDrawMessage('Kyu A'),
       confirmLabel: 'Start competition',
       cancelLabel: 'Cancel',

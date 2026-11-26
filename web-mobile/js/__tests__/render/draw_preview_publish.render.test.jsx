@@ -156,7 +156,7 @@ describe('the draw preview header (bc-drpb)', () => {
     await act(async () => { fireEvent.click(button(container, 'Start competition')); });
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
     const [ask] = window.confirmDialog.mock.calls[0];
-    expect(ask).toMatchObject({ message: startHiddenDrawMessage('Mudansha'), confirmLabel: 'Start competition', cancelLabel: 'Cancel' });
+    expect(ask).toMatchObject({ title: 'Start Mudansha?', message: startHiddenDrawMessage('Mudansha'), confirmLabel: 'Start competition', cancelLabel: 'Cancel' });
     expect(window.API.startCompetition).not.toHaveBeenCalled();
 
     window.confirmDialog = vi.fn().mockResolvedValue(true);

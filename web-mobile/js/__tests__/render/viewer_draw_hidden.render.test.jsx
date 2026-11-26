@@ -1,7 +1,8 @@
 // bc-drpb: a draft whose draw the public may not see yet reads, on the public
 // competition page, as a competition still in setup: Overview only (Swiss
-// keeps its Standings tab), with the "Draw being prepared" card, and the
-// header badge says "Draw being prepared". Publishing brings the Pools and
+// keeps its Standings tab), with the "Draw being prepared" card and no header
+// badge (the card already says it), and no names-hidden notice, since no one
+// is listed yet. Publishing brings the Pools and
 // Bracket tabs back with no reload; unpublishing takes them away again, and a
 // reader sitting on a tab that went lands on Overview. The events themselves
 // only refetch (app.jsx); what this pins is that the page follows the refetched
@@ -109,14 +110,22 @@ describe('StatusBadge: a hidden draft on a public surface (bc-drpb)', () => {
 });
 
 describe('ViewerCompetition: a hidden draft reads as setup (bc-drpb)', () => {
-  it('shows Overview only, the "Draw being prepared" card and badge', async () => {
+  it('shows Overview only and the "Draw being prepared" card, with no header badge', async () => {
     await act(async () => { render(<Host comp={competition({ drawHidden: true })} data={asSetup} />); });
     expect(tabNames()).toEqual(['Overview']);
     const card = screen.getByTestId('draw-preparing-card');
     expect(card.textContent).toContain('Draw being prepared');
     expect(card.textContent).toContain('Starts at 10:30. 3 competitors entered. The draw shows here once it is published.');
-    expect(document.querySelector('.viewer__head .badge').textContent).toBe('Draw being prepared');
+    expect(document.querySelector('.viewer__head .badge')).toBeNull();
     expect(screen.queryByText('Draw is ready')).toBeNull();
+  });
+
+  it('keeps the names-hidden notice until the draw is public', async () => {
+    let view;
+    await act(async () => { view = render(<Host comp={competition({ drawHidden: true, namesHidden: true })} data={asSetup} />); });
+    expect(screen.queryByTestId('names-hidden-note')).toBeNull();
+    await act(async () => { view.rerender(<Host comp={competition({ namesHidden: true })} data={drawn} />); });
+    expect(screen.getByTestId('names-hidden-note')).toBeTruthy();
   });
 
   it('hides the draw even when the payload still carries it (the organiser\'s own read)', async () => {
@@ -171,6 +180,7 @@ describe('ViewerCompetition: tabs follow publish and unpublish with no reload (b
       expect(activeTab()).toBe('Overview');
       expect(screen.queryByTestId(testId)).toBeNull();
       expect(screen.getByTestId('draw-preparing-card')).toBeTruthy();
+      expect(document.querySelector('.viewer__head .badge')).toBeNull();
       // The gone tab is corrected in place (replace), so Back does not return to it.
       expect(tabLog).toContainEqual([null, true]);
 

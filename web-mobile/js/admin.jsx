@@ -1397,11 +1397,11 @@ function StartAllModal({ state, tournament, onConfirm, onRetry, onClose }) {
         <ul className="start-all__list">
           {comps.map(c => <li key={c.id}>{c.name}</li>)}
         </ul>
-        {/* bc-drpb: a start makes a hidden draft's draw public, so the
-            competitions it would do that to are named beside the list
+        {/* bc-drpb: a start makes a hidden draft's draw visible to the
+            public, so the competitions it would do that to are named under the list
             (draw_visibility.jsx owns the rule and the words). */}
         {hiddenDrawsNote && (
-          <p className="start-all__lead" data-testid="start-all-hidden-draws">{hiddenDrawsNote}</p>
+          <p className="start-all__lead start-all__hidden-note" data-testid="start-all-hidden-draws">{hiddenDrawsNote}</p>
         )}
         {blocked.length > 0 && (
           <div data-testid="start-all-blocked">

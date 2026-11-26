@@ -532,8 +532,8 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
               onNow={drawNowAnyway}
             />
             {isDrawReady && (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-                <div style={{ display: "flex", gap: 8 }}>
+              <div className="draw-ready-actions">
+                <div className="draw-ready-actions__buttons">
                   {/* navBusy (generating||starting||discarding) covers the brief
                       window where generateDraw has flipped status to draw-ready
                       but its setGenerating(false) hasn't run yet: without it

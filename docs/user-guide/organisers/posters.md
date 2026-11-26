@@ -19,7 +19,7 @@ Pick a poster from the list. The name of the poster you are editing heads the ch
 
 - **Heading**: the line above the code. Leave it empty to use the standard words ("Follow the tournament live" on the viewer-home poster, "Follow this court live" on a shiai-jo poster). While the box is empty it shows the standard words in grey, and the line under it says which words print. A heading holds up to 80 characters.
 - **Call to action**: an optional second line under the heading, for example "Scan for live results". Leave it empty and nothing prints. It holds up to 120 characters.
-- **Over a limit**: a counter under each box shows how many characters it holds. While a heading or call to action is over its limit, its box is outlined in red, **Save** and both print buttons are switched off, the poster's name in the list carries a red **!**, and the line beside **Save** names the poster to shorten.
+- **Over a limit**: a counter under each box shows how many characters it holds. While a heading or call to action is over its limit, its box is outlined in red and **Save** and both print buttons are switched off. The poster's name in the list carries a red **!**, and the line beside **Save** names the poster to shorten.
 - **Logo**: shown only when the tournament has a logo. Choose **Logo in the centre of the code**, the choice a new poster starts with, or the other place: **Logo above the code** on the viewer-home poster, **Logo in the top corner** on a shiai-jo poster, where the logo prints large in the empty corner beside the letter. The logo prints from the image in the tournament's branding, so use one at least 400 pixels across for a sharp print. The code stays readable with a logo in its centre because the poster uses the code's strongest error correction. A very long address does not leave room for that, so the centre choice is switched off and a sentence under the choices says why. The logo then goes to the other place, and a shorter public address brings the centre choice back.
 - **Show sponsors**: shown only when the tournament has sponsors. Untick it to leave the sponsor strip off this poster.
 
@@ -33,7 +33,7 @@ Sponsors print along the foot of the poster in one row, evenly spaced, up to six
 
 <figure class="bc-fig" markdown="span">
   ![The Posters page showing the poster for shiai-jo A: the court letter in very large type with the logo in the top corner beside it, the code under the heading, and the sponsors along the foot.](../../screenshots/posters-court.png)
-  <figcaption>A shiai-jo poster: the court letter is the largest thing on the page, with the logo above the code.</figcaption>
+  <figcaption>A shiai-jo poster: the court letter is the largest thing on the page, with the logo in the top corner beside it.</figcaption>
 </figure>
 
 ## Save your choices
@@ -55,7 +55,7 @@ A code never carries a link that reveals competitor names. If a competition [hid
 
 The codes open the tournament's **Public URL**. Set it on **Edit details** (refer to [Tournament details](run-tournament.md#tournament-details-and-the-public-info-page)), using the address people can reach from their own phones.
 
-If no public address is set, the codes open the address the page is open at. When that address is one phones may not reach, such as `localhost`, a venue-network address like `192.168.1.20`, or any address with a port number, the page shows a warning above the poster list. The warning shows on screen only and never prints, and its button takes you to the tournament details. You can still print: the poster prints the address it would use.
+If no public address is set, the codes open the address the page is open at. When that address is one phones may not reach, such as `localhost`, a venue-network address like `192.168.1.20`, or any address with a port number, the page shows a warning above the poster list. The warning shows on screen only and never prints, and its **Set it in Edit details** button takes you to the tournament details. You can still print: the poster prints the address it would use.
 
 ## Print the posters
 

@@ -15,7 +15,8 @@
 import { createTimerPool } from './timer_pool.jsx';
 import { Icon } from './icon.jsx';
 import { courtQueueEntriesOf } from './court_queue.jsx';
-import { applyPatch, createPushLedger, matchInComp } from './patch.jsx';
+import { applyPatch, createPushLedger, createRefetchGate, matchInComp } from './patch.jsx';
+import { readSeqOf } from './read_seq.jsx';
 import { useCourtPaceLookup } from './court_pace.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
@@ -127,19 +128,28 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // the SSE effect, the reconnect handler, AND the manual Refresh button all
     // drive the same fetch. Guarded by mountedRef so a late resolve after
     // unmount is dropped. Returns the promise so callers can await completion.
+    // The feed effect's refetch gate (createRefetchGate, patch.jsx), as
+    // { court, gate }: every read of the feed tells it the seq of the answer
+    // it applied (bc-sseq FR4), so an event that answer holds fetches nothing.
+    const feedGateRef = useRef(null);
+    // It answers the feed it applied (whose seq readSeqOf reads), or nothing
+    // when none was.
     const refreshCourt = useCallback(() => {
-        if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return Promise.resolve();
+        if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return Promise.resolve(null);
         // A refetch never puts a row back to an older state
         // (keepNewerCompetitions, patch.jsx; the rule showRunningPush applies
         // to a push), nor behind a push applied after it was sent (push-wins).
         const keep = pushes.competitions();
         return window.API.fetchCourtMatches(court)
             .then(comps => {
-                if (!mountedRef.current) return;
+                if (!mountedRef.current) return null;
                 setCourtComps((prev) => keep(prev, comps));
                 forgetTieBreakerStandings(comps);
+                const held = feedGateRef.current;
+                if (held && held.court === court) held.gate.applied(readSeqOf(comps));
+                return comps;
             })
-            .catch(err => console.error("Failed to fetch court matches", err));
+            .catch(err => { console.error("Failed to fetch court matches", err); return null; });
     }, [court, pushes]);
     // Operator-triggered re-sync: the last-resort recovery when a court's tablet
     // has fallen behind (dropped SSE, flaky venue WiFi) and the queue looks
@@ -250,13 +260,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const timerPool = createTimerPool();
         // One refetch per burst of events, not one per event: a running match
         // broadcasts every saved point, and each used to schedule its own
-        // full fetch of the court's feed.
-        let refreshPending = false;
-        const scheduleRefresh = () => {
-            if (refreshPending) return;
-            refreshPending = true;
-            timerPool.schedule(() => { refreshPending = false; if (!cancelled) refreshCourt(); }, 200 + Math.random() * 400);
-        };
+        // full fetch of the court's feed. The gate (createRefetchGate,
+        // patch.jsx; bc-sseq FR4) sends it 300 to 600 ms after the event, and
+        // none for an event the feed applied already holds.
+        const feedGate = createRefetchGate({
+            schedule: timerPool.schedule,
+            fetch: () => (cancelled ? null : refreshCourt()),
+            maxDelayMs: 600,
+            // Read at each schedule, so a test's Math.random stub reaches it.
+            random: () => Math.random(),
+        });
+        feedGateRef.current = { court, gate: feedGate };
+        const scheduleRefresh = (event) => feedGate.event(event && event.seq);
+        const refreshNow = () => feedGate.now();
         // A running match's score update changes only its own row, so the
         // pushed result is shown at once rather than after the refetch. The
         // refetch still follows (once per burst): it carries what a push
@@ -289,7 +305,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             ]);
             // A RECONNECT (an 'open' following an 'error') forces an immediate
             // refetch so a court that missed events while disconnected self-heals.
-            const onStatus = makeReconnectRefetcher(() => { if (!cancelled) scheduleRefresh(); });
+            const onStatus = makeReconnectRefetcher(() => { if (!cancelled) refreshNow(); });
             const off = window.API.subscribeToEvents(
                 (event) => {
                     if (cancelled || !event) return;
@@ -297,6 +313,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                     // refetch that follows.
                     if (event.type === "resync_required" || event.type === "tournament_updated") pushes.clear();
                     if (!REFRESH_EVENTS.has(event.type)) return;
+                    if (event.type === "resync_required") {
+                        // A new stream: no feed held counts as applied, and
+                        // the refetch is asked for whatever its seq says.
+                        feedGate.forget();
+                        refreshNow();
+                        return;
+                    }
                     if (event.type === "competitor_status_updated") {
                         // Eligibility moved in that competition (a withdrawal
                         // cleared, a competitor reinstated): a Start refused
@@ -317,7 +340,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             }
                         }
                     }
-                    scheduleRefresh();
+                    scheduleRefresh(event);
                 },
                 onStatus
             );
@@ -333,11 +356,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // Back from the background (an iPad locked or switched app): events
         // may have been missed meanwhile, and admin.jsx's own resume refresh
         // reloads the competition, not this court's feed.
-        const onVisible = () => { if (!document.hidden && !cancelled) scheduleRefresh(); };
+        const onVisible = () => { if (!document.hidden && !cancelled) refreshNow(); };
         document.addEventListener("visibilitychange", onVisible);
         return () => {
             cancelled = true;
             timerPool.clearAll();
+            if (feedGateRef.current && feedGateRef.current.gate === feedGate) feedGateRef.current = null;
             document.removeEventListener("visibilitychange", onVisible);
             unsub();
         };

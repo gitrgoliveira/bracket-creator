@@ -39,6 +39,7 @@ import { mergeMatchPatch as _mergeMatchPatch, olderByScoreVersion } from './data
 import { normalizeMatch, buildPlayerMap } from './api_serializers.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 import { compareCourtQueue, courtQueueEntriesOf, withCourtQueuePositions } from './court_queue.jsx';
+import { readSeqOf } from './read_seq.jsx';
 
 // bc-cse: _mergeMatchPatchKeepIneligible, which used to live here, is gone.
 // It defended `ineligibleSides` against an explicit `null` in the patch, but
@@ -229,6 +230,159 @@ function checkSeqGap(state, seq, onGap) {
     // Normal forward progress (or first event).
     state.lastSeq = seq;
     return { gap: false, duplicate: false };
+}
+
+// HELD_PUSH_WAIT_MS: no refetch the gate schedules is sent sooner than this
+// after the event that asked for it. The server holds a running match's push
+// for up to its coalescing window (matchCoalesceWindow, 250 ms,
+// internal/mobileapp/broadcast_coalescer.go) and a held push takes its seq
+// only when it is sent, so a read made before it is out names a lower seq
+// and the push would ask for a second fetch. The window plus 50 ms lets that
+// push go first, so the read's seq covers it. Pinned to the Go constant by
+// the shared table internal/mobileapp/testdata/held_push_wait.json (the Go
+// half is held_push_wait_test.go, the JS half refetch_gate.test.jsx).
+const HELD_PUSH_WAIT_MS = 300;
+
+// createRefetchGate (bc-sseq FR4) is the ONE owner of "does this event need
+// a refetch". A host makes one per thing it fetches again (a competition's
+// detail, the list, the court feed) and sends every event that would have
+// refetched through `event(seq)`, instead of scheduling a fetch per event.
+//   - schedule(run, delayMs): the host's timer (timerPool.schedule);
+//   - fetch(): sends the read and answers a promise of the value the fetcher
+//     returned, whose seq read_seq.jsx holds (readSeqOf);
+//   - take(): called as the fetch is sent; answers the function that takes
+//     the fetch's answer (the push ledger's keeper is made at send time), or
+//     nothing to drop it;
+//   - maxDelayMs: the top of the host's jitter window. Each fetch is sent a
+//     delay drawn uniformly from HELD_PUSH_WAIT_MS to it (the wait is the
+//     window's start, never added before it, so no page waits longer than its
+//     window's top);
+//   - onError(err): a failed fetch or take (console.error by default).
+// The gate's answers, in order:
+//   - an event at or below the applied answer's seq needs no refetch;
+//   - while a refetch is scheduled and not sent, more events add nothing;
+//   - while one is out, it keeps the highest seq seen, and once the answer
+//     lands it schedules one more only if that answer names a lower seq (or
+//     none: a missing header covers nothing);
+//   - now() (reconnect, tab resume, a gap) asks for one whatever the seq,
+//     still coalescing;
+//   - an answer naming a lower seq than the applied one (a server restart, a
+//     late answer) is read as a new stream: it is adopted, and one refetch
+//     is asked for when an event above it was seen;
+//   - forget() (resync_required) drops every seq: nothing counts as applied,
+//     and an answer to a fetch sent before it is taken but its seq is not
+//     adopted. The host asks for its refetch with now().
+// Every fetch that applies the same state outside the gate (a first load, a
+// refresh after a save) reports the seq of the value its fetcher returned,
+// before any merge: `applied(readSeqOf(fetched))`.
+// event() answers true when the event asked for (or joined) a refetch, false
+// when an applied answer already covers it.
+function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_MS, random = Math.random, onError } = {}) {
+    const report = typeof onError === 'function' ? onError : (err) => console.error('Refresh failed:', err);
+    const top = Math.max(HELD_PUSH_WAIT_MS, Number(maxDelayMs) || 0);
+    let applied = 0;      // seq of the newest answer applied (0: none)
+    let seen = 0;         // highest event seq seen (events only, never an answer)
+    let scheduled = false;
+    let inflight = false;
+    let again = false;    // a refetch was asked for while one was out
+    let flightSeq = 0;    // highest event seq seen while the fetch was out
+    let flightUnknown = false; // an event with no seq arrived while it was out
+    let generation = 0;
+
+    const isSeq = (seq) => typeof seq === 'number' && Number.isSafeInteger(seq) && seq > 0;
+
+    // adopt records an answer's seq; true when it asks for one more refetch
+    // (a new stream, with an event above it already seen).
+    const adopt = (seq) => {
+        if (!isSeq(seq)) return false;
+        if (seq < applied) {
+            applied = seq;
+            const refetch = seen > seq;
+            seen = seq;
+            return refetch;
+        }
+        applied = seq;
+        return false;
+    };
+
+    const want = () => {
+        if (scheduled) return;
+        if (inflight) { again = true; return; }
+        scheduled = true;
+        schedule(fire, HELD_PUSH_WAIT_MS + random() * (top - HELD_PUSH_WAIT_MS));
+    };
+
+    const settle = (gen, seq, ok) => {
+        inflight = false;
+        let more = again;
+        again = false;
+        if (gen === generation && ok) {
+            if (flightUnknown || (flightSeq > 0 && !(isSeq(seq) && seq >= flightSeq))) more = true;
+            if (adopt(seq)) more = true;
+        } else if (flightUnknown || flightSeq > 0) {
+            more = true;
+        }
+        flightSeq = 0;
+        flightUnknown = false;
+        if (more) want();
+    };
+
+    function fire() {
+        scheduled = false;
+        if (inflight) { again = true; return; }
+        inflight = true;
+        flightSeq = 0;
+        flightUnknown = false;
+        const gen = generation;
+        let apply;
+        let sent;
+        try {
+            apply = take ? take() : undefined;
+            sent = Promise.resolve(fetch());
+        } catch (err) {
+            sent = Promise.reject(err);
+        }
+        sent.then((value) => {
+            let ok = true;
+            try {
+                if (typeof apply === 'function') apply(value);
+            } catch (err) {
+                ok = false;
+                report(err);
+            }
+            settle(gen, readSeqOf(value), ok);
+        }, (err) => {
+            report(err);
+            settle(gen, 0, false);
+        });
+    }
+
+    return {
+        event(seq) {
+            if (isSeq(seq) && seq <= applied) return false;
+            if (isSeq(seq) && seq > seen) seen = seq;
+            if (inflight) {
+                // Judged once the answer lands (settle): it covers this
+                // event only when it names this seq or a higher one.
+                if (!isSeq(seq)) flightUnknown = true;
+                else if (seq > flightSeq) flightSeq = seq;
+                return true;
+            }
+            want();
+            return true;
+        },
+        now() { want(); },
+        applied(seq) {
+            if (adopt(seq)) want();
+        },
+        forget() {
+            generation += 1;
+            applied = 0;
+            seen = 0;
+        },
+        // appliedSeq: the seq the gate counts as applied (tests and logs).
+        appliedSeq() { return applied; },
+    };
 }
 
 function applyPatchOrdered(prev, event, state, onGap) {
@@ -556,6 +710,7 @@ function matchInComp(comp, id) {
 
 export {
     applyPatch, applyPatchToCompetitions, applyPatchOrdered, checkSeqGap,
+    createRefetchGate, HELD_PUSH_WAIT_MS,
     keepNewerMatches, keepNewerDetail, keepNewerCompetitions, keepNewerTournament, isOlderRunningCopy,
     createPushLedger,
     matchInComp,

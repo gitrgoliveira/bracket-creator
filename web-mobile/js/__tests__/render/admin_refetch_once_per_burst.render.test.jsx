@@ -1,0 +1,131 @@
+// bc-sseq FR4: the admin competition page fetches once per burst. Its
+// per-event detail refetch and its tournament refresh each ask a gate
+// (createRefetchGate, patch.jsx), which sends one fetch per burst and none for
+// an event the answer it applied already holds (X-Event-Seq, read_seq.jsx).
+// Every read of the detail made outside the events (the first one, the data
+// issue banner's Reload) tells the gate the seq it applied.
+import React from 'react';
+import { render, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
+import { HELD_PUSH_WAIT_MS } from '../../patch.jsx';
+import { noteReadSeq } from '../../read_seq.jsx';
+
+const probe = { props: null };
+const sse = { emit: null };
+
+const withSeq = (value, seq) => noteReadSeq(value, { headers: { get: (k) => (k === 'X-Event-Seq' ? String(seq) : null) } });
+
+const head = { detail: 20, competitions: 20 };
+const config = { id: 'c1', name: 'Autumn Cup', status: 'pools', format: 'league', kind: 'individual', courts: ['A'], players: [] };
+const running = (ipponsA) => ({ id: 'Pool A-0', status: 'running', court: 'A', modifiedAt: 100 + ipponsA.length, ipponsA, ipponsB: [] });
+const detail = () => withSeq({ config: { ...config }, pools: [], poolMatches: [running([])], standings: {}, bracket: null }, head.detail);
+
+const STUBBED_GLOBALS = {
+  // MODULE-EVAL-TIME: captured at import by admin.jsx.
+  AdminCompetition: (props) => { probe.props = props; return <div data-testid="competition" />; },
+  confirmDialog: vi.fn(),
+  API: {
+    subscribeToEvents: vi.fn((onEvent) => { sse.emit = onEvent; return () => {}; }),
+    fetchCompetitions: vi.fn(async () => withSeq([{ ...config }], head.competitions)),
+    fetchTournament: vi.fn(async () => withSeq({ name: 'Cup', courts: ['A'] }, head.competitions)),
+    fetchCompetitionDetails: vi.fn(async () => detail()),
+  },
+};
+
+const details = () => window.API.fetchCompetitionDetails.mock.calls.length;
+const lists = () => window.API.fetchCompetitions.mock.calls.length;
+const emit = (...events) => act(async () => { events.forEach((e) => sse.emit(e)); });
+// Math.random is 0: each gate sends at HELD_PUSH_WAIT_MS exactly.
+const pastWindow = () => act(async () => { await new Promise((r) => setTimeout(r, HELD_PUSH_WAIT_MS + 40)); });
+const tap = (seq, ipponsA) => ({ type: 'match_updated', seq, data: { competitionId: 'c1', result: running(ipponsA) } });
+
+let restore;
+let random;
+let AdminApp;
+
+beforeAll(async () => {
+  restore = installWindowStubs(STUBBED_GLOBALS);
+  await import('../../admin.jsx');
+  AdminApp = window.AdminApp;
+  random = vi.spyOn(Math, 'random').mockReturnValue(0);
+});
+afterAll(() => {
+  random.mockRestore();
+  restore();
+});
+
+// mount opens the competition page; its first detail read answers at `seq`.
+// Each test mounts its own: the render cleanup unmounts it after the test.
+async function mount(seq) {
+  head.detail = seq;
+  head.competitions = seq;
+  await act(async () => {
+    render(
+      <AdminApp
+        tournament={{ name: 'Cup', courts: ['A'], competitions: [{ ...config }] }}
+        onUpdate={vi.fn()} onLogout={vi.fn()} onViewerMode={vi.fn()} onPasswordChange={vi.fn()}
+        tweaks={{}} password="pw" view={{ kind: 'competition', id: 'c1', section: 'overview' }} setView={vi.fn()}
+        showToast={vi.fn()} authConfig={{}}
+      />,
+    );
+  });
+  await pastWindow();
+}
+
+describe('the admin competition page fetches once per burst (bc-sseq FR4)', () => {
+  it('an event the first read already holds refetches no detail', async () => {
+    const before = details();
+    await mount(20);
+    expect(probe.props, 'the competition page rendered').toBeTruthy();
+    expect(details(), 'the first read').toBe(before + 1);
+    await emit(tap(19, ['M']), tap(20, ['M', 'K']));
+    await pastWindow();
+    expect(details(), 'no refetch for events at or below the first read').toBe(before + 1);
+  });
+
+  it('five quick taps cause one detail fetch and one tournament refresh', async () => {
+    await mount(20);
+    head.detail = 25;
+    head.competitions = 25;
+    const before = details();
+    const beforeLists = lists();
+    await emit(tap(21, ['M']), tap(22, ['M', 'K']), tap(23, ['M', 'K', 'D']), tap(24, ['M', 'K', 'D', 'T']), tap(25, ['M', 'K', 'D', 'T', 'H']));
+    expect(details(), 'nothing is sent before the held push wait').toBe(before);
+    await pastWindow();
+    expect(details(), 'one detail fetch for the burst of five').toBe(before + 1);
+    expect(lists(), 'one tournament refresh for the burst of five').toBe(beforeLists + 1);
+    await pastWindow();
+    expect(details(), 'and no second one').toBe(before + 1);
+  });
+
+  it('a Reload outside the events tells the gate what it read', async () => {
+    await mount(20);
+    head.detail = 30;
+    const before = details();
+    let answer;
+    await act(async () => { answer = await probe.props.onRefreshCompetition(); });
+    expect(answer).toEqual({ ok: true });
+    expect(details(), 'the Reload read').toBe(before + 1);
+    // The stream delivers 21 to 30 after the Reload's answer named 30.
+    await emit(...[21, 22, 23, 24, 25, 26, 27, 28, 29, 30].map((seq) => tap(seq, ['M'])));
+    await pastWindow();
+    expect(details(), 'events the Reload already held').toBe(before + 1);
+    await emit(tap(31, ['M', 'K']));
+    await pastWindow();
+    expect(details(), 'an event above it').toBe(before + 2);
+  });
+
+  it('tournament_updated reads the tournament whatever the seqs say', async () => {
+    await mount(20);
+    // A competitions refresh named 40 covers the events up to it, but says
+    // nothing of the tournament's own settings.
+    head.competitions = 40;
+    await emit(tap(21, ['M']));
+    await pastWindow();
+    const before = window.API.fetchTournament.mock.calls.length;
+    await emit({ type: 'tournament_updated', seq: 22, data: null });
+    await pastWindow();
+    expect(window.API.fetchTournament.mock.calls.length, 'the settings are read').toBe(before + 1);
+  });
+});

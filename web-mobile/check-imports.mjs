@@ -218,6 +218,7 @@ const CHECK_MODULES = [
   'qr.jsx',
   'qualifier_preview.jsx',
   'queued_writes_wait.jsx',
+  'read_seq.jsx',
   'recorded_result.jsx',
   'registration.jsx',
   'reset.jsx',

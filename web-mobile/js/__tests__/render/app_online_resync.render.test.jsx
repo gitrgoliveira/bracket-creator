@@ -12,6 +12,7 @@ import React from 'react';
 import { act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { mountApp, settle } from '../helpers/mount_app.js';
+import { HELD_PUSH_WAIT_MS } from '../../patch.jsx';
 
 function ProbeViewerHome(props) {
   return <div data-testid="viewer-home">{props.tournament && props.tournament.name}</div>;
@@ -34,12 +35,13 @@ const STUBBED_GLOBALS = {
 };
 
 const shown = () => screen.getByTestId('viewer-home').textContent;
-// The reload is jittered; with Math.random at 0 it runs at once.
+// The reload is jittered; with Math.random at 0 it runs at the start of the
+// list gate's window, HELD_PUSH_WAIT_MS (createRefetchGate, patch.jsx).
 const status = async (s) => {
   const random = vi.spyOn(Math, 'random').mockReturnValue(0);
   try {
     await act(async () => { sse.status(s); });
-    await settle();
+    await act(async () => { await new Promise((r) => setTimeout(r, HELD_PUSH_WAIT_MS + 20)); });
   } finally {
     random.mockRestore();
   }

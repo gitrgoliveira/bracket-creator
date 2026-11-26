@@ -1,7 +1,8 @@
 // Main App: single tournament per app/url. Tournament has multiple Competitions
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
-import { applyPatch as patchCompetitionData, checkSeqGap, createPushLedger, keepNewerTournament } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap, createPushLedger, createRefetchGate, keepNewerTournament } from './patch.jsx';
+import { readSeqOf } from './read_seq.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
@@ -939,6 +940,15 @@ function App() {
   // in flight at once.
   const updateTournament = useCallback((next) => setTournament((prev) => keepNewerTournament(prev, next)), []);
 
+  // The SSE effect's refetch gates (createRefetchGate, patch.jsx), told of the
+  // reads made outside it: listGateRef the tournament's (load below), and
+  // detailGateRef the open competition's detail, as { compId, gate }. Null
+  // while no SSE effect runs. listReadRef holds the value of load's last read
+  // that names the lower seq (read_seq.jsx), for the list gate's own fetch.
+  const listGateRef = useRef(null);
+  const detailGateRef = useRef(null);
+  const listReadRef = useRef(null);
+
   const load = async () => {
     // bc-hnam: an answer read as another audience than the page reads as by
     // the time it lands (the route changed meanwhile) is dropped: the change
@@ -964,6 +974,11 @@ function App() {
         if (mode === "display") setTournament(t);
         else updateTournament(t);
         applyTheme(t.theme); // mp-scf: apply custom colors
+        // The page now holds both reads, so it is covered only up to the
+        // lower of their seqs (bc-sseq FR4): that read is the one reported.
+        const lower = readSeqOf(t) <= readSeqOf(comps) ? t : comps;
+        listReadRef.current = lower;
+        if (listGateRef.current) listGateRef.current.applied(readSeqOf(lower));
       }
       return true;
     } catch (e) {
@@ -1269,7 +1284,6 @@ function App() {
     // viewer tab, so retaining fired ids would grow the set by one or two
     // entries per SSE event for the tab's lifetime.
     const timerPool = createTimerPool();
-    const jitteredTimeout = timerPool.schedule;
     // The competition page's refetches never put a live score back to an
     // older state (keepNewerDetail, patch.jsx), nor behind a push applied
     // after they were sent (push-wins): a self-run score editor reads this
@@ -1294,9 +1308,44 @@ function App() {
     // admin view is read from the ref so this closure need not be recreated on
     // navigation. Every other mode/view loads exactly as before.
     const maybeLoad = () => {
-        if (mode === "admin" && adminViewRef.current && adminViewRef.current.kind === "shiaijo") return;
-        loadRef.current();
+        if (mode === "admin" && adminViewRef.current && adminViewRef.current.kind === "shiaijo") return undefined;
+        return loadRef.current();
     };
+
+    // bc-sseq FR4: one refetch per burst. Every event that used to schedule
+    // its own fetch asks a gate instead (createRefetchGate, patch.jsx), which
+    // sends one per burst and none for an event the applied answer already
+    // holds (its X-Event-Seq, read_seq.jsx). Each fetch waits a delay drawn
+    // from HELD_PUSH_WAIT_MS to the top of the page's window, so the many
+    // open tabs do not all ask at the same moment:
+    //   listGate: the tournament and its competitions (maybeLoad), up to
+    //     2,000 ms, which staggers 1,000+ display walls;
+    //   detailGate: the open competition's detail, up to 500 ms.
+    // A load made outside the gate reports its seq from load itself
+    // (listGateRef), and the detail's first read from its own effect below
+    // (detailGateRef). The list gate's fetch answers the read load reported,
+    // or nothing when the load was skipped or failed (it covers no event).
+    const listGate = createRefetchGate({
+        schedule: timerPool.schedule,
+        fetch: () => {
+            listReadRef.current = null;
+            return Promise.resolve(maybeLoad()).then(() => listReadRef.current);
+        },
+        maxDelayMs: 2000,
+        // Read at each schedule, so a test's Math.random stub reaches it.
+        random: () => Math.random(),
+        onError: (err) => console.error('Tournament refresh failed:', err),
+    });
+    const detailGate = viewerCompId ? createRefetchGate({
+        schedule: timerPool.schedule,
+        fetch: () => window.API.fetchCompetitionDetails(viewerCompId),
+        take: takeCompDetail,
+        maxDelayMs: 500,
+        random: () => Math.random(),
+        onError: (err) => console.error('Competition refresh failed:', err),
+    }) : null;
+    listGateRef.current = listGate;
+    detailGateRef.current = detailGate ? { compId: viewerCompId, gate: detailGate } : null;
 
     // The pace tick's refetch: on a competition page the tournament list is
     // refetched every PACE_TICK_MS so shared-court pace drift stays current.
@@ -1306,27 +1355,21 @@ function App() {
     // open tabs do not all ask at the same moment.
     const paceRefetch = setInterval(() => {
         if (mode !== "viewer" || !viewerCompId || document.hidden || authPromptRef.current) return;
-        jitteredTimeout(maybeLoad, Math.random() * 2000);
+        // No event names it: the pace moves on with the clock.
+        listGate.now();
     }, PACE_TICK_MS);
 
     // F6b: per-subscription seq tracker. Allocated once per effect run so
     // it resets on viewerCompId/mode changes alongside the SSE reconnect.
     const sseSeq = { lastSeq: 0 };
 
-    // Refresh data so the UI is current: the tournament (now, or after
-    // loadDelay) and the competition page's detail. Defined inside the effect
-    // so the closure captures jitteredTimeout, maybeLoad and viewerCompId.
-    const resync = (loadDelay, label) => {
-        if (loadDelay) jitteredTimeout(maybeLoad, loadDelay);
-        else maybeLoad();
-        if (viewerCompId) {
-            jitteredTimeout(
-                () => window.API.fetchCompetitionDetails(viewerCompId)
-                    .then(takeCompDetail())
-                    .catch(err => console.error(`${label} refresh failed:`, err)),
-                Math.random() * 500
-            );
-        }
+    // Refresh data so the UI is current whatever the seqs say: the tournament
+    // (at once, or through its gate's window) and the competition page's
+    // detail. Defined inside the effect so the closure captures the gates.
+    const resync = (loadNow) => {
+        if (loadNow) maybeLoad();
+        else listGate.now();
+        if (detailGate) detailGate.now();
     };
 
     // F8: resync on tab resume. When the tab becomes visible again after
@@ -1338,7 +1381,7 @@ function App() {
     const onVisibilityChange = () => {
         if (document.hidden) return;
         window.API.reconnectEvents();
-        if (!streamLost) resync(0, 'tab-resume');
+        if (!streamLost) resync(true);
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
 
@@ -1366,17 +1409,12 @@ function App() {
         // Reset our seq counter to the server's head and do a full refetch.
         if (event.type === 'resync_required') {
             sseSeq.lastSeq = (typeof event.seq === 'number') ? event.seq : 0;
-            // Every held copy may be wrong: no push outranks the refetch.
+            // Every held copy may be wrong: no push outranks the refetch,
+            // and no answer held counts as applied (a new stream).
             compPushes.clear();
-            maybeLoad();
-            if (viewerCompId) {
-                jitteredTimeout(
-                    () => window.API.fetchCompetitionDetails(viewerCompId)
-                        .then(takeCompDetail())
-                        .catch(err => console.error('resync refresh failed:', err)),
-                    Math.random() * 500
-                );
-            }
+            listGate.forget();
+            if (detailGate) detailGate.forget();
+            resync(true);
             return;
         }
 
@@ -1384,31 +1422,21 @@ function App() {
         // accurately even for events that don't patch state (e.g. lineup_updated,
         // announcement). On a gap, trigger the same scoped refetch the per-type
         // branches below use, so we converge without waiting for the next event.
-        const seqResult = checkSeqGap(sseSeq, event.seq, () => {
-            maybeLoad();
-            if (viewerCompId) {
-                jitteredTimeout(
-                    () => window.API.fetchCompetitionDetails(viewerCompId)
-                        .then(takeCompDetail())
-                        .catch(err => console.error('gap refetch failed:', err)),
-                    Math.random() * 500
-                );
-            }
-        });
+        const seqResult = checkSeqGap(sseSeq, event.seq, () => resync(false));
         if (seqResult.duplicate) return;
 
-        // P1/P4 (mp-9afd): two jitter windows.
-        //   detailJitter: tight (0–500ms) for per-competition detail fetches
+        // P1/P4 (mp-9afd): two windows, the gates' (above).
+        //   detailGate: tight (300-500ms) for per-competition detail fetches
         //     that target a single competition. Each event targets one comp,
         //     and each viewer does O(1) work when it's viewing that comp.
-        //   listJitter: wider (0–2000ms) for full-list fetches (display mode
+        //   listGate: wider (300-2000ms) for full-list fetches (display mode
         //     and genuine list-level transitions, e.g. competition_started,
         //     draw_generated, schedule_updated, participants_updated, etc.).
         //     These are infrequent and the wider window staggers 1000+ display
         //     walls so they don't simultaneously storm GET /api/viewer/competitions.
-        const detailJitter = Math.random() * 500;
-        const listJitter = Math.random() * 2000;
-        const refetchDetail = () => jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail()).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+        // Each asks its gate, which sends one fetch per burst (bc-sseq FR4).
+        const refetchDetail = () => { if (detailGate) detailGate.event(event.seq); };
+        const refetchList = () => listGate.event(event.seq);
         // another competition's event: refetch the open competition only when the two share a day (and, when `courts` is given, a court on that day)
         const refetchIfSharesDay = (event, courts) => {
             const otherDate = (compsRef.current || []).find(c => c.id === event.data?.competitionId)?.date || "";
@@ -1419,7 +1447,7 @@ function App() {
         };
         if (event.type === "tournament_updated") {
             compPushes.clear();
-            if (!authPromptRef.current) jitteredTimeout(maybeLoad, listJitter);
+            if (!authPromptRef.current) refetchList();
         } else if (event.type === "password_reset") {
             // The admin password was rotated by someone hitting
             // POST /api/tournament/reset. Any logged-in admin's
@@ -1459,7 +1487,7 @@ function App() {
             }
             // competitor_status_updated is a list-level event (eligibility
             // badges on the lobby): always refresh the full list.
-            jitteredTimeout(maybeLoad, listJitter);
+            refetchList();
         } else if (event.type === "competition_started" || event.type === "match_updated" || event.type === "competition_completed") {
             // Display mode (T060) reads the full tournament tree
             // (every competition's poolMatches + bracket) and needs a
@@ -1471,7 +1499,7 @@ function App() {
             // thundering the server when many displays are mounted on
             // the same venue LAN.
             if (mode === "display") {
-                jitteredTimeout(maybeLoad, listJitter);
+                refetchList();
             } else if (viewerCompId === event.data?.competitionId) {
                 // Apply partial update immediately (match_updated only: 
                 // competition_completed has no per-match payload)
@@ -1506,7 +1534,7 @@ function App() {
             // Display mode is excluded because it already fires load() in the
             // `mode === "display"` block earlier in this same event handler.
             if (mode !== "display" && (event.type === "competition_started" || event.type === "competition_completed" || (event.type === "match_updated" && !viewerCompId))) {
-                jitteredTimeout(maybeLoad, listJitter);
+                refetchList();
             }
         } else if (event.type === "schedule_updated") {
             // Court/time move: no competitionId in payload, so refresh the
@@ -1514,7 +1542,7 @@ function App() {
             if (viewerCompId) {
                 refetchDetail();
             }
-            jitteredTimeout(maybeLoad, listJitter);
+            refetchList();
         } else if (event.type === "draw_generated" || event.type === "draw_discarded") {
             // Draw generated/discarded: refresh the selected competition's
             // details (new pools/bracket data or cleared state) and the
@@ -1524,7 +1552,7 @@ function App() {
             } else if (viewerCompId && event.data?.competitionId !== viewerCompId) {
                 refetchIfSharesDay(event);
             }
-            jitteredTimeout(maybeLoad, listJitter);
+            refetchList();
         } else if (event.type === "swiss_round_generated") {
             // T192 (US13: FR-050d): a new Swiss round's matches have been
             // generated. The payload carries competitionId + swissCurrentRound
@@ -1541,7 +1569,7 @@ function App() {
             // swiss_round_generated updates the tournament list (swissCurrentRound
             // counter): always do one list refresh: covers display mode, home-
             // screen viewers, and per-comp viewers alike.
-            jitteredTimeout(maybeLoad, listJitter);
+            refetchList();
         } else if (event.type === "participants_updated") {
             // Check-in toggle: viewer-side badges (checked-in indicator) need
             // the updated player list. Refetch the selected competition when the
@@ -1550,7 +1578,7 @@ function App() {
             if (viewerCompId === event.data?.competitionId) {
                 refetchDetail();
             }
-            jitteredTimeout(maybeLoad, listJitter);
+            refetchList();
         } else if (event.type === "lineup_updated") {
             // A team lineup was saved or deleted by an operator. The lineup data
             // is not part of the competition object, so patchCompetitionData /
@@ -1579,7 +1607,7 @@ function App() {
             // helper's own test passed while the CALL SITE stayed mutable to a
             // no-op, so it bought indirection and a swallowed-TypeError path,
             // not coverage.
-            jitteredTimeout(maybeLoad, listJitter);
+            refetchList();
         } else if (event.type === "announcement") {
             // Payload is now the full list snapshot.
             const list = Array.isArray(event.data) ? event.data : [];
@@ -1608,13 +1636,15 @@ function App() {
             streamLost = true;
         } else if (streamLost) {
             streamLost = false;
-            resync(Math.random() * 2000, 'reconnect');
+            resync(false);
         }
     });
     return () => {
         unsub();
         clearInterval(paceRefetch);
         timerPool.clearAll();
+        if (listGateRef.current === listGate) listGateRef.current = null;
+        if (detailGateRef.current && detailGateRef.current.gate === detailGate) detailGateRef.current = null;
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('online', onOnline);
     };
@@ -1631,6 +1661,10 @@ function App() {
         .then(data => {
           if (cancelled) return;
           setSelectedCompData((prev) => keep(prev, data));
+          // The detail gate counts the events this read holds (bc-sseq FR4),
+          // read off the fetched value, since the merged one carries no seq.
+          const held = detailGateRef.current;
+          if (held && held.compId === viewerCompId) held.gate.applied(readSeqOf(data));
           setLoading(false);
         })
         .catch(err => {

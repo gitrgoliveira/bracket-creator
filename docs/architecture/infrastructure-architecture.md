@@ -334,7 +334,11 @@ refetch is 50.9 KB and 3.5 KB. With 1,000 viewers fetching both after one point,
 sent and 5.5 MB gzipped, against 0.6 MB for the events themselves. Answers are gzipped for any
 browser that accepts it, which cuts a refetch to about 8% of its size; the embedded page files are
 not compressed, so a first load is unchanged. Compressing a 317 KB list takes about 0.6 ms of CPU,
-once per shared build. Refer to [Scale limit](network-architecture.md#7-scale-limit-egress) for the table.
+once per shared build. A page also fetches once per burst of events rather than once per event,
+and not at all for an event its last answer already holds: five points scored in quick succession
+cost each viewer one competition fetch instead of five, so 1,000 viewers download 2.1 MB gzipped
+instead of 10.3 MB (25.7 MB instead of 128.3 MB as sent). Refer to
+[Scale limit](network-architecture.md#7-scale-limit-egress) for the tables.
 
 ## 6. Configuration (environment variables)
 

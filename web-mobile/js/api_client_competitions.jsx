@@ -27,6 +27,7 @@ import {
 } from './api_client_overlays.jsx';
 import { _forgetShownMatches, _forgetAllShownMatches } from './api_client_status.jsx';
 import { _outboxWrite } from './api_client_enqueue.jsx';
+import { noteReadSeq } from './read_seq.jsx';
 
 // _downloadWorkbook GETs an admin-gated .xlsx through the direct door and
 // returns its Blob; a non-2xx throws the server's own sentence, else `fallback`.
@@ -60,7 +61,7 @@ export const competitionsApi = {
             // _fetchJson reads an unreadable body as {}: never hand that on as
             // the competitions.
             if (!Array.isArray(body)) throw new Error('Failed to fetch competitions (unreadable answer)');
-            return body.map((c) => _overlayPendingFields(normalizeViewerCompItem(c)));
+            return noteReadSeq(body.map((c) => _overlayPendingFields(normalizeViewerCompItem(c))), res);
         }
         const res = await fetch('/api/viewer/competitions', { headers: readHeaders() });
         if (!res.ok) {
@@ -69,8 +70,9 @@ export const competitionsApi = {
         }
         const comps = await res.json();
         if (!Array.isArray(comps)) return comps;
-        // A court or time this device still has queued shows (R4).
-        return comps.map((c) => _overlayPendingFields(normalizeViewerCompItem(c)));
+        // A court or time this device still has queued shows (R4). The
+        // answer's stream position rides on the array returned (read_seq.jsx).
+        return noteReadSeq(comps.map((c) => _overlayPendingFields(normalizeViewerCompItem(c))), res);
     },
     // fetchCourtMatches returns the court-scoped match feed: only the
     // competitions that have a real match physically on `court` right now, each
@@ -89,7 +91,7 @@ export const competitionsApi = {
         }
         const data = await res.json();
         const comps = Array.isArray(data.competitions) ? data.competitions : [];
-        return comps.map((c) => _overlayPendingFields(normalizeViewerCompItem(c)));
+        return noteReadSeq(comps.map((c) => _overlayPendingFields(normalizeViewerCompItem(c))), res);
     },
     async fetchCompetitionDetails(id) {
         const res = await fetch(`/api/viewer/competitions/${id}`, { headers: readHeaders() });
@@ -102,7 +104,7 @@ export const competitionsApi = {
             throw e;
         }
         const data = await res.json();
-        return _overlayPendingFields(normalizeCompetitionDetail(data), id);
+        return noteReadSeq(_overlayPendingFields(normalizeCompetitionDetail(data), id), res);
     },
     async updateCompetition(id, config, password) {
         // Go's domain.Player uses json:"metadata" (array); the JS layer uses the

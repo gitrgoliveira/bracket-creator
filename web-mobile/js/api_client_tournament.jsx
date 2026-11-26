@@ -27,6 +27,7 @@ import { _forgetAllShownMatches } from './api_client_status.jsx';
 import { _outboxWrite, _isFollowed } from './api_client_enqueue.jsx';
 import { _newClientId } from './api_client_members.jsx';
 import { _inFlight } from './api_client_store.jsx';
+import { noteReadSeq } from './read_seq.jsx';
 
 // The password change: direct (_directFetch), with the version it was made
 // from. A save of the settings this device still has queued is made stale
@@ -69,8 +70,9 @@ export const tournamentApi = {
             const err = await res.json().catch(() => ({}));
             throw readFailure(res.status, err.error, 'tournament');
         }
-        // A settings save this device still has queued shows (G4b).
-        return overlayPendingTournament(await res.json());
+        // A settings save this device still has queued shows (G4b). The
+        // answer's stream position rides on the object returned (read_seq.jsx).
+        return noteReadSeq(overlayPendingTournament(await res.json()), res);
     },
     // Public endpoint: returns {mode: "file"|"locked", resetEnabled: bool}.
     // Mounted on App() boot to decide whether to render the "Forgot

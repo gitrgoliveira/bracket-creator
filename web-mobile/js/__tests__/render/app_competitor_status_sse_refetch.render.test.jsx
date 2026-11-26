@@ -1,7 +1,12 @@
 import React from 'react';
 import { act } from '@testing-library/react';
 import { describe, it, expect, vi, afterAll } from 'vitest';
-import { mountApp, settle, propsProbe } from '../helpers/mount_app.js';
+import { mountApp, propsProbe } from '../helpers/mount_app.js';
+import { HELD_PUSH_WAIT_MS } from '../../patch.jsx';
+
+// settle: past the shortest delay the page's refetch gates draw (the start of
+// their window, HELD_PUSH_WAIT_MS, createRefetchGate in patch.jsx).
+const settle = () => act(async () => { await new Promise((r) => setTimeout(r, HELD_PUSH_WAIT_MS + 20)); });
 
 const page = propsProbe(() => <div data-testid="viewer-competition" />);
 

@@ -497,3 +497,24 @@ One point, with every viewer fetching both the competition and the list again:
 
 The refetches, not the events, are what grows with the audience, which is why both the compression
 and fetching once per burst of events matter.
+
+### A burst of points
+
+A court scores in bursts: an ippon, then another a moment later, each announced by its own event.
+A page no longer fetches once per event. Each answer it reads carries `X-Event-Seq`, the number of
+the newest event the server had sent when the read began, so an event at or below that number is
+already in the answer and fetches nothing. Events that arrive close together share one fetch, sent
+300 ms to 500 ms after the first of them on a competition page, 300 ms to 2 s for the tournament
+list (1.5 s on the organiser's competition page) and 300 ms to 600 ms on the court console. The 300 ms start lets a point the server is still
+holding (it gathers a running match's points for up to 250 ms) go out before the read takes its
+number, so the read covers it too. The pushed scores themselves show at once, without waiting.
+
+Five points scored in quick succession on a competition the viewer has open cause one fetch of the
+competition instead of five (the render test `app_refetch_once_per_burst.render.test.jsx` counts
+it). Using the competition refetch measured above:
+
+| Viewers | Five fetches, as sent | One fetch, as sent | Five fetches, gzipped | One fetch, gzipped |
+|---|---|---|---|---|
+| 1 | 128.3 KB | 25.7 KB | 10.3 KB | 2.1 KB |
+| 100 | 12.8 MB | 2.6 MB | 1.0 MB | 206 KB |
+| 1,000 | 128.3 MB | 25.7 MB | 10.3 MB | 2.1 MB |

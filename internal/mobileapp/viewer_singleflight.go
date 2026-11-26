@@ -217,11 +217,11 @@ func (c *sfCall) gzipped(key string) []byte {
 		}
 		var buf bytes.Buffer
 		zw := getGzipWriter(&buf)
-		if _, err := zw.Write(c.val); err != nil {
-			log.Printf("singleflight: gzip for key %q failed: %v", key, err)
-			return
+		_, err := zw.Write(c.val)
+		if err == nil {
+			err = zw.Close()
 		}
-		if err := zw.Close(); err != nil {
+		if err != nil {
 			log.Printf("singleflight: gzip for key %q failed: %v", key, err)
 			return
 		}

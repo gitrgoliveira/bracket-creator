@@ -53,15 +53,16 @@
   overflow-wrap: anywhere;
 }
 
-/* The body takes what the band and the sponsor strip leave and spreads its
- * pieces evenly, so a poster without a call to action or sponsors has no hole. */
+/* The body takes what the band and the sponsor strip leave and keeps its
+ * pieces together as one block in the middle of it, so the words sit right by
+ * the code they explain and the free space is shared above and below. */
 .poster__body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-evenly;
+  justify-content: center;
   gap: 0.6cqw;
   padding: 0.6cqw 6cqw;
   text-align: center;
@@ -75,11 +76,15 @@
 }
 
 .poster__court-label {
-  font-size: 3.2cqw;
+  font-size: 4.2cqw;
   font-weight: 700;
-  letter-spacing: 0.3em;
-  text-transform: uppercase;
+  line-height: 1.2;
   color: var(--poster-ink);
+}
+
+/* The viewer poster has room for a wider step between its pieces. */
+.poster--viewer .poster__body {
+  gap: 5cqw;
 }
 
 /* The largest element of a court poster, taller than its code. */

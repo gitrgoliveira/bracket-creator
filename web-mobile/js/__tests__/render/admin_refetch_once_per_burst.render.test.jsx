@@ -168,4 +168,20 @@ describe('the admin competition page fetches once per burst (bc-sseq FR4)', () =
     await pastWindow();
     expect(window.API.fetchTournament.mock.calls.length, 'the settings are read').toBe(before + 1);
   });
+
+  it('a tournament_updated event counts as seen: an answer built before it is read once more', async () => {
+    await mount(20);
+    const beforeLists = lists();
+    // The competitions answer joins a build that began before event 50 and
+    // names 40: the list is behind the event, whatever the settings read says.
+    head.competitions = 40;
+    await emit({ type: 'tournament_updated', seq: 50, data: null });
+    await pastWindow();
+    expect(lists(), 'the first read').toBe(beforeLists + 1);
+    head.competitions = 50;
+    await pastWindow();
+    expect(lists(), 'and one more, since it named less than the event').toBe(beforeLists + 2);
+    await pastWindow();
+    expect(lists(), 'and no third: that answer holds the event').toBe(beforeLists + 2);
+  });
 });

@@ -243,152 +243,160 @@ function checkSeqGap(state, seq, onGap) {
 // half is held_push_wait_test.go, the JS half refetch_gate.test.jsx).
 const HELD_PUSH_WAIT_MS = 300;
 
+// FETCH_DEADLINE_MS: a gate fetch with no answer after this is abandoned as
+// failed, so a fetch that never settles cannot freeze the gate. 30 s is
+// longer than a slow tablet on a bad link takes to answer, and short enough
+// that a later event recovers.
+const FETCH_DEADLINE_MS = 30000;
+
 // createRefetchGate (bc-sseq FR4) is the ONE owner of "does this event need
 // a refetch". A host makes one per thing it fetches again (a competition's
 // detail, the list, the court feed) and sends every event that would have
 // refetched through `event(seq)`, instead of scheduling a fetch per event.
-//   - schedule(run, delayMs): the host's timer (timerPool.schedule);
+//   - schedule(run, delayMs): the host's timer pool (timerPool.schedule),
+//     cleared with the host's effect;
 //   - fetch(): sends the read and answers a promise of the value the fetcher
 //     returned, whose seq read_seq.jsx holds (readSeqOf);
-//   - take(): called as the fetch is sent; answers the function that takes
+//   - take(): called as the fetch is sent; answers apply(value), which takes
 //     the fetch's answer (the push ledger's keeper is made at send time), or
-//     nothing to drop it;
+//     nothing to drop it. apply returns exactly false when it dropped the
+//     answer unshown (the host's audience changed while it was out): its seq
+//     then covers nothing. Any other return means it was applied;
 //   - maxDelayMs: the top of the host's jitter window. Each fetch is sent a
 //     delay drawn uniformly from HELD_PUSH_WAIT_MS to it (the wait is the
-//     window's start, never added before it, so no page waits longer than its
-//     window's top);
-//   - onError(err): a failed fetch or take (console.error by default).
-// The gate's answers, in order:
-//   - an event at or below the applied answer's seq needs no refetch;
-//   - while a refetch is scheduled and not sent, more events add nothing, and
-//     an applied answer that covers every event seen (an out-of-gate read,
-//     such as the save's own refresh) cancels it; one asked for by now() or by
-//     an event with no seq is sent whatever was applied;
-//   - while one is out, it keeps the highest seq seen, and once the answer
-//     lands it schedules one more only if that answer names a lower seq (or
-//     none: a missing header covers nothing);
-//   - an answer that names a lower seq than the highest event seen before
-//     its fetch was sent was built before that event (a fetch can join a
-//     build the server elected earlier): one more refetch is asked for, and
-//     only one, since a fetch that repeats it never asks again;
-//   - now() (reconnect, tab resume, a gap) asks for one whatever the seq,
-//     still coalescing;
-//   - an answer naming a lower seq than the applied one is a late answer (a
-//     build that began earlier, openapi EventSeq) and changes nothing: the
-//     applied seq only ever rises. A seq cannot be compared across a server
-//     restart (the head seq starts again at 0 and no header names the
-//     stream), so a host whose stream ended and reopened calls restart();
-//   - a refetch that fails is asked for again once, after the same wait, and
-//     as forced as the one that failed (now(), restart()); a second failure waits for the next event or now() (an offline device
-//     must not poll);
-//   - forget() (resync_required) drops every seq: nothing counts as applied,
-//     and an answer to a fetch sent before it is taken but its seq is not
-//     adopted. The host asks for its refetch with now();
-//   - restart() (the stream reopened, resync_required) is forget() and now():
-//     nothing counts as applied and one refetch is asked for whatever its
-//     seq says;
-//   - dispose() (the host's effect ended, so the page it fetched for is gone):
-//     a fetch still out is neither applied nor followed by another, and
-//     nothing is sent again. A host calls it in the effect's cleanup, beside
-//     clearing its timers, since an answer landing after a competition was
-//     switched away would otherwise show the old competition's data.
-// Every fetch that applies the same state outside the gate (a first load, a
+//     window's start, never added before it);
+//   - onError(err): a failed fetch or apply (console.error by default).
+// The life of a refetch:
+//   - asked for: by an event above the applied seq, or, forced, by an event
+//     with no seq, now(seq?) (reconnect, tab resume, a gap; a seq it names
+//     counts as seen) or restart(). An ask while one is scheduled joins it;
+//     an ask while one is out asks for one more after it.
+//   - sent: after the wait, unless it is not forced and an answer applied
+//     meanwhile (an out-of-gate read, such as a save's own refresh) covers
+//     every event seen.
+//   - answered: an answer naming a lower seq than the applied one is late (a
+//     build that began earlier, openapi EventSeq): it is not applied, so it
+//     never puts older data over a newer read, and the applied seq only
+//     rises. Any answer asks for one more when an event seen while it was out
+//     is above its seq (a missing header covers nothing, an event with no seq
+//     is never covered), or, once only, when its seq is below an event seen
+//     before it was sent (it joined a build the server elected earlier).
+//   - failed: a fetch that rejects, an apply that throws, or a fetch with no
+//     answer after FETCH_DEADLINE_MS (abandoned: its late answer is ignored)
+//     is asked for again once, as forced as the one that failed; an event
+//     seen while it was out still gets its refetch. A second failure waits
+//     for the next event or now(): an offline device must not poll.
+//   - ended: forget() (resync_required) drops every seq: nothing counts as
+//     applied, and an answer to a fetch sent before it is applied but not
+//     adopted. restart() (the stream reopened; a seq cannot be compared
+//     across a server restart) is forget() and a forced ask. dispose() (the
+//     host's effect ended): a fetch still out is neither applied nor followed
+//     by another, and nothing is sent again.
+// A host made after its page read seeds the gate with that read's seq:
+// seed(seq), whose first answer replaces it (the seed may be older than a
+// server restart). A fetch that applies the same state outside the gate (a first load, a
 // refresh after a save) reports the seq of the value its fetcher returned,
-// before any merge: `applied(readSeqOf(fetched))`. The gate's own fetch never
-// reports: the answer it returns is read by the gate itself, which drops one
-// sent before forget().
-// event() answers true when the event asked for (or joined) a refetch, false
-// when an applied answer already covers it.
+// before any merge: `applied(readSeqOf(fetched))`. event() answers true when
+// the event asked for (or joined) a refetch, false when an applied answer
+// already covers it.
 function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_MS, random = Math.random, onError } = {}) {
     const report = typeof onError === 'function' ? onError : (err) => console.error('Refresh failed:', err);
     const top = Math.max(HELD_PUSH_WAIT_MS, Number(maxDelayMs) || 0);
     let applied = 0;      // seq of the newest answer applied (0: none)
-    let seen = 0;         // highest event seq seen (events only, never an answer)
-    let scheduled = false;
-    let inflight = false;
-    let again = false;    // a refetch was asked for while one was out
-    let flightSeq = 0;    // highest event seq seen while the fetch was out
-    let flightUnknown = false; // an event with no seq arrived while it was out
-    let flightSent = 0;   // highest event seq seen when the fetch was sent
-    let flightRecheck = false; // the fetch out is the repeat of one that answered behind
-    let recheck = false;  // the refetch wanted is that repeat
-    let forced = false;   // the refetch wanted is one applied() cannot cancel
-    let flightForced = false; // the fetch out was one, so its retry is too
-    let generation = 0;
+    let seen = 0;         // highest event seq seen (events and now(seq), never an answer)
+    let generation = 0;   // forget()s so far: an answer sent before one is not adopted
     let failed = false;   // the last fetch failed and has been asked for again
     let disposed = false; // the host's effect ended: nothing is sent or applied
+    let seeded = false;   // applied came from seed(): the next answer replaces it
+    let flights = 0;      // flight ids handed out
+    // flight: the fetch out, or null. id: its number; gen: the generation it
+    // was sent in; sent: `seen` when it was sent; seq: highest event seq seen
+    // while out; unknown: an event with no seq arrived while out; recheck: it
+    // repeats one that answered behind; forced: it was forced, so its retry
+    // is too.
+    let flight = null;
+    // wanted: the next refetch. scheduled: its timer is set; again: asked for
+    // while one was out; forced: applied() cannot cancel it; recheck: it is
+    // the repeat of an answer that came back behind.
+    const wanted = { scheduled: false, again: false, forced: false, recheck: false };
 
     const isSeq = (seq) => typeof seq === 'number' && Number.isSafeInteger(seq) && seq > 0;
 
     // adopt records an answer's seq. It only ever rises: a lower one is a
-    // late answer (a build that began earlier) and holds nothing new.
+    // late answer (a build that began earlier) and holds nothing new. The
+    // exception is the first answer after seed(): the seed came from a read
+    // made before the stream may have restarted, so that answer replaces it.
     const adopt = (seq) => {
-        if (isSeq(seq) && seq > applied) applied = seq;
+        if (!isSeq(seq)) return;
+        if (seeded) {
+            seeded = false;
+            applied = seq;
+        } else if (seq > applied) applied = seq;
     };
 
-    // forced: the refetch asked for is one an applied answer cannot cancel
-    // (now(), an event with no seq, a failed fetch): fire() sends it
-    // whatever has been applied since.
-    const want = (force) => {
+    // note records an event's seq as seen and, while a fetch is out, as seen
+    // during it: settle() judges it once the answer lands.
+    const note = (seq) => {
+        if (!isSeq(seq)) {
+            if (flight) flight.unknown = true;
+            return;
+        }
+        if (seq > seen) seen = seq;
+        if (flight && seq > flight.seq) flight.seq = seq;
+    };
+
+    // ask wants a refetch. A forced one (now(), an event with no seq, a failed
+    // fetch) is sent whatever has been applied since.
+    const ask = (force) => {
         if (disposed) return;
-        if (force) forced = true;
-        if (scheduled) return;
-        if (inflight) { again = true; return; }
-        scheduled = true;
+        if (force) wanted.forced = true;
+        if (wanted.scheduled) return;
+        if (flight) { wanted.again = true; return; }
+        wanted.scheduled = true;
         schedule(fire, HELD_PUSH_WAIT_MS + random() * (top - HELD_PUSH_WAIT_MS));
     };
 
-    const settle = (gen, seq, ok) => {
-        inflight = false;
-        let more = again;
+    // settle ends flight `f`: answered with `seq` when ok, failed otherwise.
+    const settle = (f, seq, ok) => {
+        flight = null;
+        let more = wanted.again;
         let force = false;
-        again = false;
-        if (gen === generation && ok) {
-            if (flightUnknown) more = force = true;
-            else if (flightSeq > 0 && !(isSeq(seq) && seq >= flightSeq)) more = true;
-            // An answer behind an event seen before the fetch was sent was
-            // built before that event (it joined an earlier build): fetch
-            // once more. Only once, so a server whose seq restarted below
-            // the page's cannot loop it.
-            else if (!flightRecheck && isSeq(seq) && seq < flightSent) more = recheck = true;
+        wanted.again = false;
+        const current = f.gen === generation;
+        if (current && ok) {
+            if (f.unknown) more = force = true;
+            else if (f.seq > 0 && !(isSeq(seq) && seq >= f.seq)) more = true;
+            // Behind an event seen before it was sent: once only, so a server
+            // whose seq restarted below the page's cannot loop it.
+            else if (!f.recheck && isSeq(seq) && seq < f.sent) more = wanted.recheck = true;
             adopt(seq);
             failed = false;
-        } else if (flightUnknown || flightSeq > 0) {
+        } else if (f.unknown || f.seq > 0) {
             more = force = true;
         }
-        // A failed fetch is asked for again once: the burst it served rode on
-        // it alone, so no later fetch covers it. A second failure waits for
-        // an event or now().
-        if (gen === generation && !ok && !failed) {
+        // A failure is asked for again once, as forced as the fetch it repeats
+        // (else fire() would find nothing to ask after now() or restart()).
+        if (current && !ok && !failed) {
             failed = more = true;
-            // A forced fetch (now(), restart()) was sent whatever had been
-            // applied: its retry is too, or fire() would find nothing to ask.
-            force = force || flightForced;
-        }
-        else if (!ok) failed = false;
-        flightSeq = 0;
-        flightUnknown = false;
-        flightForced = false;
-        if (more) want(force);
+            force = force || f.forced;
+        } else if (!ok) failed = false;
+        if (more) ask(force);
     };
 
+    // out: flight `id` is still the one the gate waits for.
+    const out = (id) => !disposed && flight !== null && flight.id === id;
+
     function fire() {
-        scheduled = false;
+        wanted.scheduled = false;
         if (disposed) return;
-        if (inflight) { again = true; return; }
-        // An answer applied since the refetch was asked for may cover every
-        // event seen: then there is nothing left to fetch.
-        const repeat = recheck;
-        recheck = false;
-        if (!forced && seen <= applied) return;
-        flightForced = forced;
-        forced = false;
-        inflight = true;
-        flightSeq = 0;
-        flightUnknown = false;
-        flightSent = seen;
-        flightRecheck = repeat;
-        const gen = generation;
+        if (flight) { wanted.again = true; return; }
+        const recheck = wanted.recheck;
+        wanted.recheck = false;
+        if (!wanted.forced && seen <= applied) return;
+        flights += 1;
+        const f = { id: flights, gen: generation, sent: seen, seq: 0, unknown: false, recheck, forced: wanted.forced };
+        wanted.forced = false;
+        flight = f;
         let apply;
         let sent;
         try {
@@ -397,20 +405,29 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
         } catch (err) {
             sent = Promise.reject(err);
         }
+        schedule(() => {
+            if (!out(f.id)) return;
+            report(new Error(`refetch did not answer in time (${FETCH_DEADLINE_MS} ms)`));
+            settle(f, 0, false);
+        }, FETCH_DEADLINE_MS);
         sent.then((value) => {
-            if (disposed) return;
+            if (!out(f.id)) return;
+            const seq = readSeqOf(value);
             let ok = true;
+            let kept = true;
             try {
-                if (typeof apply === 'function') apply(value);
+                // Older than a read already shown: applying it would put
+                // older data back.
+                if (typeof apply === 'function' && !(isSeq(seq) && seq < applied)) kept = apply(value) !== false;
             } catch (err) {
                 ok = false;
                 report(err);
             }
-            settle(gen, readSeqOf(value), ok);
+            settle(f, kept ? seq : 0, ok);
         }, (err) => {
-            if (disposed) return;
+            if (!out(f.id)) return;
             report(err);
-            settle(gen, 0, false);
+            settle(f, 0, false);
         });
     }
 
@@ -418,33 +435,37 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
         generation += 1;
         applied = 0;
         seen = 0;
+        seeded = false;
     };
 
     return {
         event(seq) {
             if (isSeq(seq) && seq <= applied) return false;
-            if (isSeq(seq) && seq > seen) seen = seq;
-            if (inflight) {
-                // Judged once the answer lands (settle): it covers this
-                // event only when it names this seq or a higher one.
-                if (!isSeq(seq)) flightUnknown = true;
-                else if (seq > flightSeq) flightSeq = seq;
-                return true;
-            }
-            want(!isSeq(seq));
+            note(seq);
+            if (!flight) ask(!isSeq(seq));
             return true;
         },
-        now() { want(true); },
+        now(seq) {
+            if (isSeq(seq)) note(seq);
+            ask(true);
+        },
         applied(seq) { adopt(seq); },
+        // seed(seq): a gate made after the page read starts from that read's
+        // seq, so its first event does not fetch what the page holds. The
+        // seed may be older than a server restart, so the first answer that
+        // follows replaces it instead of being held at or below it.
+        seed(seq) {
+            adopt(seq);
+            seeded = isSeq(seq);
+        },
         forget,
         restart() {
             forget();
-            want(true);
+            ask(true);
         },
-        // dispose() ends the gate with the host's effect: a fetch already out
-        // is not applied (take's function never runs) and asks for nothing
-        // more, and no later event, now() or restart() sends one. The seq it
-        // held stays readable through appliedSeq().
+        // dispose() ends the gate with the host's effect (call it in the
+        // effect's cleanup): the seq it held stays readable through
+        // appliedSeq().
         dispose() { disposed = true; },
         // appliedSeq: the seq the gate counts as applied (tests and logs).
         appliedSeq() { return applied; },
@@ -776,7 +797,7 @@ function matchInComp(comp, id) {
 
 export {
     applyPatch, applyPatchToCompetitions, applyPatchOrdered, checkSeqGap,
-    createRefetchGate, HELD_PUSH_WAIT_MS,
+    createRefetchGate, HELD_PUSH_WAIT_MS, FETCH_DEADLINE_MS,
     keepNewerMatches, keepNewerDetail, keepNewerCompetitions, keepNewerTournament, isOlderRunningCopy,
     createPushLedger,
     matchInComp,

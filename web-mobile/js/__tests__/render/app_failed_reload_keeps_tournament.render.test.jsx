@@ -12,6 +12,7 @@ import React from 'react';
 import { act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, afterAll } from 'vitest';
 import { mountApp, settle, propsProbe } from '../helpers/mount_app.js';
+import { HELD_PUSH_WAIT_MS } from '../../patch.jsx';
 
 const home = propsProbe((props) => <div data-testid="viewer-home">{props.tournament && props.tournament.name}</div>);
 
@@ -31,10 +32,18 @@ const STUBBED_GLOBALS = {
   },
 };
 
-// A server event that reloads the tournament at once (resync_required calls
-// load() with no jitter).
+// A server event that reloads the tournament through the list gate
+// (resync_required restarts it). With Math.random at 0 the reload is sent at
+// the start of the gate's window, HELD_PUSH_WAIT_MS; a failed one is asked for
+// again once, after another window, so the wait covers both.
 const reload = async () => {
-  await act(async () => { sse.emit({ type: 'resync_required', seq: 0 }); });
+  const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+  try {
+    await act(async () => { sse.emit({ type: 'resync_required', seq: 0 }); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 2 * HELD_PUSH_WAIT_MS + 60)); });
+  } finally {
+    random.mockRestore();
+  }
   await settle();
 };
 
@@ -47,14 +56,15 @@ describe('a failed reload keeps the tournament on screen', () => {
     ({ unmount } = await mountApp({ path: '/', globals: STUBBED_GLOBALS }));
     expect(screen.getByTestId('viewer-home')).toHaveTextContent('London Cup');
 
-    // load() logs each failure; that log is expected here.
+    // The list gate logs each failure; that log is expected here.
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       // The tournament fetch fails (a network blip, or a 5xx, which
       // fetchTournament throws on).
       window.API.fetchTournament.mockRejectedValueOnce(new Error('Failed to fetch tournament (Status 503)'));
       await reload();
-      expect(window.API.fetchTournament).toHaveBeenCalledTimes(2);
+      // The failed read, and the gate's one more try.
+      expect(window.API.fetchTournament).toHaveBeenCalledTimes(3);
       expect(screen.queryByText('Welcome to Bracket Creator')).toBeNull();
       expect(screen.getByTestId('viewer-home')).toHaveTextContent('London Cup');
       expect(home.props.tournament.name).toBe('London Cup');
@@ -62,11 +72,12 @@ describe('a failed reload keeps the tournament on screen', () => {
       // The tournament answers but its competitions do not.
       window.API.fetchCompetitions.mockRejectedValueOnce(new TypeError('Failed to fetch'));
       await reload();
-      expect(window.API.fetchTournament).toHaveBeenCalledTimes(3);
+      expect(window.API.fetchTournament).toHaveBeenCalledTimes(5);
       expect(screen.queryByText('Welcome to Bracket Creator')).toBeNull();
       expect(screen.getByTestId('viewer-home')).toHaveTextContent('London Cup');
 
-      expect(logged.mock.calls.map((c) => c[0])).toEqual(['Failed to load tournament', 'Failed to load tournament']);
+      // One log per failed read: the gate's, not also the read's own.
+      expect(logged.mock.calls.map((c) => c[0])).toEqual(['Tournament refresh failed:', 'Tournament refresh failed:']);
     } finally {
       logged.mockRestore();
     }
@@ -74,7 +85,7 @@ describe('a failed reload keeps the tournament on screen', () => {
     // The server says there is no tournament: now the setup screen opens.
     window.API.fetchTournament.mockResolvedValueOnce(null);
     await reload();
-    expect(window.API.fetchTournament).toHaveBeenCalledTimes(4);
+    expect(window.API.fetchTournament).toHaveBeenCalledTimes(6);
     expect(screen.getByText('Welcome to Bracket Creator')).toBeInTheDocument();
     expect(screen.queryByTestId('viewer-home')).toBeNull();
   });

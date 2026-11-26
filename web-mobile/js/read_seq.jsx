@@ -14,6 +14,7 @@
 // merging, since the merged object carries none.
 //   - noteReadSeq(value, res): keeps the answer's seq for `value` (the object
 //     the fetcher finally returns) and returns `value`;
+//   - holdReadSeq(value, seq): the same for a seq the host worked out;
 //   - readSeqOf(value): that seq, or 0 when the answer carried none (a
 //     missing or unreadable header covers no event).
 //
@@ -38,16 +39,22 @@ function headerSeq(res) {
     return Number.isSafeInteger(n) && n > 0 ? n : 0;
 }
 
-function noteReadSeq(value, res) {
+// holdReadSeq keeps `seq` as `value`'s place in the stream (0 clears it) and
+// returns `value`: for a host that joins two answers into one value, which is
+// covered only up to the lower of their seqs.
+function holdReadSeq(value, seq) {
     if (!keyable(value)) return value;
-    const seq = headerSeq(res);
     if (seq > 0) seqs.set(value, seq);
     else seqs.delete(value);
     return value;
+}
+
+function noteReadSeq(value, res) {
+    return holdReadSeq(value, headerSeq(res));
 }
 
 function readSeqOf(value) {
     return keyable(value) ? seqs.get(value) || 0 : 0;
 }
 
-export { EVENT_SEQ_HEADER, noteReadSeq, readSeqOf };
+export { EVENT_SEQ_HEADER, holdReadSeq, noteReadSeq, readSeqOf };

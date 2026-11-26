@@ -81,11 +81,14 @@ describe('reloading after the event stream was lost', () => {
 
     // An event reached the page during the outage; the load it started failed.
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
     try {
       window.API.fetchTournament.mockRejectedValueOnce(new TypeError('Failed to fetch'));
       await act(async () => { sse.emit({ type: 'resync_required', seq: 0 }); });
+      await act(async () => { await new Promise((r) => setTimeout(r, HELD_PUSH_WAIT_MS + 20)); });
       await settle();
     } finally {
+      random.mockRestore();
       logged.mockRestore();
     }
     expect(shown()).not.toBe(name);

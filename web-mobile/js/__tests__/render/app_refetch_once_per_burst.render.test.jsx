@@ -31,6 +31,7 @@ const sse = { emit: null, status: null };
 
 const STUBBED_GLOBALS = {
   ViewerCompetition: page.Component,
+  ViewerHome: () => <div data-testid="viewer-home" />,
   API: {
     fetchTournament: vi.fn(async () => withSeq({ name: 'T', courts: ['A'] }, head.tournament)),
     fetchCompetitions: vi.fn(async () => withSeq([{ id: 'c1', name: 'Open', date: '2026-11-01' }], head.competitions)),
@@ -159,5 +160,43 @@ describe('the public competition page fetches once per burst (bc-sseq FR4)', () 
     await pastWindow();
     expect(loads(), 'and no third one: the answer named the event').toBe(before + 2);
     error.mockRestore();
+  });
+
+  it('a reconnect followed by resync_required reads the list once', async () => {
+    head.tournament = 60;
+    head.competitions = 60;
+    await pastWindow();
+    const beforeLoads = loads();
+    await act(async () => { sse.status('error'); });
+    await act(async () => { sse.status('open'); });
+    // The reopened stream restarted the gate; resync_required restarts it
+    // again, and both ask for the same one read.
+    await emit({ type: 'resync_required', seq: 3 });
+    await pastWindow();
+    expect(loads(), 'one list read for the two').toBe(beforeLoads + 1);
+  });
+
+  it('a restart seen away from the competition drops the seq the page kept for it', async () => {
+    // The page reads the detail at 40 and leaves for the lobby, which keeps
+    // 40 for a gate made later.
+    head.detail = 40;
+    await emit(tap(39, ['M']));
+    await pastWindow();
+    window.history.pushState(null, '', '/');
+    await act(async () => { window.dispatchEvent(new PopStateEvent('popstate')); });
+    await pastWindow();
+    // The server restarts while the page is on the lobby: its seqs begin again.
+    head.detail = 3;
+    head.tournament = 3;
+    head.competitions = 3;
+    await emit({ type: 'resync_required', seq: 3 });
+    await pastWindow();
+    window.history.pushState(null, '', '/competition/c1');
+    await act(async () => { window.dispatchEvent(new PopStateEvent('popstate')); });
+    await pastWindow();
+    const before = details();
+    await emit(tap(4, ['M', 'K']));
+    await pastWindow();
+    expect(details(), 'an event of the new stream is above the read the page holds').toBe(before + 1);
   });
 });

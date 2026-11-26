@@ -132,24 +132,35 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // { court, gate }: every read of the feed tells it the seq of the answer
     // it applied (bc-sseq FR4), so an event that answer holds fetches nothing.
     const feedGateRef = useRef(null);
-    // readCourt answers the feed it applied (whose seq readSeqOf reads), or
-    // nothing when none was, and rejects when the read failed. It reports
-    // nothing to the feed gate: the gate's own fetch takes the seq off the
-    // answer, and refreshCourt below reports for every read made outside it.
-    const readCourt = useCallback(() => {
+    // fetchCourt reads the court's feed and answers it (whose seq readSeqOf
+    // reads), or nothing when there is no court to read, and rejects when the
+    // read failed. It shows nothing: takeCourt, called as the read is sent,
+    // answers what does, so the feed gate can leave an answer older than a read
+    // the page already shows unshown, and a late answer after the court
+    // changed never shown at all.
+    const fetchCourt = useCallback(() => {
         if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return Promise.resolve(null);
+        return window.API.fetchCourtMatches(court);
+    }, [court]);
+    const takeCourt = useCallback(() => {
         // A refetch never puts a row back to an older state
         // (keepNewerCompetitions, patch.jsx; the rule showRunningPush applies
         // to a push), nor behind a push applied after it was sent (push-wins).
         const keep = pushes.competitions();
-        return window.API.fetchCourtMatches(court)
-            .then(comps => {
-                if (!mountedRef.current) return null;
-                setCourtComps((prev) => keep(prev, comps));
-                forgetTieBreakerStandings(comps);
-                return comps;
-            });
-    }, [court, pushes]);
+        return (comps) => {
+            // Guarded by mountedRef: a late resolve after unmount is dropped.
+            if (!mountedRef.current || !comps) return false;
+            setCourtComps((prev) => keep(prev, comps));
+            forgetTieBreakerStandings(comps);
+            return true;
+        };
+    }, [pushes]);
+    // readCourt is fetchCourt and takeCourt in one, for a read made outside the
+    // feed gate: it answers the feed it showed, or nothing when none was.
+    const readCourt = useCallback(() => {
+        const apply = takeCourt();
+        return fetchCourt().then((comps) => (apply(comps) ? comps : null));
+    }, [fetchCourt, takeCourt]);
     // refreshCourt is every read of the feed made outside the feed gate: a
     // failed one is logged and answers nothing, an applied one is told to the
     // gate so an event it holds fetches nothing.
@@ -272,7 +283,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // none for an event the feed applied already holds.
         const feedGate = createRefetchGate({
             schedule: timerPool.schedule,
-            fetch: () => (cancelled ? null : readCourt()),
+            fetch: () => (cancelled ? null : fetchCourt()),
+            take: () => (cancelled ? undefined : takeCourt()),
             maxDelayMs: 600,
             onError: (err) => console.error("Failed to fetch court matches", err),
             // Read at each schedule, so a test's Math.random stub reaches it.
@@ -376,7 +388,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             document.removeEventListener("visibilitychange", onVisible);
             unsub();
         };
-    }, [court, refreshCourt, readCourt, pushes]);
+    }, [court, refreshCourt, fetchCourt, takeCourt, pushes]);
 
     // Court-scoped competitions: the live feed once loaded, else the prop
     // aggregate as a transient fallback. All competition/match derivations below

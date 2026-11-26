@@ -2,7 +2,7 @@
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
 import { applyPatch as patchCompetitionData, applyPatchToCompetitions, checkSeqGap, createPushLedger, createRefetchGate, matchInComp } from './patch.jsx';
-import { readSeqOf } from './read_seq.jsx';
+import { holdReadSeq, readSeqOf } from './read_seq.jsx';
 import { makeReconnectRefetcher } from './admin_shiaijo_feed.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 // Imported from the leaf, not read off `window`: write_result.jsx is
@@ -918,8 +918,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             // Cancelled flag is the primary navigation guard. The id check is
             // belt-and-braces in case a fetch comes back with unexpected data
             // shape.
-            if (cancelled || data?.config?.id !== compId) return;
+            if (cancelled || data?.config?.id !== compId) return false;
             setAdminCompData((prev) => keep(prev, data));
+            return true;
           };
         },
         maxDelayMs: 500,
@@ -948,17 +949,20 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             ? Promise.all([window.API.fetchTournament(), window.API.fetchCompetitions()])
                 .then(([tourney, comps]) => ({ tourney, comps }))
             : window.API.fetchCompetitions().then(comps => ({ tourney: null, comps }));
-          return work.then(({ tourney, comps }) => {
-            if (cancelled) return null;
-            const base = tourney || tRef.current;
-            onUpdateRef.current({ ...base, competitions: comps });
-            // Both reads are applied: covered only up to the lower seq.
-            return tourney && readSeqOf(tourney) < readSeqOf(comps) ? tourney : comps;
-          }, (err) => {
+          return work.then(({ tourney, comps }) => (
+            // Both reads are joined: covered only up to the lower seq.
+            holdReadSeq({ tourney, comps }, tourney ? Math.min(readSeqOf(tourney), readSeqOf(comps)) : readSeqOf(comps))
+          ), (err) => {
             // A config that was asked for and not read is asked for again.
             if (fetchTournament) pendingNeedsTournamentFetch = true;
             throw err;
           });
+        },
+        // The gate shows what it read, so it can leave an older answer than a
+        // read the page already shows unshown.
+        take: () => ({ tourney, comps }) => {
+          const base = tourney || tRef.current;
+          onUpdateRef.current({ ...base, competitions: comps });
         },
         maxDelayMs: 1500,
         random: () => Math.random(),
@@ -966,13 +970,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       });
       detailGateRef.current = { compId, gate: detailGate };
       listGateRef.current = listGate;
-      listGate.applied(listSeedRef.current);
-      if (detailSeedRef.current.compId === compId) detailGate.applied(detailSeedRef.current.seq);
+      listGate.seed(listSeedRef.current);
+      if (detailSeedRef.current.compId === compId) detailGate.seed(detailSeedRef.current.seq);
       const refetchDetail = (seq) => detailGate.event(seq);
       const scheduleTournamentRefresh = (needsTournament, seq) => {
         if (needsTournament) {
           pendingNeedsTournamentFetch = true;
-          listGate.now();
+          listGate.now(seq);
         } else {
           listGate.event(seq);
         }

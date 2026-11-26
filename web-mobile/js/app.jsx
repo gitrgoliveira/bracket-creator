@@ -2,7 +2,7 @@
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
 import { applyPatch as patchCompetitionData, checkSeqGap, createPushLedger, createRefetchGate, keepNewerTournament } from './patch.jsx';
-import { readSeqOf } from './read_seq.jsx';
+import { holdReadSeq, readSeqOf } from './read_seq.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
@@ -955,69 +955,78 @@ function App() {
   const listSeedRef = useRef(0);
   const detailSeedRef = useRef({ compId: null, seq: 0 });
 
-  // readList reads the tournament and its competitions and shows them. It
-  // answers the read that names the lower seq (read_seq.jsx) when the page now
-  // holds both, true when no tournament is configured, and READ_SUPERSEDED for
-  // a read dropped as below; a read that failed REJECTS, after the page's own
-  // state is tended, so whoever asked sees the failure. It reports nothing to
-  // the list gate: the gate's own fetch takes the seq off the answer, and
-  // load below reports for every read made outside the gate.
-  const readList = async () => {
-    // bc-hnam: an answer read as another audience than the page reads as by
-    // the time it lands (the route changed meanwhile) is dropped: the change
-    // of audience reads again.
-    const readAs = currentReadAudienceKey();
+  // fetchList reads the tournament and its competitions and answers the
+  // tournament with its competitions set, or null when no tournament is
+  // configured. The answer is covered only up to the lower of the two reads'
+  // seqs (bc-sseq FR4), so that is the seq it holds (read_seq.jsx). It shows
+  // nothing: showList does, so the list gate can leave an answer unshown. A
+  // read that failed REJECTS, after the page's own state is tended, so whoever
+  // asked sees the failure and logs it.
+  const fetchList = async () => {
     try {
       const t = await window.API.fetchTournament();
-      if (currentReadAudienceKey() !== readAs) return READ_SUPERSEDED;
-      if (!t || t.error) {
-        // null = no tournament configured yet: fetchTournament returns null for
-        // the bootstrap state (a 200 with a null body on newer servers, or a 404
-        // on older ones). Open the create-tournament gate without logging an error.
-        setTournament(null);
-        return true;
-      } else {
-        const comps = await window.API.fetchCompetitions();
-        if (currentReadAudienceKey() !== readAs) return READ_SUPERSEDED;
-        t.competitions = comps;
-        // A display takes the fetch whole: no score editor reads it, and a
-        // reload must discard its optimistic broadcast overlay (see below).
-        if (mode === "display") setTournament(t);
-        else updateTournament(t);
-        applyTheme(t.theme); // mp-scf: apply custom colors
-        // The page now holds both reads, so it is covered only up to the
-        // lower of their seqs (bc-sseq FR4): that read is the one reported.
-        return readSeqOf(t) <= readSeqOf(comps) ? t : comps;
-      }
+      // null = no tournament configured yet: fetchTournament returns null for
+      // the bootstrap state (a 200 with a null body on newer servers, or a 404
+      // on older ones). Open the create-tournament gate without logging an error.
+      if (!t || t.error) return null;
+      const comps = await window.API.fetchCompetitions();
+      t.competitions = comps;
+      return holdReadSeq(t, Math.min(readSeqOf(t), readSeqOf(comps)));
     } catch (e) {
       // A failed fetch (network, 5xx) says nothing about whether a tournament
       // exists, so it never opens the create-tournament gate over one already
       // shown: a failed RELOAD (every SSE event runs one) keeps the last good
-      // data, logged like the page's other background refetches, and the
-      // connection indicator reports the outage. Only the FIRST load moves
-      // undefined to null here, so the gate opens instead of spinning; only
-      // the server's own "no tournament" answer (above) replaces a loaded one.
-      console.error("Failed to load tournament", e);
+      // data, and the connection indicator reports the outage. Only the FIRST
+      // load moves undefined to null here, so the gate opens instead of
+      // spinning; only the server's own "no tournament" answer replaces a
+      // loaded one.
       // A refused password says nothing about whether a tournament exists
       // either: dropStaleCredential has taken the page off the admin audience,
       // and that change of audience reads again.
       if (!(e && e.code === CREDENTIAL_REFUSED)) setTournament((prev) => (prev === undefined ? null : prev));
-      throw e;
-    } finally {
       setLoading(false);
+      throw e;
     }
   };
 
+  // showList shows what fetchList answered, read as the audience `readAs`.
+  // bc-hnam: an answer read as another audience than the page reads as now
+  // (the route changed meanwhile) is dropped: the change of audience reads
+  // again. It answers the tournament it showed, true when no tournament is
+  // configured, and READ_SUPERSEDED for an answer it dropped.
+  const showList = (t, readAs) => {
+    setLoading(false);
+    if (t === READ_SUPERSEDED || currentReadAudienceKey() !== readAs) return READ_SUPERSEDED;
+    if (!t) {
+      setTournament(null);
+      return true;
+    }
+    // A display takes the fetch whole: no score editor reads it, and a
+    // reload must discard its optimistic broadcast overlay (see below).
+    if (mode === "display") setTournament(t);
+    else updateTournament(t);
+    applyTheme(t.theme); // mp-scf: apply custom colors
+    return t;
+  };
+
+  // readList is fetchList and showList in one, for a read made outside the
+  // list gate. It reports nothing to the gate: load below does.
+  const readList = async () => {
+    const readAs = currentReadAudienceKey();
+    return showList(await fetchList(), readAs);
+  };
+
   // load is every read of the list the page makes outside the list gate. It
-  // answers what readList does, except that a failed read answers false (the
-  // reload effect below waits for a truthy answer, reports false and ignores
-  // READ_SUPERSEDED), and it tells the list gate the seq of a read it
-  // showed, or keeps it for a gate made later.
+  // answers what readList does, except that a failed read is logged and
+  // answers false (the reload effect below waits for a truthy answer, reports
+  // false and ignores READ_SUPERSEDED), and it tells the list gate the seq of
+  // a read it showed, or keeps it for a gate made later.
   const load = async () => {
     let read;
     try {
       read = await readList();
-    } catch {
+    } catch (e) {
+      console.error("Failed to load tournament", e);
       return false;
     }
     if (read && typeof read === "object") {
@@ -1027,9 +1036,23 @@ function App() {
     return read;
   };
 
+  // The list gate's two halves (createRefetchGate, patch.jsx): fetchListRef
+  // reads, and takeList, called as the read is sent, answers what shows it
+  // (false when it dropped the answer). A refused password is no failure of
+  // the read: the audience change that follows reads again, so the gate must
+  // not retry it.
+  const fetchListRef = useLatestRef(() => fetchList().catch((e) => {
+    if (e && e.code === CREDENTIAL_REFUSED) return READ_SUPERSEDED;
+    throw e;
+  }));
+  const showListRef = useLatestRef(showList);
+  const takeList = useCallback(() => {
+    const sentAs = currentReadAudienceKey();
+    return (t) => showListRef.current(t, sentAs) !== READ_SUPERSEDED;
+  }, [showListRef]);
+
   // The effects below run load() as it is now, never re-running for it.
   const loadRef = useLatestRef(load);
-  const readListRef = useLatestRef(readList);
   useEffect(() => { loadRef.current(); }, [loadRef]);
 
   // Pace projections move on with the clock on the pace tick. The tournament
@@ -1318,12 +1341,15 @@ function App() {
     // data. The display reads `tournament`, never this. Called as the fetch
     // is sent; it answers what takes the fetch's answer. An answer read as
     // another audience than the page's now (the organiser signed out while it
-    // was out) is dropped, never shown: its names were not the public's.
+    // was out) is dropped, never shown (the function answers false, so the
+    // gate does not count its seq as applied): its names were not the public's.
     const takeCompDetail = () => {
         const keep = compPushes.detail();
         const sentAs = audienceRef.current;
         return (data) => {
-            if (audienceRef.current === sentAs) setSelectedCompData((prev) => keep(prev, data));
+            if (audienceRef.current !== sentAs) return false;
+            setSelectedCompData((prev) => keep(prev, data));
+            return true;
         };
     };
 
@@ -1350,12 +1376,13 @@ function App() {
     // A load made outside the gate reports its seq from load itself
     // (listGateRef), and the detail's first read from its own effect below
     // (detailGateRef). The list gate's fetch answers the read it made, or
-    // nothing when the load was skipped (it covers no event), and rejects
-    // when the read failed, so the gate asks for it again.
+    // nothing when the load was skipped (it covers no event, and takeList is
+    // not asked), and rejects when the read failed, so the gate asks for it
+    // again; the gate, not the fetch, shows what was read (takeList).
     const listGate = createRefetchGate({
         schedule: timerPool.schedule,
-        fetch: () => (listLoadSkipped() ? null : readListRef.current()
-            .then((read) => (read && typeof read === 'object' ? read : null))),
+        fetch: () => (listLoadSkipped() ? null : fetchListRef.current()),
+        take: () => (listLoadSkipped() ? undefined : takeList()),
         maxDelayMs: 2000,
         // Read at each schedule, so a test's Math.random stub reaches it.
         random: () => Math.random(),
@@ -1371,8 +1398,8 @@ function App() {
     }) : null;
     listGateRef.current = listGate;
     detailGateRef.current = detailGate ? { compId: viewerCompId, gate: detailGate } : null;
-    listGate.applied(listSeedRef.current);
-    if (detailGate && detailSeedRef.current.compId === viewerCompId) detailGate.applied(detailSeedRef.current.seq);
+    listGate.seed(listSeedRef.current);
+    if (detailGate && detailSeedRef.current.compId === viewerCompId) detailGate.seed(detailSeedRef.current.seq);
 
     // The pace tick's refetch: on a competition page the tournament list is
     // refetched every PACE_TICK_MS so shared-court pace drift stays current.
@@ -1397,6 +1424,17 @@ function App() {
         if (loadNow) maybeLoad();
         else listGate.now();
         if (detailGate) detailGate.now();
+    };
+
+    // restartReads is what a new stream asks of the page (resync_required, a
+    // stream that reopened): no answer held counts as applied, the gates
+    // included, and each sends ONE refetch, however many of these arrive in a
+    // row (a reconnect and then resync_required would otherwise read the list
+    // twice). The seqs the page kept for a gate made later need no reset: a
+    // seeded gate lets its first answer replace the seed (seed(), patch.jsx).
+    const restartReads = () => {
+        listGate.restart();
+        if (detailGate) detailGate.restart();
     };
 
     // F8: resync on tab resume. When the tab becomes visible again after
@@ -1439,9 +1477,7 @@ function App() {
             // Every held copy may be wrong: no push outranks the refetch,
             // and no answer held counts as applied (a new stream).
             compPushes.clear();
-            listGate.forget();
-            if (detailGate) detailGate.forget();
-            resync(true);
+            restartReads();
             return;
         }
 
@@ -1665,8 +1701,7 @@ function App() {
             streamLost = false;
             // The server may have restarted (its seqs begin again): no
             // answer held counts as applied, and one refetch follows.
-            listGate.restart();
-            if (detailGate) detailGate.restart();
+            restartReads();
         }
     });
     return () => {
@@ -1684,7 +1719,7 @@ function App() {
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('online', onOnline);
     };
-  }, [viewerCompId, mode, loadRef, compPushes, dropStaleCredentialRef]);
+  }, [viewerCompId, mode, loadRef, fetchListRef, takeList, compPushes, dropStaleCredentialRef]);
 
   useEffect(() => { selectedCompDataRef.current = selectedCompData; }, [selectedCompData]);
 

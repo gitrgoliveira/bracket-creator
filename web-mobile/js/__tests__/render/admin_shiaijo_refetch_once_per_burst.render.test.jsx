@@ -199,4 +199,68 @@ describe('the court console reads its feed once per burst (bc-sseq FR4)', () => 
       vi.useRealTimers();
     }
   });
+
+  it('an answer older than a read the page already shows is not shown', async () => {
+    vi.useFakeTimers();
+    const side = (id, name) => ({ id, name });
+    const match = (name) => ({
+      id: 'm1', status: 'running', phase: 'pool', poolName: 'Pool A', court: 'A', scheduledAt: '09:00',
+      sideA: side('p1', name), sideB: side('p2', 'Tanaka'), ipponsA: [], ipponsB: [], modifiedAt: 100,
+    });
+    // The competition's name is what the console shows of a feed, so it tells the answers apart.
+    const feed = (name, seq) => withSeq([{ id: 'c1', name, status: 'pools', poolMatches: [match('Yamada')] }], seq);
+    let emit = () => {};
+    let manual = false;
+    const pending = [];
+    const prev = {
+      fetch: window.API.fetchCourtMatches, sub: window.API.subscribeToEvents,
+      tm: window.tournamentMatches, fbc: window.filterMatchesByCourt,
+    };
+    const fetchCourtMatches = vi.fn().mockImplementation(() => (
+      manual ? new Promise((resolve) => pending.push(resolve)) : Promise.resolve(feed('Alpha Cup', 20))));
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    window.API.subscribeToEvents = (cb) => { emit = cb; return () => {}; };
+    window.tournamentMatches = (t) => (t.competitions || [])
+      .flatMap((c) => (c.poolMatches || []).map((m) => ({ ...m, compId: c.id, compName: c.name })));
+    window.filterMatchesByCourt = (matches) => matches;
+    const pastWindow = async () => {
+      await act(async () => { vi.advanceTimersByTime(700); });
+      await act(async () => { await Promise.resolve(); });
+    };
+    const answer = async (index, value) => {
+      await act(async () => { pending[index](value); });
+      await act(async () => { await Promise.resolve(); });
+    };
+    try {
+      await act(async () => { renderPage(makeMinimalTournament(), 'A'); });
+      await act(async () => { await Promise.resolve(); });
+      expect(document.body.textContent).toContain('Alpha Cup');
+
+      // An event sends a read that stays out; then the operator's Refresh
+      // reads the feed, and its newer answer is shown first.
+      manual = true;
+      await act(async () => {
+        emit({ type: 'match_updated', seq: 21, data: { competitionId: 'c1', matchId: 'm1', result: match('Yamada') } });
+      });
+      await pastWindow();
+      expect(pending, 'the event sent its read').toHaveLength(1);
+      const refresh = document.querySelector('button.shiaijo-refresh');
+      await act(async () => { refresh.click(); });
+      expect(pending, 'the Refresh sent its own').toHaveLength(2);
+      await answer(1, feed('Kimura Cup', 30));
+      expect(document.body.textContent).toContain('Kimura Cup');
+
+      // The older read lands late: it must not put the older feed back.
+      await answer(0, feed('Suzuki Cup', 25));
+      await pastWindow();
+      expect(document.body.textContent).toContain('Kimura Cup');
+      expect(document.body.textContent).not.toContain('Suzuki Cup');
+    } finally {
+      window.API.fetchCourtMatches = prev.fetch;
+      window.API.subscribeToEvents = prev.sub;
+      window.tournamentMatches = prev.tm;
+      window.filterMatchesByCourt = prev.fbc;
+      vi.useRealTimers();
+    }
+  });
 });

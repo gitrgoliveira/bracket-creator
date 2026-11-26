@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createRefetchGate, HELD_PUSH_WAIT_MS } from '../patch.jsx';
+import { createRefetchGate, HELD_PUSH_WAIT_MS, FETCH_DEADLINE_MS } from '../patch.jsx';
 import { noteReadSeq, readSeqOf, EVENT_SEQ_HEADER } from '../read_seq.jsx';
 import { API } from '../api_client.jsx';
 
@@ -19,24 +19,28 @@ const resWithSeq = (seq) => ({ headers: { get: (name) => (name === EVENT_SEQ_HEA
 const answerAt = (seq, body = {}) => noteReadSeq({ ...body }, resWithSeq(seq));
 
 // harness: a gate over a manual timer and a manual fetch, so a test decides
-// when each scheduled fetch is sent and when each answer lands.
-function harness({ maxDelayMs = 500, random = () => 0 } = {}) {
+// when each scheduled fetch is sent and when each answer lands. The deadline
+// each sent fetch schedules is kept apart (deadlines, fireDeadlines), so
+// `timers` holds only the refetches. `result` is what apply returns.
+function harness({ maxDelayMs = 500, random = () => 0, result = () => undefined } = {}) {
   const timers = [];
+  const deadlines = [];
   const sent = [];
   const taken = [];
   const errors = [];
   const gate = createRefetchGate({
-    schedule: (run, delay) => timers.push({ run, delay }),
+    schedule: (run, delay) => (delay === FETCH_DEADLINE_MS ? deadlines : timers).push({ run, delay }),
     fetch: () => new Promise((resolveFetch, rejectFetch) => sent.push({ resolve: resolveFetch, reject: rejectFetch })),
-    take: () => (value) => taken.push(value),
+    take: () => (value) => { taken.push(value); return result(value); },
     maxDelayMs,
     random,
     onError: (err) => errors.push(err),
   });
   const fireTimers = () => { const due = timers.splice(0); due.forEach((t) => t.run()); return due.length; };
+  const fireDeadlines = () => { const due = deadlines.splice(0); due.forEach((t) => t.run()); return due.length; };
   const answer = async (value, i = sent.length - 1) => { sent[i].resolve(value); await Promise.resolve(); await Promise.resolve(); };
   const fail = async (err, i = sent.length - 1) => { sent[i].reject(err); await Promise.resolve(); await Promise.resolve(); };
-  return { gate, timers, sent, taken, errors, fireTimers, answer, fail };
+  return { gate, timers, deadlines, sent, taken, errors, fireTimers, fireDeadlines, answer, fail };
 }
 
 describe('read_seq: an answer keeps its stream position beside its value', () => {
@@ -115,6 +119,34 @@ describe('createRefetchGate', () => {
     expect(h.taken).toEqual([value]);
     expect(h.timers).toHaveLength(0);
     expect(h.gate.appliedSeq()).toBe(5);
+  });
+
+  it('a seeded gate counts the seed as applied until its first answer, which replaces it', async () => {
+    // The seed is the seq of a read made before the stream may have
+    // restarted: the first answer after it names the new stream's seq, which
+    // is lower, and a gate that only raised applied would keep the seed.
+    const h = harness();
+    h.gate.seed(40);
+    expect(h.gate.event(30)).toBe(false); // the page holds it
+    h.gate.applied(3);
+    expect(h.gate.appliedSeq()).toBe(3);
+    expect(h.gate.event(4)).toBe(true);
+    h.gate.applied(2); // only the first answer replaces the seed
+    expect(h.gate.appliedSeq()).toBe(3);
+
+    // An applied seq that was never a seed is only ever raised.
+    const plain = harness();
+    plain.gate.applied(40);
+    plain.gate.applied(3);
+    expect(plain.gate.appliedSeq()).toBe(40);
+
+    // forget() drops the seed with everything else.
+    const forgotten = harness();
+    forgotten.gate.seed(40);
+    forgotten.gate.forget();
+    forgotten.gate.applied(3);
+    forgotten.gate.applied(2);
+    expect(forgotten.gate.appliedSeq()).toBe(3);
   });
 
   it('a replayed event the answer covers fetches nothing', async () => {
@@ -336,7 +368,8 @@ describe('createRefetchGate', () => {
     const timers = [];
     const sends = [];
     const gate = createRefetchGate({
-      schedule: (run) => timers.push(run),
+      // The fetch deadline is not a refetch: only refetch timers are kept.
+      schedule: (run, delay) => { if (delay !== FETCH_DEADLINE_MS) timers.push(run); },
       fetch: () => new Promise((r) => sends.push(r)),
       take: () => (data) => { held = { ...held, ...data }; },
       random: () => 0,
@@ -529,6 +562,121 @@ describe('createRefetchGate', () => {
     h.gate.restart();
     expect(h.timers).toHaveLength(0);
     expect(h.sent).toHaveLength(0);
+  });
+
+  it('now(seq) counts its seq as seen: an answer behind it is fetched once more', async () => {
+    // tournament_updated at seq 8: the answer joined a build elected before it.
+    const h = harness();
+    h.gate.now(8);
+    h.fireTimers();
+    await h.answer(answerAt(5));
+    expect(h.gate.appliedSeq()).toBe(5);
+    expect(h.timers).toHaveLength(1);
+    h.fireTimers();
+    await h.answer(answerAt(8));
+    expect(h.timers).toHaveLength(0);
+    expect(h.sent).toHaveLength(2);
+    expect(h.gate.event(8)).toBe(false);
+  });
+
+  it('an answer apply dropped (it returned false) is not adopted, and an event seen while it was out still gets its refetch', async () => {
+    let drop = true;
+    const h = harness({ result: () => (drop ? false : true) });
+    h.gate.event(1);
+    h.fireTimers();
+    h.gate.event(2);
+    await h.answer(answerAt(5));
+    expect(h.taken).toHaveLength(1);
+    expect(h.gate.appliedSeq()).toBe(0);
+    expect(h.errors).toHaveLength(0);
+    expect(h.timers).toHaveLength(1);
+    drop = false; // true (or nothing) means applied
+    h.fireTimers();
+    await h.answer(answerAt(5));
+    expect(h.gate.appliedSeq()).toBe(5);
+    expect(h.timers).toHaveLength(0);
+    expect(h.gate.event(2)).toBe(false);
+  });
+
+  it('an answer older than a read already applied is not applied; one at or above it, or with no seq, is', async () => {
+    const h = harness();
+    h.gate.applied(10); // an out-of-gate read already shown
+    h.gate.now();
+    h.fireTimers();
+    await h.answer(answerAt(7));
+    expect(h.taken).toHaveLength(0);
+    expect(h.errors).toHaveLength(0);
+    expect(h.gate.appliedSeq()).toBe(10);
+    expect(h.timers).toHaveLength(0);
+    const same = answerAt(10);
+    h.gate.now();
+    h.fireTimers();
+    await h.answer(same);
+    const bare = answerAt(null);
+    h.gate.now();
+    h.fireTimers();
+    await h.answer(bare);
+    const newer = answerAt(11);
+    h.gate.now();
+    h.fireTimers();
+    await h.answer(newer);
+    expect(h.taken).toEqual([same, bare, newer]);
+    expect(h.gate.appliedSeq()).toBe(11);
+  });
+
+  it('a fetch with no answer by the deadline fails, is retried, and its late answer is ignored', async () => {
+    const h = harness();
+    h.gate.event(1);
+    h.fireTimers();
+    expect(h.deadlines).toHaveLength(1);
+    expect(h.deadlines[0].delay).toBe(FETCH_DEADLINE_MS);
+    h.gate.event(2); // seen while it hangs: recorded only
+    expect(h.timers).toHaveLength(0);
+    h.fireDeadlines();
+    expect(h.errors).toHaveLength(1);
+    expect(h.errors[0].message).toMatch(/did not answer in time/);
+    expect(h.timers).toHaveLength(1); // no longer frozen
+    h.fireTimers();
+    expect(h.sent).toHaveLength(2);
+    await h.answer(answerAt(1), 0); // the abandoned fetch answers late
+    expect(h.taken).toHaveLength(0);
+    expect(h.gate.appliedSeq()).toBe(0);
+    expect(h.timers).toHaveLength(0);
+    const fresh = answerAt(2);
+    await h.answer(fresh, 1);
+    expect(h.taken).toEqual([fresh]);
+    expect(h.gate.appliedSeq()).toBe(2);
+    h.fireDeadlines(); // the answered fetch's deadline does nothing
+    expect(h.errors).toHaveLength(1);
+    expect(h.timers).toHaveLength(0);
+  });
+
+  it('after a deadline whose retry also hangs, the next event sends a fetch', async () => {
+    const h = harness();
+    h.gate.event(1);
+    h.fireTimers();
+    h.fireDeadlines();
+    h.fireTimers(); // the retry
+    h.fireDeadlines(); // it hangs too: no polling
+    expect(h.errors).toHaveLength(2);
+    expect(h.timers).toHaveLength(0);
+    expect(h.gate.event(2)).toBe(true);
+    h.fireTimers();
+    expect(h.sent).toHaveLength(3);
+    await h.fail(new Error('late'), 0); // a late failure of an abandoned fetch is ignored
+    expect(h.errors).toHaveLength(2);
+    await h.answer(answerAt(2));
+    expect(h.gate.appliedSeq()).toBe(2);
+  });
+
+  it('dispose: a deadline running after it reports nothing and asks for nothing', () => {
+    const h = harness();
+    h.gate.event(1);
+    h.fireTimers();
+    h.gate.dispose();
+    h.fireDeadlines();
+    expect(h.errors).toHaveLength(0);
+    expect(h.timers).toHaveLength(0);
   });
 });
 

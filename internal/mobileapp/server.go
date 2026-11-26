@@ -90,7 +90,9 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Tournament-Password, X-Confirm-Password, "+revealKeyHeader)
 		// Every answer names the build that gave it (bc-evts F2).
 		c.Writer.Header().Set(BuildHeader, AppBuild())
-		c.Writer.Header().Set("Access-Control-Expose-Headers", BuildHeader)
+		// The viewer reads name the newest event they already hold
+		// (bc-sseq FR3), which a page reads to skip a refetch.
+		c.Writer.Header().Set("Access-Control-Expose-Headers", BuildHeader+", "+eventSeqHeader)
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -98,6 +100,11 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		}
 		c.Next()
 	})
+
+	// Compress the JSON answers of /api/* for callers that accept gzip
+	// (bc-sseq FR2). Registered after CORS so a preflight never reaches it;
+	// the event stream is skipped by path inside.
+	r.Use(GzipMiddleware())
 
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
@@ -154,8 +161,8 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// Public viewer endpoints
 	viewer := r.Group("/api/viewer")
 	{
-		registerViewerHandlers(viewer, store, eng, names)
-		registerDisplayHandlers(viewer, store, names)
+		registerViewerHandlers(viewer, store, eng, names, hub)
+		registerDisplayHandlers(viewer, store, names, hub)
 	}
 
 	// Stateless schedule estimator, no auth, no state-store access.

@@ -37,24 +37,26 @@ import (
 // cannot silently disagree with either of those.
 //
 // This form judges its callers with a judge of its own over the file-mode
-// password (tests mount the display reads alone this way); NewRouterWithHub
-// calls registerDisplayHandlers with the router's shared judge.
+// password (tests mount the display reads alone this way) and a hub of its
+// own, on which nothing is broadcast; NewRouterWithHub calls
+// registerDisplayHandlers with the router's shared judge and its hub.
 func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
-	registerDisplayHandlers(r, store, newPublicNames(store, nil))
+	registerDisplayHandlers(r, store, newPublicNames(store, nil), NewHub())
 }
 
 // registerDisplayHandlers wires the court-scoped reads. Each judges its caller
 // first (names.judge; a password sent but wrong is 401) and answers for that
 // audience: a court board or overlay, which never sends the password, shows
 // the numbers of a competition that hides names (bc-hnam), and the court
-// console, which sends it, the real names.
-func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publicNames) {
+// console, which sends it, the real names. The court feed names the hub's
+// event seq its read began at (X-Event-Seq, event_seq.go).
+func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publicNames, hub *Hub) {
 	// P2 (mp-9afd style): singleflight group for the court-scoped match feed,
 	// mirroring the sf in RegisterViewerHandlers for GET /competitions.
 	// Unlike the constant "competitions" key, the key here includes the
 	// court, different courts are different payloads and must not collapse
 	// together.
-	sf := newViewerSingleFlight()
+	sf := newViewerSingleFlight(func() int64 { return headSeq(hub) })
 
 	r.GET("/court/:court/current", func(c *gin.Context) {
 		// Streaming clients poll this on a 1-2s cadence; resolveCourt pins the
@@ -235,7 +237,7 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 		// key: see the sf declaration comment; the audience through
 		// viewerFlightKey). On panic inside the elected build, sf.Do returns
 		// an error and all waiters receive it; mapped to 500.
-		data, err := sf.Do(viewerFlightKey("court-matches:"+court, aud), func() ([]byte, error) {
+		res, err := sf.Do(viewerFlightKey("court-matches:"+court, aud), acceptsGzip(c.Request), func() ([]byte, error) {
 			// Propagate a failing competition list so serveSingleFlightJSON
 			// maps it to a 500 (matching GET /competitions): swallowing it
 			// here would serve an empty-but-200 board to every collapsed
@@ -254,7 +256,7 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 			return json.Marshal(gin.H{"court": court, "competitions": comps})
 		})
 
-		serveSingleFlightJSON(c, data, err)
+		serveSingleFlightJSON(c, res, err)
 	})
 }
 

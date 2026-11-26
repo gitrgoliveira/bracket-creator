@@ -327,6 +327,15 @@ Set a **billing budget alert** (for example, $1) on cloud deployments so you're 
 exceeds the free allowance. `SSE_MAX_CLIENTS` bounds fan-out cost (default 5000; ~4–10 KB
 resident per client).
 
+Most of the egress is not the real-time events but the answers each viewer fetches after one. In a
+measured tournament of two 12-competitor round robins, one point is a 612-byte event, while the
+competition refetch it causes is 25.7 KB as sent and 2.1 KB gzipped, and the competitions-list
+refetch is 25.6 KB and 2.0 KB. With 1,000 viewers fetching both after one point, that is 51 MB as
+sent and 4.1 MB gzipped, against 0.6 MB for the events themselves. Answers are gzipped for any
+browser that accepts it, which cuts a refetch to about 8% of its size; the embedded page files are
+not compressed, so a first load is unchanged. Compressing a 317 KB list takes about 0.6 ms of CPU,
+once per shared build. Refer to [Scale limit](network-architecture.md#7-scale-limit-egress) for the table.
+
 ## 6. Configuration (environment variables)
 
 ```mermaid

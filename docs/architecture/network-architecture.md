@@ -466,3 +466,34 @@ flowchart TB
 Because every real-time update is fanned out to **every** connected viewer, **network egress is the
 practical ceiling**, not CPU/RAM. Refer to [Infrastructure architecture](infrastructure-architecture.md#5-capacity-scaling)
 for per-tier audience guidance (for example, GCP free tier compared with Oracle for large events).
+
+### What one point costs on the wire
+
+A point is announced by one small `match_updated` event, but a page that hears it fetches the
+competition (or the list) again, and that answer is far larger than the event. The test
+`internal/mobileapp/sync_bytes_measure_test.go` records one point through the real router and
+counts the bytes. The tournament it seeds is small: two competitions of 12 competitors each, a full
+round robin of 66 bouts apiece, so a real event is larger.
+
+| What is sent | Bytes as sent | Bytes gzipped |
+|---|---|---|
+| The `match_updated` event (stream frame) | 612 | not compressed |
+| One competition refetch | 25,665 | 2,059 (8%) |
+| One competitions-list refetch | 25,606 | 2,024 (8%) |
+
+Every `/api` answer over 1 KiB that is JSON is gzipped for a browser that accepts it, so the saving
+applies to each refetch. The embedded page files are not compressed, so a first load is unchanged.
+Compressing the largest list answer (317 KB of JSON, which becomes 41 KB) takes about 0.6 ms on a
+laptop-class core (`BenchmarkCompressViewerList`), and the shared builds compress once for every
+viewer waiting on them, so a crowd does not multiply that cost.
+
+One point, with every viewer fetching both the competition and the list again:
+
+| Viewers | The event | Refetches as sent | Refetches gzipped |
+|---|---|---|---|
+| 1 | 612 B | 51.3 KB | 4.1 KB |
+| 100 | 61 KB | 5.1 MB | 408 KB |
+| 1,000 | 612 KB | 51.3 MB | 4.1 MB |
+
+The refetches, not the events, are what grows with the audience, which is why both the compression
+and fetching once per burst of events matter.

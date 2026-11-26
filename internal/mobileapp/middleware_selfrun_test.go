@@ -287,9 +287,21 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		// A draw swap (bc-drev) changes who meets whom: the organiser's
 		// review of the draw before the start, never a participant's.
 		{http.MethodPost, "/api/competitions/some-id/draw/swap"},
+		// The swap candidates take the competition's lock and can rebuild the
+		// knockout once per competitor, so an anonymous caller must not run them.
+		{http.MethodGet, "/api/competitions/some-id/draw/swap-candidates?id=p1"},
+		// The draw review's two reads are the organiser's review before the
+		// start, as their OpenAPI entries say, in self-run too.
+		{http.MethodGet, "/api/competitions/some-id/draw/swap-suggestions"},
+		{http.MethodGet, "/api/competitions/some-id/dojo-separation"},
 	}
 	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodPost, "/api/competitions/:id/draw/swap"),
 		"POST /api/competitions/:id/draw/swap must be organiser-only in self-run")
+	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodGet, "/api/competitions/:id/draw/swap-candidates"),
+		"GET /api/competitions/:id/draw/swap-candidates must be organiser-only in self-run")
+	for _, fullPath := range []string{"/api/competitions/:id/draw/swap-suggestions", "/api/competitions/:id/dojo-separation"} {
+		assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodGet, fullPath), "GET %s must be organiser-only in self-run", fullPath)
+	}
 	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodGet, "/api/schedule/draft-estimate"),
 		"GET /api/schedule/draft-estimate must be organiser-only in self-run")
 	assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodGet, "/api/schedule/calendar"),

@@ -4,7 +4,8 @@
 // It reads, it does not decide. First, and on its own (operator note P0: "dojo
 // summary first after the draw. The swaps should be suggested as a separate
 // step"), Dojo separation: one row per pair of competitors from the same dojo
-// and where they can first meet (GET .../dojo-separation, the server's order).
+// and where they can first meet (GET .../dojo-separation, the server's order),
+// grouped by dojo, with a one-line verdict under the card's title.
 // Below it, optional, Change the draw: the swaps the server suggests
 // (GET .../draw/swap-suggestions), then two native selects to pick a swap by
 // hand. Every swap opens the "If you swap them" check first
@@ -22,6 +23,7 @@ import { competitionHasRecordedResult } from './recorded_result.jsx';
 import { andList } from './list_phrase.jsx';
 import {
   DrawSwapCheck, effectiveFormat, drawEntrants, drawPlaceLabel, poolLabel, competitorLabel, meetingRoundName, meetingChange, swapDoneToast,
+  bothWinRound, meetingLateness,
 } from './admin_draw_swap_check.jsx';
 
 const { useState, useEffect } = React;
@@ -32,14 +34,66 @@ export function reviewsDraw(comp) {
 }
 
 // canFirstMeet: the "Can first meet" cell of one summary row: its first line,
-// and a second one when winning both pools makes them meet later than the
-// earliest place they can meet at ("Final if both win their pools").
+// and a second one when winning both pools makes them meet in a later round
+// than the earliest they can meet in ("Final if both win their pools"). Another
+// match of the same round is not a second line, and the table names rounds
+// only, never match numbers.
 export function canFirstMeet(row) {
   if (row.samePool) return { first: `Share ${poolLabel(row.samePool)}`, second: '' };
   if (!row.earliest) return { first: 'Cannot meet in the knockout', second: '' };
-  const first = meetingRoundName(row.earliest);
-  const later = row.ifBothWin && row.ifBothWin.matchId !== row.earliest.matchId;
-  return { first, second: later ? `${meetingRoundName(row.ifBothWin)} if both win their pools` : '' };
+  const both = bothWinRound(row);
+  return { first: meetingRoundName(row.earliest), second: both ? `${both} if both win their pools` : '' };
+}
+
+const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+// onlyInFinal: the pair cannot meet before the final (or not at all).
+const onlyInFinal = (row) => !row.samePool && (!row.earliest || meetingLateness(row)[0] === 0);
+
+// drawVerdict: the card's one line under its title, counted from the summary
+// rows: "12 pairs from 4 dojos. None share a pool; the earliest any can meet
+// is the Quarterfinals (4 pairs).", "12 pairs from 4 dojos. 2 pairs share a
+// pool." or "12 pairs from 4 dojos. They can meet only in the Final." A
+// knockout-only draw has no pools to share, so it says nothing of them. Empty
+// with no rows: the table already says no two competitors share a dojo.
+export function drawVerdict(meetings, { knockoutOnly = false } = {}) {
+  const rows = meetings || [];
+  if (rows.length === 0) return '';
+  const one = rows.length === 1;
+  const head = `${count(rows.length, 'pair', 'pairs')} from ${count(new Set(rows.map((r) => r.dojo)).size, 'dojo', 'dojos')}.`;
+  const shared = rows.filter((r) => r.samePool);
+  if (shared.length > 0) {
+    if (one) return `${head} They share ${poolLabel(shared[0].samePool)}.`;
+    return `${head} ${count(shared.length, 'pair shares', 'pairs share')} a pool.`;
+  }
+  const meeting = rows.filter((r) => r.earliest);
+  if (meeting.length === 0) return `${head} ${one ? 'They cannot' : 'None can'} meet in the knockout.`;
+  if (rows.every(onlyInFinal)) return `${head} They can meet only in the Final.`;
+  const depth = Math.min(...meeting.map((r) => meetingLateness(r)[0]));
+  const first = meeting.filter((r) => meetingLateness(r)[0] === depth);
+  const round = meetingRoundName(first[0].earliest);
+  if (one) return knockoutOnly ? `${head} They can first meet in the ${round}.` : `${head} They do not share a pool and can first meet in the ${round}.`;
+  const earliest = `earliest any can meet is the ${round} (${count(first.length, 'pair', 'pairs')})`;
+  return knockoutOnly ? `${head} The ${earliest}.` : `${head} None share a pool; the ${earliest}.`;
+}
+
+// noSwapNeeded: no pair shares a pool and none can meet before the final, so
+// there is nothing a swap could put later.
+export function noSwapNeeded(meetings) {
+  return Array.isArray(meetings) && meetings.every(onlyInFinal);
+}
+
+// byDojo: the summary rows grouped by dojo, the dojos in the order they first
+// appear in the server's list (earliest meeting first, so the earliest
+// meeting stays the first row) and each dojo's pairs in the server's order.
+export function byDojo(meetings) {
+  const groups = [];
+  const index = new Map();
+  for (const row of meetings || []) {
+    if (!index.has(row.dojo)) { index.set(row.dojo, { dojo: row.dojo, rows: [] }); groups.push(index.get(row.dojo)); }
+    index.get(row.dojo).rows.push(row);
+  }
+  return groups;
 }
 
 // stuckSentences: the dojos no suggested swap helps, and why that is all the
@@ -107,6 +161,8 @@ function useDrawReviewReads(compId, password, generation, enabled) {
   };
 }
 
+// SeparationTable: one row per pair (operator ruling D6), each dojo named
+// once: its pairs are a group of their own, the dojo cell spanning them.
 function SeparationTable({ meetings }) {
   if (meetings.length === 0) {
     return <p className="draw-review__empty" data-testid="dojo-separation-empty">No two competitors share a dojo.</p>;
@@ -117,34 +173,38 @@ function SeparationTable({ meetings }) {
         <thead>
           <tr><th scope="col">Dojo</th><th scope="col">Pair</th><th scope="col">Can first meet</th></tr>
         </thead>
-        <tbody>
-          {meetings.map((row) => {
-            const meet = canFirstMeet(row);
-            return (
-              <tr key={`${row.a.id}\u001f${row.b.id}`} data-testid="dojo-separation-row" className={row.samePool ? 'draw-review__row--same-pool' : undefined}>
-                <td>{row.dojo}</td>
-                <td>
-                  <div className="draw-review__who">{competitorLabel(row.a)}</div>
-                  <div className="draw-review__who">{competitorLabel(row.b)}</div>
-                </td>
-                <td>
-                  <div>{meet.first}</div>
-                  {meet.second && <div className="draw-review__second">{meet.second}</div>}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
+        {byDojo(meetings).map((group) => (
+          <tbody key={group.dojo} className="draw-review__group" data-testid="dojo-separation-group">
+            {group.rows.map((row, i) => {
+              const meet = canFirstMeet(row);
+              return (
+                <tr key={`${row.a.id}\u001f${row.b.id}`} data-testid="dojo-separation-row" className={row.samePool ? 'draw-review__row--same-pool' : undefined}>
+                  {i === 0 && <td className="draw-review__dojo" rowSpan={group.rows.length}>{group.dojo}</td>}
+                  <td>
+                    <div className="draw-review__who">{competitorLabel(row.a)}</div>
+                    <div className="draw-review__who">{competitorLabel(row.b)}</div>
+                  </td>
+                  <td>
+                    <div>{meet.first}</div>
+                    {meet.second && <div className="draw-review__second">{meet.second}</div>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        ))}
       </table>
     </div>
   );
 }
 
-function Suggestions({ answer, bracket, onPick }) {
+function Suggestions({ answer, meetings, bracket, onPick }) {
   const { suggestions, stuck } = answer;
   return (
     <div data-testid="swap-suggestions">
-      {suggestions.length === 0 && <p className="draw-review__empty">No swap keeps dojo-mates apart for longer.</p>}
+      {suggestions.length === 0 && (
+        <p className="draw-review__empty">{noSwapNeeded(meetings) ? 'No swap is needed.' : 'No swap keeps dojo-mates apart for longer.'}</p>
+      )}
       {suggestions.length > 0 && (
         <ul className="draw-review__suggestions">
           {suggestions.map((s) => (
@@ -177,17 +237,23 @@ function Suggestions({ answer, bracket, onPick }) {
   );
 }
 
-function EntrantSelect({ id, label, groups, value, onChange, disabled, testId }) {
+// EntrantSelect: a picker of the draw's competitors, by pool or first-round
+// match. `exclude` is the competitor the other picker holds, left out here,
+// since a competitor cannot swap with themself.
+function EntrantSelect({ id, label, groups, value, onChange, disabled, testId, exclude = '' }) {
   return (
     <div className="field draw-review__pick">
       <label className="field__label" htmlFor={id}>{label}</label>
       <select id={id} className="select" value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} data-testid={testId}>
         <option value="">Choose a competitor</option>
-        {groups.map((g) => (
-          <optgroup key={g.label} label={g.label}>
-            {g.entrants.map((e) => <option key={e.id} value={e.id}>{optionLabel(e)}</option>)}
-          </optgroup>
-        ))}
+        {groups.map((g) => {
+          const entrants = g.entrants.filter((e) => e.id !== exclude);
+          return entrants.length > 0 && (
+            <optgroup key={g.label} label={g.label}>
+              {entrants.map((e) => <option key={e.id} value={e.id}>{optionLabel(e)}</option>)}
+            </optgroup>
+          );
+        })}
       </select>
     </div>
   );
@@ -213,14 +279,17 @@ export function DrawReviewPanel({ c, pools, poolMatches, bracket, password, show
   groups.forEach((g) => g.entrants.forEach((e) => byId.set(e.id, e)));
   // A pick the draw no longer holds (it changed under the page) reads as none.
   const a = byId.get(pickA) || null;
-  const b = byId.get(pickB) || null;
+  const b = (pickB !== pickA && byId.get(pickB)) || null;
   const recorded = competitionHasRecordedResult(poolMatches, bracket);
+  const verdict = separation.meetings ? drawVerdict(separation.meetings, { knockoutOnly: effectiveFormat(c) === 'knockout' }) : '';
 
   const readAgain = () => {
     setGeneration((g) => g + 1);
     if (onRefreshCompetition) onRefreshCompetition();
   };
   const resetPicks = () => { setPickA(''); setPickB(''); };
+  // The first picker taking the competitor the second holds empties the second.
+  const pickFirst = (id) => { setPickA(id); if (id && id === pickB) setPickB(''); };
   const onSwapped = (answer) => {
     const pair = checking;
     setChecking(null);
@@ -238,7 +307,10 @@ export function DrawReviewPanel({ c, pools, poolMatches, bracket, password, show
   return (
     <div className="card draw-review" data-testid="draw-review">
       <div className="card__head">
-        <div className="card__title">Draw review</div>
+        <div className="card__head-main">
+          <h2 className="card__title draw-review__title">Draw review</h2>
+          {verdict && <p className="draw-review__verdict" data-testid="draw-review-verdict">{verdict}</p>}
+        </div>
       </div>
 
       <section className="draw-review__section" aria-labelledby="draw-review-separation" data-testid="dojo-separation">
@@ -256,21 +328,21 @@ export function DrawReviewPanel({ c, pools, poolMatches, bracket, password, show
           {suggestions.error && <div className="alert alert--warn" role="alert">{suggestions.error}</div>}
           {!suggestions.error && !suggestions.answer && <p className="draw-review__empty" role="status">Looking for swaps…</p>}
           {suggestions.answer && (
-            <Suggestions answer={suggestions.answer} bracket={bracket} onPick={(sa, sb) => setChecking({ a: sa, b: sb })} />
+            <Suggestions answer={suggestions.answer} meetings={separation.meetings} bracket={bracket}
+              onPick={(sa, sb) => setChecking({ a: sa, b: sb })} />
           )}
 
           <h4 className="draw-review__subheading">Or pick your own swap</h4>
           <div className="draw-review__picks">
-            <EntrantSelect id="draw-swap-a" label="Competitor" groups={groups} value={a ? pickA : ''} onChange={setPickA}
+            <EntrantSelect id="draw-swap-a" label="Competitor" groups={groups} value={a ? pickA : ''} onChange={pickFirst}
               disabled={!!checking} testId="swap-pick-a" />
             <EntrantSelect id="draw-swap-b" label="Swap with" groups={groups} value={b ? pickB : ''} onChange={setPickB}
-              disabled={!!checking} testId="swap-pick-b" />
+              disabled={!!checking} testId="swap-pick-b" exclude={a ? a.id : ''} />
           </div>
           <button type="button" className="btn btn--primary" data-testid="swap-check-btn"
-            disabled={!a || !b || a.id === b.id || !!checking} onClick={() => setChecking({ a, b })}>
+            disabled={!a || !b || !!checking} onClick={() => setChecking({ a, b })}>
             Check this swap
           </button>
-          {a && b && a.id === b.id && <div className="field__hint">Pick two different competitors.</div>}
         </section>
       )}
 

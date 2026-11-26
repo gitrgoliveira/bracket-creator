@@ -502,7 +502,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                     {starting ? "Starting…" : "Start competition"}
                   </button>
                 </div>
-                <div style={{ fontSize: 11, color: "var(--ink-3)" }} data-testid="draw-ready-line">
+                <div style={{ fontSize: 13, color: "var(--ink-3)" }} data-testid="draw-ready-line">
                   {reviewsDraw(c)
                     ? "Draw generated. Review it below, swap competitors if a pairing is wrong, then start. To change anything else, discard the draw first."
                     : "Draw generated. Preview below, then start. To change it, discard the draw first."}

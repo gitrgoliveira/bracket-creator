@@ -9,6 +9,7 @@ import { confirmLeave } from './unsaved_entries.jsx';
 import { competitionHasRecordedResult } from './recorded_result.jsx';
 import { reviewsDraw } from './admin_draw_review.jsx';
 import { DrawSwapCheck, effectiveFormat, drawEntrants, drawPlaceLabel, swapDoneToast } from './admin_draw_swap_check.jsx';
+import { useSwapCandidates, marksKey, SwapMarksKey, SwapVerdictWord } from './admin_swap_candidates.jsx';
 import { acceptTap } from './tap_guard.jsx';
 import { useEscapeToClose } from './ui.jsx';
 const { useState, useEffect, useRef, useMemo } = React;
@@ -221,7 +222,10 @@ RunningMatchPanel.displayName = "RunningMatchPanel";
 // tap guard (acceptTap), so the bounce of a double tap never picks and
 // unpicks, picks twice, or lands on the Done that took the place of the
 // button it turned on with; the check panel takes the bounce of the tap that
-// opened it itself. After a swap the mode stays on with nothing picked, so a
+// opened it itself. Once a competitor is picked, every other one is marked
+// better or worse for dojo-mates (useSwapCandidates, admin_swap_candidates.jsx)
+// until the pick is cancelled or the second tap opens the check. After a
+// swap the mode stays on with nothing picked, so a
 // second swap can follow; Done, Escape, or leaving the tab (the host
 // unmounts) turns it off. The page reads the swapped draw on the
 // draw_generated broadcast the swap makes (admin.jsx).
@@ -236,7 +240,9 @@ export function swapModeAvailable(c, tab, poolMatches, bracket) {
   return !competitionHasRecordedResult(poolMatches, bracket);
 }
 
-// swapPickLine: the line under the banner once one competitor is picked.
+// swapPickLine: the line under the banner once one competitor is picked. What
+// the marks mean is said on a key line of its own (SwapMarksKey), so this one
+// never changes length when they arrive.
 export function swapPickLine(picked, bracket) {
   const where = [drawPlaceLabel(picked.place, bracket), picked.number].filter(Boolean).join(', ');
   return `Swap ${picked.name}${where ? ` (${where})` : ''} with… tap another competitor.`;
@@ -295,7 +301,29 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
     setNote({ text: message || 'The draw has changed. Pick the two competitors again.', error: true });
   };
 
-  const swap = active ? { entrantOf: (id) => entrants.get(id) || null, pickedId: picked ? picked.id : null, onPick } : null;
+  // The marks belong to the first pick alone: none while nothing is picked or
+  // while the check panel is open for the second.
+  // A draw that places someone elsewhere (another device's swap) reads the
+  // marks again too. The key is where every competitor stands, not the
+  // object's identity, so a re-read of the same draw keeps the marks.
+  const drawKey = useMemo(
+    () => [...entrants.values()].map((e) => `${e.id}@${JSON.stringify(e.place)}`).join('|'),
+    [entrants],
+  );
+  const { marks, failed } = useSwapCandidates({
+    compId: c && c.id, pickId: picked && !checking ? picked.id : null, drawKey, password, onDrawChanged,
+  });
+  const markOf = (id) => (marks && marks.get(id)) || null;
+
+  const swap = active ? {
+    entrantOf: (id) => entrants.get(id) || null,
+    pickedId: picked ? picked.id : null,
+    onPick,
+    markOf,
+    // The word beside a mark, drawn (hidden) on every pick while the mode is
+    // on, so a mark that appears moves nothing.
+    verdictWord: (id, lead) => <SwapVerdictWord mark={markOf(id)} lead={lead} />,
+  } : null;
 
   let controls = null;
   if (available && !active) {
@@ -325,6 +353,10 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
             <span className={note.error ? 'swap-mode__note swap-mode__note--error' : 'swap-mode__note'}>{note.text}</span>
           ) : null}
         </div>
+        {/* What the marks mean, on a line of its own drawn from the pick on at
+            the height of its longest sentence, so the marks arriving move
+            nothing. */}
+        {picked && <SwapMarksKey current={checking ? null : marksKey({ marks, failed })} />}
         {checking && (
           <DrawSwapCheck comp={c} bracket={bracket} a={checking.a} b={checking.b} password={password}
             onClose={() => setChecking(null)} onSwapped={onSwapped} onDrawChanged={onDrawChanged} />

@@ -22,7 +22,7 @@ beforeAll(async () => {
   restore = installWindowStubs({
     ScoreEditorModal: ({ match }) => <div data-testid="editor-open">{match.id}</div>,
     CourtPicker: () => null,
-    API: { swapDrawPlaces: vi.fn() },
+    API: { swapDrawPlaces: vi.fn(), fetchSwapCandidates: vi.fn() },
   });
   // The bracket trees measure their cards with it; jsdom has none.
   if (typeof globalThis.ResizeObserver === 'undefined') {
@@ -44,6 +44,9 @@ beforeEach(() => {
   now = 1_000_000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   Element.prototype.scrollIntoView = function scrollIntoView() {};
+  // The marks of a pick are pinned in swap_marks.render.test.jsx: here the
+  // read never answers, so every pick keeps its plain edge.
+  window.API.fetchSwapCandidates = vi.fn(() => new Promise(() => {}));
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 

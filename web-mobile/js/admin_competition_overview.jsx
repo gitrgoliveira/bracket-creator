@@ -786,13 +786,38 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       const previewSection = c.format === "knockout" ? "bracket" : "pools";
       const previewLabel = c.format === "knockout" ? "bracket" : c.format === "league" ? "league" : "pools";
       // The action cards sit BESIDE the status card, not inside it (one
-      // containment layer), as the running state's do.
+      // containment layer), as the running state's do. A draw the Draw review
+      // covers has neither the status card nor the To start card: the header
+      // line already says what to do, and the review card follows the preview.
+      const previewCard = (
+        <button
+          type="button"
+          className="card card--sm card--action"
+          style={{ textAlign: "left" }}
+          onClick={() => onSection(previewSection)}
+          data-testid="draw-ready-preview-btn"
+        >
+          <div className="card__title" style={{ marginBottom: 4 }}>
+            Preview {previewLabel}
+          </div>
+          <div className="card__sub">Check placements before starting</div>
+        </button>
+      );
+      if (reviewsDraw(c)) {
+        return (
+          <div>
+            <div className="row">{previewCard}</div>
+            <DrawReviewPanel c={c} pools={pools ?? c.pools} poolMatches={poolMatches ?? c.poolMatches} bracket={effectiveBracket}
+              password={password} showToast={showToast} onRefreshCompetition={onRefreshCompetition} />
+          </div>
+        );
+      }
       return (
         <div>
           <div className="card" style={{ marginBottom: 16 }} data-testid="draw-ready-card">
             <div className="card__head">
               <div className="card__title">Draw ready</div>
-              <div className="card__sub">{numPlayers} {participantLabel} · {seededCount > 0 ? `${seededCount} seeded` : "no seeds"}</div>
+              <div className="card__sub">{numPlayers} {participantLabel}, {seededCount > 0 ? `${seededCount} seeded` : "no seeds"}</div>
             </div>
             <div style={{ fontSize: 13.5, color: "var(--ink-2)" }}>
               {isSwiss
@@ -801,33 +826,14 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
             </div>
           </div>
           <div className="row">
-            {!isSwiss && (
-              <button
-                type="button"
-                className="card card--sm card--action"
-                style={{ textAlign: "left" }}
-                onClick={() => onSection(previewSection)}
-                data-testid="draw-ready-preview-btn"
-              >
-                <div className="card__title" style={{ marginBottom: 4 }}>
-                  Preview {previewLabel}
-                </div>
-                <div className="card__sub">Check placements before starting</div>
-              </button>
-            )}
+            {!isSwiss && previewCard}
             <div className="card card--sm" style={{ background: "var(--bg)" }}>
               <div className="card__title" style={{ marginBottom: 4, color: "var(--ink-2)" }}>To start</div>
               <div className="card__sub">
-                {reviewsDraw(c)
-                  ? <>Use the <strong>Start competition</strong> button above. To swap two competitors, use the <strong>Draw review</strong> below; to change anything else, use <strong>Discard draw</strong> first.</>
-                  : <>Use the <strong>Start competition</strong> button above. To change the draw, use <strong>Discard draw</strong> first.</>}
+                Use the <strong>Start competition</strong> button above. To change the draw, use <strong>Discard draw</strong> first.
               </div>
             </div>
           </div>
-          {reviewsDraw(c) && (
-            <DrawReviewPanel c={c} pools={pools ?? c.pools} poolMatches={poolMatches ?? c.poolMatches} bracket={effectiveBracket}
-              password={password} showToast={showToast} onRefreshCompetition={onRefreshCompetition} />
-          )}
         </div>
       );
     }

@@ -983,10 +983,15 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                   const [pMember1, pMember2] = isEngi && window.engiPairParts ? window.engiPairParts(p.name) : [p.name, ""];
                   const entrant = swap && p.id ? swap.entrantOf(p.id) : null;
                   const isPicked = !!entrant && swap.pickedId === entrant.id;
+                  // In the swap mode a candidate's mark (better, worse) is a colour and
+                  // a word: on the dojo line, or on the name line when dojos are hidden.
+                  const mark = entrant && swap.markOf ? swap.markOf(entrant.id) : null;
+                  const word = (lead) => (entrant && swap.verdictWord ? swap.verdictWord(entrant.id, lead) : null);
                   const nameCell = (
                     <>
                       <div className="pool__player-name">
                         <NumberedName name={pMember1} number={p.number} />
+                        {tweaks.showDojo ? null : word(true)}
                         {isTeam && dhWinnerNames.has(p.name) && (
                           <DHBadge />
                         )}
@@ -1001,7 +1006,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       </div>
                       {/* Engi pair: member 2 (from the combined name) stacked below member 1; a solo side has no member 2. */}
                       {isEngi && pMember2 ? <div className="pool__player-name">{pMember2}</div> : null}
-                      {tweaks.showDojo ? <div className="pool__dojo-name">{p.dojo}</div> : null}
+                      {tweaks.showDojo ? <div className="pool__dojo-name">{p.dojo}{word(!!p.dojo)}</div> : null}
                     </>
                   );
                   return (
@@ -1011,7 +1016,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       </td>
                       <td>
                         {entrant ? (
-                          <button type="button" className={`swap-pick${isPicked ? " swap-pick--picked" : ""}`}
+                          <button type="button" className={`swap-pick${isPicked ? " swap-pick--picked" : ""}${mark ? ` swap-pick--${mark}` : ""}`}
                             aria-pressed={isPicked} data-testid="swap-target" onClick={(ev) => swap.onPick(entrant, ev)}>
                             {nameCell}
                           </button>

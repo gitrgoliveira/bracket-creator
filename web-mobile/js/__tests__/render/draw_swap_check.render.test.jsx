@@ -59,14 +59,46 @@ describe('If you swap them', () => {
     expect(window.API.swapDrawPlaces).toHaveBeenCalledTimes(1);
     expect(window.API.swapDrawPlaces).toHaveBeenCalledWith('c1',
       { a: { id: 'a', place: a.place }, b: { id: 'b', place: b.place }, dryRun: true }, 'pw');
-    expect(screen.getByTestId('swap-moves').textContent).toBe('Arthur Dick goes to Pool C, Lena Park to Pool B.');
-    expect(screen.getByTestId('swap-separation').textContent).toContain('Team Omega: shared Pool B, now not before the Semifinals.');
+    const verdict = screen.getByTestId('swap-verdict');
+    expect(verdict.textContent).toBe('No dojo-mates meet earlier.');
+    expect(verdict.className, 'nothing gets earlier: the normal style').toBe('draw-swap-check__line');
+    expect(verdict.compareDocumentPosition(screen.getByTestId('swap-moves')) & Node.DOCUMENT_POSITION_FOLLOWING, 'the verdict comes first').toBeTruthy();
+    expect(screen.getByTestId('swap-moves').textContent).toBe('IMS4 Arthur Dick goes to Pool C, IMS8 Lena Park to Pool B.');
+    expect(screen.getByTestId('swap-separation').textContent).toContain('Team Omega: shared Pool B; now not before the Semifinals.');
     expect(screen.getByTestId('swap-numbers').textContent)
       .toBe('Numbers stay with the place: Arthur Dick takes IMS8, Lena Park takes IMS4. Swap their tags.');
     expect(screen.getByText('Arthur Dick is seed 2 and moves to Pool C.')).toBeInTheDocument();
     expect(screen.getByText('The knockout bracket is rebuilt from the new pools.')).toBeInTheDocument();
-    expect(screen.getByText('The public pages update at once.')).toBeInTheDocument();
+    expect(screen.getByText('The public pages update at once.').className, 'said in the body ink, not muted').toBe('draw-swap-check__line');
     expect(screen.getByTestId('swap-them')).not.toBeDisabled();
+    expect(screen.getByTestId('swap-them').textContent).toBe('Swap them');
+    expect(screen.getByTestId('swap-them').className).toBe('btn btn--primary');
+  });
+
+  it('warns first when the swap brings dojo-mates together earlier, and asks to Swap anyway', async () => {
+    vi.useFakeTimers();
+    const pair = (bId, m) => ({ dojo: 'Fudo', a: { id: 'a', name: 'Arthur Dick' }, b: { id: bId, name: bId }, ...m });
+    const sf = { matchId: 'r1-m0', round: 1, rounds: 3, matchNumber: 5 };
+    const qf = { matchId: 'r0-m0', round: 0, rounds: 3, matchNumber: 1 };
+    window.API.swapDrawPlaces = vi.fn().mockResolvedValue({
+      ...dryRun,
+      separation: {
+        before: [pair('x', { earliest: sf }), pair('y', { earliest: sf }), pair('z', { earliest: sf })],
+        after: [pair('x', { samePool: 'Pool C' }), pair('y', { samePool: 'Pool C' }), pair('z', { earliest: qf })],
+      },
+    });
+    await open();
+    await act(async () => { vi.advanceTimersByTime(1); });
+    const verdict = screen.getByTestId('swap-verdict');
+    expect(verdict.textContent).toBe('2 pairs would share a pool and 1 would meet earlier.');
+    expect(verdict.className).toBe('draw-swap-check__line draw-swap-check__line--warn');
+    const swap = screen.getByTestId('swap-them');
+    expect(swap.textContent).toBe('Swap anyway');
+    expect(swap.className, 'the warning colour, in the primary\'s place').toBe('btn btn--warn');
+    expect(swap.previousElementSibling.textContent).toBe('Cancel');
+    expect(document.activeElement.textContent, 'Cancel keeps first focus').toBe('Cancel');
+    // The per-dojo lines stay.
+    expect(screen.getByTestId('swap-separation').textContent).toContain('Fudo (Arthur Dick and z): could first meet in the Semifinals (M5); now as early as the Quarterfinals (M1).');
   });
 
   it('offers Swap them only once the check is answered', async () => {

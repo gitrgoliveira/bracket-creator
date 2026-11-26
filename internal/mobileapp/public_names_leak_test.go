@@ -140,6 +140,7 @@ var leakRoutes = map[string]leakRouteClass{
 	"GET /api/competitions/:id/backup":                                   leakOrganiser,
 	"GET /api/competitions/:id/chusen-candidates":                        leakOrganiser,
 	"GET /api/competitions/:id/draw-warnings":                            leakOrganiser,
+	"GET /api/competitions/:id/draw/swap-candidates":                     leakOrganiser,
 	"GET /api/competitions/:id/draw/swap-suggestions":                    leakOrganiser,
 	"GET /api/competitions/:id/dojo-separation":                          leakOrganiser,
 	"GET /api/competitions/:id/export":                                   leakOrganiser,

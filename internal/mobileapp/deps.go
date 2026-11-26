@@ -47,10 +47,12 @@ type CompetitionLoader interface {
 
 // DrawReviewEngine is the consumer-boundary view of engine.Engine used by the
 // draw review handlers (handlers_draw_review.go): the dojo separation summary,
-// the swap suggestions and the swap itself. *engine.Engine satisfies it.
+// the swap suggestions, the swap candidates and the swap itself.
+// *engine.Engine satisfies it.
 type DrawReviewEngine interface {
 	DojoSeparationFor(comp *state.Competition) ([]engine.DojoMeeting, error)
 	SwapSuggestionsFor(comp *state.Competition) (*engine.SwapSuggestions, error)
+	SwapCandidatesFor(compID, pickID string) (*engine.SwapCandidates, error)
 	SwapDrawPlaces(compID string, req engine.SwapRequest) (*engine.SwapResult, error)
 }
 

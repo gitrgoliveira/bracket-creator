@@ -6,8 +6,10 @@
 // Overview's Draw review card (admin_draw_review.jsx), and the preview tabs'
 // Swap competitors mode, which imports it from here without touching the card.
 // On open it asks the server for a dry run of the swap (POST .../draw/swap with
-// dryRun, which saves nothing) and shows what the swap would do in plain words;
-// "Swap them" sends the same two places without dryRun. The server judges
+// dryRun, which saves nothing) and shows what the swap would do in plain words,
+// opening with whether any dojo-mates would meet earlier; "Swap them" ("Swap
+// anyway", in the warning colour, when some would) sends the same two places
+// without dryRun. The server judges
 // everything (refusals, where each goes, the numbers, the seed warning, the
 // lineups, the byes, the separation before and after); this module only words
 // its answer.
@@ -28,7 +30,7 @@ const { useState, useEffect, useRef } = React;
 
 // The refusals that mean the draw on screen is no longer the stored one: the
 // panel closes and its host reads the draw again.
-const DRAW_MOVED_CODES = new Set(['draw_changed', 'draw_started', 'no_draw']);
+export const DRAW_MOVED_CODES = new Set(['draw_changed', 'draw_started', 'no_draw']);
 
 // competitorLabel: a competitor as the review names them, number first when
 // the competition numbers ("IMS2 Elijah Everdeen").
@@ -105,26 +107,61 @@ export function meetingRoundName(meeting) {
   return bracketRoundLabel({ displayRound: meeting.displayRound }, meeting.round, meeting.rounds);
 }
 
-// meetingChange: how a pair of dojo-mates' first meeting moves, in words:
-// "could first meet in the Quarterfinals, now not before the Semifinals",
-// "shared Pool B, now not before the Semifinals" or "could first meet in the
-// Semifinals, now as early as the Quarterfinals". Words, never an arrow
-// between the two (Hallmark gate 63). `later` is true when the meeting moves
-// later, as separationChanges and the suggestions judge it.
+// meetingMatchName: a meeting as the bracket card names it, the round and
+// then the match number the card prints: "Semifinals (M5)". The round alone
+// when the meeting carries no match number.
+export function meetingMatchName(meeting) {
+  if (!meeting) return '';
+  const round = meetingRoundName(meeting);
+  return meeting.matchNumber ? `${round} (M${meeting.matchNumber})` : round;
+}
+
+// bothWinRound: the round two pool winners meet in, when that round is not
+// the one of their earliest meeting ("Final" for a pair who can first meet in
+// the Semifinals); empty when the two are the same round, or the pair shares
+// a pool, cannot meet, or comes from a knockout-only draw. The round's NAME
+// decides: another match in the same round is not a second meeting to name.
+export function bothWinRound(row) {
+  if (!row || row.samePool || !row.earliest || !row.ifBothWin) return '';
+  const round = meetingRoundName(row.ifBothWin);
+  return round !== meetingRoundName(row.earliest) ? round : '';
+}
+
+// meetingChange: how a pair of dojo-mates' first meeting moves, in words,
+// the meeting before, then after the swap: "could first meet in the
+// Quarterfinals (M2); now not before the Semifinals (M5)", "shared Pool B; now
+// not before the Semifinals (M5), or the Final if both win their pools" or
+// "could first meet in the Semifinals (M5), or the Final if both win their
+// pools; now the Semifinals (M6) either way". Words, never an arrow between
+// the two (Hallmark gate 63). `later` is true when the meeting moves later,
+// as separationChanges and the suggestions judge it.
 export function meetingChange(before, after, later) {
-  return `${meetingWas(before)}, ${meetingNow(after, later)}`;
+  return `${meetingWas(before)}; ${meetingNow(before, after, later)}`;
 }
 
 function meetingWas(row) {
   if (row && row.samePool) return `shared ${poolLabel(row.samePool)}`;
-  if (row && row.earliest) return `could first meet in the ${meetingRoundName(row.earliest)}`;
+  if (row && row.earliest) {
+    const both = bothWinRound(row);
+    return `could first meet in the ${meetingMatchName(row.earliest)}${both ? `, or the ${both} if both win their pools` : ''}`;
+  }
   return 'could not meet in the knockout';
 }
 
-function meetingNow(row, later) {
-  if (row && row.samePool) return `now share ${poolLabel(row.samePool)}`;
-  if (row && row.earliest) return `now ${later ? 'not before' : 'as early as'} the ${meetingRoundName(row.earliest)}`;
-  return 'now cannot meet in the knockout';
+// meetingNow: the meeting after the swap. A new earliest round says which way
+// it moved ("not before", "as early as"); the same round names the new match
+// alone ("now the Semifinals (M6)"). The pool winners' round follows when it
+// differs from the earliest, and "either way" says that a difference the
+// meeting had before is gone.
+function meetingNow(before, after, later) {
+  if (after && after.samePool) return `now share ${poolLabel(after.samePool)}`;
+  if (!after || !after.earliest) return 'now cannot meet in the knockout';
+  const sameRound = !!(before && !before.samePool && before.earliest)
+    && meetingRoundName(before.earliest) === meetingRoundName(after.earliest);
+  const where = sameRound ? `now the ${meetingMatchName(after.earliest)}` : `now ${later ? 'not before' : 'as early as'} the ${meetingMatchName(after.earliest)}`;
+  const both = bothWinRound(after);
+  if (both) return `${where}, or the ${both} if both win their pools`;
+  return bothWinRound(before) ? `${where} either way` : where;
 }
 
 // fromEnd: how many rounds before the final a meeting is (0 = the final).
@@ -149,18 +186,16 @@ function compareLateness(a, b) {
   return x[0] - y[0] || x[1] - y[1];
 }
 
-function sameMeeting(a, b) {
-  const id = (m) => (m ? m.matchId : '');
-  return (a.samePool || '') === (b.samePool || '') && id(a.earliest) === id(b.earliest) && id(a.ifBothWin) === id(b.ifBothWin);
-}
-
 const pairKey = (row) => [row.a && row.a.id, row.b && row.b.id].sort().join('\u001f');
 
 // separationChanges: the dojo separation rows a swap touches, before and
 // after (the answer's `separation`), as one entry per dojo, in the order the
 // dojos first appear: `changes` lists each pair whose first meeting moves
-// (`later` true when it moves later), empty when the dojo's pairs all meet
-// where they did. A pair is keyed by its two ids, which a swap never changes.
+// earlier or later (`later` true when it moves later), empty when the dojo's
+// pairs all meet when they did. A move to another match at the same depth,
+// with the pool winners' meeting just as deep (or to share another pool), is
+// not a change of when they can meet, so it is no change. A pair is keyed by
+// its two ids, which a swap never changes.
 export function separationChanges(separation) {
   const before = (separation && separation.before) || [];
   const after = (separation && separation.after) || [];
@@ -175,7 +210,8 @@ export function separationChanges(separation) {
     const d = dojoOf(row.dojo);
     d.pairs += 1;
     const next = afterByPair.get(pairKey(row));
-    if (next && !sameMeeting(row, next)) d.changes.push({ a: row.a, b: row.b, before: row, after: next, later: compareLateness(next, row) > 0 });
+    const moved = next ? compareLateness(next, row) : 0;
+    if (moved !== 0) d.changes.push({ a: row.a, b: row.b, before: row, after: next, later: moved > 0 });
   }
   for (const row of after) {
     if (!before.some((r) => pairKey(r) === pairKey(row))) dojoOf(row.dojo).pairs += 1;
@@ -184,7 +220,7 @@ export function separationChanges(separation) {
 }
 
 // separationSentences: separationChanges in words, one line per dojo:
-// "Team Omega: shared Pool B, now not before the Semifinals." or "Team
+// "Team Omega: shared Pool B; now not before the Semifinals (M5)." or "Team
 // Kappa: no change." A dojo of more than one pair names the pair.
 export function separationSentences(separation) {
   const lines = [];
@@ -202,15 +238,44 @@ export function separationSentences(separation) {
   return lines;
 }
 
-// movesSentence: "Arthur Dick goes to Pool C, Lena Park to Pool B." A swap
-// inside one pool names the places, since only the bout order changes.
-export function movesSentence(moves, bracket) {
+const plural = (n, one, many) => (n === 1 ? one : many);
+
+// swapVerdict: the one line the check opens with, counted from the pairs
+// whose first meeting the swap brings earlier: "2 pairs would share a pool
+// and 2 would meet earlier.", either part alone, or "No dojo-mates meet
+// earlier." `worse` is true when any pair would, and the check then warns.
+export function swapVerdict(separation) {
+  let pool = 0;
+  let earlier = 0;
+  for (const d of separationChanges(separation)) {
+    for (const ch of d.changes) {
+      if (ch.later) continue;
+      if (ch.after && ch.after.samePool) pool += 1;
+      else earlier += 1;
+    }
+  }
+  if (pool === 0 && earlier === 0) return { worse: false, text: 'No dojo-mates meet earlier.' };
+  const pairs = (n) => `${n} ${plural(n, 'pair', 'pairs')}`;
+  const parts = [];
+  if (pool > 0) parts.push(`${pairs(pool)} would share a pool`);
+  if (earlier > 0) parts.push(`${pool > 0 ? earlier : pairs(earlier)} would meet earlier`);
+  return { worse: true, text: `${parts.join(' and ')}.` };
+}
+
+// movesSentence: "IMS4 Arthur Dick goes to Pool C, IMS8 Lena Park to Pool
+// B.", each competitor named as the check's headline names them, by the
+// number they hold now (read off `people`, the two picked competitors, by
+// id). A swap inside one pool names the places, since only the bout order
+// changes.
+export function movesSentence(moves, bracket, people) {
   const list = moves || [];
   if (list.length === 0) return '';
+  const numberOf = new Map((people || []).filter((p) => p && p.id).map((p) => [p.id, p.number]));
+  const who = (m) => competitorLabel({ name: m.name, number: numberOf.get(m.id) });
   const samePool = list.length === 2 && list[0].to.pool && list[0].to.pool === list[1].to.pool;
   const where = (m) => drawPlaceLabel(m.to, bracket, { withPosition: samePool });
   const [first, ...rest] = list;
-  return `${first.name} goes to ${where(first)}${rest.map((m) => `, ${m.name} to ${where(m)}`).join('')}.`;
+  return `${who(first)} goes to ${where(first)}${rest.map((m) => `, ${who(m)} to ${where(m)}`).join('')}.`;
 }
 
 // numbersSentence (FR4): a number belongs to its place, so the two exchange
@@ -220,8 +285,6 @@ export function numbersSentence(numbers) {
   if (list.length === 0) return '';
   return `Numbers stay with the place: ${list.map((n) => `${n.name} takes ${n.to}`).join(', ')}. Swap their tags.`;
 }
-
-const plural = (n, one, many) => (n === 1 ? one : many);
 
 // swapDetailLines: everything else the answer says, one sentence each: the
 // seed warning (FR5), the rebuilt bracket and its new times, the lineups that
@@ -317,6 +380,7 @@ export function DrawSwapCheck({ comp, bracket, a, b, password, onClose, onSwappe
   };
 
   const separation = check ? separationSentences(check.separation) : [];
+  const verdict = check ? swapVerdict(check.separation) : null;
   const numbers = check ? numbersSentence(check.numbers) : '';
   const details = check ? swapDetailLines(check, bracket) : [];
 
@@ -331,7 +395,8 @@ export function DrawSwapCheck({ comp, bracket, a, b, password, onClose, onSwappe
         {!check && !error && <p className="shiaijo-move-confirm__body" role="status">Working out what the swap does…</p>}
         {check && (
           <div className="draw-swap-check__answer" aria-live="polite">
-            <p className="draw-swap-check__line" data-testid="swap-moves">{movesSentence(check.moves, bracket)}</p>
+            <p className={`draw-swap-check__line${verdict.worse ? ' draw-swap-check__line--warn' : ''}`} data-testid="swap-verdict">{verdict.text}</p>
+            <p className="draw-swap-check__line" data-testid="swap-moves">{movesSentence(check.moves, bracket, [a, b])}</p>
             {separation.length > 0 && (
               <ul className="draw-swap-check__list" data-testid="swap-separation">
                 {separation.map((l) => (
@@ -343,15 +408,16 @@ export function DrawSwapCheck({ comp, bracket, a, b, password, onClose, onSwappe
             {details.map((l) => (
               <p key={l.text} className={`draw-swap-check__line${l.kind === 'warn' ? ' draw-swap-check__line--warn' : ''}`}>{l.text}</p>
             ))}
-            <p className="draw-swap-check__line draw-swap-check__line--muted">The public pages update at once.</p>
+            <p className="draw-swap-check__line">The public pages update at once.</p>
           </div>
         )}
         {error && <div className="alert alert--error" role="alert">{error}</div>}
         <div className="shiaijo-move-confirm__actions">
           <button type="button" className="btn" onClick={onClose} disabled={sending}>Cancel</button>
-          <button type="button" className="btn btn--primary" onClick={swapNow} disabled={!check || sending} data-testid="swap-them">
+          <button type="button" className={`btn ${verdict && verdict.worse ? 'btn--warn' : 'btn--primary'}`} onClick={swapNow}
+            disabled={!check || sending} data-testid="swap-them">
             {sending && <span className="spinner" />}
-            {sending ? 'Swapping…' : 'Swap them'}
+            {sending ? 'Swapping…' : verdict && verdict.worse ? 'Swap anyway' : 'Swap them'}
           </button>
         </div>
       </div>

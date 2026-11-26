@@ -151,6 +151,7 @@ const CHECK_MODULES = [
   'admin_shiaijo_queue.jsx',
   'admin_shiaijo_start.jsx',
   'admin_sponsors.jsx',
+  'admin_swap_candidates.jsx',
   'api_client_clock.jsx',
   'api_client_competitions.jsx',
   'api_client_enqueue.jsx',

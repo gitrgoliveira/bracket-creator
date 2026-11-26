@@ -30,8 +30,10 @@ import { _outboxWrite } from './api_client_enqueue.jsx';
 
 // _drawReviewRead GETs one of the draw review's reads (bc-drev) under the
 // request deadline, with the organiser's password. A refusal throws the
-// server's sentence (readFailure), a dropped connection or a deadline the
-// plain "could not read" sentence, so the card always says it read nothing.
+// server's sentence (readFailure) carrying its `status` and, unless the
+// password was refused, the server's `code` (no_draw, not_in_draw, ...); a
+// dropped connection or a deadline throws the plain "could not read"
+// sentence, so the card always says it read nothing.
 async function _drawReviewRead(path, password, what) {
     let answer;
     try {
@@ -40,7 +42,12 @@ async function _drawReviewRead(path, password, what) {
         throw new Error(`Could not read ${what}. Check the connection and try again.`);
     }
     const { res, body } = answer;
-    if (!res.ok) throw readFailure(res.status, body.message || body.error, what);
+    if (!res.ok) {
+        const e = readFailure(res.status, body.message || body.error, what);
+        if (!e.code && body.error) e.code = body.error;
+        e.status = res.status;
+        throw e;
+    }
     return body;
 }
 
@@ -283,7 +290,7 @@ export const competitionsApi = {
             return [];
         }
     },
-    // The draw review (bc-drev): three organiser-only requests between the
+    // The draw review (bc-drev): four organiser-only requests between the
     // draw and the start. Plain requests, never outbox doors: the card needs
     // the server's answer before it shows anything, so they are refused while
     // offline, like generating the draw.
@@ -305,6 +312,23 @@ export const competitionsApi = {
         return {
             suggestions: Array.isArray(body.suggestions) ? body.suggestions : [],
             stuck: Array.isArray(body.stuck) ? body.stuck : [],
+        };
+    },
+    // fetchSwapCandidates: GET /competitions/:id/draw/swap-candidates?id=,
+    // {pick: {id, place}, candidates: [{id, place, verdict}]}: for the
+    // competitor picked first in the swap mode, every other drawn competitor
+    // in draw order, and whether swapping the two keeps dojo-mates apart for
+    // longer ("better"), brings a pair together earlier ("worse") or neither
+    // ("same"). A refusal throws with the server's `code`: not_in_draw (409)
+    // means the draw no longer holds the pick, so the page reads the draw
+    // again; no_draw and draw_started as for the swap.
+    async fetchSwapCandidates(id, pickId, password) {
+        const body = await _drawReviewRead(
+            `/api/competitions/${id}/draw/swap-candidates?id=${encodeURIComponent(pickId || '')}`,
+            password, 'the swap candidates');
+        return {
+            pick: body.pick || null,
+            candidates: Array.isArray(body.candidates) ? body.candidates : [],
         };
     },
     // swapDrawPlaces: POST /competitions/:id/draw/swap with {a: {id, place},

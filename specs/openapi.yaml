@@ -2826,6 +2826,73 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/competitions/{id}/draw/swap-candidates:
+    get:
+      tags: [competitions]
+      summary: What swapping one competitor with each other would do to dojo separation
+      description: |
+        For the competitor picked first in the swap mode (`id`), every other
+        competitor of the draw, in draw order, with the place they hold (the
+        shape the swap request takes) and a `verdict` for swapping the two,
+        judged on the dojo separation before and after, the same rows the swap
+        answers in `separation`:
+
+        - `worse`: at least one pair of dojo-mates would first meet earlier
+          (sharing a pool is earliest of all);
+        - `better`: no pair meets earlier and at least one meets later;
+        - `same`: every pair first meets where it does now. A move to another
+          match of the same round is not earlier.
+
+        Seeded competitors are candidates too: a swap that moves a seed out of
+        their pool rebuilds the knockout, and its verdict is judged on the
+        rebuilt bracket.
+
+        Recomputed from the stored draw on every request and never stored.
+        Organiser only, in self-run mode too. Refusals carry `error` (the code)
+        and `message` (the sentence to show).
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - name: id
+          in: query
+          required: true
+          description: The participant id of the competitor picked first.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The pick and every other drawn competitor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapCandidates'
+        '400':
+          description: '`invalid`: no competitor is named (`id` is missing or blank).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapRefusal'
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            `not_in_draw`: the draw does not hold the picked competitor (it
+            has changed since the page read it).
+            `no_draw`: the competition has no draw.
+            `draw_started`: the competition has started, or a match of the
+            draw already holds something fought.
+            `swap_not_supported`: the format has no places to swap (a league
+            or a Swiss competition).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapRefusal'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/draw/swap:
     post:
       tags: [competitions]
@@ -9258,6 +9325,29 @@ components:
           type: string
         place:
           $ref: '#/components/schemas/DrawPlace'
+
+    SwapCandidates:
+      type: object
+      required: [pick, candidates]
+      properties:
+        pick:
+          $ref: '#/components/schemas/SwapSide'
+        candidates:
+          type: array
+          description: Every other drawn competitor, in draw order.
+          items:
+            type: object
+            required: [id, place, verdict]
+            properties:
+              id:
+                type: string
+                description: The participant id.
+              place:
+                $ref: '#/components/schemas/DrawPlace'
+              verdict:
+                type: string
+                enum: [better, worse, same]
+                description: What swapping this competitor with the pick does to the dojo separation.
 
     SwapRequest:
       type: object

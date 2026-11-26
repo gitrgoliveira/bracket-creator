@@ -446,7 +446,7 @@ function teamIVPWScore(m) {
 // card passes one (bronzeSlotLabels), so every other card is unchanged. A
 // normalized empty side is {id: "", name: ""}, truthy, so the test is the name.
 // `pick` is set only in the admin Swap competitors mode (swapPickFor below):
-// the side is then its own button, {picked, onPick}; without it the side is
+// the side is then its own button, {picked, mark, word, onPick}; without it the side is
 // drawn exactly as before.
 const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD, isEngi, slotLabel, feederId, barred, emptyLabel, pick }) => {
   if (!player || isTBD || (emptyLabel && !player.name)) {
@@ -473,7 +473,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
   const Side = pick ? "button" : "div";
   return (
     <Side
-      className={`bc-side bc-side--${side} ${isWinner ? "bc-side--winner" : ""}${pick ? ` swap-pick${pick.picked ? " swap-pick--picked" : ""}` : ""}`}
+      className={`bc-side bc-side--${side} ${isWinner ? "bc-side--winner" : ""}${pick ? ` swap-pick${pick.picked ? " swap-pick--picked" : ""}${pick.mark ? ` swap-pick--${pick.mark}` : ""}` : ""}`}
       type={pick ? "button" : undefined}
       aria-pressed={pick ? pick.picked : undefined}
       data-testid={pick ? "swap-target" : undefined}
@@ -498,6 +498,9 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
           ellipsis. Mirrors where a completed match's Kiken/Fus./Ht mark rides
           (cardMarks in MatchCard); the two can never both apply to one side. */}
       {score != null ? <span className="bc-score">{score}</span> : barred ? <BarredChip /> : null}
+      {/* A swap candidate's mark carries its word too (better, worse), in the
+          card's right column, so a long name or dojo never cuts it off. */}
+      {pick ? pick.word : null}
     </Side>
   );
 });
@@ -511,7 +514,12 @@ PlayerLine.displayName = "PlayerLine";
 function swapPickFor(swap, side) {
   const entrant = swap && side && side.id ? swap.entrantOf(side.id) : null;
   if (!entrant) return null;
-  return { picked: swap.pickedId === entrant.id, onPick: (ev) => swap.onPick(entrant, ev) };
+  return {
+    picked: swap.pickedId === entrant.id,
+    mark: swap.markOf ? swap.markOf(entrant.id) : null,
+    word: swap.verdictWord ? swap.verdictWord(entrant.id, false) : null,
+    onPick: (ev) => swap.onPick(entrant, ev),
+  };
 }
 
 // `swap` is set only in the admin Swap competitors mode (bc-drev FR10): the card

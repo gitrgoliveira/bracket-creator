@@ -333,17 +333,9 @@ func foughtMatch(tx state.StoreTx, compID string, snap swapSnapshot) (string, er
 // place that is not exactly one shape), SwapSameCompetitor, SwapInvalid again
 // (two sides naming one place), SwapNotInDraw, SwapDrawChanged.
 func planSwap(snap swapSnapshot, req SwapRequest) (swapPlan, error) {
-	comp := snap.comp
-	if !CompetitionDrawsBracket(comp.EffectiveFormat()) {
-		return swapPlan{}, swapRefused(SwapNotSupported, "A league or Swiss competition has no draw places to swap.")
-	}
-	source := DrawSourceFor(comp)
-	if source == DrawNone || (source == DrawInPools && len(snap.pools) == 0) ||
-		(source == DrawInBracket && (snap.bracket == nil || len(snap.bracket.Rounds) == 0)) {
-		return swapPlan{}, swapRefused(SwapNoDraw, "There is no draw to change yet.")
-	}
-	if comp.Status != state.CompStatusDrawReady || recordedResultIn(snap.poolMatches, snap.bracket) || snap.fought != "" {
-		return swapPlan{}, swapRefused(SwapDrawStarted, swapDrawStartedHuman)
+	source, err := swappableDraw(snap)
+	if err != nil {
+		return swapPlan{}, err
 	}
 	for _, side := range []SwapSide{req.A, req.B} {
 		if err := checkSwapPlace(side, source); err != nil {
@@ -400,6 +392,26 @@ func planSwap(snap swapSnapshot, req SwapRequest) (swapPlan, error) {
 	plan.answer.Places = SwapPlaces{A: clonePlace(after.A), B: clonePlace(after.B)}
 	plan.describe(snap, req, source)
 	return plan, nil
+}
+
+// swappableDraw is the draw's own refusals, judged before anything a request
+// names, in order: SwapNotSupported (a league or Swiss competition),
+// SwapNoDraw, SwapDrawStarted. The swap and the swap candidates ask it alike.
+// It answers where the draw's places are.
+func swappableDraw(snap swapSnapshot) (DrawSource, error) {
+	comp := snap.comp
+	if !CompetitionDrawsBracket(comp.EffectiveFormat()) {
+		return DrawNone, swapRefused(SwapNotSupported, "A league or Swiss competition has no draw places to swap.")
+	}
+	source := DrawSourceFor(comp)
+	if source == DrawNone || (source == DrawInPools && len(snap.pools) == 0) ||
+		(source == DrawInBracket && (snap.bracket == nil || len(snap.bracket.Rounds) == 0)) {
+		return source, swapRefused(SwapNoDraw, "There is no draw to change yet.")
+	}
+	if comp.Status != state.CompStatusDrawReady || recordedResultIn(snap.poolMatches, snap.bracket) || snap.fought != "" {
+		return source, swapRefused(SwapDrawStarted, swapDrawStartedHuman)
+	}
+	return source, nil
 }
 
 // checkSwapPlace refuses a place that is not exactly one shape, or a shape

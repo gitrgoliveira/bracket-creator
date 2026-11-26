@@ -359,6 +359,46 @@ func (s *swapSuggester) row(i, j, x, y int) DojoMeeting {
 	return dm
 }
 
+// laterPair is a pair of dojo-mates, entrants i and j, that meets later
+// after a swap: before and after rank its first meeting.
+type laterPair struct {
+	i, j          int
+	before, after meetingRank
+}
+
+// pairShifts compares the first meeting of every pair of dojo-mates that
+// holds entrant x or y before and after the swap of the two: gained lists the
+// pairs that meet later, earlier says at least one pair meets earlier. Only
+// valid for a swap that rebuilds nothing (no seed leaves a pools + knockout
+// pool), where the bracket keeps its shape and no other pair's meeting can
+// change. Any two entrants, seeded or not, in one group or two.
+func (s *swapSuggester) pairShifts(x, y int) (gained []laterPair, earlier bool) {
+	ex, ey := s.entrants[x], s.entrants[y]
+	type pair struct{ i, j int }
+	var pairs []pair
+	for _, m := range s.byDojo[ex.key] {
+		if m != x {
+			pairs = append(pairs, pair{x, m})
+		}
+	}
+	for _, m := range s.byDojo[ey.key] {
+		if m != y && m != x {
+			pairs = append(pairs, pair{y, m})
+		}
+	}
+	for _, p := range pairs {
+		before := s.rank(s.entrants[p.i], s.entrants[p.j])
+		after := s.rank(s.view(p.i, x, y), s.view(p.j, x, y))
+		switch c := after.compare(before); {
+		case c < 0:
+			earlier = true
+		case c > 0:
+			gained = append(gained, laterPair{p.i, p.j, before, after})
+		}
+	}
+	return gained, earlier
+}
+
 // improvement is a SwapImprovement with the ranks the search sorts by.
 type improvement struct {
 	SwapImprovement
@@ -376,37 +416,8 @@ func (s *swapSuggester) evaluate(x, y int) (improves []improvement, ok bool) {
 	if ex.seed > 0 || ey.seed > 0 || ex.group == ey.group {
 		return nil, false
 	}
-	type pair struct{ i, j int }
-	var pairs []pair
-	for _, m := range s.byDojo[ex.key] {
-		if m != x {
-			pairs = append(pairs, pair{x, m})
-		}
-	}
-	for _, m := range s.byDojo[ey.key] {
-		if m != y && m != x {
-			pairs = append(pairs, pair{y, m})
-		}
-	}
-	if len(pairs) == 0 {
-		return nil, false
-	}
-	type later struct {
-		pair
-		before, after meetingRank
-	}
-	var gained []later
-	for _, p := range pairs {
-		before := s.rank(s.entrants[p.i], s.entrants[p.j])
-		after := s.rank(s.view(p.i, x, y), s.view(p.j, x, y))
-		switch c := after.compare(before); {
-		case c < 0:
-			return nil, false
-		case c > 0:
-			gained = append(gained, later{p, before, after})
-		}
-	}
-	if len(gained) == 0 {
+	gained, earlier := s.pairShifts(x, y)
+	if earlier || len(gained) == 0 {
 		return nil, false
 	}
 	improves = make([]improvement, len(gained))

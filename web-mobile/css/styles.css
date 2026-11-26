@@ -895,6 +895,21 @@ a:hover {
   border-color: var(--accent-strong);
 }
 
+/* The primary answer of a check that found a cost ("Swap anyway" when a
+   swap brings dojo-mates together earlier): amber, the caution colour, in
+   the primary's place. --warn on white text holds 5:1; --warn-ink deepens it
+   on hover. A warning, never an error: a destructive action is .btn--danger. */
+.btn--warn {
+  background: var(--warn);
+  color: var(--accent-fg);
+  border-color: var(--warn);
+}
+
+.btn--warn:hover {
+  background: var(--warn-ink);
+  border-color: var(--warn-ink);
+}
+
 /* Armed "Finish" state: the commit button has been tapped once and now shows
    the computed verdict, awaiting a confirming second tap. Deepen the fill and
    add the accent ring so it reads as "armed, tap again to record", navy, not
@@ -12795,15 +12810,26 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   padding-top: 16px;
   border-top: 1px solid var(--line-2);
 }
+/* The card's title is its h2 and the largest heading in it; the two
+   sections' h3 and the picker's h4 step down from it. */
+.draw-review__title {
+  font-size: 16px;
+}
+.draw-review__verdict {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
 .draw-review__heading {
   margin: 0 0 4px;
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--ink-1);
 }
 .draw-review__subheading {
   margin: 16px 0 8px;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--ink-1);
 }
@@ -12811,6 +12837,20 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin: 0 0 10px;
   font-size: 13px;
   color: var(--ink-2);
+}
+/* The review's sentences never leave their last word alone on a line. */
+.draw-review__verdict,
+.draw-review__lead,
+.draw-review__empty,
+.draw-review__effect,
+.draw-review__stuck li,
+.draw-swap-check__line,
+.draw-swap-check__list li {
+  text-wrap: pretty;
+}
+/* The table's short meeting cells break evenly ("Share" over "Pool A"). */
+.draw-review__table td:last-child > div {
+  text-wrap: balance;
 }
 .draw-review__empty {
   margin: 0;
@@ -12823,6 +12863,19 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .draw-review__table td {
   vertical-align: top;
+}
+/* One dojo per row group, named once in a cell spanning its pairs, and a
+   stronger rule between two dojos than between two pairs of one. */
+.draw-review__dojo {
+  font-weight: 600;
+}
+.draw-review__group + .draw-review__group > tr:first-child > td {
+  border-top: 2px solid var(--line);
+}
+/* The section below draws its own rule, so the last row draws none. */
+.draw-review__group:last-child > tr:last-child > td,
+.draw-review__group:last-child .draw-review__dojo {
+  border-bottom: 0;
 }
 /* One competitor per line in the Pair cell, never broken inside: the table
    scrolls instead (above). */
@@ -12857,15 +12910,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   min-width: 0;
 }
 .draw-review__effect {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink-2);
 }
 .draw-review__stuck {
   margin-top: 10px;
 }
 .draw-review__stuck li {
-  font-size: 12.5px;
-  color: var(--ink-3);
+  font-size: 13px;
+  color: var(--ink-2);
   padding: 2px 0;
 }
 .draw-review__picks {
@@ -12899,9 +12952,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--warn-ink);
   font-weight: 600;
 }
-.draw-swap-check__line--muted {
-  color: var(--ink-3);
-}
 .draw-swap-check__list {
   margin: 0 0 8px;
   padding-inline-start: 18px;
@@ -12912,6 +12962,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .draw-swap-check__earlier {
   color: var(--warn-ink);
   font-weight: 600;
+}
+/* Its two answers are buttons a thumb finds: never under 36px tall. */
+.draw-swap-check .shiaijo-move-confirm__actions .btn {
+  min-height: max(36px, var(--tap-floor));
 }
 
 /* Swap competitors: the mode on Pools (preview) and Bracket (preview). The
@@ -13002,4 +13056,78 @@ button.bc-side.swap-pick:not(.swap-pick--picked):not(:focus-visible) {
 button.swap-pick:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+/* Once a first competitor is picked, each other one is marked by what the
+   swap would do to dojo-mates (admin_swap_candidates.jsx): green keeps them
+   apart longer, amber brings a pair closer, and an unmarked pick keeps its
+   dashed edge. A mark changes colour, fill and an inset ring only, never a
+   border width or a size, so nothing moves under the finger as it appears. */
+.pool__table button.swap-pick.swap-pick--better,
+button.bc-side.swap-pick.swap-pick--better {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+  border-style: solid;
+  box-shadow: inset 0 0 0 1px var(--ok);
+}
+.pool__table button.swap-pick.swap-pick--worse,
+button.bc-side.swap-pick.swap-pick--worse {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  border-style: solid;
+  box-shadow: inset 0 0 0 1px var(--warn);
+}
+/* A bracket side draws its edge as an inset ring, in place of the dashed
+   outline. */
+button.bc-side.swap-pick.swap-pick--better:not(:focus-visible),
+button.bc-side.swap-pick.swap-pick--worse:not(:focus-visible) {
+  outline: 0;
+}
+button.bc-side.swap-pick.swap-pick--better {
+  box-shadow: inset 0 0 0 2px var(--ok);
+}
+button.bc-side.swap-pick.swap-pick--worse {
+  box-shadow: inset 0 0 0 2px var(--warn);
+}
+/* The mark's word. Both words sit in one grid cell from the moment the mode
+   is on, the shown one visible, so the space is held before any mark. */
+.swap-verdict {
+  display: inline-grid;
+}
+.swap-verdict__word {
+  grid-area: 1 / 1;
+  visibility: hidden;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.swap-verdict__word.is-shown {
+  visibility: visible;
+}
+.swap-verdict__word--better {
+  color: var(--ok-ink);
+}
+.swap-verdict__word--worse {
+  color: var(--warn-ink);
+}
+.bc-side .swap-verdict {
+  flex: none;
+  font-size: 11px;
+}
+/* The key line under the pick line: every sentence it can say stacked in one
+   grid cell, only the current one visible, so it holds the height of the
+   longest from the pick on. */
+.swap-mode__key {
+  display: grid;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.swap-mode__key-line {
+  grid-area: 1 / 1;
+  visibility: hidden;
+  text-wrap: pretty;
+}
+.swap-mode__key-line.is-shown {
+  visibility: visible;
+}
+.swap-mode__key-line--quiet {
+  color: var(--ink-3);
 }

@@ -465,6 +465,43 @@ describe('createRefetchGate', () => {
     await h.answer(answerAt(5));
     expect(h.timers).toHaveLength(1);
   });
+
+  it('dispose: an answer landing after it is not applied and asks for nothing more', async () => {
+    const h = harness();
+    h.gate.event(1);
+    h.fireTimers();
+    h.gate.event(2); // seen while the fetch is out: would ask for one more
+    h.gate.dispose();
+    await h.answer(answerAt(1));
+    expect(h.taken).toHaveLength(0);
+    expect(h.timers).toHaveLength(0);
+    expect(h.sent).toHaveLength(1);
+    expect(h.gate.appliedSeq()).toBe(0);
+  });
+
+  it('dispose: a failed fetch landing after it is not reported or asked for again', async () => {
+    const h = harness();
+    h.gate.event(1);
+    h.fireTimers();
+    h.gate.dispose();
+    await h.fail(new Error('late'));
+    expect(h.errors).toHaveLength(0);
+    expect(h.timers).toHaveLength(0);
+  });
+
+  it('dispose: a refetch scheduled and not sent is never sent, and no event, now() or restart() asks again', () => {
+    const h = harness();
+    h.gate.event(1);
+    expect(h.timers).toHaveLength(1);
+    h.gate.dispose();
+    h.fireTimers();
+    expect(h.sent).toHaveLength(0);
+    h.gate.event(2);
+    h.gate.now();
+    h.gate.restart();
+    expect(h.timers).toHaveLength(0);
+    expect(h.sent).toHaveLength(0);
+  });
 });
 
 describe('the reads note the answer seq on the value they finally return', () => {

@@ -286,7 +286,12 @@ const HELD_PUSH_WAIT_MS = 300;
 //     adopted. The host asks for its refetch with now();
 //   - restart() (the stream reopened, resync_required) is forget() and now():
 //     nothing counts as applied and one refetch is asked for whatever its
-//     seq says.
+//     seq says;
+//   - dispose() (the host's effect ended, so the page it fetched for is gone):
+//     a fetch still out is neither applied nor followed by another, and
+//     nothing is sent again. A host calls it in the effect's cleanup, beside
+//     clearing its timers, since an answer landing after a competition was
+//     switched away would otherwise show the old competition's data.
 // Every fetch that applies the same state outside the gate (a first load, a
 // refresh after a save) reports the seq of the value its fetcher returned,
 // before any merge: `applied(readSeqOf(fetched))`. The gate's own fetch never
@@ -310,6 +315,7 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
     let forced = false;   // the refetch wanted is one applied() cannot cancel
     let generation = 0;
     let failed = false;   // the last fetch failed and has been asked for again
+    let disposed = false; // the host's effect ended: nothing is sent or applied
 
     const isSeq = (seq) => typeof seq === 'number' && Number.isSafeInteger(seq) && seq > 0;
 
@@ -323,6 +329,7 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
     // (now(), an event with no seq, a failed fetch): fire() sends it
     // whatever has been applied since.
     const want = (force) => {
+        if (disposed) return;
         if (force) forced = true;
         if (scheduled) return;
         if (inflight) { again = true; return; }
@@ -360,6 +367,7 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
 
     function fire() {
         scheduled = false;
+        if (disposed) return;
         if (inflight) { again = true; return; }
         // An answer applied since the refetch was asked for may cover every
         // event seen: then there is nothing left to fetch.
@@ -382,6 +390,7 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
             sent = Promise.reject(err);
         }
         sent.then((value) => {
+            if (disposed) return;
             let ok = true;
             try {
                 if (typeof apply === 'function') apply(value);
@@ -391,6 +400,7 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
             }
             settle(gen, readSeqOf(value), ok);
         }, (err) => {
+            if (disposed) return;
             report(err);
             settle(gen, 0, false);
         });
@@ -423,6 +433,11 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
             forget();
             want(true);
         },
+        // dispose() ends the gate with the host's effect: a fetch already out
+        // is not applied (take's function never runs) and asks for nothing
+        // more, and no later event, now() or restart() sends one. The seq it
+        // held stays readable through appliedSeq().
+        dispose() { disposed = true; },
         // appliedSeq: the seq the gate counts as applied (tests and logs).
         appliedSeq() { return applied; },
     };

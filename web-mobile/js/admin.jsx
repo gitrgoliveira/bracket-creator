@@ -1054,6 +1054,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       return () => {
         cancelled = true;
         timerPool.clearAll();
+        detailGate.dispose();
+        listGate.dispose();
         if (detailGateRef.current && detailGateRef.current.gate === detailGate) detailGateRef.current = null;
         if (listGateRef.current === listGate) listGateRef.current = null;
         document.removeEventListener('visibilitychange', onVisibilityChange);

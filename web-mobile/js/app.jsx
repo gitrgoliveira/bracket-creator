@@ -1661,6 +1661,10 @@ function App() {
         timerPool.clearAll();
         listSeedRef.current = listGate.appliedSeq();
         if (detailGate) detailSeedRef.current = { compId: viewerCompId, seq: detailGate.appliedSeq() };
+        // A fetch still out must not show its answer, or send another, once
+        // this effect is over (the competition may have changed).
+        listGate.dispose();
+        if (detailGate) detailGate.dispose();
         if (listGateRef.current === listGate) listGateRef.current = null;
         if (detailGateRef.current && detailGateRef.current.gate === detailGate) detailGateRef.current = null;
         document.removeEventListener('visibilitychange', onVisibilityChange);

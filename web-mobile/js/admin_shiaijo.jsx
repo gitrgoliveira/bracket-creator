@@ -365,6 +365,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return () => {
             cancelled = true;
             timerPool.clearAll();
+            feedGate.dispose();
             if (feedGateRef.current && feedGateRef.current.gate === feedGate) feedGateRef.current = null;
             document.removeEventListener("visibilitychange", onVisible);
             unsub();

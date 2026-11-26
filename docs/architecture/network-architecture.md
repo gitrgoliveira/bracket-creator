@@ -478,8 +478,8 @@ round robin of 66 bouts apiece, so a real event is larger.
 | What is sent | Bytes as sent | Bytes gzipped |
 |---|---|---|
 | The `match_updated` event (stream frame) | 612 | not compressed |
-| One competition refetch | 25,665 | 2,059 (8%) |
-| One competitions-list refetch | 25,606 | 2,024 (8%) |
+| One competition refetch | 25,665 | 2,058 (8%) |
+| One competitions-list refetch | 50,943 | 3,478 (7%) |
 
 Every `/api` answer over 1 KiB that is JSON is gzipped for a browser that accepts it, so the saving
 applies to each refetch. The embedded page files are not compressed, so a first load is unchanged.
@@ -491,9 +491,9 @@ One point, with every viewer fetching both the competition and the list again:
 
 | Viewers | The event | Refetches as sent | Refetches gzipped |
 |---|---|---|---|
-| 1 | 612 B | 51.3 KB | 4.1 KB |
-| 100 | 61 KB | 5.1 MB | 408 KB |
-| 1,000 | 612 KB | 51.3 MB | 4.1 MB |
+| 1 | 612 B | 76.6 KB | 5.5 KB |
+| 100 | 61 KB | 7.7 MB | 554 KB |
+| 1,000 | 612 KB | 76.6 MB | 5.5 MB |
 
 The refetches, not the events, are what grows with the audience, which is why both the compression
 and fetching once per burst of events matter.

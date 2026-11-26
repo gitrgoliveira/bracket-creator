@@ -39,6 +39,7 @@ func sbmSeed(t *testing.T) (*backupTestRig, []state.MatchResult) {
 		Name: "Measurement Taikai", Date: "01-06-2026", Venue: "Sports Hall", Courts: []string{"A", "B"},
 		Password: backupTestPassword, Mode: state.TournamentModeOfficiated,
 	}))
+	var alphaMatches []state.MatchResult
 	for _, id := range []string{"alpha", "beta"} {
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID: id, Name: "Individual " + id, Kind: "individual", Format: state.CompFormatLeague,
@@ -68,11 +69,11 @@ func sbmSeed(t *testing.T) (*backupTestRig, []state.MatchResult) {
 		}
 		require.NoError(t, store.SavePoolMatches(id, matches))
 		if id == "alpha" {
-			r, hub := newBackupRouter(t, store)
-			return &backupTestRig{r: r, store: store, hub: hub, dir: dir}, matches
+			alphaMatches = matches
 		}
 	}
-	return nil, nil
+	r, hub := newBackupRouter(t, store)
+	return &backupTestRig{r: r, store: store, hub: hub, dir: dir}, alphaMatches
 }
 
 // sbmGet reads path as a public viewer, asking for gzip when gzipped. It
@@ -134,6 +135,8 @@ func TestSyncBytes_ARefetchIsLargerThanTheEventThatCausesIt(t *testing.T) {
 	// causes it, so an event that fetches nothing is a saving.
 	assert.Greater(t, detailPlain, eventBytes, "the detail refetch is larger than its event")
 	assert.Greater(t, listPlain, eventBytes, "the list refetch is larger than its event")
+	// Both competitions are on the list, so it outweighs the one detail it holds.
+	assert.Greater(t, listPlain, detailPlain, "the list carries both competitions")
 
 	// The answers a gzip-accepting page gets are compressed, and smaller.
 	assert.True(t, detailIsGz, "the detail answer is gzipped for a caller that accepts it")

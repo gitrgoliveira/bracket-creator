@@ -330,8 +330,8 @@ resident per client).
 Most of the egress is not the real-time events but the answers each viewer fetches after one. In a
 measured tournament of two 12-competitor round robins, one point is a 612-byte event, while the
 competition refetch it causes is 25.7 KB as sent and 2.1 KB gzipped, and the competitions-list
-refetch is 25.6 KB and 2.0 KB. With 1,000 viewers fetching both after one point, that is 51 MB as
-sent and 4.1 MB gzipped, against 0.6 MB for the events themselves. Answers are gzipped for any
+refetch is 50.9 KB and 3.5 KB. With 1,000 viewers fetching both after one point, that is 77 MB as
+sent and 5.5 MB gzipped, against 0.6 MB for the events themselves. Answers are gzipped for any
 browser that accepts it, which cuts a refetch to about 8% of its size; the embedded page files are
 not compressed, so a first load is unchanged. Compressing a 317 KB list takes about 0.6 ms of CPU,
 once per shared build. Refer to [Scale limit](network-architecture.md#7-scale-limit-egress) for the table.

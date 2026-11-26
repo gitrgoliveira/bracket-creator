@@ -281,7 +281,7 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		// recordDisplacedHistory used to be called for separately here (a
 		// newer count the finish closed out), since recordWriteHistory
 		// appends it too.
-		rec, recErr := e.recordEngiMatch(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason, result.ModifiedAt, result.GroupStamps, true, fo)
+		rec, recErr := e.recordEngiMatch(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason, result.ResultSource, result.ModifiedAt, result.GroupStamps, true, fo)
 		if recErr != nil {
 			return nil, recErr
 		}

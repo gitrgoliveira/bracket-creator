@@ -182,6 +182,28 @@ func TestGzip_HandlerPanicStillAnswers500(t *testing.T) {
 	}
 }
 
+// A panic while a large answer is still streaming leaves its gzip stream
+// unclosed: the caller's read of the body fails, where a closed stream would
+// have read as a well-formed answer of truncated JSON under 200.
+func TestGzip_PanicMidStreamLeavesTheGzipBodyUnfinished(t *testing.T) {
+	r := gzipTestRouter(func(r *gin.Engine) {
+		r.GET("/api/cut", func(c *gin.Context) {
+			c.Writer.Header().Set("Content-Type", "application/json")
+			c.Writer.WriteHeader(http.StatusOK)
+			_, err := c.Writer.Write([]byte(`{"pad":"` + strings.Repeat("x", 4*gzipMinBytes)))
+			require.NoError(t, err)
+			panic("mid answer")
+		})
+	})
+	w := gzipGet(r, http.MethodGet, "/api/cut", "gzip")
+	assert.Equal(t, "gzip", w.Header().Get("Content-Encoding"))
+	zr, err := gzip.NewReader(w.Body)
+	if err == nil {
+		_, err = io.ReadAll(zr)
+	}
+	assert.Error(t, err)
+}
+
 // A panic after a handler wrote its whole answer (work done after c.JSON)
 // leaves the answer the caller got: the write landed, and a 500 would have
 // the outbox retry it.

@@ -149,6 +149,25 @@ describe('createRefetchGate', () => {
     expect(forgotten.gate.appliedSeq()).toBe(3);
   });
 
+  it('the first answer after a seed is shown even when its seq is below the seed', async () => {
+    // A seed older than a server restart is above the new stream's seqs: the
+    // answer to the first fetch must still be applied, not dropped as late.
+    const h = harness();
+    h.gate.seed(40);
+    expect(h.gate.event(41)).toBe(true);
+    h.fireTimers();
+    const value = answerAt(3, { fresh: true });
+    await h.answer(value);
+    expect(h.taken).toEqual([value]);
+    expect(h.gate.appliedSeq()).toBe(3);
+    // Past the seed, a lower answer is late again.
+    expect(h.gate.event(5)).toBe(true);
+    h.fireTimers();
+    await h.answer(answerAt(2));
+    expect(h.taken).toHaveLength(1);
+    expect(h.gate.appliedSeq()).toBe(3);
+  });
+
   it('a replayed event the answer covers fetches nothing', async () => {
     const h = harness();
     h.gate.event(3);

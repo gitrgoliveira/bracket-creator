@@ -151,16 +151,18 @@ func GzipMiddleware() gin.HandlerFunc {
 				// stays answered 200, where a 500 would have the outbox retry
 				// it. Anything else held (nothing written, or a body cut
 				// short) is dropped, so Recovery's 500 reaches the caller.
-				// An answer already past gzipMinBytes has sent its headers: its
-				// stream is closed, so the caller reads what was written
-				// whole, never a gzip body cut short. A writer mid-stream is
-				// not returned to the pool.
+				// An answer already past gzipMinBytes has sent its headers. One
+				// that went out whole has its stream closed, so the caller
+				// reads it to its end. One cut short is left unclosed, so the
+				// caller's read of the body fails like a dropped connection,
+				// never a well-formed gzip body of truncated JSON under 200. A
+				// writer mid-stream is not returned to the pool.
 				if gw.wroteHeader && !gw.decided && json.Valid(gw.buf) {
 					if err := gw.decide(false); err != nil {
 						slog.Debug("mobileapp: gzip answer", "err", err)
 					}
 				}
-				if gw.zw != nil {
+				if gw.zw != nil && gw.whole {
 					if err := gw.zw.Close(); err != nil {
 						slog.Debug("mobileapp: gzip close", "err", err)
 					}
@@ -190,6 +192,7 @@ type gzipResponseWriter struct {
 
 	buf      []byte
 	decided  bool
+	whole    bool // the one thing the handler wrote, past gzipMinBytes, is a complete JSON value
 	hijacked bool
 	zw       *gzip.Writer
 }
@@ -226,6 +229,7 @@ func (w *gzipResponseWriter) Write(p []byte) (int, error) {
 	w.WriteHeaderNow()
 	w.size += len(p)
 	if w.decided {
+		w.whole = false
 		return w.writeOut(p)
 	}
 	if !w.mayCompress() {
@@ -236,6 +240,7 @@ func (w *gzipResponseWriter) Write(p []byte) (int, error) {
 	}
 	w.buf = append(w.buf, p...)
 	if len(w.buf) >= gzipMinBytes {
+		w.whole = json.Valid(w.buf)
 		if err := w.decide(true); err != nil {
 			return 0, err
 		}

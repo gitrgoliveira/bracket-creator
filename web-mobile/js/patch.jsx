@@ -277,7 +277,8 @@ const FETCH_DEADLINE_MS = 30000;
 //   - answered: an answer naming a lower seq than the applied one is late (a
 //     build that began earlier, openapi EventSeq): it is not applied, so it
 //     never puts older data over a newer read, and the applied seq only
-//     rises. Any answer asks for one more when an event seen while it was out
+//     rises (the first answer after seed() is never late: it replaces the
+//     seed, so it is applied whatever its seq). Any answer asks for one more when an event seen while it was out
 //     is above its seq (a missing header covers nothing, an event with no seq
 //     is never covered), or, once only, when its seq is below an event seen
 //     before it was sent (it joined a build the server elected earlier).
@@ -417,8 +418,9 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
             let kept = true;
             try {
                 // Older than a read already shown: applying it would put
-                // older data back.
-                if (typeof apply === 'function' && !(isSeq(seq) && seq < applied)) kept = apply(value) !== false;
+                // older data back. A seed is no read shown by this gate, so
+                // the first answer is never late against it.
+                if (typeof apply === 'function' && (seeded || !(isSeq(seq) && seq < applied))) kept = apply(value) !== false;
             } catch (err) {
                 ok = false;
                 report(err);

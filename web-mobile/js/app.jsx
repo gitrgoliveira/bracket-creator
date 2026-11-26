@@ -1378,7 +1378,9 @@ function App() {
     // (detailGateRef). The list gate's fetch answers the read it made, or
     // nothing when the load was skipped (it covers no event, and takeList is
     // not asked), and rejects when the read failed, so the gate asks for it
-    // again; the gate, not the fetch, shows what was read (takeList).
+    // again; the gate, not the fetch, shows what was read (takeList). While
+    // the load is skipped an event asks the gate for nothing: its fetch would
+    // cover no seq, so every event would still cost a flight and its deadline.
     const listGate = createRefetchGate({
         schedule: timerPool.schedule,
         fetch: () => (listLoadSkipped() ? null : fetchListRef.current()),
@@ -1499,7 +1501,7 @@ function App() {
         //     walls so they don't simultaneously storm GET /api/viewer/competitions.
         // Each asks its gate, which sends one fetch per burst (bc-sseq FR4).
         const refetchDetail = () => { if (detailGate) detailGate.event(event.seq); };
-        const refetchList = () => listGate.event(event.seq);
+        const refetchList = () => { if (!listLoadSkipped()) listGate.event(event.seq); };
         // another competition's event: refetch the open competition only when the two share a day (and, when `courts` is given, a court on that day)
         const refetchIfSharesDay = (event, courts) => {
             const otherDate = (compsRef.current || []).find(c => c.id === event.data?.competitionId)?.date || "";

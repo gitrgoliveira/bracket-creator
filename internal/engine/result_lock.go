@@ -317,7 +317,7 @@ func builtOnOf(tx state.StoreTx, compID string, comp *state.Competition, matchID
 			return BuiltOn{Kind: BuiltOnSwissRound, Round: later}, nil
 		}
 	}
-	if comp != nil && comp.Status == state.CompStatusComplete {
+	if comp.Status == state.CompStatusComplete {
 		return BuiltOn{Kind: BuiltOnFinished, Reopens: comp.Format == state.CompFormatLeague}, nil
 	}
 	if inPool {

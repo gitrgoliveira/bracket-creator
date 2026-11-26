@@ -380,6 +380,53 @@ function parseCourtFromSearch() {
   return raw.toLowerCase() === 'all' ? 'ALL' : raw.toUpperCase();
 }
 
+// alertNamedInCompetition: an outbox alert about a match names it by `where`,
+// the match's label ("Match 1"), which every competition has. The held-writes
+// list names the same write "<competition> · <match>" (heldWriteWhere,
+// held_writes_panel.jsx), so the alert is named the same way whenever this
+// page holds the competition (the self-run walk's S7). Never by its id: a
+// competition the page does not hold leaves the alert as it was, as does an
+// alert that names no match. Exported for test.
+export function alertNamedInCompetition(alert, competitions) {
+  if (!alert || !alert.compID || !alert.matchID || !alert.where) return alert;
+  const comp = (competitions || []).find((c) => c && c.id === alert.compID);
+  if (!comp || !comp.name) return alert;
+  return { ...alert, where: `${comp.name} · ${alert.where}` };
+}
+
+// toastQueueAlert: tell one outbox alert as a toast, its match named in the
+// competition (alertNamedInCompetition) when `competitions` holds it.
+function toastQueueAlert(alert, competitions) {
+  const message = queueAlertMessage(alertNamedInCompetition(alert, competitions));
+  if (message) pushToast(message, queueAlertToastType(alert), queueAlertToastOptions(alert));
+}
+
+// useQueueAlertToasts: the one subscriber that renders the outbox's alerts as
+// toasts. An alert replayed on subscribe, raised before the tournament was
+// read (`tournament` is undefined until the first answer, a tournament or
+// null), waits for that read, so it is named with its competition like the
+// later ones; the competitions are read when the alert comes, not when the
+// subscription was made. Exported for test.
+export function useQueueAlertToasts(tournament) {
+  const alertCompetitionsRef = useLatestRef(tournament && tournament.competitions);
+  const tournamentReadRef = useLatestRef(tournament !== undefined);
+  const waitingAlertsRef = useRef([]);
+  useEffect(() => {
+    if (typeof window.subscribeQueueAlert !== "function") return;
+    return window.subscribeQueueAlert((alert) => {
+      if (tournamentReadRef.current) toastQueueAlert(alert, alertCompetitionsRef.current);
+      else waitingAlertsRef.current.push(alert);
+    });
+    // The refs are stable; the toast queue is module-level.
+  }, [tournamentReadRef, alertCompetitionsRef]);
+  useEffect(() => {
+    if (tournament === undefined) return;
+    const waiting = waitingAlertsRef.current;
+    waitingAlertsRef.current = [];
+    waiting.forEach((alert) => toastQueueAlert(alert, tournament && tournament.competitions));
+  }, [tournament]);
+}
+
 // bc-qttl: turn a queue alert from the outbox (api_client_queue.jsx) into operator-facing prose.
 //
 // The queue holds writes that have not reached the server. Every alert below but
@@ -424,7 +471,10 @@ export function queueAlertMessage(alert) {
         // current copy and save again, never to re-enter it over theirs.
         if (alert.code === "tournament_changed") return "Tournament settings were not saved: they were changed on another device. Open them and save again.";
         if (alert.code === "awards_changed") return "The fighting-spirit awards were not saved: they were changed on another device. Open them and save again.";
-        const what = Number(alert.terminalCount) > 0 ? "A result" : "A change";
+        // A match write names its match (`where`, the words the outbox's
+        // other alerts name it by), so a refusal told away from the match
+        // says which one it is about (decision q-f6-one-message).
+        const what = `${Number(alert.terminalCount) > 0 ? "A result" : "A change"}${alert.where ? ` in ${alert.where}` : ""}`;
         if (alert.sentence && alert.detail) return `${what} was refused by the server and cannot be saved. ${alert.detail}`;
         return `${what} was refused by the server${detail} and cannot be saved. Re-enter it.`;
       }
@@ -467,14 +517,16 @@ export function queueAlertMessage(alert) {
     // its history. Recorded, so not an error: the history has the change.
     case "displaced":
       return displacedAlertText(n, one);
-    // bc-evts: taps the server did not apply this pass, one alert a pass;
-    // a single one says why in the server's words or the outcome's.
-    // A tap the server turned away after its own answer said it landed
-    // (`turnedAway`) is told away from its match, so the alert names the match
-    // and the tap.
+    // bc-evts: taps the server did not apply this pass, one alert a match
+    // (decision q-f6-one-message), naming the match; a single one says why in
+    // the server's words or the outcome's, and several end on those words
+    // when every tap was given the same (`sameReason`). A tap the server
+    // turned away after its own answer said it landed (`turnedAway`) is told
+    // away from its match, so the alert names the match and the tap.
     case "not_applied":
       return tapNotAppliedAlertText(n, one,
-        tapNotAppliedText(alert.outcome, alert.where || "", alert.tap ? tapWords(alert.tap) : ""), alert.where || "");
+        tapNotAppliedText(alert.outcome, alert.where || "", alert.tap ? tapWords(alert.tap) : ""), alert.where || "",
+        alert.sameReason ? tapNotAppliedText(alert.outcome) || "" : "");
     // bc-evts S5 b: a batch of taps the server refused is held, not dropped.
     case "taps_parked":
       return `The server refused ${one ? "a tap" : `${n} taps`}. ${one ? "It is" : "They are"} held and ${one ? "holds" : "hold"} back that match's later changes: open the held writes list to discard ${one ? "it" : "them"}.`;
@@ -754,14 +806,7 @@ function App() {
   // load-bearing here: the queue rehydrates from localStorage at module load,
   // long before App mounts, so the "results were discarded" alert is always
   // raised before this effect can run. Subscribing replays it.
-  useEffect(() => {
-    if (typeof window.subscribeQueueAlert !== "function") return;
-    return window.subscribeQueueAlert((alert) => {
-      const message = queueAlertMessage(alert);
-      if (message) showToast(message, queueAlertToastType(alert), queueAlertToastOptions(alert));
-    });
-    // Mount-only: showToast pushes into the module-level toast queue.
-  }, []);
+  useQueueAlertToasts(tournament);
 
   // Sync state to URL whenever it changes. Uses the AppRouter.route()
   // helper (preact-router-backed) which mirrors history.pushState while

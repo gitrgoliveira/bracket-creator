@@ -9,6 +9,7 @@ import { VSchedItem, MatchViewerModal, useLiveMatch, matchInList } from './viewe
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
 import { mirrorWatchlistParam } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
+import { isTeamCompetition, TEAMS_ENTERED_BY_ORGANIZER, competitionUnderWay } from './competition_shape.jsx';
 import { Icon } from './icon.jsx';
 import { drawHiddenFromPublic } from './draw_visibility.jsx';
 
@@ -60,10 +61,19 @@ export function filterSecondaryOnDeck(bothSidesMatches, resolvedWatched, primary
 // shouldShowRegister returns true when a "Register for this competition" button
 // should be shown on a competition card. Extracted for unit testability (mp-e5j).
 export function shouldShowRegister(tournament, competition, hasHandler) {
-  return !!(hasHandler &&
-    tournament && tournament.mode === "self-run" &&
-    competition && competition.kind !== "team" &&
-    (!competition.status || competition.status === "setup"));
+  return !!(hasHandler && inSelfRunSetup(tournament, competition) && !isTeamCompetition(competition));
+}
+
+// shouldShowTeamNote: a self-run team competition still in setup has no
+// Register button, so its card says how teams get in instead. After the draw no
+// competition offers registration, so nothing then needs explaining.
+export function shouldShowTeamNote(tournament, competition) {
+  return inSelfRunSetup(tournament, competition) && isTeamCompetition(competition);
+}
+
+function inSelfRunSetup(tournament, competition) {
+  return !!(tournament && tournament.mode === "self-run" &&
+    competition && (!competition.status || competition.status === "setup"));
 }
 
 // The viewer home's path: app.jsx's pathFromState returns "/" for it.
@@ -243,12 +253,13 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // Every door on this page shows the live row from this list.
   const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id, compId) => matchInList(allMatches, id, compId));
   const bothSidesMatches = useMemo(() => allMatches.filter(hasBothSides), [allMatches]);
-  // Running-comp set: gates the home NOW / Up-next strips and the running dot.
-  // BOTH setup and draw-ready are excluded: a draw-ready comp has a published
-  // draw but no match has been called, so it is NOT running. (The competition
-  // detail view still shows its Pools/Bracket tabs; that is governed separately
-  // by isPreStart in ViewerCompetition.)
-  const runningCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready").map(c => c.id)), [t.competitions]);
+  // Under-way set: gates the home NOW / Up-next strips. Setup is excluded,
+  // and so is draw-ready in an officiated tournament (no match has been
+  // called); a self-run draw-ready competition is under way, since its
+  // competitors start it (competitionUnderWay, competition_shape.jsx, the one
+  // owner). (The competition detail view still shows its Pools/Bracket tabs;
+  // that is governed separately by isPreStart in ViewerCompetition.)
+  const runningCompIds = useMemo(() => new Set((t.competitions || []).filter(c => competitionUnderWay(c, t)).map(c => c.id)), [t]);
   // Apply hasBothSides here too: pre-fix, a bracket match marked
   // `running` while one side was still an unresolved "Winner of rX-mY"
   // placeholder would appear in the public NOW strip, even though
@@ -533,7 +544,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
                               {[
                                 competitionKindLabel(c),
                                 c.teamSize > 1 ? `${c.teamSize}-person` : "",
-                                `${c.players.length} ${c.kind === "team" ? "teams" : "players"}`,
+                                `${c.players.length} ${isTeamCompetition(c) ? "teams" : "players"}`,
                                 formatLabel(c.format),
                                 c.startTime ? `starts ${c.startTime}` : "",
                               ].filter(Boolean).join(", ")}
@@ -552,6 +563,11 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
                           </div>
                         )}
                       </button>
+                      {shouldShowTeamNote(t, c) && (
+                        <div className="vlist-item--row-padded">
+                          <div className="vlist-item__meta">{TEAMS_ENTERED_BY_ORGANIZER}</div>
+                        </div>
+                      )}
                       {showRegister && (
                         <div className="vlist-item--row-padded">
                           <button type="button"

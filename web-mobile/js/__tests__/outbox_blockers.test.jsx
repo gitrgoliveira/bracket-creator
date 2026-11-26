@@ -218,6 +218,7 @@ describe('the match names the write it waits on (G2)', () => {
         expect(API.heldWriteKeepsFailing('c1', 'm1')).toBe(true);
         const blocker = API.heldWriteBlocker('c1', 'm1');
         expect(blocker).toMatchObject({ kind: 'member', keepsFailing: true });
+        expect(API.heldWriteState('c1', 'm1'), 'the match waits; its own write is not the refused one').toMatchObject({ keepsFailing: true, refused: false });
     });
 
     it('discarding the match\'s failing writes discards the blocker, and the save then goes', async () => {
@@ -506,6 +507,7 @@ describe('the write a match waits on is named by where it is (H5)', () => {
         await reconnect();
         const blocker = API.heldWriteBlocker('c1', 'ma');
         expect(blocker).toMatchObject({ matchID: 'mb', where: 'Match 7', cycled: true });
+        expect(API.heldWriteState('c1', 'ma'), 'a wait cycle keeps failing but is no refusal').toMatchObject({ keepsFailing: true, refused: false });
         const w = await wording();
         expect(w.queuedBlockedNotice(blocker)).toContain('Match 7');
         expect(w.queuedBlockedNotice(blocker), 'a cycle is not a refusal').not.toContain('keeps refusing');

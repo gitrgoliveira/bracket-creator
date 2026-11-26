@@ -8,8 +8,10 @@
 // tag, or the browser fetches it under a second URL (.js?v=N vs .jsx) and evaluates
 // it twice (double-load; same class as mp-zd1v).
 //
-// pool_ids.jsx is a leaf module (no imports, no side effects), so importing it
-// here does not introduce a load-order dependency or a double-eval risk.
+// pool_ids.jsx and competition_shape.jsx are leaf modules (no imports, no side
+// effects), so importing them here does not introduce a load-order dependency
+// or a double-eval risk.
+import { isTeamCompetition } from './competition_shape.jsx';
 import { isSupplementaryBout, teamMatchTypeFor, poolNameOf, swissRoundLabel, poolMatchNumberOf } from './pool_ids.jsx';
 
 // TermV: kendo-glossary tooltip wrapper. Lazy lookup so the script
@@ -23,7 +25,7 @@ export function TermV(props) {
 }
 
 export function competitionKindLabel(c) {
-  return c.kind === "team" ? "Teams" : "Individual";
+  return isTeamCompetition(c) ? "Teams" : "Individual";
 }
 
 // leagueAwareLabel: the single source of truth for the pool-vs-league-vs-swiss

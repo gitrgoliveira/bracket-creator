@@ -35,7 +35,10 @@ export async function createTournament(page, {
 // Sign in, creating the tournament first when this file's server has none yet.
 // Every test in a file can call it, whichever runs first or in which worker.
 // Returns { created } so a caller can tell the first run from a later one.
-export async function enterTournament(page, { name = 'E2E Cup', courts = 2, date } = {}) {
+// `mode` is the "Tournament type" pill's label ('Officiated', the default, or
+// 'Self-run'); it counts only when this call creates the tournament, since the
+// type cannot be changed afterwards and a file's server holds just one.
+export async function enterTournament(page, { name = 'E2E Cup', courts = 2, date, mode } = {}) {
   await page.goto('/');
   // The first-run form, or the public home of a tournament that exists:
   // whichever the first paint shows, however long it takes.
@@ -43,7 +46,7 @@ export async function enterTournament(page, { name = 'E2E Cup', courts = 2, date
   const home = page.locator('.viewer__body');
   await welcome.or(home).first().waitFor({ state: 'visible' });
   if (await welcome.isVisible()) {
-    await createTournament(page, { name, courts, date });
+    await createTournament(page, { name, courts, date, ...(mode ? { mode } : {}) });
     return { created: true };
   }
   await login(page);

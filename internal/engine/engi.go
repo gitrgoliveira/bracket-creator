@@ -63,11 +63,12 @@ func engiWinnerSide(flagsA, flagsB int) string {
 //
 // correctionReason is the operator-supplied audit note when overwriting a
 // previously completed match. It mirrors the kendo path's CorrectionReason
-// so the audit trail is preserved for engi competitions.
+// so the audit trail is preserved for engi competitions. These callers name
+// no result source (the score door's write does, through recordEngiMatch).
 //
 // Returns the persisted MatchResult so the handler can echo / broadcast it.
 func (e *Engine) recordEngiMatchResult(h state.StoreTx, compID, matchID string, flagsA, flagsB int, correctionReason string, opts ...ForceOptions) (*state.MatchResult, error) {
-	return e.recordEngiMatch(h, compID, matchID, flagsA, flagsB, correctionReason, 0, nil, false, opts...)
+	return e.recordEngiMatch(h, compID, matchID, flagsA, flagsB, correctionReason, "", 0, nil, false, opts...)
 }
 
 // engiFinishProbe is the write an engi finish makes, built on the stored
@@ -78,7 +79,7 @@ func engiFinishProbe(prior, result *state.MatchResult) state.MatchResult {
 	p.SubResults = state.CloneSubResults(prior.SubResults)
 	p.GroupStamps = nil
 	p.Merge = nil
-	applyEngiToMatchResult(&p, result.FlagsA, result.FlagsB, engiWinnerSide(result.FlagsA, result.FlagsB), result.CorrectionReason)
+	applyEngiToMatchResult(&p, result.FlagsA, result.FlagsB, engiWinnerSide(result.FlagsA, result.FlagsB), result.CorrectionReason, result.ResultSource)
 	p.ModifiedAt = result.ModifiedAt
 	p.Changed = append([]string(nil), engiChangedGroups...)
 	p.WriteDoor = doorEngi
@@ -212,6 +213,10 @@ func (e *Engine) recordEngiMatch(
 	compID, matchID string,
 	flagsA, flagsB int,
 	correctionReason string,
+	// resultSource says who entered the result ("self-reported" for a
+	// self-run participant, "admin" for the organiser), as the score door
+	// decided it; stored when non-empty, as the kendo bracket write does.
+	resultSource string,
 	stamp int64,
 	groupStamps map[string]int64,
 	// skipDirectHistory is true for the one caller (RecordMatchResultWithIneligibilityTx,
@@ -251,7 +256,7 @@ func (e *Engine) recordEngiMatch(
 	// Try the pool stage first.
 	var out *state.MatchResult
 	err := e.withPoolMatch(h, compID, matchID, func(r *state.MatchResult) error {
-		applyEngiToMatchResult(r, flagsA, flagsB, winnerSide, correctionReason)
+		applyEngiToMatchResult(r, flagsA, flagsB, winnerSide, correctionReason, resultSource)
 		stampEngiChanges(r, stamp, groupStamps)
 		cp := *r
 		out = &cp
@@ -301,7 +306,7 @@ func (e *Engine) recordEngiMatch(
 				}
 				priorWinner, priorWinnerID := propagatedWinnerOf(b, rIdx, mIdx, bm)
 				before := repPickSnapshot(b, matchID)
-				result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason)
+				result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason, resultSource)
 				stampEngiChanges(bm, stamp, groupStamps)
 				e.propagateBracketWinner(b, rIdx, mIdx)
 				if force && winnerActuallyChanged(priorWinner, priorWinnerID, bm) {
@@ -318,7 +323,7 @@ func (e *Engine) recordEngiMatch(
 				// PURE, same reasoning as the round branch above.
 				return validationErrorf("%s is not ready to score: a feeder pool or match has not finished", SentenceCase(MatchLabel(bracketMatchRef(bm))))
 			}
-			result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason)
+			result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason, resultSource)
 			stampEngiChanges(bm, stamp, groupStamps)
 			// No propagation out of bronze.
 			return nil
@@ -344,8 +349,9 @@ func (e *Engine) recordEngiMatch(
 // only when non-empty, mirroring the kendo path's CorrectionReason semantics.
 // Also sets WinnerID from SideAID/SideBID (when present) so same-name
 // participants from different dojos remain distinguishable downstream (e.g.
-// accrueEngiMatch), mirroring the non-engi scoring path.
-func applyEngiToMatchResult(r *state.MatchResult, flagsA, flagsB int, winnerSide, correctionReason string) {
+// accrueEngiMatch), mirroring the non-engi scoring path. resultSource is
+// stored when non-empty, like correctionReason.
+func applyEngiToMatchResult(r *state.MatchResult, flagsA, flagsB int, winnerSide, correctionReason, resultSource string) {
 	if winnerSide == "A" {
 		r.Winner = r.SideA
 		r.WinnerID = r.SideAID
@@ -360,11 +366,15 @@ func applyEngiToMatchResult(r *state.MatchResult, flagsA, flagsB int, winnerSide
 	if correctionReason != "" {
 		r.CorrectionReason = correctionReason
 	}
+	if resultSource != "" {
+		r.ResultSource = resultSource
+	}
 }
 
 // applyEngiToBracketMatch writes a flag-decided result into a BracketMatch and
 // returns the equivalent MatchResult for the caller to echo / broadcast.
-// correctionReason is persisted on the bracket match when non-empty.
+// correctionReason and resultSource are persisted on the bracket match when
+// non-empty.
 //
 // bm.WinnerID is stamped from bm.SideAID/SideBID (bc-brid), mirroring
 // applyEngiToMatchResult's pool twin: an engi bracket bout's sides are
@@ -376,7 +386,7 @@ func applyEngiToMatchResult(r *state.MatchResult, flagsA, flagsB int, winnerSide
 // without this stamp, that propagation would silently carry an empty id
 // through the rest of the bracket even though the sides themselves are
 // correctly identified.
-func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerSide, correctionReason string) *state.MatchResult {
+func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerSide, correctionReason, resultSource string) *state.MatchResult {
 	if winnerSide == "A" {
 		bm.Winner = bm.SideA
 		bm.WinnerID = bm.SideAID
@@ -389,6 +399,9 @@ func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerS
 	bm.Status = state.MatchStatusCompleted
 	if correctionReason != "" {
 		bm.CorrectionReason = correctionReason
+	}
+	if resultSource != "" {
+		bm.ResultSource = resultSource
 	}
 	return &state.MatchResult{
 		ID:               bm.ID,
@@ -404,7 +417,8 @@ func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerS
 		Status:           state.MatchStatusCompleted,
 		Court:            bm.Court,
 		ScheduledAt:      bm.ScheduledAt,
-		CorrectionReason: correctionReason,
+		CorrectionReason: bm.CorrectionReason,
+		ResultSource:     bm.ResultSource,
 	}
 }
 

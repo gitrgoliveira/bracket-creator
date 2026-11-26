@@ -331,6 +331,14 @@ func TestGzip_OnlyAPIPathsAreWrapped(t *testing.T) {
 	assert.Empty(t, w.Header().Get("Vary"))
 }
 
+// An unknown /api path with no NoRoute handler keeps the 404 gin set before
+// the middleware ran, instead of the wrapper overwriting it with 200.
+func TestGzip_UnknownAPIRouteKeepsGin404(t *testing.T) {
+	r := gzipTestRouter(func(*gin.Engine) {})
+	w := gzipGet(r, http.MethodGet, "/api/nothing-here", "gzip")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
 // Through the app's own router: a JSON read is compressed, and backup zips
 // and workbooks carry no Content-Encoding.
 func TestGzip_AppRouter(t *testing.T) {

@@ -136,7 +136,7 @@ func GzipMiddleware() gin.HandlerFunc {
 			ResponseWriter: orig,
 			accepts:        acceptsGzip(c.Request),
 			head:           c.Request.Method == http.MethodHead,
-			status:         http.StatusOK,
+			status:         orig.Status(),
 			size:           -1,
 		}
 		c.Writer = gw

@@ -31,6 +31,8 @@ const detail = (modifiedAt, ipponsA) => ({
 });
 
 const sse = { emit: null };
+// The outbox's local match patches (subscribeLocalMatchPatch), as the page subscribes.
+const local = { emit: null };
 const details = [];
 
 const STUBBED_GLOBALS = {
@@ -42,6 +44,7 @@ const STUBBED_GLOBALS = {
     fetchAnnouncements: vi.fn(async () => []),
     fetchCompetitionDetails: vi.fn(async () => details.shift()),
     subscribeToEvents: vi.fn((onEvent) => { sse.emit = onEvent; return () => {}; }),
+    subscribeLocalMatchPatch: vi.fn((cb) => { local.emit = cb; return () => {}; }),
     reconnectEvents: vi.fn(),
     resumeAfterAuth: vi.fn(),
   },
@@ -112,6 +115,26 @@ describe('the public competition page keeps the newer live score over a stale re
     expect(page.props.poolMatches[0]).toMatchObject({ status: 'running', scoreVersion: 5, ipponsB: ['K'] });
   });
 
+  // bc-sseq FR6: a self-run participant's write the server held answers with
+  // the match as stored, and the outbox shows it to the page as a whole-match
+  // local patch before the sheet's note, so the two agree. A whole patch older
+  // than the copy the page holds changes nothing; one for another competition
+  // (match ids repeat across competitions) never touches this one.
+  it('a refused write\'s stored match reaches the open competition, never an older one or another competition', async () => {
+    expect(local.emit, 'the page subscribes to the outbox\'s local patches').toBeTypeOf('function');
+    const before = page.props.poolMatches[0];
+    expect(before).toMatchObject({ status: 'running', scoreVersion: 5 });
+    const patch = (competitionId, result) => act(async () => {
+      local.emit({ type: 'match_updated', local: true, whole: true, data: { competitionId, matchId: 'Pool A-0', result: { id: 'Pool A-0', ...result } } });
+    });
+    await patch('c2', { status: 'completed', scoreVersion: 9 });
+    expect(page.props.poolMatches[0], 'another competition\'s match of the same id').toMatchObject({ status: 'running', scoreVersion: 5 });
+    await patch('c1', { status: 'completed', scoreVersion: 4, modifiedAt: 900 });
+    expect(page.props.poolMatches[0], 'an older stored copy').toMatchObject({ status: 'running', scoreVersion: 5 });
+    await patch('c1', { status: 'completed', scoreVersion: 6, modifiedAt: 600, ipponsB: ['K', 'M'] });
+    expect(page.props.poolMatches[0]).toMatchObject({ status: 'completed', scoreVersion: 6, ipponsB: ['K', 'M'] });
+  });
+
   // The event above reaches one of the page's refetches; the others sit in
   // their own branches of App's event handler, so they are read from source:
   // none may hand a fetched detail to the page's state whole.
@@ -121,7 +144,7 @@ describe('the public competition page keeps the newer live score over a stale re
     const writes = [...code.matchAll(/setSelectedCompData\(([^;]*)\);/g)].map((m) => m[1].replace(/\s+/g, ' '));
     expect(writes.length).toBeGreaterThan(0);
     for (const w of writes) {
-      expect(w, `setSelectedCompData(${w})`).toMatch(/^(null|prev => patchCompetitionData\(prev, event\)|prev => compPushes\.push\(prev, viewerCompId, event\)|\(prev\) => keep\(prev, data\))$/);
+      expect(w, `setSelectedCompData(${w})`).toMatch(/^(null|prev => patchCompetitionData\(prev, event\)|prev => \(prev && prev\.config && prev\.config\.id === cid \? patchCompetitionData\(prev, event\) : prev\)|prev => compPushes\.push\(prev, viewerCompId, event\)|\(prev\) => keep\(prev, data\))$/);
     }
     // Every keeper is the ledger's, made as its fetch is sent.
     const keepers = [...code.matchAll(/const keep = ([^;]*);/g)].map((m) => m[1]);

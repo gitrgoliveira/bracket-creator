@@ -31,7 +31,7 @@ import {
     _dequeue, _baseOf, _byEntryOrder, _entriesFor, _claimRefusal, _settleAnsweredElsewhere, _shareAnswer,
     _afterKeys, _keepForClock,
 } from './api_client_queue.jsx';
-import { _CHECKIN_KINDS, _checkInAnswered, rebaseQueuedVersion } from './api_client_overlays.jsx';
+import { _CHECKIN_KINDS, _checkInAnswered, rebaseQueuedVersion, _showStoredMatch } from './api_client_overlays.jsx';
 import { TAP_BATCH_MAX, _tellTurnedAway, _sendTapBatch } from './api_client_taps.jsx';
 import { _randomId } from './api_client_ids.jsx';
 import { createBaseLease, detectWebLocks } from './base_sender_lease.jsx';
@@ -839,6 +839,11 @@ async function _sendEntry(key, descriptor, pass) {
     if (_endDiscardWhileOut(descriptor, res, body)) return 'settled';
     body = body || {};
     if (res.ok) {
+        // A write the merge held answers with the match as stored (FR5): it is
+        // shown, through the turned-away record and as a whole-match patch,
+        // before the editor or an alert hears of the refusal below and before
+        // the entry leaves the queue (FR6, _showStoredMatch).
+        if (!_NOT_MATCH_WRITE_KINDS.has(kind)) _showStoredMatch(compID, matchID, body);
         // An answer that carries the match names the taps the server turned
         // away since their own answer: this device's are told.
         if (compID && matchID) _tellTurnedAway(compID, matchID, body.result || body);

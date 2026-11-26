@@ -5667,6 +5667,14 @@ paths:
                             decision stamped before it had already closed the
                             match (see RefusedWrite.heldReason); `error` then
                             carries that sentence.
+                        match:
+                          readOnly: true
+                          description: >
+                            On a `superseded` entry, the match as it is stored
+                            once the entry was held, read under the same lock
+                            as the entry's write (see RefusedWrite.match).
+                          allOf:
+                            - $ref: '#/components/schemas/MatchResult'
                   heldGroups:
                     type: array
                     description: >
@@ -8596,6 +8604,23 @@ components:
           readOnly: true
           description: >
             Present with `turnedAway`: the match's `scoreVersion` it was read at.
+        match:
+          readOnly: true
+          description: >
+            Present on `superseded` from the match writes (PUT /score,
+            /quick-score, POST /decision and both /daihyosen paths): the match
+            as it is stored once the write was held, read under the same lock
+            as the write, so the device can show the stored match at the same
+            moment as `message` and the two never disagree. It is the shape
+            the door answers an applied write with (`rev` and `revSession`
+            omitted; a knockout match carries its `court` and `scheduledAt`);
+            an anonymous self-run participant on PUT /score, and every caller
+            of the /daihyosen paths, gets it without `correctionReason` and
+            `decisionReason`, as the SSE stream carries it. Omitted when the
+            stored match could not be read, and on `clock_skew`, where nothing
+            was judged.
+          allOf:
+            - $ref: '#/components/schemas/MatchResult'
 
     MatchHistoryEntry:
       type: object

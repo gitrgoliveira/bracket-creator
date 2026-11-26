@@ -1325,6 +1325,20 @@ function App() {
   // The server pushes applied to selectedCompData, for its refetches
   // (push-wins, createPushLedger, patch.jsx).
   const [compPushes] = useState(() => createPushLedger());
+  // A match patch the outbox tells this page (subscribeLocalMatchPatch): the
+  // stored match a refused write's answer carries (bc-sseq FR6), shown before
+  // the self-run score sheet's note, so the note and the sheet agree, and a
+  // court or time change. Applied to the open competition only (match ids
+  // repeat across competitions), and never through the push ledger: it is
+  // not the server's push.
+  useEffect(() => {
+    if (!window.API || typeof window.API.subscribeLocalMatchPatch !== "function") return undefined;
+    return window.API.subscribeLocalMatchPatch((event) => {
+      const cid = event && event.data && event.data.competitionId;
+      if (!cid) return;
+      setSelectedCompData(prev => (prev && prev.config && prev.config.id === cid ? patchCompetitionData(prev, event) : prev));
+    });
+  }, []);
   useEffect(() => {
     // Track every pending jittered timer so the cleanup can cancel them when
     // viewerCompId / mode changes. Without this, a timer queued for

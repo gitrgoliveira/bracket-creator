@@ -42,12 +42,24 @@ import (
 // timestamp guard. An unstamped request still applies: the bracket projection
 // carries no ModifiedAt (the unstamped bypass), and a pool match's copy carries
 // the stored stamp, which ApplyByTimestamp's >= comparison accepts.
+//
+// It answers with no stored match: the daihyosen doors, which read one in their
+// transaction, answer through respondSupersededError with it, and this arm is
+// left for a superseded error no door caught (respondIfEngineWriteError).
 func respondIfSuperseded(c *gin.Context, err error) bool {
 	if !errors.Is(err, engine.ErrMatchSuperseded) {
 		return false
 	}
-	respondSuperseded(c, engine.HeldGroupsOf(err), engine.HeldReasonOf(err), err)
+	respondSupersededError(c, nil, err)
 	return true
+}
+
+// respondSupersededError is respondSuperseded for a door holding the engine's
+// *SupersededError: the held groups, the held reason and the turned-away taps
+// are read off it. stored is the match the write lost to, read in its
+// transaction (storedMatchForAnswer), or nil.
+func respondSupersededError(c *gin.Context, stored *state.MatchResult, err error) {
+	respondSuperseded(c, stored, engine.HeldGroupsOf(err), engine.HeldReasonOf(err), err)
 }
 
 // daihyosenWriteStamp reads the client's server-relative write stamp from the
@@ -215,8 +227,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			haveResult bool
 			// supersededErr is a write whose every change was held: the
 			// transaction commits (its history entry lands) and the answer is
-			// applied:false (bc-mrgc).
-			supersededErr error
+			// applied:false (bc-mrgc), with supersededMatch, the stored match
+			// it lost to, read under the same lock.
+			supersededErr   error
+			supersededMatch *state.MatchResult
 		)
 		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
 			match, found, err := findMatchForDaihyosenTx(stx, id, mid)
@@ -309,6 +323,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 					// Committed, not aborted: the write's history entry is
 					// its one footprint and must land.
 					supersededErr = err
+					supersededMatch = storedMatchForAnswer(stx, id, mid, true)
 					return nil
 				}
 				return err
@@ -325,7 +340,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		}
 		if supersededErr != nil {
-			respondIfSuperseded(c, supersededErr)
+			respondSupersededError(c, supersededMatch, supersededErr)
 			return
 		}
 		if resp != nil {
@@ -373,8 +388,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			subOut     *state.SubMatchResult
 			resp       *txResponse // the answer when nothing is written, decided under the lock
 			haveResult bool
-			// supersededErr: see the remove handler's.
-			supersededErr error
+			// supersededErr and supersededMatch: see the remove handler's.
+			supersededErr   error
+			supersededMatch *state.MatchResult
 		)
 		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
 			// Engi competitions decide bouts by referee flag counts; a
@@ -535,6 +551,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
 				if errors.Is(err, engine.ErrMatchSuperseded) {
 					supersededErr = err
+					supersededMatch = storedMatchForAnswer(stx, id, mid, true)
 					return nil
 				}
 				return err
@@ -552,7 +569,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		}
 		if supersededErr != nil {
-			respondIfSuperseded(c, supersededErr)
+			respondSupersededError(c, supersededMatch, supersededErr)
 			return
 		}
 		if resp != nil {

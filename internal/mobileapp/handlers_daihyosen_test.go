@@ -910,6 +910,16 @@ func TestDaihyosenWrites_CompeteOnTimestamps(t *testing.T) {
 			assert.EqualValues(t, storedAt, bm.ModifiedAt, "the stored stamp stands")
 			assert.Equal(t, tc.withRow, carriesDaihyosenRow(bm.SubResults), "nothing was written")
 			assert.Empty(t, hub.events, "a refused write is broadcast to nobody")
+
+			// The answer carries the match as stored, so the device shows it
+			// with the note (FR5).
+			match, ok := body["match"].(map[string]any)
+			require.True(t, ok, "the superseded answer carries the stored match: %v", body)
+			assert.Equal(t, "B1", match["id"])
+			assert.EqualValues(t, storedAt, match["modifiedAt"], "the stored match, not the write")
+			assert.Equal(t, string(state.MatchStatusRunning), match["status"])
+			subs, _ := match["subResults"].([]any)
+			assert.Equal(t, tc.withRow, len(subs) > 0, "the stored rows, not the write's")
 		})
 
 		t.Run(tc.name+" stamped past the skew margin is refused", func(t *testing.T) {

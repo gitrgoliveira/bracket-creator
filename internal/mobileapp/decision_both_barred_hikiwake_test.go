@@ -306,6 +306,13 @@ func TestDecisionHandler_BothSidesBarredHikiwake_SupersededNot500(t *testing.T) 
 	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
 	assert.Equal(t, false, body["applied"])
 	assert.Equal(t, "superseded", body["reason"])
+	// The answer carries the match as stored (FR5): still scheduled, at the
+	// stamp the draw lost to.
+	match, ok := body["match"].(map[string]any)
+	require.True(t, ok, "the superseded answer carries the stored match: %v", body)
+	assert.Equal(t, "Pool A-2", match["id"])
+	assert.Equal(t, string(state.MatchStatusScheduled), match["status"])
+	assert.EqualValues(t, storedStamp, match["modifiedAt"])
 
 	after, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)

@@ -213,6 +213,9 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// bracket match reopened by a forced correction, populated only
 			// when req.ForceDownstreamReopen actually unblocked one.
 			reopenedDownstream []engine.ReopenedMatch
+			// supersededMatch is the stored match a held decision lost to,
+			// read in the write's transaction for the answer's `match`.
+			supersededMatch *state.MatchResult
 		)
 		reason := strings.TrimSpace(req.DecisionReason)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
@@ -268,6 +271,9 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			}
 			result, status, engErr = eng.RecordDecisionTxWithOptions(stx, id, mid, req.Decision, req.DecisionBy, reason, req.Encho,
 				req.tagInto(fo), req.ModifiedAt)
+			if errors.Is(engErr, engine.ErrMatchSuperseded) {
+				supersededMatch = storedMatchForAnswer(stx, id, mid, false)
+			}
 			if result != nil && result.ResultSource == "" {
 				result.ResultSource = "admin"
 			}
@@ -293,7 +299,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// in common (superseded, downstream_knockout_running/played,
 			// corrupt overrides) identically rather than the carve-out
 			// falling through respondEngineError's 500 default for them.
-			respondDecisionEngineError(c, store, id, mid, engErr)
+			respondDecisionEngineError(c, store, id, mid, supersededMatch, engErr)
 			return
 		}
 
@@ -337,7 +343,10 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 // retries 5xx forever (the mp-q8c6 poisoned-queue pattern), so a superseded
 // carve-out write could never win a retry, and the other three are terminal,
 // operator-actionable conflicts that must never look like a server fault.
-func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, matchID string, engErr error) {
+//
+// stored is the match as stored once a superseded write was held, read in the
+// write's transaction (storedMatchForAnswer); nil for any other refusal.
+func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, matchID string, stored *state.MatchResult, engErr error) {
 	// Map engine.ValidationError → 400, NotFoundError → 404,
 	// IneligibleCompetitorError → 409 (FR-035).
 	var alreadyIneligErr *engine.AlreadyIneligibleError
@@ -361,7 +370,7 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		// supersede here would not merely mis-report a dropped write,
 		// it would poison the offline queue with one that can never
 		// succeed.
-		respondSuperseded(c, engine.HeldGroupsOf(engErr), engine.HeldReasonOf(engErr), engErr)
+		respondSupersededError(c, stored, engErr)
 	case respondIfLeagueFinished(c, engErr):
 		// A correction of a finished league's result: resent with
 		// confirmFinished once the organiser confirms.
@@ -474,6 +483,8 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 		replay   bool
 		result   state.MatchResult
 		writeErr error
+		// stored is the match a held draw lost to (storedMatchForAnswer).
+		stored *state.MatchResult
 	)
 	txErr := txr.WithTransaction(compID, func(stx state.StoreTx) error {
 		poolMatches, err := stx.LoadPoolMatches(compID)
@@ -522,6 +533,9 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 		}
 		if _, werr := eng.RecordMatchResultWithIneligibilityTx(stx, compID, matchID, write); werr != nil {
 			writeErr = werr
+			if errors.Is(werr, engine.ErrMatchSuperseded) {
+				stored = storedMatchForAnswer(stx, compID, matchID, false)
+			}
 			return nil
 		}
 		result = *write
@@ -551,7 +565,7 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 			// or trip a downstream-knockout guard exactly like the main flow,
 			// and respondEngineError's 500 default for those would poison the
 			// SPA's offline write queue instead of answering them terminally.
-			respondDecisionEngineError(c, store, compID, matchID, writeErr)
+			respondDecisionEngineError(c, store, compID, matchID, stored, writeErr)
 			return true
 		}
 		return false

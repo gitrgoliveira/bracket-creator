@@ -645,6 +645,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			// gets its own match_updated broadcast below, alongside the
 			// corrected match's own.
 			reopenedDownstream []engine.ReopenedMatch
+			// supersededMatch is the stored match a held write lost to,
+			// read in the write's transaction for the answer's `match`.
+			supersededMatch *state.MatchResult
 		)
 		txErr := tx.WithCourtExclusivityLock(func() error {
 			// bc-adna: the court is judged only on a write that moves the
@@ -783,6 +786,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					// so it leaves no history line to loop.
 					NoReplayHistory: selfReported,
 				})
+				if errors.Is(engErr, engine.ErrMatchSuperseded) {
+					supersededMatch = storedMatchForAnswer(stx, id, mid, selfReported)
+				}
 				// engErr is a normal application-level signal (AlreadyIneligible
 				// → 409, validation/not-found → other codes); we surface it
 				// after the tx returns. The score-write inside the tx already
@@ -848,7 +854,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// the shape the override endpoint already uses for this exact
 				// condition, and the client keys on it.
 
-				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason(), engErr)
+				respondSuperseded(c, supersededMatch, result.Merge.HeldGroups(), result.Merge.HeldReason(), engErr)
 				return
 			}
 			var refusal *selfRunRefusal

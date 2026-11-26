@@ -316,7 +316,7 @@
 .posters-logo-field {
   border: 0;
   padding: 0;
-  margin: 0;
+  margin: 0 0 14px;
 }
 
 /* Copy this court poster's choices to every court poster, with what it did. */

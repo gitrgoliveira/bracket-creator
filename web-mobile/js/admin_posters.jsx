@@ -290,8 +290,10 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
           <Breadcrumbs items={[{ label: t.name || "Tournament", onClick: guarded(onBack) }, { label: "Posters" }]} />
         )}
         <div className="page-head">
-          <h1 className="page-head__title">Posters</h1>
-          <div className="page-head__sub">QR-code posters for the venue: one for the viewer home and one for each shiaijo.</div>
+          <div>
+            <h1 className="page-head__title">Posters</h1>
+            <div className="page-head__sub">QR-code posters for the venue: one for the viewer home and one for each shiaijo.</div>
+          </div>
           <div className="page-head__actions">
             <button type="button" className="btn btn--ghost" onClick={guarded(onBack)}>Back</button>
           </div>

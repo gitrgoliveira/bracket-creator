@@ -138,6 +138,35 @@ describe('the admin competition page fetches once per burst (bc-sseq FR4)', () =
     expect(details(), 'an event the old 20 would have called covered').toBe(before + 2);
   });
 
+  // The settings gate applied a high seq from its own read, then the server restarted.
+  async function settingsReadAt30() {
+    await mount(20);
+    head.competitions = 30;
+    await emit({ type: 'tournament_updated', seq: 30, data: null });
+    await pastWindow();
+    head.competitions = 0;
+    return window.API.fetchTournament.mock.calls.length;
+  }
+
+  it('a stream that reopens after an error reads the settings again', async () => {
+    const before = await settingsReadAt30();
+    await act(async () => { sse.status('error'); });
+    await act(async () => { sse.status('open'); });
+    await pastWindow();
+    expect(window.API.fetchTournament.mock.calls.length, 'the settings are read again').toBe(before + 1);
+  });
+
+  it('resync_required reads the settings again, so a restarted server\'s tournament_updated refetches', async () => {
+    const before = await settingsReadAt30();
+    await emit({ type: 'resync_required', seq: 0 });
+    await pastWindow();
+    expect(window.API.fetchTournament.mock.calls.length, 'the settings are read again').toBe(before + 1);
+    head.competitions = 1;
+    await emit({ type: 'tournament_updated', seq: 1, data: null });
+    await pastWindow();
+    expect(window.API.fetchTournament.mock.calls.length, 'a seq the old 30 would have called covered').toBe(before + 2);
+  });
+
   it('a competition opened again starts from the list seq the page already held', async () => {
     const first = await mount(20);
     head.detail = 25;

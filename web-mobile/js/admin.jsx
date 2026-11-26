@@ -988,6 +988,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         window.API.reconnectEvents();
         detailGate.now();
         listGate.now();
+        settingsGate.now();
       };
       document.addEventListener('visibilitychange', onVisibilityChange);
 
@@ -1006,6 +1007,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           pushes.clear();
           detailGate.restart();
           listGate.restart();
+          settingsGate.restart();
           return;
         }
 
@@ -1015,6 +1017,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         const seqResult = checkSeqGap(sseSeq, event.seq, () => {
           detailGate.now();
           listGate.now();
+          settingsGate.now();
         });
         if (seqResult.duplicate) return;
 
@@ -1062,6 +1065,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         if (cancelled) return;
         detailGate.restart();
         listGate.restart();
+        settingsGate.restart();
       }));
       return () => {
         cancelled = true;

@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -448,4 +449,17 @@ func TestServeSingleFlightJSON_EncodingVaryAndSeq(t *testing.T) {
 	assert.Equal(t, "0", w.Header().Get(eventSeqHeader))
 	assert.Equal(t, []string{"X-Tournament-Password", "Accept-Encoding"}, varyTokens(w.Header()))
 	assert.Equal(t, body, w.Body.Bytes())
+}
+
+// The error answer names Accept-Encoding in Vary too, with no middleware in
+// front of it.
+func TestServeSingleFlightJSON_ErrorAnswerCarriesVary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/viewer/competitions", nil)
+	c.Writer.Header().Set("Vary", "X-Tournament-Password")
+	serveSingleFlightJSON(c, sfResult{}, errors.New("build failed"))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, []string{"X-Tournament-Password", "Accept-Encoding"}, varyTokens(w.Header()))
 }

@@ -177,7 +177,12 @@ type gzipResponseWriter struct {
 	zw       *gzip.Writer
 }
 
+// WriteHeader records the status until the header is written. A later call
+// is ignored, as gin's own writer does, so Status keeps the code sent.
 func (w *gzipResponseWriter) WriteHeader(code int) {
+	if w.wroteHeader || w.decided {
+		return
+	}
 	if code > 0 {
 		w.status = code
 	}

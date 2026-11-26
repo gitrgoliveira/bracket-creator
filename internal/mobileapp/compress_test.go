@@ -339,6 +339,31 @@ func TestGzip_UnknownAPIRouteKeepsGin404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// A WriteHeader after the header is written is ignored: the answer and
+// Status both keep the code that was written, whether the body is still
+// held or has already gone out compressed.
+func TestGzip_LateWriteHeaderKeepsTheSentStatus(t *testing.T) {
+	for name, body := range map[string][]byte{
+		"small": []byte(`{"ok":true}`),
+		"big":   bigJSON(t, 200),
+	} {
+		var status int
+		r := gzipTestRouter(func(r *gin.Engine) {
+			r.GET("/api/late", func(c *gin.Context) {
+				c.Header("Content-Type", "application/json")
+				c.Writer.WriteHeader(http.StatusCreated)
+				_, err := c.Writer.Write(body)
+				require.NoError(t, err)
+				c.Writer.WriteHeader(http.StatusTeapot)
+				status = c.Writer.Status()
+			})
+		})
+		w := gzipGet(r, http.MethodGet, "/api/late", "gzip")
+		assert.Equal(t, http.StatusCreated, w.Code, name)
+		assert.Equal(t, http.StatusCreated, status, name)
+	}
+}
+
 // Through the app's own router: a JSON read is compressed, and backup zips
 // and workbooks carry no Content-Encoding.
 func TestGzip_AppRouter(t *testing.T) {

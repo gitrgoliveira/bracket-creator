@@ -2917,10 +2917,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// completion; its error arm sets the same sanitized header.
 		outcome, acErr := eng.MaybeAutoCompletePools(id)
 		answerAutoComplete(c, hub, id, outcome, acErr)
-		if acErr == nil && outcome == engine.AutoCompleteTransitioned {
-			// Reflect the auto-complete in the response body so the caller doesn't
-			// see a stale "pools" status. The persisted file is already updated.
-			comp.Status = state.CompStatusComplete
+		if acErr == nil {
+			// Reflect what the pass did in the response body so the caller doesn't
+			// see a stale "pools" status: the persisted file already holds the
+			// finished competition or the seeded knockout.
+			switch outcome {
+			case engine.AutoCompleteTransitioned:
+				comp.Status = state.CompStatusComplete
+			case engine.AutoCompleteKnockoutStarted:
+				comp.Status = state.CompStatusKnockout
+			}
 		}
 
 		c.JSON(http.StatusOK, comp)

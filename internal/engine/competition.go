@@ -426,17 +426,24 @@ func (e *Engine) maybeAutoCompletePools(compID string, poolsMayHaveMoved bool) (
 	if err != nil {
 		return outcome, err
 	}
-	if started && outcome == AutoCompleteNoChange {
-		return AutoCompleteStarted, nil
+	return startOutcome(started, reopened, outcome), nil
+}
+
+// startOutcome reports a start this pass made: a draw-ready competition
+// started by its first result, or a finished league back in match play.
+// Either is reported as a start, whatever else this pass did (an awaited
+// tie-breaker, injected or healed bouts, a seeded pool), since every surface
+// reloads the whole competition on it. A competition the same pass finished
+// reports that instead, and a knockout the same pass started is already
+// reported as a start.
+func startOutcome(started, reopened bool, outcome AutoCompleteOutcome) AutoCompleteOutcome {
+	if !started && !reopened {
+		return outcome
 	}
-	// A finished league back in match play is running again: reported as a
-	// start, whatever else this pass did (an awaited tie-breaker, injected
-	// bouts), since every surface reloads the whole competition on it. One
-	// the same pass finished again reports that instead.
-	if reopened && outcome != AutoCompleteTransitioned {
-		return AutoCompleteStarted, nil
+	if outcome == AutoCompleteTransitioned || outcome == AutoCompleteKnockoutStarted {
+		return outcome
 	}
-	return outcome, nil
+	return AutoCompleteStarted
 }
 
 // leagueBackInPlay reports whether a finished league is in match play again

@@ -242,6 +242,8 @@ func (c *sfCall) gzipped(key string) []byte {
 // an extra error mapping (e.g. errNotFound → 404 on /competitions/:id)
 // branch on that first and fall through here for the rest.
 func serveSingleFlightJSON(c *gin.Context, res sfResult, err error) {
+	h := c.Writer.Header()
+	addVaryAcceptEncoding(h)
 	if err != nil {
 		// Through the shared helper rather than a hand-rolled 500: this path
 		// used to swallow the cause entirely (no log line at all), and a
@@ -251,8 +253,6 @@ func serveSingleFlightJSON(c *gin.Context, res sfResult, err error) {
 		return
 	}
 	setEventSeq(c, res.seq)
-	h := c.Writer.Header()
-	addVaryAcceptEncoding(h)
 	if res.gz != nil {
 		h.Set("Content-Encoding", "gzip")
 		c.Data(http.StatusOK, "application/json; charset=utf-8", res.gz)

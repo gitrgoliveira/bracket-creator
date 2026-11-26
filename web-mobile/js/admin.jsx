@@ -33,7 +33,7 @@ import { onDocumentSettled } from './document_versions.jsx';
 import { PUBLIC_NAMES_APPLY_CONFIRM, confirmPublicNamesApply } from './public_names_fields.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useRef, useCallback } = React;
 
 // closingHistoryToast (bc-mrgc): the toast editMatchScore shows for a write
 // that landed but kept something in the match's history (part of it held, or
@@ -259,6 +259,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // Refs are read by the SSE subscription (which has narrower deps to avoid
   // teardown); refresh them only when the underlying props change.
   useEffect(() => { tRef.current = t; onUpdateRef.current = onUpdate; }, [t, onUpdate]);
+  // Advance tRef alongside onUpdate so two updates in the same tick (before
+  // the post-render effect runs) both stand instead of the second spreading a
+  // stale tRef.current.
+  const applyTournament = useCallback((next) => {
+    tRef.current = next;
+    onUpdateRef.current(next);
+  }, []);
   // AdminApp unmounts on logout / viewer-mode switch. Several async
   // handlers below (updateCompetition's fetchCompetitionDetails,
   // startAllCompetitions) setAdminCompData / setAdminLoading
@@ -324,12 +331,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       if (!tRef.current) return;
       // The tournament holds every competition, so a court move re-stamps the
       // court-wide queue numbers rather than shifting one competition's own.
-      const next = mergeCompetitionsIntoTournament(tRef.current,
-        (comps) => applyPatchToCompetitions(comps, cid, event));
-      tRef.current = next;
-      onUpdateRef.current(next);
+      applyTournament(mergeCompetitionsIntoTournament(tRef.current,
+        (comps) => applyPatchToCompetitions(comps, cid, event)));
     });
-  }, []);
+  }, [applyTournament]);
 
   // Best-effort post-mutation refresh. Several mutation handlers below
   // (moveMatchCourt, editMatchScore, addCompetition,
@@ -351,7 +356,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     try {
       const comps = await window.API.fetchCompetitions({ bounded: true });
       if (!mountedRef.current || lateListRead(comps)) return;
-      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
+      applyTournament(mergeCompetitionsIntoTournament(tRef.current, () => comps));
       reportListRead(comps);
     } catch (e) {
       console.warn(`refresh after ${actionLabel} failed (action did succeed):`, e);
@@ -383,13 +388,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     try {
       const comps = await window.API.fetchCompetitions();
       if (!mountedRef.current || lateListRead(comps)) return;
-      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
+      applyTournament(mergeCompetitionsIntoTournament(tRef.current, () => comps));
       reportListRead(comps);
     } catch (e) {
       console.warn(`refresh after ${actionLabel} failed (action did succeed):`, e);
       if (mountedRef.current) {
         const normalized = normalizeCreatedRecord(created);
-        onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
+        applyTournament(mergeCompetitionsIntoTournament(tRef.current,
           comps => comps.some(c => c.id === normalized.id) ? comps : [...comps, normalized]));
         showToast(`${actionLabel} succeeded; refresh failed. Reload to see latest`, "error");
       }
@@ -415,14 +420,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // (stage 6 review 12, C1).
       if (e && e.code === "roster_changed") {
         const current = { players: e.players, rosterVersion: e.rosterVersion };
-        onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
+        applyTournament(mergeCompetitionsIntoTournament(tRef.current,
           comps => comps.map(c => c.id === cid ? { ...c, ...current } : c)));
         if (mountedRef.current) setAdminCompData((prev) => storedCompetitionInDetail(prev, cid, current));
         throw e;
       }
       if (e && e.code === "config_changed") {
         const current = (e.competition && typeof e.competition === "object") ? e.competition : {};
-        onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
+        applyTournament(mergeCompetitionsIntoTournament(tRef.current,
           comps => comps.map(c => c.id === cid ? { ...c, ...current } : c)));
         if (mountedRef.current) setAdminCompData((prev) => storedCompetitionInDetail(prev, cid, current));
         throw e;
@@ -441,7 +446,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // the await above, and using the closure-captured `t` would clobber
     // those updates with stale state. Same reasoning applies to
     // onUpdateRef.current vs the closure-captured onUpdate.
-    onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
+    applyTournament(mergeCompetitionsIntoTournament(tRef.current,
       comps => comps.map(c => c.id === cid ? mergeSavedCompetition(c, updatedComp, next) : c)));
     // The competition page shows what was stored at once, from the PUT's own
     // answer (stage 6 review 10, m10): the refetch below can fail, and the
@@ -681,7 +686,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     try {
       const fresh = await window.API.fetchCompetitions();
       if (mountedRef.current && !lateListRead(fresh)) {
-        onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => fresh));
+        applyTournament(mergeCompetitionsIntoTournament(tRef.current, () => fresh));
         reportListRead(fresh);
       }
     } catch (e) {
@@ -806,7 +811,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // Re-read tRef.current AFTER the await: the patch just persisted is
         // applied on top of the freshest snapshot, with the version the save
         // answered, so the next save is made from the settings just stored.
-        onUpdateRef.current({ ...mergeTournamentPatch(tRef.current, stored, password, locked), tournamentVersion: saved.tournamentVersion });
+        applyTournament({ ...mergeTournamentPatch(tRef.current, stored, password, locked), tournamentVersion: saved.tournamentVersion });
         showToast("Tournament updated");
         return true;
       }
@@ -821,7 +826,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           try { copy = await window.API.fetchTournament(); } catch (_e) { copy = null; }
         }
         if (copy && !copy.error && !lateSettingsRead(copy)) {
-          onUpdateRef.current(tournamentFromConflict(tRef.current, copy, password, locked));
+          applyTournament(tournamentFromConflict(tRef.current, copy, password, locked));
           if (settingsGateRef.current) settingsGateRef.current.applied(readSeqOf(copy));
         }
       };
@@ -860,7 +865,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // The settings the operator just saved show at once (the freshest
         // snapshot with the patch on top, as before); the version they were
         // saved at comes with the server's answer.
-        onUpdateRef.current(mergeTournamentPatch(tRef.current, stored, password, locked));
+        applyTournament(mergeTournamentPatch(tRef.current, stored, password, locked));
         // Kept on this device and sent when the link allows: a save made with no
         // connection says so now, not when it lands (the same line the court-call
         // composer gives).
@@ -872,7 +877,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           if (!saved || saved.discarded) { takeCurrentCopy(null); return; }
           // Only the version: tRef.current already holds the patch, and a later
           // save of the operator's, queued behind this one, must not be undone.
-          onUpdateRef.current({ ...tRef.current, tournamentVersion: saved.tournamentVersion });
+          applyTournament({ ...tRef.current, tournamentVersion: saved.tournamentVersion });
           if (mountedRef.current) showToast("Tournament updated");
         }, takeCurrentCopy);
       };
@@ -884,7 +889,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // (the Edit form keeps what was typed until its Reload remounts it from
       // this copy, so a stale save stays refused until then).
       if (e && e.code === "tournament_changed" && e.tournament) {
-        onUpdateRef.current(tournamentFromConflict(tRef.current, e.tournament, password, locked));
+        applyTournament(tournamentFromConflict(tRef.current, e.tournament, password, locked));
       } else {
         showToast(e.message, "error");
       }
@@ -970,9 +975,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // The gate shows what it read, so it can leave an older answer than a
         // read the page already shows unshown.
         take: () => (comps) => {
-          const next = { ...tRef.current, competitions: comps };
-          tRef.current = next;
-          onUpdateRef.current(next);
+          applyTournament({ ...tRef.current, competitions: comps });
         },
         maxDelayMs: 1500,
         random: () => Math.random(),
@@ -984,9 +987,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         take: () => (tourney) => {
           // No tournament configured (null): nothing to show.
           if (!tourney) return;
-          const next = { ...tourney, competitions: (tRef.current && tRef.current.competitions) || [] };
-          tRef.current = next;
-          onUpdateRef.current(next);
+          applyTournament({ ...tourney, competitions: (tRef.current && tRef.current.competitions) || [] });
         },
         maxDelayMs: 1500,
         random: () => Math.random(),
@@ -1107,7 +1108,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         unsub();
       };
     }
-  }, [view.id, view.kind, pushes]); // t and onUpdate accessed via refs to avoid churn; pushes never changes
+  }, [view.id, view.kind, pushes, applyTournament]); // t and onUpdate accessed via refs to avoid churn; pushes and applyTournament never change
 
   if (view.kind === "dashboard") {
     return <>
@@ -1286,7 +1287,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // tRef/onUpdateRef so SSE updates during the in-flight import
         // are preserved (see mergeCompetitionsIntoTournament docstring).
         if (!lateListRead(comps)) {
-          onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
+          applyTournament(mergeCompetitionsIntoTournament(tRef.current, () => comps));
           reportListRead(comps);
         }
         setView({ kind: "dashboard" });

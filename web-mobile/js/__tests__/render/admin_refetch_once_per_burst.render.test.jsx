@@ -11,7 +11,7 @@ import { installWindowStubs } from '../helpers/stub_globals.js';
 import { HELD_PUSH_WAIT_MS } from '../../patch.jsx';
 import { noteReadSeq } from '../../read_seq.jsx';
 
-const probe = { props: null };
+const probe = { props: null, editProps: null };
 const sse = { emit: null };
 
 const withSeq = (value, seq) => noteReadSeq(value, { headers: { get: (k) => (k === 'X-Event-Seq' ? String(seq) : null) } });
@@ -24,6 +24,7 @@ const detail = () => withSeq({ config: { ...config }, pools: [], poolMatches: [r
 const STUBBED_GLOBALS = {
   // MODULE-EVAL-TIME: captured at import by admin.jsx.
   AdminCompetition: (props) => { probe.props = props; return <div data-testid="competition" />; },
+  AdminEditTournament: (props) => { probe.editProps = props; return <div data-testid="edit-tournament" />; },
   confirmDialog: vi.fn(),
   API: {
     subscribeToEvents: vi.fn((onEvent, onStatus) => { sse.emit = onEvent; sse.status = onStatus; return () => {}; }),
@@ -31,6 +32,7 @@ const STUBBED_GLOBALS = {
     fetchTournament: vi.fn(async () => withSeq({ name: 'Cup', courts: ['A'] }, head.competitions)),
     fetchCompetitionDetails: vi.fn(async () => detail()),
     recordScore: vi.fn(async () => ({ applied: true })),
+    updateTournament: vi.fn(),
   },
 };
 
@@ -316,5 +318,127 @@ describe('the admin competition page fetches once per burst (bc-sseq FR4)', () =
       );
     });
     expect(onUpdate.mock.calls.at(-1)[0].competitions[0].name).toBe('Newest List Cup');
+  });
+
+  function SettingsHarness({ initialTournament, view, onUpdate }) {
+    const [tournament, setTournament] = React.useState(initialTournament);
+    return (
+      <AdminApp
+        tournament={tournament}
+        onUpdate={(next) => { if (onUpdate) onUpdate(next); setTournament(next); }}
+        onLogout={vi.fn()} onViewerMode={vi.fn()} onPasswordChange={vi.fn()}
+        tweaks={{}} password="pw" view={view} setView={vi.fn()}
+        showToast={vi.fn()} authConfig={{ mode: 'file' }}
+      />
+    );
+  }
+
+  async function openCompetitionWithPendingSave({ initialName = 'Cup', optimisticName = 'Optimistic Cup', initialSeq = 20 } = {}) {
+    head.detail = initialSeq;
+    head.competitions = initialSeq;
+    let rejectSettled;
+    const settled = new Promise((_resolve, reject) => { rejectSettled = reject; });
+    window.API.updateTournament.mockImplementationOnce(async () => ({ pending: true, settled }));
+    const onUpdate = vi.fn();
+    const initialTournament = { name: initialName, courts: ['A'], competitions: [{ ...config }] };
+    let view;
+    await act(async () => {
+      view = render(<SettingsHarness initialTournament={initialTournament} view={{ kind: 'editTournament' }} onUpdate={onUpdate} />);
+    });
+    expect(probe.editProps, 'edit tournament screen rendered').toBeTruthy();
+    await act(async () => {
+      await probe.editProps.onSave({ name: optimisticName, courts: ['A'] });
+    });
+    await act(async () => {
+      view.rerender(<SettingsHarness initialTournament={initialTournament} view={{ kind: 'competition', id: 'c1', section: 'overview' }} onUpdate={onUpdate} />);
+    });
+    await pastWindow();
+    expect(probe.props, 'competition screen rendered').toBeTruthy();
+    expect(probe.props.tournament.name).toBe(optimisticName);
+    return { onUpdate, rejectSettled };
+  }
+
+  it('a stale settings fetch after a refused save does not overwrite a newer settings gate answer', async () => {
+    const { onUpdate, rejectSettled } = await openCompetitionWithPendingSave();
+    head.detail = 30;
+    head.competitions = 30;
+    window.API.fetchTournament.mockImplementationOnce(async () => withSeq({ name: 'Newer Settings Cup', courts: ['A', 'B'] }, 30));
+    await emit({ type: 'tournament_updated', seq: 30, data: null });
+    await pastWindow();
+    expect(probe.props.tournament.name).toBe('Newer Settings Cup');
+
+    window.API.fetchTournament.mockImplementationOnce(async () => withSeq({ name: 'Stale Settings Cup', courts: ['A'] }, 25));
+    onUpdate.mockClear();
+    const beforeFetches = window.API.fetchTournament.mock.calls.length;
+    await act(async () => {
+      rejectSettled(new Error('invalid venue'));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(window.API.fetchTournament.mock.calls.length, 'takeCurrentCopy fetched the stored settings').toBe(beforeFetches + 1);
+    expect(onUpdate, 'stale fetched settings are dropped').not.toHaveBeenCalled();
+    expect(probe.props.tournament.name, 'displayed settings stay at the newer ones').toBe('Newer Settings Cup');
+    expect(probe.props.tournament.courts).toEqual(['A', 'B']);
+  });
+
+  it('a fresh copy restored after a refused save is shown and covers tournament_updated up to its seq', async () => {
+    const { rejectSettled } = await openCompetitionWithPendingSave();
+    head.detail = 30;
+    head.competitions = 30;
+    window.API.fetchTournament.mockImplementationOnce(async () => withSeq({ name: 'Settings At 30', courts: ['A'] }, 30));
+    await emit({ type: 'tournament_updated', seq: 30, data: null });
+    await pastWindow();
+    expect(probe.props.tournament.name).toBe('Settings At 30');
+
+    const conflict = Object.assign(new Error('Tournament changed'), {
+      code: 'tournament_changed',
+      tournament: withSeq({ name: 'Restored At 32', courts: ['A', 'B'] }, 32),
+    });
+    await act(async () => {
+      rejectSettled(conflict);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(probe.props.tournament.name).toBe('Restored At 32');
+    expect(probe.props.tournament.courts).toEqual(['A', 'B']);
+
+    const beforeFetches = window.API.fetchTournament.mock.calls.length;
+    head.detail = 32;
+    head.competitions = 32;
+    await emit({ type: 'tournament_updated', seq: 31, data: null }, { type: 'tournament_updated', seq: 32, data: null });
+    await pastWindow();
+    expect(window.API.fetchTournament.mock.calls.length, 'no refetch for tournament_updated up to the restored seq').toBe(beforeFetches);
+    expect(probe.props.tournament.name, 'restored settings stay shown').toBe('Restored At 32');
+
+    head.detail = 33;
+    head.competitions = 33;
+    await emit({ type: 'tournament_updated', seq: 33, data: null });
+    await pastWindow();
+    expect(window.API.fetchTournament.mock.calls.length, 'an event above the restored seq still refetches').toBe(beforeFetches + 1);
+  });
+
+  it('restored settings survive a list gate apply in the same tick', async () => {
+    const { onUpdate, rejectSettled } = await openCompetitionWithPendingSave({ initialName: 'Cup', optimisticName: 'Optimistic Cup', initialSeq: 20 });
+    head.detail = 21;
+    let resolveList;
+    window.API.fetchCompetitions.mockImplementationOnce(() => new Promise((r) => { resolveList = r; }));
+    await emit(tap(21, ['M']));
+    await pastWindow();
+    expect(resolveList, 'list gate fetch is in flight').toBeTypeOf('function');
+
+    onUpdate.mockClear();
+    const conflict = Object.assign(new Error('Tournament changed'), {
+      code: 'tournament_changed',
+      tournament: withSeq({ name: 'Restored Cup', courts: ['A', 'B'] }, 25),
+    });
+    await act(async () => {
+      rejectSettled(conflict);
+      resolveList(withSeq([{ ...config, name: 'Updated Comp' }], 25));
+    });
+    expect(onUpdate.mock.calls.length, 'both takeCurrentCopy and listGate applied').toBe(2);
+    expect(onUpdate.mock.calls[0][0].name).toBe('Restored Cup');
+    expect(onUpdate.mock.calls[1][0].name).toBe('Restored Cup');
+    expect(onUpdate.mock.calls[1][0].competitions[0].name).toBe('Updated Comp');
+    expect(probe.props.tournament.name, 'restored settings survive the same-tick list apply').toBe('Restored Cup');
+    expect(probe.props.tournament.courts, 'restored courts survive the same-tick list apply').toEqual(['A', 'B']);
+    expect(probe.props.tournament.competitions[0].name, 'the list update also stood').toBe('Updated Comp');
   });
 });

@@ -123,8 +123,9 @@ info:
     add made elsewhere) keeps the stored row, scored or not, unless it finishes the match,
     which is refused with 409 `daihyosen_added`. It carries only what the competitors saw: a match
     `decision` that is empty, `fought`, `hikiwake` or, in a kachinuki competition,
-    `kachinuki-exhaustion` (the End match write, whose winner the server works out
-    from the scored bouts), a numbered bout `decision` that is
+    `kachinuki-exhaustion` (the End match write: the server works its winner out
+    from the scored bouts when it can attribute the last one, and otherwise the
+    winner sent stands, as for `fought`), a numbered bout `decision` that is
     one of those or `fusensho`, and a representative-bout `decision` that is empty or
     `daihyosen` (a draw, a kiken, a fusenpai, or a fusensho there would decide the encounter). Any
     other decision, or the `Ht` judges'-decision mark on a numbered bout, is refused

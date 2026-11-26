@@ -163,6 +163,26 @@ export function writeResultLocked(res) {
     if (res.heldReason === HELD_REASON_RESULT_LOCKED_RUNNING) return 'running';
     return null;
 }
+// The court console's write gate (court_control.jsx, bc-sseq FR9): while the
+// console is on screen and another device runs its shiaijo (or nobody does
+// and this tablet lost it earlier), a new write is refused before it is
+// queued, and its door answers courtNotHeldAnswer(). Nothing was stored or
+// queued, so the banner leads "Not saved", and the remedy is Take control.
+// writeCourtNotHeld is the ONE reader of that answer; a refused tap is told
+// through the tap-outcome channel with the same reason (tapNotAppliedText).
+export const COURT_NOT_HELD = 'court_not_held';
+export const COURT_NOT_HELD_SENTENCE = 'this tablet does not run this shiaijo, so nothing was recorded. To run it, tap Take control at the top of the screen, then enter the change again.';
+export function courtNotHeldAnswer() {
+    return { applied: false, reason: COURT_NOT_HELD };
+}
+export function writeCourtNotHeld(res) {
+    return !!res && res.applied === false && res.reason === COURT_NOT_HELD;
+}
+// The refusal the refused write's `settled` rejects with, worded for a toast.
+export function courtNotHeldError() {
+    return Object.assign(new Error(`Not saved: ${COURT_NOT_HELD_SENTENCE}`), { code: COURT_NOT_HELD, reason: COURT_NOT_HELD });
+}
+
 // displacedAlertText: the queue alert for queued finishes that landed and
 // moved a later change of the same match to its history (writeDisplacedGroups).
 export function displacedAlertText(n, one) {
@@ -192,6 +212,8 @@ export function tapNotAppliedText(o, where = '', what = '') {
 function tapNotAppliedReasonText(o) {
     if (!o || tapOutcomeQuiet(o)) return null;
     if (typeof o.message === 'string' && o.message) return o.message;
+    // Refused by the court console's write gate before it was queued.
+    if (o.reason === COURT_NOT_HELD) return `Not applied: ${COURT_NOT_HELD_SENTENCE}`;
     switch (o.outcome) {
         case 'capped': return 'Not applied: the bout was already decided.';
         case 'matchClosed': return `Not applied: ${MATCH_CLOSED_REASON}. ${MATCH_CLOSED_ADVICE}`;
@@ -253,6 +275,8 @@ export function decisionWord(code) {
 // sentence (`message`) is shown as it is when it sends one (notSavedText's
 // `sentence` path).
 export function supersededBanner(res) {
+    // Not a superseded write at all: it was never queued (writeCourtNotHeld).
+    if (writeCourtNotHeld(res)) return { reason: COURT_NOT_HELD_SENTENCE, sentence: true };
     const sentence = res && typeof res.message === 'string' && res.message;
     const locked = writeResultLocked(res);
     if (locked || writeMatchClosed(res)) {

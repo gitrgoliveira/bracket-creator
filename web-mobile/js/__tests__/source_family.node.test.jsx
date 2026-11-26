@@ -17,8 +17,8 @@ const FAMILIES = {
   ],
   'admin_scoring_team.jsx': ['admin_scoring_team.jsx', 'admin_scoring_team_bouts.jsx', 'admin_scoring_team_kachinuki.jsx'],
   'admin_shiaijo.jsx': [
-    'admin_shiaijo.jsx', 'admin_shiaijo_calls.jsx', 'admin_shiaijo_context.jsx', 'admin_shiaijo_feed.jsx',
-    'admin_shiaijo_moves.jsx', 'admin_shiaijo_queue.jsx', 'admin_shiaijo_start.jsx',
+    'admin_shiaijo.jsx', 'admin_shiaijo_calls.jsx', 'admin_shiaijo_context.jsx', 'admin_shiaijo_control.jsx',
+    'admin_shiaijo_feed.jsx', 'admin_shiaijo_moves.jsx', 'admin_shiaijo_queue.jsx', 'admin_shiaijo_start.jsx',
   ],
 };
 

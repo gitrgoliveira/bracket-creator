@@ -7,7 +7,7 @@
 // shot's state - a running match stays running, a completed one stays
 // completed. Each drive() checks the precondition it needs and throws rather
 // than photograph the wrong moment.
-import { settle, withAdminPage } from '../lib/ui.mjs';
+import { courtConsoleRuns, settle, withAdminPage } from '../lib/ui.mjs';
 import { roster } from '../lib/api.mjs';
 import { EDITOR, TAP_DWELL_MS, finishMatch, startMatch } from '../lib/editor.mjs';
 import { assertBoutPoints, assertLineupIds } from '../lib/fixture.mjs';
@@ -467,6 +467,7 @@ export const recipes = [
     route: '/admin/shiaijo/A',
     waitFor: 'text=Shiaijo A',
     drive: async ({ page }) => {
+      await courtConsoleRuns(page);
       await page.waitForTimeout(800);
     },
     // The subject is the ABSENCE of pending work. Assert it: a court with

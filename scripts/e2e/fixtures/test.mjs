@@ -7,6 +7,7 @@ import { start, BIN } from '../../screenshots/lib/server.mjs';
 import { auditsFor } from './audit.mjs';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { ensureCoarse, isCoarse } from './pointer.mjs';
+import { releaseContextCourts, releaseOnClose } from './court-control.mjs';
 
 export { isCoarse };
 
@@ -344,7 +345,9 @@ export const test = base.extend({
     browser.newContext = async (...args) => {
       const ctx = await newContext.apply(browser, args);
       c.attachContext(ctx);
-      return ctx;
+      // Closing it, or one of its pages, gives back the shiaijo its court
+      // consoles run, as closing a tab does (fixtures/court-control.mjs).
+      return releaseOnClose(ctx);
     };
     try {
       await use(browser);
@@ -355,9 +358,14 @@ export const test = base.extend({
 
   // The default context goes through browser.newContext today; attached here
   // as well so the policy does not depend on how Playwright builds it.
+  // Playwright closes it after the test without a pagehide, so the shiaijo its
+  // court consoles run are given back first (fixtures/court-control.mjs): the
+  // next test of the file then opens a free shiaijo.
   context: async ({ context, consoleCollector: c }, use) => {
     c.attachContext(context);
+    releaseOnClose(context);
     await use(context);
+    await releaseContextCourts(context).catch(() => {});
   },
 
   // The check, at the end of every test (auto, so no journey has to ask).

@@ -443,6 +443,12 @@ paths:
         - `bracket_quarantined`: a `bracket.json` that would not parse was
           renamed aside and the knockout stage rebuilt; every device should
           reload.
+        - `court_control_updated`: the court console tab that runs a shiaijo
+          changed (a take, a free shiaijo claimed, a release, or every
+          shiaijo freed because the whole tournament was replaced).
+          `data: { court, holderKey, device, since }`, `holderKey` empty while
+          nobody runs it. Organiser only: every other stream, a self-run
+          tournament's included, is sent the event with no data.
         - `resync_required` and `heartbeat`: stream control frames. A
           `resync_required` says the replay ring cannot close the gap since
           `Last-Event-ID`, so the client refetches everything.
@@ -592,7 +598,9 @@ paths:
       tags: [tournament]
       summary: Create tournament configuration
       description: |
-        Creates a new tournament.
+        Creates a new tournament. Every shiaijo is freed (see
+        `/api/courts/{court}/control`): shiaijo letters repeat, so whoever ran
+        a shiaijo before runs nothing in the new tournament.
 
         **File mode (default)**: allowed without the
         `X-Tournament-Password` header when no tournament has been
@@ -1021,6 +1029,8 @@ paths:
         via a multipart form upload. The server accepts files under any field name(s).
         One of the uploaded files must be named `manifest.yaml` (or `.yml`); it declares
         which competitions to create and which participant/seed CSV files to associate with each.
+        When at least one competition row lands, every shiaijo is freed (see
+        `/api/courts/{court}/control`).
 
         Each competition row is validated against the same rules
         `POST /api/competitions` applies, and two manifest keys are worth
@@ -1352,6 +1362,10 @@ paths:
       summary: Execute tournament restore
       description: |
         Restores a tournament or single competition from a backup archive.
+        A restore that replaces the tournament frees every shiaijo (see
+        `/api/courts/{court}/control`); a restore of one competition leaves
+        who runs each shiaijo alone. Who runs each shiaijo is never in a
+        backup.
 
         Saves an automatic safety backup into `backups/` (named `<timestamp>-before-restore-<scope>.zip`)
         before any live directory is replaced or removed. Every rename is journaled, so a
@@ -2008,6 +2022,181 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Court control (Admin, requires auth) ───────────────────────────────────
+
+  /api/courts/{court}/control:
+    parameters:
+      - name: court
+        in: path
+        required: true
+        description: A shiaijo the tournament lists (its letter, A to P).
+        schema:
+          type: string
+    get:
+      tags: [tournament]
+      summary: Who runs a shiaijo
+      description: |
+        The court console tab that runs the shiaijo, as any organiser sees it:
+        `youHold`, `sameDevice` and `youWereDisplaced` are false, since the
+        GET names no tab. A console learns its own place from the PUT, which
+        it sends as its claim and every 30 seconds as its heartbeat.
+
+        Organiser only, in a self-run tournament too.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: The shiaijo's control.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourtControl'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: "`unknown_court`: the tournament does not list this shiaijo."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [tournament]
+      summary: Claim, keep or take a shiaijo
+      description: |
+        A court console's claim of the shiaijo it shows. One tab runs each
+        shiaijo (the green bar), and the court's standing belongs to the
+        tablet that tab is on: a result from any court console tab of that
+        tablet counts as the court's.
+
+        - A shiaijo nobody runs is taken at once, unless this tab or this
+          tablet lost it earlier by a take: then only `take: true` takes it.
+        - The holder's own claim is its heartbeat: it refreshes `lastActiveAt`
+          and changes nothing else.
+        - A shiaijo another tab runs is taken only with `take: true` (Take
+          control). A take by another tablet starts the court's standing at
+          `takenAt`, so results the former tablet queued count like any other
+          device's; a take between two tabs of one tablet moves the green bar
+          and keeps the standing where it was.
+        - Claiming one shiaijo gives back any other this tab ran.
+
+        The control never lapses on a timer. A change of holder is announced
+        as `court_control_updated`; a heartbeat announces nothing. The tab and
+        tablet ids are compared through one-way keys and never stored,
+        answered or broadcast. Organiser only, in a self-run tournament too.
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tabId, pageId, deviceId]
+              properties:
+                tabId:
+                  type: string
+                  description: The console tab's id, a lowercase UUID v4 kept for the tab's life.
+                pageId:
+                  type: string
+                  description: >
+                    The page load's id, a lowercase UUID v4, so a reload's late
+                    release never frees the new page's claim.
+                deviceId:
+                  type: string
+                  description: >
+                    The tablet's id, a lowercase UUID v4 shared by every tab of
+                    the browser. The court's standing is judged by it.
+                take:
+                  type: boolean
+                  description: Take control from whoever runs the shiaijo.
+                takenAt:
+                  type: integer
+                  format: int64
+                  description: >
+                    Required with `take`: when the take was made, server-relative
+                    unix milliseconds as the outbox stamps a write, held to at
+                    most the server's clock plus a few seconds.
+                device:
+                  type: string
+                  enum: [ipad, android-tablet, iphone, android-phone, mac, windows, other]
+                  description: The kind of device, shown to the other consoles. Anything else reads `other`.
+      responses:
+        '200':
+          description: The shiaijo's control as this tab sees it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourtControl'
+        '400':
+          description: "`invalid_court_control`: an id is not a lowercase UUID v4, or a take carries no `takenAt`."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: "`unknown_court`: the tournament does not list this shiaijo."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [tournament]
+      summary: Give a shiaijo back
+      description: |
+        The console's release as its tab closes. It frees the shiaijo only
+        when this tab runs it and `pageId` names the current page load;
+        anything else changes nothing and answers the control as it stands.
+        Organiser only, in a self-run tournament too.
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tabId, pageId]
+              properties:
+                tabId:
+                  type: string
+                pageId:
+                  type: string
+      responses:
+        '200':
+          description: The shiaijo's control after the release.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourtControl'
+        '400':
+          description: "`invalid_court_control`: an id is not a lowercase UUID v4."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: "`unknown_court`: the tournament does not list this shiaijo."
           content:
             application/json:
               schema:
@@ -9665,6 +9854,45 @@ components:
               description: >
                 True when the call's time (its `modifiedAt` plus the duration)
                 was already over when it arrived, so nothing is shown.
+
+    CourtControl:
+      type: object
+      description: >
+        Which court console tab runs a shiaijo, as one caller sees it. Times
+        are unix milliseconds on the server's clock.
+      properties:
+        court:
+          type: string
+        holderKey:
+          type: string
+          description: >
+            A one-way key of the holding tab's id (16 hex characters), empty
+            while nobody runs the shiaijo. It grants nothing.
+        device:
+          type: string
+          enum: ['', ipad, android-tablet, iphone, android-phone, mac, windows, other]
+          description: The holder's kind of device, empty while nobody runs it.
+        youHold:
+          type: boolean
+          description: This tab runs the shiaijo.
+        sameDevice:
+          type: boolean
+          description: The holder is a tab of this tablet (this tab or another).
+        youWereDisplaced:
+          type: boolean
+          description: >
+            This tab or this tablet lost the shiaijo by a take. Always false
+            while this tablet runs the shiaijo.
+        since:
+          type: integer
+          format: int64
+          description: When the holder took the shiaijo, 0 while nobody runs it.
+        lastActiveAt:
+          type: integer
+          format: int64
+          description: >
+            The holder's last claim or heartbeat, kept in memory only: after a
+            restart it starts at `since`.
 
     Announcement:
       type: object

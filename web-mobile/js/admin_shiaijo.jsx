@@ -27,7 +27,7 @@ import { useCourtPaceLookup } from './court_pace.jsx';
 // already makes.
 import {
     writeDidNotLand, writeKeepsEditorOpen, writeWasSuperseded, BRONZE_MATCH_ID,
-    writePending, writeWasRefused, writeQueueKey,
+    writePending, writeWasRefused, writeQueueKey, writeCourtNotHeld,
 } from './write_result.jsx';
 // bc-cse: a scheduled match a competitor is barred from (withdrew earlier)
 // cannot be fought, so no auto-pick may offer it and the queue row shows the
@@ -46,6 +46,9 @@ import { ShiaijoContext } from './admin_shiaijo_context.jsx';
 import { useCourtStart, ShiaijoUpNextCard } from './admin_shiaijo_start.jsx';
 import { useCourtCalls } from './admin_shiaijo_calls.jsx';
 import { useCourtMoves, ShiaijoConfirms } from './admin_shiaijo_moves.jsx';
+// One tab runs each shiaijo (bc-sseq FR9): the mark under the top bar, Take
+// control, and the check every console handler below makes before it writes.
+import { useShiaijoControl, ShiaijoControlBar, refusedNotHeld } from './admin_shiaijo_control.jsx';
 
 const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
@@ -774,6 +777,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         if (!key || !writePending(res)) return;
         setStartedFrom((prev) => (prev && prev.key === key ? null : prev));
     };
+    // Who runs this shiaijo (bc-sseq FR9). While another tab or device runs it,
+    // or nobody does and this tablet lost it, the console is view only: the
+    // action area is a disabled fieldset, and every handler below asks
+    // refusedNotHeld(controlRef) before it acts (the outbox's own gate,
+    // court_control.jsx, refuses any write that still reaches it). The
+    // automatic withdrawal of this console's court calls is not gated:
+    // taking a call down is cleanup the new holder wants too.
+    const control = useShiaijoControl(courtKnown ? court : "", password, showToast);
+    const { controlRef, canWrite } = control;
+    // The pre-start lineup panel saves a lineup: opened only while this tab runs
+    // the shiaijo (or has had no answer yet).
+    const openLineup = (m) => {
+        if (refusedNotHeld(controlRef)) return;
+        setLineupKey(matchKey(m));
+    };
     // The start, pick and correct flow (useCourtStart, admin_shiaijo_start.jsx),
     // called once the court's live bout, the open correction and the selected
     // match are known. It binds latestRef in its own layout effect.
@@ -784,13 +802,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         court, password, showToast, onEditScore, mountedRef, editorUnsavedRef, leaveEditorConfirmed,
         allMatches, courtMatchesRaw, liveHere, liveBout, openCorrection, selectedMatch, isStartedSnapshot,
         startingKey, setStartingKey, startError, setStartError, setPickedKey, setCorrectingKey, setStartedFrom,
-        markSentBackHere,
+        markSentBackHere, controlRef,
     });
     // Call to court and its withdrawal (useCourtCalls, admin_shiaijo_calls.jsx),
     // which binds withdrawCallRef for the court feed's handler.
     const { callingKey, isCalled, callToCourt, withdrawCall } = useCourtCalls({
         court, password, showToast, mountedRef, callIdsRef, withdrawCallRef,
-        courtComps, courtCompetitions, courtMatchesRaw, tournament,
+        courtComps, courtCompetitions, courtMatchesRaw, tournament, controlRef,
     });
 
     // For pool daihyosen/tiebreaker bouts, enrich the selected match with
@@ -982,7 +1000,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const { moveMatch, requestRevert, requestMoveCourt, confirms } = useCourtMoves({
         court, password, showToast, onMoveCourt, mountedRef, editorUnsavedRef, selectedMatch, sorted,
         filteredScheduled, pickingRef, markSentBackHere, setPickedKey, setCorrectingKey, withdrawCall,
-        pendingStartAsk, answerStartAsk,
+        pendingStartAsk, answerStartAsk, controlRef,
     });
 
     // allDone: selected comp has no more matches to run on this court (AC4).
@@ -998,6 +1016,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     return (
         <div className="app">
             <AdminTopbar onLogout={leaving(onLogout)} onViewerMode={leaving(onViewerMode)} beforeLeave={leaveEditorConfirmed} tournament={tournament} hideRunningStrip />
+            {/* Who runs this shiaijo, stuck under the top bar so it is on
+                screen however far the operator scrolls (bc-sseq FR9). */}
+            {courtKnown && <ShiaijoControlBar court={court} control={control} showToast={showToast} />}
             <div className="page page--wide">
                 <Breadcrumbs items={[{ label: "Dashboard", onClick: leaving(onBack) }, { label: `Shiaijo ${court}` }]} />
                 <div className="page-head page-head--oneline">
@@ -1159,13 +1180,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             {filteredScheduled.length === 0 && filteredPending.length === 0 && filteredCompleted.length === 0 && (
                                 <p className="shiaijo-queue__empty">Nothing else queued on this court.</p>
                             )}
+                            {/* The queue's actions (Start, Call, Lineup, the moves, a
+                                barred row's decision) are view only while this tab
+                                does not run the shiaijo. The Hide toggle and Show all
+                                stay outside: they only change the view. */}
+                            <fieldset className="shiaijo-control-scope shiaijo-control-scope--queue" disabled={!canWrite}>
                             {upNext && (
                                 <ShiaijoUpNextCard
                                     upNext={upNext} paceLookup={paceLookup} notice={upNextNotice}
                                     starting={startingKey === matchKey(upNext)}
                                     called={isCalled(matchKey(upNext))} calling={callingKey === matchKey(upNext)}
                                     onStart={(ev) => tapStart(upNext, ev)}
-                                    onEnterLineup={() => setLineupKey(matchKey(upNext))}
+                                    onEnterLineup={() => openLineup(upNext)}
                                     onCall={window.API && typeof window.API.sendAnnouncement === "function" ? (ev) => callToCourt(upNext, ev) : null}
                                     onMoveDown={window.API && typeof window.API.updateMatchTime === "function" && filteredScheduled.length > 1 ? () => moveMatch(upNext, "down") : null}
                                 />
@@ -1179,13 +1205,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <ShiaijoQueueGroup
                                     label="Upcoming" subGroup matches={upcomingQueueMatches}
                                     courts={courts} onMoveCourt={requestMoveCourt}
-                                    onMove={moveMatch} onEnterLineup={(m) => setLineupKey(matchKey(m))}
+                                    onMove={moveMatch} onEnterLineup={openLineup}
                                     onPick={tapStart} noticeFor={(m) => startNoticeFor(matchKey(m))}
                                     onCall={callToCourt} callingKey={callingKey} isCalled={isCalled} startingKey={startingKey}
                                     scheduled={filteredScheduled}
                                     password={password}
                                 />
                             )}
+                            </fieldset>
 
                             {/* Later: scheduled knockout bouts still waiting on a
                                 "Winner of rX-mY" feeder (mp-y3nk). Shown so a court
@@ -1229,11 +1256,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     <div className="section-title">
                                         Completed <span className="shiaijo-count" aria-label={`${filteredCompleted.length} matches`}>{filteredCompleted.length}</span>
                                     </div>
-                                    <ShiaijoQueueGroup
-                                        matches={completedShown}
-                                        courts={courts} onMoveCourt={requestMoveCourt} onCorrect={correctMatch}
-                                        noticeFor={(m) => refusalNotice(matchKey(m))}
-                                    />
+                                    <fieldset className="shiaijo-control-scope" disabled={!canWrite}>
+                                        <ShiaijoQueueGroup
+                                            matches={completedShown}
+                                            courts={courts} onMoveCourt={requestMoveCourt} onCorrect={correctMatch}
+                                            noticeFor={(m) => refusalNotice(matchKey(m))}
+                                        />
+                                    </fieldset>
                                     {filteredCompleted.length > COMPLETED_PREVIEW && (
                                         <button
                                             type="button"
@@ -1312,6 +1341,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 bout makes allDone true, and the pin must still
                                 hold the editor open. */}
                             {(!allDone || correctingMatch) && selectedMatch && (
+                                // View only while this tab does not run the shiaijo
+                                // (bc-sseq FR9): the editor keeps what is on screen
+                                // and cannot save. Its window-level shortcuts and any
+                                // write it still makes are refused by the outbox's
+                                // gate, and a refused tap is noted beside the board.
+                                <fieldset className="shiaijo-control-scope shiaijo-control-scope--editor" disabled={!canWrite}>
                                 <ScoreEditorModal
                                     hostUnsavedRef={editorUnsavedRef}
                                     // No subResults.length: see the same key in
@@ -1339,6 +1374,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         try {
                                             // opts: the editor's own claim on a refusal (onRefusal).
                                             const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch, opts);
+                                            // Refused before it was queued: this tab does not run
+                                            // the shiaijo (court_control.jsx). Nothing to end or
+                                            // advance; the editor shows the refusal.
+                                            if (writeCourtNotHeld(res)) return res;
                                             // A landed Save correction ends the correction (a
                                             // write that did not land keeps it open, with the
                                             // editor's not-saved banner).
@@ -1370,6 +1409,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         let res;
                                         try {
                                             res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
+                                            // Refused before it was queued (court_control.jsx): no
+                                            // advance, no next start.
+                                            if (writeCourtNotHeld(res)) return res;
                                             // See the onSubmit handler above: a superseded write must not
                                             // advance the local bracket on a winner the server discarded.
                                             if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch, res);
@@ -1393,6 +1435,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         return res;
                                     }}
                                     onAfterDecision={async (result) => {
+                                        // A decision refused before it was queued (this tab
+                                        // does not run the shiaijo) advances nothing and starts
+                                        // nothing; the editor already says why.
+                                        if (writeCourtNotHeld(result) || refusedNotHeld(controlRef, { quiet: true })) return;
                                         // A fusenpai/hantei decision already persisted the bout via
                                         // the /decision POST: no score PUT here. It still resolves a
                                         // winner, so offline we must advance the LOCAL bracket the same
@@ -1414,6 +1460,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     }}
                                     password={password}
                                 />
+                                </fieldset>
                             )}
 
                             {correctingMatch && correctingMatch.status === "completed" && (
@@ -1455,6 +1502,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         type="button"
                                         className="btn btn--sm btn--ghost"
                                         onClick={() => requestRevert(selectedMatch)}
+                                        disabled={!canWrite}
                                         title="Return this match to the queue without recording a result"
                                     >
                                         Send back to queue

@@ -17,7 +17,7 @@ import {
   writeDidNotLand, writeRetryable, decisionWord,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, LEAGUE_FINISHED_REOPEN_CANCELLED, LOTS_REPLACED_CANCELLED, downstreamKnockoutReopenedNotice,
   courtBusyMessage, courtBusyReopenWarning, heldWriteDiscardLabel, heldWriteDiscardConfirm, queuedNotice,
-  tapNotAppliedText, tapOutcomeQuiet, writePending, writeWasRefused,
+  tapNotAppliedText, tapOutcomeQuiet, writePending, writeWasRefused, COURT_NOT_HELD,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord, sideWithColour } from './side_cell.jsx';
@@ -76,6 +76,10 @@ export function useClearPendingWhenNothingHeld(compId, matchId, pendingWrite, on
 // The refusals a tap gets while the server holds the match as not running
 // (operator S7 a): the server's sentence is shown next to the board.
 const TAP_NOT_RUNNING_REASONS = new Set(['match_not_started', 'match_sent_back']);
+// The refusals a tap gets before it is queued (bc-sseq FR9): the court
+// console on screen does not run its shiaijo (court_control.jsx's write
+// gate). The board never shows such a tap, so the sentence beside it says why.
+const TAP_NOT_QUEUED_REASONS = new Set([COURT_NOT_HELD]);
 
 // useTapOutcomeNote (bc-evts stage 3): what the outbox reported about a tap of
 // this editor's match the server did not apply (API.subscribeTapOutcome).
@@ -102,7 +106,7 @@ export function useTapOutcomeNote(compId, matchId) {
       const text = tapNotAppliedText(o);
       if (!text) return;
       const id = (o && o.id) || null;
-      if (o && TAP_NOT_RUNNING_REASONS.has(o.reason)) setState((s) => ({ ...s, refusal: text, id }));
+      if (o && (TAP_NOT_RUNNING_REASONS.has(o.reason) || TAP_NOT_QUEUED_REASONS.has(o.reason))) setState((s) => ({ ...s, refusal: text, id }));
       else setState((s) => ({ ...s, note: text, id }));
     });
   }, [compId, matchId]);

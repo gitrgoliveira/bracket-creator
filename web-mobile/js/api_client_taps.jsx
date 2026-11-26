@@ -196,6 +196,20 @@ function _emitOn(map, base, value) {
     }
 }
 
+// _tellTapNotQueued (bc-sseq FR9): a tap the court console's write gate
+// refused before it was queued (_commitEnqueue). A tap is fire and forget,
+// so its editor hears of it where it hears of every tap outcome
+// (subscribeTapOutcome), with the gate's reason, worded by tapNotAppliedText
+// and shown beside the board. Its seq is given back when it was the last one
+// handed out, so the server never waits for a tap that was never sent.
+export function _tellTapNotQueued(base, payload, reason) {
+    const id = payload && payload.id;
+    if (!id) return;
+    const seq = Number(payload.seq);
+    if (payload.session === _eventSession && seq > 0 && _tapSeq.get(base) === seq) _tapSeq.set(base, seq - 1);
+    _emitOn(_tapOutcomeListeners, base, { id, outcome: 'notQueued', reason });
+}
+
 // The taps this device holds for a match, in the order they are sent.
 export function _tapEntriesFor(base) {
     return _entriesFor(base).filter(([, d]) => d.kind === 'evt');

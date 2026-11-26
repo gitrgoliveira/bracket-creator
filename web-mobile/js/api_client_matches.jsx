@@ -13,7 +13,7 @@
 // (it would run the outbox twice).
 
 import { toBackendMatchResult } from './api_serializers.jsx';
-import { isOffline } from './write_result.jsx';
+import { isOffline, writeCourtNotHeld } from './write_result.jsx';
 import {
     fetchWithTimeout, reopenBody, START_CHECK_TIMEOUT_MS, _serverKeepsRetrying, START_CHECK_NOT_FOUND_MESSAGE,
     START_CHECK_WRITE_KINDS, _reasonHumanError, _fetchJson,
@@ -144,7 +144,9 @@ export const matchesApi = {
             seen: result && result.seenScoreVersion !== undefined ? result.seenScoreVersion : match && match.scoreVersion,
             onRefusal: opts && opts.onRefusal,
         });
-        _broadcastPatch(payload);
+        // A write the court console's gate refused (court_control.jsx) was
+        // never queued, so no display is shown it (bc-sseq FR9).
+        if (!writeCourtNotHeld(answer)) _broadcastPatch(payload);
         return answer;
     },
     // T093–T095: kiken / fusenpai / fusensho / daihyosen: server auto-fills
@@ -187,7 +189,7 @@ export const matchesApi = {
             url: `/api/competitions/${compID}/matches/${matchID}/time`,
             payload: { scheduledAt }, password, onRefusal: opts && opts.onRefusal, was: opts && opts.was,
         });
-        _emitLocalMatchPatch(compID, matchID, { scheduledAt });
+        if (!writeCourtNotHeld(answer)) _emitLocalMatchPatch(compID, matchID, { scheduledAt });
         return answer;
     },
     async moveMatchCourt(compID, matchID, court, password, opts = {}) {
@@ -201,6 +203,7 @@ export const matchesApi = {
             url: `/api/competitions/${compID}/matches/${matchID}/court`,
             payload, password, onRefusal: opts && opts.onRefusal, was: opts && opts.was,
         });
+        if (writeCourtNotHeld(answer)) return answer;
         _emitLocalMatchPatch(compID, matchID, { court });
         if (opts && opts.stopsRunning && opts.match) {
             const oldCourt = (opts.was && opts.was.court) || opts.match.court || '';
@@ -221,7 +224,7 @@ export const matchesApi = {
         // and flag counts), lets a display on this machine show the send back
         // at once, and the bout running again when it does not land.
         const match = opts && opts.match;
-        if (match) {
+        if (match && !writeCourtNotHeld(answer)) {
             _attachSendBackDisplayPutBack(compID, matchID, match, answer);
         }
         return answer;

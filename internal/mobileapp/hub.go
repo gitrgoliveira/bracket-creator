@@ -58,6 +58,12 @@ const (
 	// swissCurrentRound is in the payload so callers need no separate GET).
 	// FR-050d.
 	EventSwissRoundGenerated EventType = "swiss_round_generated"
+	// EventCourtControlUpdated: the court console tab that runs a shiaijo
+	// changed (a take, a free shiaijo claimed, a release, a whole-tournament
+	// replacement freeing it; bc-sseq FR9). Payload: {court, holderKey,
+	// device, since}, holderKey being a one-way key of the tab's id ("" when
+	// nobody holds it). Organiser-only; heartbeats broadcast nothing.
+	EventCourtControlUpdated EventType = "court_control_updated"
 )
 
 // AutoCompleteErrorHeader is set on score/start responses when the
@@ -234,6 +240,11 @@ type Hub struct {
 	// (attachPublicNames). With none attached (a bare hub in a test) every
 	// stream is sent the events as broadcast and no ticket can be had.
 	names *publicNames
+	// courts is the court control registry (bc-sseq FR9), attached once
+	// before serving (attachCourtControl), so the whole-tournament
+	// replacements, which reach the hub, can free every shiaijo. Nil on a
+	// bare hub in a test, which holds no control to free.
+	courts CourtControls
 	// tickets holds the event-stream tickets handed out and not yet used.
 	tickets eventTickets
 	// rejudges counts the reveal re-judgements a tournament_updated started
@@ -254,6 +265,20 @@ type sseSubscriber struct {
 // masks. Called once, before serving.
 func (h *Hub) attachPublicNames(names *publicNames) {
 	h.names = names
+}
+
+// attachCourtControl gives the hub the router's court control registry.
+// Called once, before serving.
+func (h *Hub) attachCourtControl(courts CourtControls) {
+	h.courts = courts
+}
+
+// courtControl is the attached court control registry, nil on a bare hub.
+func (h *Hub) courtControl() CourtControls {
+	if h == nil {
+		return nil
+	}
+	return h.courts
 }
 
 // pushMatchNow runs send under the attached coalescer's lock for matchKey

@@ -151,6 +151,11 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// the server was started with (in locked mode behind a digest cache).
 	names := newPublicNames(store, verifier)
 	hub.attachPublicNames(names)
+	// Who runs each shiaijo (bc-sseq FR9): one registry per router, reached
+	// by the claim routes, the score and decision doors, and through the hub
+	// by the whole-tournament replacements that free every shiaijo.
+	courts := newCourtControlRegistry(store, hub)
+	hub.attachCourtControl(courts)
 
 	// SSE Events endpoint. Each stream is answered for the audience of the
 	// single-use ticket it is opened with (POST /api/events/ticket, which
@@ -222,6 +227,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 
 	adminSmallBody := adminGroup(r, DefaultMaxBodyBytes, verifier, store)
 	RegisterTournamentHandlers(adminSmallBody, store, hub, verifier)
+	RegisterCourtControlHandlers(adminSmallBody, courts)
 	// Deleting a competition or a kept backup asks for the password again
 	// (X-Confirm-Password); this middleware judges only the routes in
 	// confirmedRoutes, after the sign-in, and covers only the routes below.
@@ -260,7 +266,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// The restore asks for the password again; Use covers only the routes
 	// registered after it, so the import above is not judged.
 	adminLargeBody.Use(RequireConfirmPassword(verifier))
-	RegisterRestoreHandlers(adminLargeBody, store, eng, hub, verifier)
+	RegisterRestoreHandlers(adminLargeBody, store, eng, hub, verifier, courts)
 
 	// Sponsor uploads (mp-c38), multipart logo upload needs envelope
 	// headroom for the file plus boundary/form-field overhead; so it gets

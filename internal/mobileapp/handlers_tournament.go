@@ -1370,6 +1370,9 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			internalError(c, err)
 			return
 		}
+		// A new tournament: whoever ran a shiaijo of the one it replaced runs
+		// nothing now, since shiaijo letters repeat (bc-sseq FR9).
+		clearCourtControlAfterReplace(hub.courtControl(), "new tournament")
 
 		// The default landed; now the competitions it was confirmed for.
 		var publicNamesFailure *publicNamesAnswer

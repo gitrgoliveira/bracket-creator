@@ -17,6 +17,9 @@ import { announcementExpiredToast } from './write_result.jsx';
 import { matchKey } from './admin_shiaijo_feed.jsx';
 import { competitionCallsByNumber } from './competition_shape.jsx';
 import { numberOf } from './competitor_identity.jsx';
+// A new call is a write: a tab that does not run the shiaijo makes none (bc-sseq
+// FR9). Taking this console's earlier calls down is not gated (withdrawCall).
+import { refusedNotHeld } from './admin_shiaijo_control.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -25,7 +28,7 @@ export const CALL_MINUTES = 5;
 
 export function useCourtCalls({
     court, password, showToast, mountedRef, callIdsRef, withdrawCallRef,
-    courtComps, courtCompetitions, courtMatchesRaw, tournament,
+    courtComps, courtCompetitions, courtMatchesRaw, tournament, controlRef,
 }) {
     // One timer per called match, for the end of the call kept for it
     // (keepCalled): the card reads as called only while that call is showing.
@@ -113,6 +116,7 @@ export function useCourtCalls({
         // true otherwise, stamping the tap as it goes.
         if (!acceptTap(callTapRef, ev, matchKey(m))) return;
         if (!window.API || typeof window.API.sendAnnouncement !== "function") return;
+        if (refusedNotHeld(controlRef)) return;
         // A competition whose public pages hide names is called by number (the
         // side colour when a side has none yet): the announcement reaches every
         // public screen as typed, so a name here would undo the setting.

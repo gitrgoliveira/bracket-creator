@@ -10513,6 +10513,74 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* ── Shiaijo operator console (Direction C, mp-c2yr) ──────────────────────
    Two-column: queue (left ~40%) + inline scoring & context (right). Stacks
    below 900px so tablet-portrait gets scoring-on-top, queue-below. */
+/* ---------- Court console: who runs this shiaijo (bc-sseq FR9) ---------- */
+/* The mark sits under the admin top bar and sticks with it (the top bar
+   publishes its height as --topbar-stack-h), so it is on screen however far
+   the operator scrolls. A static banner, never a pulse: green with a filled
+   dot for the holder, neutral for a shiaijo another tab or device runs, amber
+   for one this tablet lost, a free one it lost earlier, or no connection. */
+.shiaijo-control {
+  position: sticky;
+  top: var(--topbar-stack-h, 0px);
+  z-index: 29;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 14px;
+}
+.shiaijo-control__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.shiaijo-control__dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.shiaijo-control__take { flex: none; min-height: 36px; }
+.shiaijo-control--holds {
+  background: var(--ok-soft);
+  border-bottom-color: var(--ok);
+  color: var(--ok-ink);
+  font-weight: 600;
+}
+.shiaijo-control--warn {
+  background: var(--warn-soft);
+  border-bottom-color: var(--warn-border);
+  color: var(--warn-ink);
+}
+.shiaijo-control--checking { color: var(--ink-3); }
+/* The console's action areas, disabled as one while this tab does not run the
+   shiaijo: a bare grouping box that lays its children out as the column it
+   sits in did. */
+.shiaijo-control-scope {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.shiaijo-control-scope--queue {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+/* Nothing to group (no Up next, no upcoming rows): no box, so no gap. */
+.shiaijo-control-scope:empty { display: none; }
+@media (max-width: 640px) {
+  .shiaijo-control { flex-wrap: wrap; gap: 6px 12px; }
+}
+
 .shiaijo {
   display: grid;
   grid-template-columns: minmax(300px, 38%) 1fr;

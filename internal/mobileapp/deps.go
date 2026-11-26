@@ -316,6 +316,40 @@ type Broadcaster interface {
 	Broadcast(eventType EventType, data any)
 }
 
+// CourtControlStore is the consumer-boundary view of state.Store the court
+// control registry (court_control.go) reads court-control.json and the
+// tournament's shiaijo through (bc-sseq FR9). *state.Store satisfies it.
+type CourtControlStore interface {
+	TournamentLoader
+	LoadCourtControl() state.CourtControl
+	SaveCourtControl(c state.CourtControl, listed []string) error
+	ClearCourtControl() error
+}
+
+// CourtControls is the consumer-boundary view of the court control registry
+// (bc-sseq FR9): which court console tab runs each shiaijo, and whether a
+// court console's write has the court's standing. The claim routes
+// (handlers_court_control.go), the whole-tournament replacements (a new
+// tournament, an import, a full restore) and the score and decision doors
+// reach it through this. *courtControlRegistry satisfies it.
+type CourtControls interface {
+	// Look is the shiaijo's control as any caller sees it.
+	Look(court string) (CourtControlAnswer, error)
+	// Claim is the claim route's PUT: a claim, a heartbeat or a take.
+	Claim(req CourtClaim) (CourtControlAnswer, error)
+	// Release is the claim route's DELETE: it frees the shiaijo only when
+	// the tab holds it and names the current page load.
+	Release(court, tabID, pageID string) (CourtControlAnswer, error)
+	// WriteStanding judges a court console's write on arrival: true when
+	// the write's tablet runs the shiaijo and the write was made at or after
+	// the standing's start. A write naming a shiaijo nobody holds, from a tab
+	// and a tablet on neither displaced list, claims it first.
+	WriteStanding(court, tabID, deviceID string, stamp int64) (bool, error)
+	// Clear frees every shiaijo and forgets both displaced lists: the whole
+	// tournament was replaced.
+	Clear() error
+}
+
 // CompetitionTransactor is the consumer-boundary view of
 // state.Store.WithTransaction used by handler families that need to
 // commit multiple file mutations under one per-comp lock acquire

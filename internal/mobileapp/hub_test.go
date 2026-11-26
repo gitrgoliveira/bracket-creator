@@ -870,7 +870,7 @@ func TestSSEEventCatalogue_ClassifiesEveryEventType(t *testing.T) {
 			}
 		}
 	}
-	require.Len(t, declared, 15, "the package declares 15 event types")
+	require.Len(t, declared, 16, "the package declares 16 event types")
 	for et := range declared {
 		spec, ok := sseEventCatalogue[et]
 		if assert.True(t, ok, "event type %q is not classified in sseEventCatalogue", et) {

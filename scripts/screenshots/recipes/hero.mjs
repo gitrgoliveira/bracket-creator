@@ -26,7 +26,7 @@
 // the console's origin only (authAdmin's `origin`). A different origin has its
 // own localStorage, so the phone starts as a spectator's browser does: empty.
 import { londonCup } from '../lib/api.mjs';
-import { authAdmin, pressInScaledFrame, settle, withAdminPage } from '../lib/ui.mjs';
+import { authAdmin, courtConsoleRuns, pressInScaledFrame, settle, withAdminPage } from '../lib/ui.mjs';
 import {
   INLINE_EDITOR, tapIppon, finishMatch, startNextFromList,
 } from '../lib/editor.mjs';
@@ -146,6 +146,7 @@ export async function openStage(page, base, fixture, layout) {
   if (layout === 'wide') {
     const console = page.frameLocator('iframe[name="console"]');
     await console.locator(INLINE_EDITOR).first().waitFor({ state: 'visible', timeout: 20000 });
+    await courtConsoleRuns(console);
     await console.getByText(name).first().waitFor({ state: 'visible', timeout: 15000 });
   }
   const display = page.frameLocator('iframe[name="display"]');

@@ -19,3 +19,20 @@ export async function openScoreEditor(page, id, { court } = {}) {
   await expect(page.locator(EDITOR)).toBeVisible();
   return row;
 }
+
+// The RUNNING match on `court` (the row the server marks running), opened in
+// the overlay editor: how a second device scores a match the court console
+// runs. A court console that does not run its shiaijo is view only (FR9), so a
+// second tablet at the same court cannot score; the Scores page can, as the
+// head table does. Waits for the row, since the match may have been started a
+// moment ago on another device. Returns the row it opened.
+export async function openRunningScoreEditor(page, id, { court } = {}) {
+  await page.goto(`/admin/competition/${encodeURIComponent(id)}/scores`);
+  let rows = scoreRows(page).and(page.locator('.score-edit-row--running'));
+  if (court) rows = rows.filter({ has: page.locator('.score-edit-row__court', { hasText: new RegExp(`^${court}\\b`) }) });
+  const row = rows.first();
+  await expect(row, 'the running match is listed on the Scores page').toBeVisible();
+  await row.getByRole('button', { name: /^Score$/ }).tap();
+  await expect(page.locator(EDITOR)).toBeVisible();
+  return row;
+}

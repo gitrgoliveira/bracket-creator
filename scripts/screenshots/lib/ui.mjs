@@ -5,9 +5,37 @@
 // One owner: lib/api.mjs declares the password the seeder and the UI share.
 // Imported AND re-exported, not `export ... from`: that form re-exports
 // without binding the name locally, so authAdmin below could not see it.
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { PASSWORD } from './api.mjs';
 
 export { PASSWORD };
+
+// One tab runs each shiaijo (court_control.jsx, FR9): the court console claims
+// its shiaijo from the browser tab it is in, keeping the tab id in
+// sessionStorage and the tablet id in localStorage. Every capture context is a
+// fresh browser, and closing one sends no pagehide (Playwright's
+// context.close() fires none), so a second capture of the same family's
+// console would open a shiaijo "run from another device" and draw it view
+// only. The capture is the court's own tablet instead: every signed-in
+// context starts as the SAME tab of the SAME tablet, so each console reads as
+// the one that runs its shiaijo (a tab that reopens claims what it held), as a
+// docs screenshot of the console should show. The keys are read from their one
+// source, so a renamed key fails here instead of drifting.
+const COURT_CONTROL_SOURCE = fileURLToPath(new URL('../../../web-mobile/js/court_control.jsx', import.meta.url));
+const courtKey = (name) => {
+  const m = new RegExp(`export const ${name} = '([^']+)';`).exec(fs.readFileSync(COURT_CONTROL_SOURCE, 'utf8'));
+  if (!m) throw new Error(`ui: no ${name} found in ${COURT_CONTROL_SOURCE}`);
+  return m[1];
+};
+export const CAPTURE_COURT_TAB = {
+  tabKey: courtKey('COURT_TAB_KEY'),
+  deviceKey: courtKey('COURT_DEVICE_KEY'),
+  // Lowercase UUID v4s, the shape court_control.jsx keeps (it mints a new one
+  // over anything else).
+  tabId: 'c0a7c0a7-0000-4000-8000-00000000000a',
+  deviceId: 'c0a7c0a7-0000-4000-8000-00000000000d',
+};
 
 // Every capture context's locale and time zone, fixed so that a date, a time
 // field or a 12/24-hour clock the page formats through the browser reads the
@@ -28,7 +56,7 @@ export const CONTEXT_DEFAULTS = { locale: 'en-GB', timezoneId: 'Europe/London' }
 // origin which must stay signed out (the hero stage, recipes/hero.mjs): an
 // init script runs in every frame of the context, not only the top one.
 export async function authAdmin(context, { origin } = {}) {
-  await context.addInitScript(({ pw, only }) => {
+  await context.addInitScript(({ pw, only, court }) => {
     // An init script also runs on the context's initial about:blank document,
     // whose opaque origin has no localStorage: touching it throws a
     // SecurityError. Measured: the runner's pageerror listener is attached
@@ -39,7 +67,18 @@ export async function authAdmin(context, { origin } = {}) {
     if (only && location.origin !== only) return;
     localStorage.setItem('bc_authed', 'true');
     localStorage.setItem('bc_password', pw);
-  }, { pw: PASSWORD, only: origin || null });
+    // The court's own tablet and tab (CAPTURE_COURT_TAB above).
+    localStorage.setItem(court.deviceKey, court.deviceId);
+    sessionStorage.setItem(court.tabKey, court.tabId);
+  }, { pw: PASSWORD, only: origin || null, court: CAPTURE_COURT_TAB });
+}
+
+// Wait until a court console (a page, or a frameLocator holding one) shows
+// that it runs its shiaijo: the green bar, not the "Checking who runs" line it
+// shows while its claim is out. A capture of the console waits for it, so the
+// still never catches the bar between the two.
+export async function courtConsoleRuns(scope, { timeout = 15000 } = {}) {
+  await scope.locator('[data-testid="court-control"][data-state="holds"]').waitFor({ state: 'visible', timeout });
 }
 
 // A signed-in page for a seed to drive, on a context of its own that is closed

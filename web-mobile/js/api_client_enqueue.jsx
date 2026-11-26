@@ -23,12 +23,14 @@ import {
 } from './api_client_queue.jsx';
 import {
     _eventSession, BASIS_OWN_MAX, _tapSeq, _tapEntriesFor, _publishPendingTaps, _noteOwnTapSeq,
-    _adoptStoredTapSeq,
+    _adoptStoredTapSeq, _tellTapNotQueued,
 } from './api_client_taps.jsx';
+import { COURT_NOT_HELD, courtNotHeldAnswer, courtNotHeldError } from './write_result.jsx';
 import { _whereOf, _recomputeSyncStatus } from './api_client_status.jsx';
 import { _resetFlushBackoff, _flushQueue, _flushAdoptedSoon } from './api_client_flush.jsx';
 import { _followMintedMembers } from './api_client_members.jsx';
-import { _inFlight, _minted, store, provide } from './api_client_store.jsx';
+import { _inFlight, _minted, store, provide, late } from './api_client_store.jsx';
+import { consoleWriteRefusal, courtOfControlStamp } from './court_control.jsx';
 
 // _takenFromLegacy: every entry this tab took over from the key an older build
 // uses (_takeOverLegacyQueue), its key to the `enqueuedAt` it was taken with,
@@ -127,7 +129,21 @@ export function _outboxWrite({ kind, compID, matchID, method, url, payload, pass
     }
     let settled = null;
     const key = _commitEnqueue(base, descriptor, (k) => { settled = _openSettlement(k, onRefusal); });
+    if (key === null) return _refusedAtDoor(descriptor);
     return _pendingAnswer(key, settled);
+}
+
+// _refusedAtDoor: the answer of a write the court console's gate refused
+// (_placeWrite): never queued, so nothing will settle it. It carries a
+// `settled` that rejects with the same refusal at once, so a caller that
+// follows it learns of the refusal as of any other (a send back's display
+// put-back, a member's revert), and a court move, time change or check-in
+// the door showed at once is put back (`was`) once the door has shown it.
+function _refusedAtDoor(descriptor) {
+    const settled = Promise.reject(courtNotHeldError());
+    settled.catch(() => {});
+    queueMicrotask(() => late._revertLocalFields(descriptor));
+    return { ...courtNotHeldAnswer(), settled };
 }
 
 // _lastEntryKey: the queue key of a base's last entry in replay order, or ''.
@@ -279,7 +295,8 @@ export function _storedEntryProblem(descriptor) {
 // match's list (_placeWrite: coalesced into the last running score write, or
 // an entry of its own), persist, republish sync status, reset the backoff
 // counter (a fresh user write must not inherit a stale max-backoff delay from
-// a prior failure run), and kick a flush. Returns the entry's key.
+// a prior failure run), and kick a flush. Returns the entry's key, or null when
+// the court console's gate refused the write (_placeWrite): nothing queued.
 // The ONE enqueue: every outbox entry, a tap included, is stored here.
 // `nextTick`: kick the flush in a microtask instead of now, so the taps of one
 // tick go in one batch (recordTap).
@@ -306,6 +323,17 @@ export function _commitEnqueue(base, descriptor, beforeFlush, { nextTick = false
     const holder = _heldBy(base);
     if (holder) _addAfter(descriptor, holder);
     const key = _placeWrite(base, descriptor);
+    // Refused by the court console's gate: nothing is queued. A tap's editor
+    // is told through the tap-outcome channel (recordTap reads nothing back).
+    if (key === null) {
+        if (descriptor.kind === 'evt') _tellTapNotQueued(base, descriptor.payload, COURT_NOT_HELD);
+        return null;
+    }
+    // Which shiaijo the write's court control was given for (court_control.jsx):
+    // persisted with the entry, so the tablet keeps the control while any tab
+    // still holds it (the release on pagehide).
+    const ccCourt = courtOfControlStamp(descriptor.payload && descriptor.payload.courtControl);
+    if (ccCourt) descriptor.courtControlCourt = ccCourt;
     // A write naming a member this device minted follows that member's add,
     // whatever the write (G1): read on the payload as placed, a union with the
     // write it took the place of.
@@ -340,8 +368,12 @@ export function _commitEnqueue(base, descriptor, beforeFlush, { nextTick = false
 // and, for a running write, a pending kachinukiBoutFinal (enqueueRunningWrite's
 // comment says why); a lineup save the positions the queued save changed
 // (joinQueuedLineupSave). Otherwise it is a new entry, after the others in
-// replay order.
+// replay order. null when the court console's gate refuses the write.
 function _placeWrite(base, descriptor) {
+    // bc-sseq FR9: the ONE write gate. While the court console on screen does
+    // not run its shiaijo, a new write is refused here, never queued (null).
+    // The withdrawal of a court call is cleanup the new holder wants too.
+    if (descriptor.kind !== 'announce-remove' && consoleWriteRefusal()) return null;
     // A tap is never merged; its key names its event id.
     if (descriptor.kind === 'evt') return `${base}${QUEUE_ENTRY_SEP}evt:${descriptor.payload.id}`;
     const target = _coalesceTarget(base, descriptor);

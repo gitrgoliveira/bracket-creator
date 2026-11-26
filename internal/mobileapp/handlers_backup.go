@@ -343,7 +343,11 @@ func respondBackupFileError(c *gin.Context, err error) {
 // RegisterRestoreHandlers wires the restore's plan and the restore on the
 // 64 MB admin group, after the confirm middleware (which asks only the
 // restore for the password again; the plan needs the sign-in alone).
-func RegisterRestoreHandlers(r *gin.RouterGroup, store BackupStore, eng RestoreEngine, hub Broadcaster, verifier PasswordVerifier) {
+//
+// A full restore (one that replaces the tournament) also frees every
+// shiaijo through courts (bc-sseq FR9); a restore of one competition leaves
+// who runs each shiaijo alone.
+func RegisterRestoreHandlers(r *gin.RouterGroup, store BackupStore, eng RestoreEngine, hub Broadcaster, verifier PasswordVerifier, courts CourtControls) {
 	r.POST("/tournament/restore/plan", func(c *gin.Context) {
 		req, ok := readRestoreRequest(c, store, verifier)
 		if !ok {
@@ -397,6 +401,9 @@ func RegisterRestoreHandlers(r *gin.RouterGroup, store BackupStore, eng RestoreE
 			resp["requeueError"] = "The restore is done, but running matches could not be returned to the queue. Restart the app to finish it."
 		}
 
+		if plan.TournamentReplaced {
+			clearCourtControlAfterReplace(courts, "restore")
+		}
 		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusOK, resp)
 	})

@@ -17,13 +17,16 @@ import { scoreRowMatchName } from './pool_ids.jsx';
 import { holdsUnsaved, discardUnsaved, UNSAVED_ENTRIES_DISCARDED } from './unsaved_entries.jsx';
 import { confirmMatchLabel, SCORE_KEPT_SENTENCE } from './court_move.jsx';
 import { matchKey } from './admin_shiaijo_feed.jsx';
+// A tab that does not run the shiaijo moves nothing (bc-sseq FR9), and a
+// confirm left open when the control went elsewhere sends nothing.
+import { refusedNotHeld } from './admin_shiaijo_control.jsx';
 
 const { useState, useRef } = React;
 
 export function useCourtMoves({
     court, password, showToast, onMoveCourt, mountedRef, editorUnsavedRef, selectedMatch, sorted,
     filteredScheduled, pickingRef, markSentBackHere, setPickedKey, setCorrectingKey, withdrawCall,
-    pendingStartAsk, answerStartAsk,
+    pendingStartAsk, answerStartAsk, controlRef,
 }) {
     // Pending court reassignment, awaiting operator confirmation. Moving a match
     // off this shiaijo is disruptive (it leaves the court and joins another's
@@ -74,6 +77,7 @@ export function useCourtMoves({
     const moveMatch = async (m, direction) => {
         if (!window.API || typeof window.API.updateMatchTime !== "function") return;
         if (m.status === "running" || m.status === "completed") return;
+        if (refusedNotHeld(controlRef)) return;
         // Reorder WITHIN the filtered (selected-competition) queue: the same list
         // the rows render and compute first/last against. Swapping against the full
         // court list would exchange ScheduledAt with a hidden match from another
@@ -132,6 +136,7 @@ export function useCourtMoves({
         return true;
     };
     const requestRevert = (m) => {
+        if (refusedNotHeld(controlRef)) return;
         if (refusedWhilePicking()) return;
         // The editor shows this match: its unsaved entries go with the send
         // back, and the confirm says so (R1, the editor's local Mark draw or
@@ -145,6 +150,7 @@ export function useCourtMoves({
         // A bounce of the tap that turned this confirm into the warned one must
         // not confirm the warned version the operator has not read yet.
         if (!acceptTap(confirmTapRef, ev)) return;
+        if (refusedNotHeld(controlRef)) { setPendingRevert(null); return; }
         const { compId, matchId, label } = pendingRevert;
         const heldNow = editorUnsavedFor(compId, matchId);
         // The confirm's wording was decided when it opened. Entries made while
@@ -198,6 +204,7 @@ export function useCourtMoves({
     // shiaijo for another court's queue. `onMoveCourt` (the real move) only runs
     // once the operator confirms.
     const requestMoveCourt = (compId, matchId, toCourt) => {
+        if (refusedNotHeld(controlRef)) return;
         if (refusedWhilePicking()) return;
         const mm = sorted.find((x) => x.compId === compId && x.id === matchId);
         setPendingMove({
@@ -212,6 +219,7 @@ export function useCourtMoves({
         if (!pendingMove || movingCourt) return;
         // The bounce guard of confirmRevert, for the court move's Confirm.
         if (!acceptTap(confirmTapRef, ev)) return;
+        if (refusedNotHeld(controlRef)) { setPendingMove(null); return; }
         const { compId, matchId, to } = pendingMove;
         const heldNow = editorUnsavedFor(compId, matchId);
         // Entries made while a confirm without the warning was open are asked

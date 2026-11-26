@@ -123,6 +123,7 @@ var leakRoutes = map[string]leakRouteClass{
 	"DELETE /api/announcements":                                          leakOrganiser,
 	"DELETE /api/announcements/:id":                                      leakOrganiser,
 	"DELETE /api/branding/logo":                                          leakOrganiser,
+	"DELETE /api/courts/:court/control":                                  leakOrganiser,
 	"DELETE /api/competitions/:id":                                       leakOrganiser,
 	"DELETE /api/competitions/:id/draw":                                  leakOrganiser,
 	"DELETE /api/competitions/:id/league-tiebreak":                       leakOrganiser,
@@ -151,6 +152,7 @@ var leakRoutes = map[string]leakRouteClass{
 	"GET /api/competitions/:id/schedule/estimate":                        leakOrganiser,
 	"GET /api/competitions/:id/seeds":                                    leakOrganiser,
 	"GET /api/competitions/:id/team-members":                             leakOrganiser,
+	"GET /api/courts/:court/control":                                     leakOrganiser,
 	"GET /api/number-prefix-default":                                     leakOrganiser,
 	"GET /api/schedule/calendar":                                         leakOrganiser,
 	"GET /api/schedule/calendar/preview":                                 leakOrganiser,
@@ -201,6 +203,7 @@ var leakRoutes = map[string]leakRouteClass{
 	"PUT /api/competitions/:id/teams/:tid/lineups/:round":                leakOrganiser,
 	"PUT /api/competitions/:id/teams/:tid/match-lineups/:matchId":        leakOrganiser,
 	"PUT /api/competitions/:id/teams/:tid/members/:memberId":             leakOrganiser,
+	"PUT /api/courts/:court/control":                                     leakOrganiser,
 	"PUT /api/tournament":                                                leakOrganiser,
 }
 
@@ -1004,6 +1007,20 @@ func TestPublicNamesLeak(t *testing.T) {
 			assert.True(t, carries(w.byID[id]), "the organiser's stream carries the fighter names of %s: a masked label would reach the team editor", id)
 		}
 		assert.NotContains(t, body, `"namesHidden":true`)
+	})
+
+	t.Run("who runs each shiaijo reaches the organiser's stream only", func(t *testing.T) {
+		const holder = "c0ffee00c0ffee00"
+		public := w.openStream(t, "")
+		organiser := w.openStream(t, "?ticket="+url.QueryEscape(w.ticket(t, map[string]string{"X-Tournament-Password": leakPassword})))
+		w.hub.Broadcast(EventCourtControlUpdated, courtControlEvent{Court: "A", HolderKey: holder, Device: "ipad", Since: 1})
+		w.settle(t, public, organiser)
+		_, publicBody := public.close(t)
+		_, organiserBody := organiser.close(t)
+		assert.Contains(t, publicBody, string(EventCourtControlUpdated), "the public stream still sees the event's seq")
+		assert.NotContains(t, publicBody, holder, "but not who holds the shiaijo")
+		assert.NotContains(t, publicBody, `"ipad"`)
+		assert.Contains(t, organiserBody, holder)
 	})
 
 	t.Run("a reveal ticket's stream reveals its own names only", func(t *testing.T) {

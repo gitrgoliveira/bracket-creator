@@ -251,4 +251,70 @@ describe('the admin competition page fetches once per burst (bc-sseq FR4)', () =
     await pastWindow();
     expect(lists(), 'and no third: that answer holds the event').toBe(beforeLists + 2);
   });
+
+  it('a late out-of-gate detail read does not overwrite a newer gate answer', async () => {
+    await mount(20);
+    let resolveLate;
+    window.API.fetchCompetitionDetails.mockImplementationOnce(() => new Promise((r) => { resolveLate = r; }));
+    const reloadPromise = probe.props.onRefreshCompetition();
+    window.API.fetchCompetitionDetails.mockImplementationOnce(async () => withSeq({
+      config: { ...config, name: 'Newer Cup' }, pools: [], poolMatches: [running(['M'])], standings: {}, bracket: null,
+    }, 30));
+    await emit(tap(30, ['M']));
+    await pastWindow();
+    expect(probe.props.competition.name).toBe('Newer Cup');
+
+    let answer;
+    await act(async () => {
+      resolveLate(withSeq({
+        config: { ...config, name: 'Stale Cup' }, pools: [], poolMatches: [running([])], standings: {}, bracket: null,
+      }, 25));
+      answer = await reloadPromise;
+    });
+    expect(answer).toEqual({ ok: true });
+    expect(probe.props.competition.name).toBe('Newer Cup');
+  });
+
+  it('a late out-of-gate list read does not overwrite a newer gate answer', async () => {
+    const onUpdate = vi.fn();
+    head.detail = 20;
+    head.competitions = 20;
+    await act(async () => {
+      render(<AdminApp
+        tournament={{ name: 'Cup', courts: ['A'], competitions: [{ ...config }] }}
+        onUpdate={onUpdate} onLogout={vi.fn()} onViewerMode={vi.fn()} onPasswordChange={vi.fn()}
+        tweaks={{}} password="pw" view={{ kind: 'competition', id: 'c1', section: 'overview' }} setView={vi.fn()}
+        showToast={vi.fn()} authConfig={{}}
+      />);
+    });
+    await pastWindow();
+
+    let resolveLate;
+    window.API.fetchCompetitions.mockImplementationOnce(() => new Promise((r) => { resolveLate = r; }));
+    const editPromise = probe.props.onEditScore(
+      'c1', 'Pool A-0', { id: 'Pool A-0', status: 'running', court: 'A', ipponsA: ['M'], ipponsB: [] }, running([])
+    );
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(resolveLate).toBeTypeOf('function');
+
+    window.API.fetchCompetitions.mockImplementationOnce(async () => withSeq([{ ...config, name: 'Newer List Cup' }], 30));
+    await emit(tap(30, ['M']));
+    await pastWindow();
+    expect(onUpdate.mock.calls.at(-1)[0].competitions[0].name).toBe('Newer List Cup');
+
+    onUpdate.mockClear();
+    await act(async () => {
+      resolveLate(withSeq([{ ...config, name: 'Stale List Cup' }], 25));
+      await editPromise;
+    });
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    window.API.fetchCompetitions.mockImplementationOnce(async () => withSeq([{ ...config, name: 'Newest List Cup' }], 31));
+    await act(async () => {
+      await probe.props.onEditScore(
+        'c1', 'Pool A-0', { id: 'Pool A-0', status: 'running', court: 'A', ipponsA: ['M', 'K'], ipponsB: [] }, running(['M'])
+      );
+    });
+    expect(onUpdate.mock.calls.at(-1)[0].competitions[0].name).toBe('Newest List Cup');
+  });
 });

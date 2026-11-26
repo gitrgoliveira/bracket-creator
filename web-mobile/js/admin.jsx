@@ -189,11 +189,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // The competition view's refetch gates (createRefetchGate, patch.jsx; the
   // SSE effect below makes them), told of the reads made outside it (bc-sseq
   // FR4): detailGateRef the shown competition's detail, as { compId, gate },
-  // and listGateRef the tournament and its competitions. Null while no
-  // competition is shown. A read reports the seq of the value its fetcher
-  // returned (readSeqOf), before any merge.
+  // listGateRef the competitions list, and settingsGateRef the tournament
+  // settings. Null while no competition is shown. A read reports the seq of
+  // the value its fetcher returned (readSeqOf), before any merge.
   const detailGateRef = useRef(null);
   const listGateRef = useRef(null);
+  const settingsGateRef = useRef(null);
   // What the view already holds, for a gate made after the read (a detail or
   // list read can land before the SSE effect makes its gates, and each
   // competition opened makes new ones): the seq of the list's last read, and
@@ -211,6 +212,17 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     if (listGateRef.current) listGateRef.current.applied(readSeqOf(comps));
     else listSeedRef.current = readSeqOf(comps);
   };
+  // An answer read outside a gate that is older than one the gate already
+  // applied is dropped before it is shown (createRefetchGate.late, patch.jsx):
+  // shown, it would put older data back while the gate's applied seq stayed
+  // above it, so events up to that seq would read as covered and nothing would
+  // heal the page.
+  const lateDetailRead = (compId, data) => {
+    const held = detailGateRef.current;
+    return !!(held && held.compId === compId && held.gate.late(readSeqOf(data)));
+  };
+  const lateListRead = (comps) => !!(listGateRef.current && listGateRef.current.late(readSeqOf(comps)));
+  const lateSettingsRead = (tourney) => !!(settingsGateRef.current && settingsGateRef.current.late(readSeqOf(tourney)));
   // Bumped by the Edit Tournament page's Reload, which remounts it from the
   // current settings after a save was refused as stale (tournament_changed).
   const [settingsReloads, setSettingsReloads] = useState(0);
@@ -338,7 +350,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   const refreshCompsBestEffort = async (actionLabel) => {
     try {
       const comps = await window.API.fetchCompetitions({ bounded: true });
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || lateListRead(comps)) return;
       onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
       reportListRead(comps);
     } catch (e) {
@@ -370,7 +382,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   const refreshCompsAfterCreate = async (created, actionLabel) => {
     try {
       const comps = await window.API.fetchCompetitions();
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || lateListRead(comps)) return;
       onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
       reportListRead(comps);
     } catch (e) {
@@ -445,7 +457,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       try {
         const keep = pushes.detail();
         const details = await window.API.fetchCompetitionDetails(cid);
-        if (mountedRef.current) { setAdminCompData((prev) => keep(prev, details)); reportDetailRead(cid, details); }
+        if (mountedRef.current && !lateDetailRead(cid, details)) {
+          setAdminCompData((prev) => keep(prev, details));
+          reportDetailRead(cid, details);
+        }
       } catch (e) {
         console.error("Failed to refresh competition details after save:", e);
       }
@@ -665,7 +680,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // actually started (the result summary below is authoritative).
     try {
       const fresh = await window.API.fetchCompetitions();
-      if (mountedRef.current) { onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => fresh)); reportListRead(fresh); }
+      if (mountedRef.current && !lateListRead(fresh)) {
+        onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => fresh));
+        reportListRead(fresh);
+      }
     } catch (e) {
       console.error("startAllCompetitions: post-start refresh failed", e);
       if (mountedRef.current) showToast("Failed to refresh after start. Try reloading.", "error");
@@ -802,8 +820,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           // too).
           try { copy = await window.API.fetchTournament(); } catch (_e) { copy = null; }
         }
-        if (copy && !copy.error) {
+        if (copy && !copy.error && !lateSettingsRead(copy)) {
           onUpdateRef.current(tournamentFromConflict(tRef.current, copy, password, locked));
+          if (settingsGateRef.current) settingsGateRef.current.applied(readSeqOf(copy));
         }
       };
       // bc-hnam: the server judged the changed default against the competitions
@@ -886,7 +905,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     const keep = pushes.detail();
     window.API.fetchCompetitionDetails(view.id)
       .then(data => {
-        if (!cancelled) { setAdminCompData((prev) => keep(prev, data)); reportDetailRead(view.id, data); setAdminLoading(false); }
+        if (cancelled) return;
+        if (lateDetailRead(view.id, data)) { setAdminLoading(false); return; }
+        setAdminCompData((prev) => keep(prev, data));
+        reportDetailRead(view.id, data);
+        setAdminLoading(false);
       })
       .catch(err => {
         if (!cancelled) { console.error(err); setAdminLoading(false); }
@@ -971,6 +994,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       });
       detailGateRef.current = { compId, gate: detailGate };
       listGateRef.current = listGate;
+      settingsGateRef.current = settingsGate;
       listGate.seed(listSeedRef.current);
       if (detailSeedRef.current.compId === compId) detailGate.seed(detailSeedRef.current.seq);
       const refetchDetail = (seq) => detailGate.event(seq);
@@ -1078,6 +1102,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         settingsGate.dispose();
         if (detailGateRef.current && detailGateRef.current.gate === detailGate) detailGateRef.current = null;
         if (listGateRef.current === listGate) listGateRef.current = null;
+        if (settingsGateRef.current === settingsGate) settingsGateRef.current = null;
         document.removeEventListener('visibilitychange', onVisibilityChange);
         unsub();
       };
@@ -1260,8 +1285,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         const comps = await window.API.fetchCompetitions();
         // tRef/onUpdateRef so SSE updates during the in-flight import
         // are preserved (see mergeCompetitionsIntoTournament docstring).
-        onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
-        reportListRead(comps);
+        if (!lateListRead(comps)) {
+          onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
+          reportListRead(comps);
+        }
         setView({ kind: "dashboard" });
       }}
       onLogout={onLogout}
@@ -1333,7 +1360,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // banner's Reload) can say a failed request, never only the console;
       // `status` is set when the server answered, absent when it was not reached.
       onRefreshCompetition={() => { const keep = pushes.detail(); return window.API.fetchCompetitionDetails(c.id)
-        .then((data) => { setAdminCompData((prev) => keep(prev, data)); reportDetailRead(c.id, data); return { ok: true }; })
+        .then((data) => {
+          if (!lateDetailRead(c.id, data)) {
+            setAdminCompData((prev) => keep(prev, data));
+            reportDetailRead(c.id, data);
+          }
+          return { ok: true };
+        })
         .catch((err) => { console.error("refresh failed:", err); return { ok: false, message: err && err.message, status: err && err.status }; }); }}
       onMoveCourt={moveMatchCourt}
       onEditScore={editMatchScore}

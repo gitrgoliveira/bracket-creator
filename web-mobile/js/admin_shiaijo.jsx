@@ -158,12 +158,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             return true;
         };
     }, [pushes]);
+    // An answer read outside the feed gate that is older than one the gate
+    // already applied is dropped before it is shown (createRefetchGate.late,
+    // patch.jsx), so it never puts older data over a newer feed while the
+    // gate's applied seq stays above it.
+    const lateCourtRead = useCallback((comps) => {
+        const held = feedGateRef.current;
+        return !!(held && held.court === court && held.gate.late(readSeqOf(comps)));
+    }, [court]);
     // readCourt is fetchCourt and takeCourt in one, for a read made outside the
-    // feed gate: it answers the feed it showed, or nothing when none was.
+    // feed gate: it answers the feed it showed, or nothing when none was (or
+    // when a newer feed was already applied through the gate).
     const readCourt = useCallback(() => {
         const apply = takeCourt();
-        return fetchCourt().then((comps) => (apply(comps) ? comps : null));
-    }, [fetchCourt, takeCourt]);
+        return fetchCourt().then((comps) => (!lateCourtRead(comps) && apply(comps) ? comps : null));
+    }, [fetchCourt, takeCourt, lateCourtRead]);
     // refreshCourt is every read of the feed made outside the feed gate: a
     // failed one is logged and answers nothing, an applied one is told to the
     // gate so an event it holds fetches nothing.

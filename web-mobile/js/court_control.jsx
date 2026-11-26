@@ -329,6 +329,9 @@ async function _claim(court, { take = false } = {}) {
         return null;
     }
     _noteAnswer(court, seq, data && typeof data === 'object' ? data : null);
+    // The console may have unmounted while the claim or take was out (its
+    // release timer ran with no answer yet): give the shiaijo back now.
+    if (!_mounted(court) && courtReleasable(court)) _release(court);
     return data;
 }
 

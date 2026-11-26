@@ -404,4 +404,39 @@ describe('giving the shiaijo back', () => {
     await settle();
     expect(deletes().length).toBe(1);
   });
+
+  it('unmounting while a claim is in flight gives the shiaijo back once the hold arrives, while a mounted claim keeps it', async () => {
+    const pending = [];
+    global.fetch = vi.fn((url, init = {}) => {
+      const body = init.body ? JSON.parse(init.body) : null;
+      const method = init.method || 'GET';
+      calls.push({ url, method, body, init });
+      if (method === 'PUT') {
+        return new Promise((res) => {
+          pending.push((r) => res({ ok: true, status: 200, json: async () => r }));
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
+    const { mountCourtControl, courtControlView } = await load();
+    const offA = track(mountCourtControl('A', () => 'pw'));
+    await settle();
+    expect(puts().filter((c) => c.url === '/api/courts/A/control')).toHaveLength(1);
+    offA();
+    await settle();
+    expect(deletes()).toHaveLength(0);
+    pending[0](HOLDS);
+    await settle();
+    expect(deletes()).toHaveLength(1);
+    expect(deletes()[0].url).toBe('/api/courts/A/control');
+    expect(courtControlView('A').state).toBe('unknown');
+
+    const offB = track(mountCourtControl('B', () => 'pw'));
+    await settle();
+    pending[1](answer({ ...HOLDS, court: 'B' }));
+    await settle();
+    expect(deletes()).toHaveLength(1);
+    expect(courtControlView('B').state).toBe('holds');
+    offB();
+  });
 });

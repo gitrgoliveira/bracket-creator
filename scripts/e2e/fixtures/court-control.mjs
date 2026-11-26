@@ -14,13 +14,17 @@
 //     openShiaijo (fixtures/shiaijo.mjs) waits for the claim's answer and, by
 //     default, takes the shiaijo when another console still holds it.
 //   - Closing a tab gives the shiaijo back on `pagehide`. Playwright's
-//     context.close() fires none (measured: the next tablet then read
-//     "run from another device"), so a context closed at a test's end would
+//     context.close() fires none, so a context closed at a test's end would
 //     keep every shiaijo it ran. releaseCourtControl below leaves the page the
 //     way a closing tab does, so the page sends its own release, and
 //     fixtures/test.mjs calls it for every page before its context or the
-//     page itself closes, so the next test, or the next context, opens a free
-//     shiaijo.
+//     page itself closes.
+//   - A shiaijo given back stays with its tablet for the server's grace
+//     (courtReleaseGrace, half a minute), so a reload gets it back first: a
+//     console on another tablet (the next test's context, or the next
+//     context) opened within it reads "run from another device" and takes it
+//     with Take control, which openShiaijo does by default. Only another tab
+//     of the same tablet, or the grace running out, finds it free.
 import { expect } from '@playwright/test';
 import { settled as layerSettled } from './pace.mjs';
 
@@ -81,7 +85,9 @@ export async function takeControl(page) {
 // How long the server is asked, after the page left, whether the release
 // landed. The release leaves at once, but as a `keepalive` request made while
 // the page unloads, which Playwright does not report (measured: neither the
-// page's nor the context's request events see it), so the server is asked.
+// page's nor the context's request events see it), so the server is asked:
+// the answer's releasedAt is set once the release landed and the grace keeps
+// the shiaijo for the tablet.
 const RELEASE_LANDED_MS = 5_000;
 const RELEASE_POLL_MS = 100;
 
@@ -98,11 +104,10 @@ async function lookCourt(page, origin, court, password) {
 // holds sends nothing. Only for a page that is about to close: it leaves the
 // app for about:blank, so its own pagehide handlers run as a closing tab's do
 // (the release, and the outbox's base lease let go) and nothing is left on it
-// to claim the shiaijo again (a console still on screen would: the release
-// announces a free shiaijo, and a free shiaijo is claimed at once). Answers
-// whether the shiaijo was given back; false when the page kept it, as it does
-// while its tablet has results queued for that shiaijo (they need the
-// control).
+// to claim the shiaijo again (a console still on screen would, once the grace
+// ends and the free shiaijo is announced). Answers whether the shiaijo was
+// given back; false when the page kept it, as it does while its tablet has
+// results queued for that shiaijo (they need the control).
 export async function releaseCourtControl(page) {
   if (!page || page.isClosed()) return false;
   const holds = await page.locator(`${COURT_CONTROL}[data-state="holds"]`).count().catch(() => 0);
@@ -118,7 +123,7 @@ export async function releaseCourtControl(page) {
   const until = Date.now() + RELEASE_LANDED_MS;
   while (Date.now() < until) {
     const now = await lookCourt(page, url.origin, court, password).catch(() => null);
-    if (now && now.holderKey !== key) return true;
+    if (now && (now.holderKey !== key || now.releasedAt > 0)) return true;
     await new Promise((done) => { setTimeout(done, RELEASE_POLL_MS); });
   }
   return false;

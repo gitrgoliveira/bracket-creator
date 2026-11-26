@@ -47,11 +47,26 @@ func (b *courtEventRecorder) Broadcast(t EventType, data any) {
 // courtRig is a registry over a real store whose tournament lists shiaijo A
 // and B, on a clock the test moves.
 type courtRig struct {
-	dir   string
-	store *state.Store
-	reg   *courtControlRegistry
-	rec   *courtEventRecorder
-	clock time.Time
+	dir    string
+	store  *state.Store
+	reg    *courtControlRegistry
+	rec    *courtEventRecorder
+	clock  time.Time
+	graces []*rigGraceTimer
+}
+
+// rigGraceTimer is a grace timer that never fires by itself: the test ends
+// the grace with lapse.
+type rigGraceTimer struct {
+	after   time.Duration
+	fire    func()
+	stopped bool
+}
+
+func (g *rigGraceTimer) Stop() bool {
+	was := !g.stopped
+	g.stopped = true
+	return was
 }
 
 func newCourtRig(t *testing.T) *courtRig {
@@ -72,7 +87,40 @@ func newCourtRig(t *testing.T) *courtRig {
 func (rig *courtRig) open() *courtControlRegistry {
 	reg := newCourtControlRegistry(rig.store, rig.rec)
 	reg.now = func() time.Time { return rig.clock }
+	reg.afterFunc = func(d time.Duration, f func()) courtGraceTimer {
+		g := &rigGraceTimer{after: d, fire: f}
+		rig.graces = append(rig.graces, g)
+		return g
+	}
 	return reg
+}
+
+// release gives the shiaijo back as the tab's page load.
+func (rig *courtRig) release(t *testing.T, court, tab, page string) CourtControlAnswer {
+	t.Helper()
+	a, err := rig.reg.Release(court, tab, page)
+	require.NoError(t, err)
+	return a
+}
+
+// lapse moves the clock past the grace and fires every grace timer nothing
+// stopped, as time.AfterFunc would.
+func (rig *courtRig) lapse() {
+	rig.clock = rig.clock.Add(courtReleaseGrace)
+	for _, g := range rig.graces {
+		if !g.stopped {
+			g.stopped = true
+			g.fire()
+		}
+	}
+}
+
+// releaseAndLapse gives the shiaijo back and lets its grace run out: the
+// shiaijo is then free for every console.
+func (rig *courtRig) releaseAndLapse(t *testing.T, court, tab, page string) {
+	t.Helper()
+	rig.release(t, court, tab, page)
+	rig.lapse()
 }
 
 func (rig *courtRig) claim(t *testing.T, court, tab, tablet, page string, take bool, takenAt int64) CourtControlAnswer {
@@ -252,11 +300,13 @@ func TestCourtControl_ReleaseNeedsTheHolderAndItsPageLoad(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, a.YouHold)
 	assert.Empty(t, a.HolderKey)
-	require.Len(t, rig.rec.events, 2, "the release is announced")
-	assert.Equal(t, courtControlEvent{Court: "A"}, rig.rec.events[1])
+	assert.Len(t, rig.rec.events, 1, "nothing is announced while the grace keeps it for its tablet")
 	_, kept := rig.store.LoadCourtControl().Courts["A"]
 	assert.False(t, kept, "a free shiaijo that remembers nobody is dropped from the file")
 
+	rig.lapse()
+	require.Len(t, rig.rec.events, 2, "the end of the grace is announced")
+	assert.Equal(t, courtControlEvent{Court: "A"}, rig.rec.events[1])
 	next := rig.claim(t, "A", ccTab2, ccTablet2, ccPage3, false, 0)
 	assert.True(t, next.YouHold, "the next tablet takes it at once")
 }
@@ -317,8 +367,7 @@ func TestCourtControl_ATabletThatLostItTakesItBackOnlyByATake(t *testing.T) {
 	rig := newCourtRig(t)
 	rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
 	rig.claim(t, "A", ccTab2, ccTablet2, ccPage2, true, rig.clock.UnixMilli())
-	_, err := rig.reg.Release("A", ccTab2, ccPage2)
-	require.NoError(t, err)
+	rig.releaseAndLapse(t, "A", ccTab2, ccPage2)
 	require.False(t, rig.stored(t, "A").Held())
 
 	again := rig.claim(t, "A", ccTab3, ccTablet1, ccPage3, false, 0)
@@ -342,8 +391,7 @@ func TestCourtControl_ATabThatLostItToItsOwnTabletKeepsTheStandingWhole(t *testi
 	rig := newCourtRig(t)
 	rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
 	rig.claim(t, "A", ccTab2, ccTablet1, ccPage2, true, rig.clock.UnixMilli())
-	_, err := rig.reg.Release("A", ccTab2, ccPage2)
-	require.NoError(t, err)
+	rig.releaseAndLapse(t, "A", ccTab2, ccPage2)
 
 	free := rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
 	assert.False(t, free.YouHold, "the displaced tab takes it back only by a take")
@@ -367,8 +415,7 @@ func TestCourtControl_DisplacementFlags(t *testing.T) {
 			act: func(t *testing.T, rig *courtRig) CourtControlAnswer {
 				rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
 				rig.claim(t, "A", ccTab2, ccTablet1, ccPage2, true, rig.clock.UnixMilli())
-				_, err := rig.reg.Release("A", ccTab2, ccPage2)
-				require.NoError(t, err)
+				rig.releaseAndLapse(t, "A", ccTab2, ccPage2)
 				return rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
 			},
 			wantTabDisplaced: true,
@@ -396,8 +443,7 @@ func TestCourtControl_DisplacementFlags(t *testing.T) {
 			act: func(t *testing.T, rig *courtRig) CourtControlAnswer {
 				rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
 				rig.claim(t, "A", ccTab2, ccTablet2, ccPage2, true, rig.clock.UnixMilli())
-				_, err := rig.reg.Release("A", ccTab2, ccPage2)
-				require.NoError(t, err)
+				rig.releaseAndLapse(t, "A", ccTab2, ccPage2)
 				return rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
 			},
 			wantDisplaced: true,
@@ -417,8 +463,7 @@ func TestCourtControl_DisplacementFlags(t *testing.T) {
 				rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
 				rig.claim(t, "A", ccTab2, ccTablet1, ccPage2, true, rig.clock.UnixMilli())
 				rig.claim(t, "A", ccTab3, ccTablet2, ccPage3, true, rig.clock.UnixMilli())
-				_, err := rig.reg.Release("A", ccTab3, ccPage3)
-				require.NoError(t, err)
+				rig.releaseAndLapse(t, "A", ccTab3, ccPage3)
 				return rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
 			},
 			wantDisplaced: true,

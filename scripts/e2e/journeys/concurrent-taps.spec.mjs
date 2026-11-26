@@ -46,7 +46,10 @@
 //      watches (grey bar naming another device, the running match's board and
 //      Send back to queue off) until
 //      it taps Take control; then the first tablet's bar turns amber, and the
-//      same two taps there take it back
+//      same two taps there take it back. Then the first tablet's page goes,
+//      as a reload over a slow network: the server keeps the shiaijo for that
+//      tablet, so a console opened on the other tablet meanwhile watches, and
+//      the first tablet comes back running it
 //
 // Known race, not asserted here: the CAP. A side that holds two points has
 // decided its bout (sanbon shobu), so a third strike for it, or any strike for
@@ -76,7 +79,7 @@ import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competi
 import { editorIdentity, inlineEditor, openShiaijo, sides, startUpNext, upNextCard } from '../fixtures/shiaijo.mjs';
 import { EDITOR, INLINE_EDITOR, armFinish, finishMatch, ipponButton, running, settled, unsentCount } from '../fixtures/scoring.mjs';
 import { openRunningScoreEditor, scoreRows } from '../fixtures/scores.mjs';
-import { OTHER_DEVICE_TEXT, HOLDS_TEXT, awaitControl, controlState, controlText, takeControl } from '../fixtures/court-control.mjs';
+import { OTHER_DEVICE_TEXT, HOLDS_TEXT, awaitControl, controlState, controlText, releaseCourtControl, takeControl } from '../fixtures/court-control.mjs';
 import { toastText } from '../fixtures/roster.mjs';
 import { editorSides, inlineRunning, rosterOf, slotMarks } from '../fixtures/individual.mjs';
 import { holdScoreWrites } from '../fixtures/held-write.mjs';
@@ -585,6 +588,22 @@ test.describe('concurrent taps from two devices', () => {
       await expect.poll(() => controlState(d3), { message: 'the second console watches again' }).toBe('other');
       expect(await awaitControl(d1)).toBe('holds');
       await expect(ipponButton(d1, 'shiro', 'M'), 'device 1 scores again').toBeEnabled();
+
+      // A reload over a slow venue network: device 1's page goes (its pagehide
+      // gives the shiaijo back) and comes back only later. The server keeps
+      // the shiaijo for device 1's tablet meanwhile, so a console opened on the
+      // other tablet in that time watches (the grey bar, Take control offered)
+      // and does not take it, and device 1 comes back running it.
+      expect(await releaseCourtControl(d1), 'device 1\'s release reached the server').toBe(true);
+      const duringReload = await openShiaijo(d3, 'A', { take: false });
+      expect(duringReload.state, 'a console opened while device 1 reloads does not take the shiaijo').toBe('other');
+      // Its tablet lost the shiaijo to device 1's take back, so it reads the amber sentence.
+      expect(await controlText(d3), 'its bar names another device').toBe('Shiaijo A is now run from another device.');
+      await expect(d3.getByTestId('court-control').getByRole('button', { name: 'Take control' })).toBeVisible();
+      const back = await openShiaijo(d1, 'A', { take: false });
+      expect(back.state, 'device 1 comes back running shiaijo A').toBe('holds');
+      await expect(ipponButton(d1, 'shiro', 'M'), 'and scores again').toBeEnabled();
+      expect(await controlState(d3), 'the other tablet still watches').toBe('other');
       record({ journey: JOURNEY, case: 'h second console', watching, asked });
     } finally {
       await ctx3.close();

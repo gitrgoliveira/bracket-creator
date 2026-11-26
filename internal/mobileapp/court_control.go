@@ -25,6 +25,12 @@ import (
 // The file is saved only when a holder, a holder's page load or device word,
 // or a displaced list changes, never on a heartbeat. lastActiveAt is kept in
 // memory only: after a restart it starts at the holder's take.
+//
+// A shiaijo its tab gives back (the tab closed or reloaded) stays with its
+// tablet for courtReleaseGrace, in memory only (the file has it free at
+// once), so a reload gets it back before another console claims it. A
+// restart during a grace ends it: the shiaijo is free, and the first console
+// to claim it after the restart takes it.
 
 // errUnknownCourt is a shiaijo the tournament does not list.
 var errUnknownCourt = errors.New("unknown shiaijo")
@@ -56,8 +62,10 @@ type CourtClaim struct {
 // only this tab lost it (to another tab of the same tablet, so the tablet
 // itself is not displaced). Both are false while the caller's tablet holds
 // it (a tab of the holding tablet is shown the "another tab on this tablet"
-// bar, never a displacement warning). Times are unix milliseconds on the
-// server's clock.
+// bar, never a displacement warning). ReleasedAt is when the holder's tab
+// gave the shiaijo back while the grace keeps it for its tablet (0 when it
+// is held, or free); no console reads it as a state of its own. Times are
+// unix milliseconds on the server's clock.
 type CourtControlAnswer struct {
 	Court            string `json:"court"`
 	HolderKey        string `json:"holderKey"`
@@ -68,6 +76,7 @@ type CourtControlAnswer struct {
 	SameDevice       bool   `json:"sameDevice"`
 	Since            int64  `json:"since"`
 	LastActiveAt     int64  `json:"lastActiveAt"`
+	ReleasedAt       int64  `json:"releasedAt"`
 }
 
 // courtControlEvent is court_control_updated's payload: who runs the shiaijo
@@ -88,9 +97,39 @@ type courtControlRegistry struct {
 	hub   Broadcaster
 	now   func() time.Time
 
+	// afterFunc starts a grace's timer (time.AfterFunc; a test's own).
+	afterFunc func(time.Duration, func()) courtGraceTimer
+
 	mu         sync.Mutex
 	holds      map[string]state.CourtHold
 	lastActive map[string]int64
+	// grace is each shiaijo a tab gave back that is still kept for its
+	// tablet (courtReleaseGrace). It is in memory only: the file already
+	// has the shiaijo free, so a restart ends every grace.
+	grace map[string]*courtGrace
+}
+
+// courtReleaseGrace is how long a shiaijo a court console tab gave back
+// (closed or reloaded) stays with its tablet, so that a reload gets it back
+// before any other console can claim it. A reload over a weak venue network
+// can take many seconds (a slow page load, a lost request resent), so the
+// grace is long; any console can still Take control at once, and every
+// console claims the shiaijo as soon as the grace ends. The server keeps the
+// grace, not the waiting consoles, because their clocks and the events they
+// are sent are not to be trusted on such a network (operator ruling: "there
+// needs to be a grace period. remember you are dealing with struggling
+// network conditions").
+const courtReleaseGrace = 30 * time.Second
+
+// courtGraceTimer is a grace's timer: Stop it when the grace ends early.
+type courtGraceTimer interface{ Stop() bool }
+
+// courtGrace is a released shiaijo kept for its tablet: the hold as it was
+// when its tab gave it back, and the timer that ends the grace.
+type courtGrace struct {
+	hold       state.CourtHold
+	releasedAt int64
+	timer      courtGraceTimer
 }
 
 // newCourtControlRegistry loads court-control.json (a missing or unreadable
@@ -101,8 +140,10 @@ func newCourtControlRegistry(store CourtControlStore, hub Broadcaster) *courtCon
 		store:      store,
 		hub:        hub,
 		now:        time.Now,
+		afterFunc:  func(d time.Duration, f func()) courtGraceTimer { return time.AfterFunc(d, f) },
 		holds:      store.LoadCourtControl().Copy().Courts,
 		lastActive: map[string]int64{},
+		grace:      map[string]*courtGrace{},
 	}
 	for court, h := range r.holds {
 		if h.Held() {
@@ -150,6 +191,9 @@ func (r *courtControlRegistry) answerLocked(court string, h state.CourtHold, tab
 		a.LastActiveAt = r.lastActive[court]
 		a.YouHold = tabKey != "" && h.HolderKey == tabKey
 		sameDevice = devKey != "" && h.DeviceKey == devKey
+		if g := r.grace[court]; g != nil && g.hold.HolderKey == h.HolderKey {
+			a.ReleasedAt = g.releasedAt
+		}
 	}
 	a.SameDevice = sameDevice
 	displacedDevice := h.IsDisplacedDevice(devKey)
@@ -165,7 +209,49 @@ func (r *courtControlRegistry) Look(court string) (CourtControlAnswer, error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.answerLocked(court, r.holds[court], "", ""), nil
+	return r.answerLocked(court, r.viewLocked(court), "", ""), nil
+}
+
+// viewLocked is the shiaijo's hold as a claim sees it: during a grace, the
+// hold its tablet gave back (so another tablet is answered that the shiaijo
+// is run from that device), else the hold as stored. Caller holds r.mu.
+func (r *courtControlRegistry) viewLocked(court string) state.CourtHold {
+	if g := r.grace[court]; g != nil {
+		return g.hold
+	}
+	return r.holds[court]
+}
+
+// startGraceLocked keeps h, the hold its tab just gave back, for its tablet
+// for courtReleaseGrace. Caller holds r.mu.
+func (r *courtControlRegistry) startGraceLocked(court string, h state.CourtHold) {
+	r.stopGraceLocked(court)
+	g := &courtGrace{hold: h, releasedAt: r.now().UnixMilli()}
+	g.timer = r.afterFunc(courtReleaseGrace, func() { r.graceOver(court, g) })
+	r.grace[court] = g
+}
+
+// stopGraceLocked ends the shiaijo's grace early (a reclaim, a take, a
+// switch, Clear). Caller holds r.mu.
+func (r *courtControlRegistry) stopGraceLocked(court string) {
+	if g := r.grace[court]; g != nil {
+		g.timer.Stop()
+		delete(r.grace, court)
+	}
+}
+
+// graceOver ends g, the shiaijo's grace, when its time is up and nothing
+// ended it before: the shiaijo is free, and that is announced so every open
+// console claims it at once. A grace already ended (or replaced) is left.
+func (r *courtControlRegistry) graceOver(court string, g *courtGrace) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.grace[court] != g {
+		return
+	}
+	delete(r.grace, court)
+	delete(r.lastActive, court)
+	r.announceLocked([]string{court})
 }
 
 // clampTakenAt is a take's standing start: the taking tab's own stamp, so
@@ -206,8 +292,15 @@ func validCourtClaim(req CourtClaim) bool {
 //     tablet moves the bar only, so nothing the tablet queued earlier loses
 //     the court's standing;
 //   - claiming one shiaijo releases any other the same tab held (switching
-//     the console's shiaijo), except those named in Keep. Entries in Keep
-//     that this tab does not already hold are ignored.
+//     the console's shiaijo), except those named in Keep, and ends at once
+//     the grace of any other this tab gave back. Entries in Keep that this
+//     tab does not already hold are ignored;
+//   - during a shiaijo's grace (Release), the tab that gave it back or any
+//     other tab of its tablet takes it back at once (a tab on the displaced
+//     list only by a take), with the standing as it was; another tablet's
+//     claim is answered as the not-holder answer, the hold that was given
+//     back, and takes nothing, while its take takes it as from a running
+//     holder.
 func (r *courtControlRegistry) Claim(req CourtClaim) (CourtControlAnswer, error) {
 	if !validCourtClaim(req) {
 		return CourtControlAnswer{}, errCourtControlBadRequest
@@ -225,9 +318,25 @@ func (r *courtControlRegistry) Claim(req CourtClaim) (CourtControlAnswer, error)
 	nowMs := now.UnixMilli()
 	next := r.copyLocked()
 	h := next[req.Court]
+	_, inGrace := r.grace[req.Court]
+	if inGrace {
+		h = r.viewLocked(req.Court)
+	}
 	var changed []string
 
 	switch {
+	case inGrace && (h.HolderKey == tabKey || h.DeviceKey == devKey) &&
+		(req.Take || h.HolderKey == tabKey || !h.IsDisplaced(tabKey)):
+		// The tablet that gave it back takes it back (a reload, or another of
+		// its tabs) with its standing whole; the tab that held it keeps its
+		// since too.
+		since := nowMs
+		if h.HolderKey == tabKey {
+			since = h.Since
+		}
+		h.RemoveDisplaced(tabKey)
+		h = holdBy(h, tabKey, devKey, device, req.PageID, since, h.StandingFrom)
+
 	case h.Held() && h.HolderKey == tabKey:
 		if h.PageID != req.PageID || h.Device != device || h.DeviceKey != devKey {
 			// A reload (a new page load), or a holder whose tablet id changed:
@@ -279,10 +388,16 @@ func (r *courtControlRegistry) Claim(req CourtClaim) (CourtControlAnswer, error)
 			changed = append(changed, court)
 		}
 	}
+	for court, g := range r.grace {
+		if court != req.Court && g.hold.HolderKey == tabKey && !slices.Contains(req.Keep, court) {
+			changed = append(changed, court)
+		}
+	}
 	if err := r.saveLocked(next, listed); err != nil {
 		return CourtControlAnswer{}, err
 	}
 	for _, court := range changed {
+		r.stopGraceLocked(court)
 		delete(r.lastActive, court)
 	}
 	r.lastActive[req.Court] = nowMs
@@ -303,9 +418,13 @@ func freed(h state.CourtHold) state.CourtHold {
 	return state.CourtHold{Displaced: h.Displaced, DisplacedDevices: h.DisplacedDevices}
 }
 
-// Release frees the shiaijo only when the tab holds it AND names the current
-// page load, so a reload's late release never frees the new page's claim.
-// Anything else changes nothing and answers the control as it stands.
+// Release gives the shiaijo back only when the tab holds it AND names the
+// current page load, so a reload's late release never frees the new page's
+// claim. Anything else changes nothing and answers the control as it stands.
+// A shiaijo given back is free in the file at once, but kept for its tablet
+// for courtReleaseGrace (startGraceLocked): nothing is announced until the
+// grace ends, since until then every other console still sees it run from
+// that device. The answer is the shiaijo as the file has it: free.
 func (r *courtControlRegistry) Release(court, tabID, pageID string) (CourtControlAnswer, error) {
 	if !state.IsClientUUID(tabID) || !state.IsClientUUID(pageID) {
 		return CourtControlAnswer{}, errCourtControlBadRequest
@@ -326,8 +445,7 @@ func (r *courtControlRegistry) Release(court, tabID, pageID string) (CourtContro
 	if err := r.saveLocked(next, listed); err != nil {
 		return CourtControlAnswer{}, err
 	}
-	delete(r.lastActive, court)
-	r.announceLocked([]string{court})
+	r.startGraceLocked(court, h)
 	return r.answerLocked(court, r.holds[court], tabKey, ""), nil
 }
 
@@ -352,8 +470,12 @@ func (r *courtControlRegistry) standingLocked(court, devKey string, stamp int64)
 // tab already holds another shiaijo, WriteStanding answers true without
 // recording a hold, so no orphan hold is left behind. One that another tab
 // of the SAME tablet holds has the standing and takes nothing. One that
-// another tablet holds is ordinary. A write never releases another shiaijo
-// its tab holds: it is no switch of the console.
+// another tablet holds is ordinary. During a grace (Release) the shiaijo is
+// the releasing tablet's: its write has the standing from the hold's own
+// start and takes it back as a claim would (unless the tab holds another
+// shiaijo or is on the displaced list), and another tablet's write is
+// ordinary and takes nothing. A write never releases another shiaijo its tab
+// holds: it is no switch of the console.
 func (r *courtControlRegistry) WriteStanding(court, tabID, deviceID string, stamp int64) (bool, error) {
 	if !state.IsClientUUID(tabID) || !state.IsClientUUID(deviceID) {
 		return false, nil
@@ -368,6 +490,9 @@ func (r *courtControlRegistry) WriteStanding(court, tabID, deviceID string, stam
 	tabKey, devKey := state.CourtControlKey(tabID), state.CourtControlKey(deviceID)
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if g := r.grace[court]; g != nil {
+		return r.graceWriteStandingLocked(court, g.hold, tabKey, devKey, stamp, listed)
+	}
 	h := r.holds[court]
 	if !h.Held() {
 		if h.IsDisplaced(tabKey) || h.IsDisplacedDevice(devKey) {
@@ -386,6 +511,32 @@ func (r *courtControlRegistry) WriteStanding(court, tabID, deviceID string, stam
 		r.announceLocked([]string{court})
 	}
 	return r.standingLocked(court, devKey, stamp), nil
+}
+
+// graceWriteStandingLocked is WriteStanding during the shiaijo's grace, gh
+// the hold its tablet gave back. Caller holds r.mu.
+func (r *courtControlRegistry) graceWriteStandingLocked(court string, gh state.CourtHold, tabKey, devKey string, stamp int64, listed []string) (bool, error) {
+	if devKey == "" || gh.DeviceKey != devKey {
+		return false, nil
+	}
+	standing := stamp >= gh.StandingFrom
+	if gh.IsDisplaced(tabKey) || r.tabHoldsOtherLocked(tabKey, court) {
+		return standing, nil
+	}
+	nowMs := r.now().UnixMilli()
+	since := nowMs
+	if gh.HolderKey == tabKey {
+		since = gh.Since
+	}
+	next := r.copyLocked()
+	next[court] = holdBy(gh, tabKey, devKey, gh.Device, "", since, gh.StandingFrom)
+	if err := r.saveLocked(next, listed); err != nil {
+		return false, err
+	}
+	r.stopGraceLocked(court)
+	r.lastActive[court] = nowMs
+	r.announceLocked([]string{court})
+	return standing, nil
 }
 
 // tabHoldsOtherLocked reports whether tabKey already holds a shiaijo other than
@@ -416,6 +567,12 @@ func (r *courtControlRegistry) Clear() error {
 			held = append(held, court)
 		}
 	}
+	// A grace ends with no wait: the tournament it was kept in is gone.
+	for court, g := range r.grace {
+		g.timer.Stop()
+		held = append(held, court)
+	}
+	r.grace = map[string]*courtGrace{}
 	r.holds = map[string]state.CourtHold{}
 	r.lastActive = map[string]int64{}
 	r.announceLocked(held)

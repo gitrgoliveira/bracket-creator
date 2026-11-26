@@ -71,6 +71,12 @@ info:
     carry `X-Event-Seq`, the newest event the answer already holds, so a page
     skips a refetch for an event at or below it.
 
+    **Compressed answers.** A JSON answer under /api/ of 1,024 bytes or more is
+    sent with `Content-Encoding: gzip` to a caller whose `Accept-Encoding`
+    allows gzip. A smaller answer, a non-JSON answer and the event stream
+    (GET /api/events) are sent as they are. Every JSON answer names
+    `Accept-Encoding` in `Vary`, compressed or not.
+
     **Self-run mode.** When the tournament is created with `mode: self-run`, the
     main-password gate is bypassed for the operational play surface (scoring,
     start/complete, generate-draw, etc.) so participants can drive their own flow without
@@ -598,9 +604,11 @@ paths:
       tags: [tournament]
       summary: Create tournament configuration
       description: |
-        Creates a new tournament. Every shiaijo is freed (see
-        `/api/courts/{court}/control`): shiaijo letters repeat, so whoever ran
-        a shiaijo before runs nothing in the new tournament.
+        Creates a new tournament. When no tournament is stored, every shiaijo
+        is freed (see `/api/courts/{court}/control`): shiaijo letters repeat,
+        so whoever ran a shiaijo before runs nothing in the new tournament. A
+        POST over a stored tournament keeps its competitions, so every holder
+        is kept too.
 
         **File mode (default)**: allowed without the
         `X-Tournament-Password` header when no tournament has been
@@ -2093,10 +2101,22 @@ paths:
           keeps the standing start where it was.
         - Claiming one shiaijo frees any other this tab held, except those
           named in `keep` (the shiaijo its tablet still has queued results
-          for). `keep` never lets a tab take or hold a shiaijo it did not
-          already hold.
+          for), and ends at once the grace of any other this tab gave back.
+          `keep` never lets a tab take or hold a shiaijo it did not already
+          hold.
+        - During the 30-second grace after the holder's tab gave the shiaijo
+          back (DELETE), a claim from that tab (a reload: same `tabId`, new
+          `pageId`) or from another tab of its tablet takes it back at once,
+          with its standing start as it was. A claim from another tablet is
+          answered as for a shiaijo that tablet runs (`holderKey`, `device`,
+          `since` and `lastActiveAt` of the hold given back, with
+          `releasedAt` set) and takes nothing; `take: true` takes it at once,
+          as from a running holder. A score or decision write from that
+          tablet in the grace has the standing from the same start and takes
+          the shiaijo back; one from another tablet is ordinary.
 
-        The control never lapses on a timer. A change of holder is announced
+        The control never lapses on a timer while a tab holds it. A change of
+        holder is announced
         as `court_control_updated`; a heartbeat announces nothing. The tab and
         tablet ids are compared through one-way keys and never stored,
         answered or broadcast. Organiser only, in a self-run tournament too.
@@ -2134,7 +2154,7 @@ paths:
                   description: >
                     Required with `take`: when the take was made, server-relative
                     unix milliseconds as the outbox stamps a write, held to at
-                    most the server's clock plus a few seconds.
+                    most the server's clock plus 5 seconds.
                 device:
                   type: string
                   enum: [ipad, android-tablet, iphone, android-phone, mac, windows, other]
@@ -2159,7 +2179,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CourtControl'
         '400':
-          description: "`invalid_court_control`: an id is not a lowercase UUID v4, a take carries no `takenAt`, or `keep` has more than 16 entries or a non-string entry."
+          description: "`invalid_court_control`: the body is not JSON of this shape, an id is not a lowercase UUID v4, a take carries no `takenAt`, or `keep` has more than 16 entries or a non-string entry."
           content:
             application/json:
               schema:
@@ -2180,9 +2200,17 @@ paths:
       tags: [tournament]
       summary: Give a shiaijo back
       description: |
-        The console's release as its tab closes. It frees the shiaijo only
-        when this tab runs it and `pageId` names the current page load;
-        anything else changes nothing and answers the control as it stands.
+        The console's release as its tab closes or reloads. It gives the
+        shiaijo back only when this tab runs it and `pageId` names the current
+        page load; anything else changes nothing and answers the control as
+        it stands. A shiaijo given back is kept for this tablet for a grace of
+        30 seconds (see the PUT), so a reload over a slow network claims it
+        back before any other console: nothing is announced until the grace
+        ends, and then `court_control_updated` announces it free and every
+        open console claims it. The answer to the release is the shiaijo as
+        the file has it, free. The grace is kept in memory only: a server
+        restart during one ends it, and the shiaijo is free. Replacing the
+        whole tournament ends every grace at once.
         Organiser only, in a self-run tournament too.
       security:
         - TournamentPassword: []
@@ -2196,8 +2224,10 @@ paths:
               properties:
                 tabId:
                   type: string
+                  description: The console tab's id, as on the PUT.
                 pageId:
                   type: string
+                  description: The page load's id, as on the PUT.
       responses:
         '200':
           description: The shiaijo's control after the release.
@@ -2206,7 +2236,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CourtControl'
         '400':
-          description: "`invalid_court_control`: an id is not a lowercase UUID v4."
+          description: "`invalid_court_control`: the body is not JSON of this shape, or an id is not a lowercase UUID v4."
           content:
             application/json:
               schema:
@@ -9961,6 +9991,13 @@ components:
           description: >
             The holder's last claim or heartbeat, kept in memory only: after a
             restart it starts at `since`.
+        releasedAt:
+          type: integer
+          format: int64
+          description: >
+            When the holder's tab gave the shiaijo back, while the 30-second
+            grace still keeps it for its tablet; 0 when the shiaijo is held
+            or free. The holder fields then describe the hold given back.
 
     Announcement:
       type: object
@@ -11599,12 +11636,14 @@ components:
         as it is stored then: the write has the court's standing when its
         tablet runs the shiaijo, through whichever of its tabs, and it was
         made (`modifiedAt`) at or after the standing's start (the take, when
-        another tablet took the shiaijo; from the first claim otherwise). A
-        shiaijo nobody runs is claimed by the write, from a tab and a tablet
-        that did not lose it by a take, with the writing tab as its holder
-        (a console opened offline) when the tab holds no other shiaijo; if the
-        tab already holds another shiaijo, the write still has the standing
-        without recording a hold. A shiaijo another tab of the same tablet
+        another tablet took the shiaijo; otherwise from the start, so a write
+        the tablet queued before its first claim has the standing too). When
+        nobody runs the shiaijo and neither the tab nor the tablet lost it by
+        a take, the write claims it with the writing tab as its holder (a
+        console opened offline). If that tab already holds another shiaijo,
+        the write still has the standing but records no hold. A write on a
+        shiaijo nobody runs, from a tab or a tablet that lost it by a take,
+        is an ordinary one. A shiaijo another tab of the same tablet
         runs is left with that tab, and the write still has the standing. A
         shiaijo another tablet runs makes the write an ordinary one. A result
         with the court's standing replaces a result another device recorded

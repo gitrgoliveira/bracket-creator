@@ -371,8 +371,9 @@ export const test = base.extend({
   // The default context goes through browser.newContext today; attached here
   // as well so the policy does not depend on how Playwright builds it.
   // Playwright closes it after the test without a pagehide, so the shiaijo its
-  // court consoles run are given back first (fixtures/court-control.mjs): the
-  // next test of the file then opens a free shiaijo.
+  // court consoles run are given back first (fixtures/court-control.mjs), as
+  // a closing tab gives them back: the next test of the file, another tablet,
+  // takes one still in the server's grace with Take control (openShiaijo).
   context: async ({ context, consoleCollector: c }, use) => {
     c.attachContext(context);
     releaseOnClose(context);

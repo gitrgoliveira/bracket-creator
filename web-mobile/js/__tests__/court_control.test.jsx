@@ -403,71 +403,69 @@ describe('the claim and the state', () => {
 
     emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
     await vi.advanceTimersByTimeAsync(1);
-    expect(puts().length, 'the holder does not wait out the grace the watching consoles do').toBe(2);
-    off();
-    await vi.advanceTimersByTimeAsync(1);
-  });
-
-  it('waits COURT_FREED_GRACE_MS before claiming after a freed-court event', async () => {
-    vi.useFakeTimers();
-    reply = () => ({ body: OTHER });
-    const { mountCourtControl, COURT_FREED_GRACE_MS } = await load();
-    const off = track(mountCourtControl('A', () => 'pw'));
-    await vi.advanceTimersByTimeAsync(1);
-    expect(puts().length).toBe(1);
-
-    emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
-    await vi.advanceTimersByTimeAsync(COURT_FREED_GRACE_MS - 1);
-    expect(puts().length).toBe(1);
-
-    await vi.advanceTimersByTimeAsync(1);
     expect(puts().length).toBe(2);
     off();
     await vi.advanceTimersByTimeAsync(1);
   });
 
-  it('never claims after a freed-court event when unmounted during the grace period', async () => {
+  it('a watching console claims at once on a freed-court event: the server kept the grace before announcing it', async () => {
     vi.useFakeTimers();
     reply = () => ({ body: OTHER });
-    const { mountCourtControl, COURT_FREED_GRACE_MS } = await load();
-    const off = track(mountCourtControl('A', () => 'pw'));
+    const cc = await load();
+    expect(cc.COURT_FREED_GRACE_MS, 'the grace is the server\'s alone').toBeUndefined();
+    const off = track(cc.mountCourtControl('A', () => 'pw'));
     await vi.advanceTimersByTimeAsync(1);
     expect(puts().length).toBe(1);
 
     emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length).toBe(2);
+    expect(puts()[1].body.take, 'a claim, not a take').toBe(false);
     off();
-    await vi.advanceTimersByTimeAsync(COURT_FREED_GRACE_MS + 100);
+    await vi.advanceTimersByTimeAsync(1);
+  });
+
+  it('never claims after a freed-court event once unmounted', async () => {
+    vi.useFakeTimers();
+    reply = () => ({ body: OTHER });
+    const { mountCourtControl } = await load();
+    const off = track(mountCourtControl('A', () => 'pw'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length).toBe(1);
+
+    off();
+    emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
+    await vi.advanceTimersByTimeAsync(100);
     expect(puts().length).toBe(1);
   });
 
-  it('lets a reloading holder reclaim within TAB_CHECK_MS before a watching console takes the freed shiaijo', async () => {
+  it('a reloading holder gets its shiaijo back while a console opened during the reload is told it is run from another device', async () => {
     vi.useFakeTimers();
     global.BroadcastChannel = class {
       constructor() { this.onmessage = null; }
       postMessage() {}
       close() {}
     };
+    // A server that keeps a released shiaijo for its tablet (the grace,
+    // court_control.go): the release announces nothing, and a claim from
+    // another tablet is answered with the hold that was given back.
     let holder = null;
+    let graced = null;
+    const view = (h, body) => answer({
+      holderKey: h.holderKey, device: h.device, youHold: h.tabId === body.tabId, sameDevice: h.deviceId === body.deviceId,
+    });
     reply = (url, init, body) => {
       if (init.method === 'DELETE') {
-        if (holder && holder.tabId === body.tabId) {
-          holder = null;
-          queueMicrotask(() => emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } }));
-        }
-        return { body: {} };
+        if (holder && holder.tabId === body.tabId) { graced = holder; holder = null; }
+        return { body: answer() };
       }
-      if (!holder) {
-        holder = { tabId: body.tabId, holderKey: `key-${body.tabId}`, device: body.device };
-        const key = holder.holderKey;
-        queueMicrotask(() => emit({ type: 'court_control_updated', data: { court: 'A', holderKey: key } }));
+      if (graced) {
+        if (graced.tabId !== body.tabId && graced.deviceId !== body.deviceId && !body.take) return { body: view(graced, body) };
+        holder = { ...graced, tabId: body.tabId, holderKey: `key-${body.tabId}` };
+        graced = null;
       }
-      return {
-        body: answer({
-          holderKey: holder.holderKey,
-          device: holder.device,
-          youHold: holder.tabId === body.tabId,
-        }),
-      };
+      if (!holder) holder = { tabId: body.tabId, deviceId: body.deviceId, holderKey: `key-${body.tabId}`, device: body.device };
+      return { body: view(holder, body) };
     };
 
     const reloader1 = await load();
@@ -477,112 +475,36 @@ describe('the claim and the state', () => {
     const tabA = sessionStorage.getItem(reloader1.COURT_TAB_KEY);
     const deviceA = localStorage.getItem(reloader1.COURT_DEVICE_KEY);
 
-    // Mount a watching console with its own tab and tablet ids.
+    // The page goes: pagehide gives the shiaijo back.
+    window.dispatchEvent(new Event('pagehide'));
+    offA1();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(holder).toBeNull();
+    expect(graced && graced.tabId).toBe(tabA);
+
+    // A console on another tablet opened while the tablet reloads: it does not take it.
     sessionStorage.clear();
     localStorage.clear();
     vi.resetModules();
     const watcher = await load();
     const offW = watcher.mountCourtControl('A', () => 'pw');
     await vi.advanceTimersByTimeAsync(watcher.TAB_CHECK_MS + 1);
-    expect(watcher.courtControlView('A').state).toBe('other');
-
-    // Restore Console A's stored ids and fire pagehide to simulate reload.
-    sessionStorage.setItem(reloader1.COURT_TAB_KEY, tabA);
-    localStorage.setItem(reloader1.COURT_DEVICE_KEY, deviceA);
-    window.dispatchEvent(new Event('pagehide'));
-    offA1();
-    await vi.advanceTimersByTimeAsync(1);
+    expect(watcher.courtControlView('A').state, 'the grey bar, with Take control').toBe('other');
     expect(holder).toBeNull();
 
-    // Reload Console A: it claims after TAB_CHECK_MS while the watcher is still in freed grace.
-    const putsBeforeReload = puts().length;
+    // The reloaded page (the same tab and tablet ids) takes it back.
+    sessionStorage.setItem(reloader1.COURT_TAB_KEY, tabA);
+    localStorage.setItem(reloader1.COURT_DEVICE_KEY, deviceA);
     vi.resetModules();
     const reloader2 = await load();
     const offA2 = reloader2.mountCourtControl('A', () => 'pw');
     await vi.advanceTimersByTimeAsync(reloader2.TAB_CHECK_MS + 1);
     expect(reloader2.courtControlView('A').holds).toBe(true);
     expect(holder && holder.tabId).toBe(tabA);
-    expect(puts().length).toBeGreaterThanOrEqual(putsBeforeReload + 1);
-
-    // Even after the grace period, Console A keeps holding and the watcher does not take it.
-    await vi.advanceTimersByTimeAsync(reloader2.COURT_FREED_GRACE_MS);
-    expect(holder && holder.tabId).toBe(tabA);
-    expect(reloader2.courtControlView('A').holds).toBe(true);
     expect(watcher.courtControlView('A').state).toBe('other');
 
     offW();
     offA2();
-    await vi.advanceTimersByTimeAsync(1);
-  });
-
-  it('skips the heartbeat claim while a freed-court grace timer is pending, then claims when the grace ends', async () => {
-    vi.useFakeTimers();
-    reply = () => ({ body: OTHER });
-    const { mountCourtControl, COURT_HEARTBEAT_MS, COURT_FREED_GRACE_MS } = await load();
-    const off = track(mountCourtControl('A', () => 'pw'));
-    await vi.advanceTimersByTimeAsync(1);
-    expect(puts().length).toBe(1);
-
-    await vi.advanceTimersByTimeAsync(COURT_HEARTBEAT_MS - 1000);
-    expect(puts().length).toBe(1);
-
-    emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(puts().length, 'heartbeat inside freed grace sends no claim').toBe(1);
-
-    await vi.advanceTimersByTimeAsync(COURT_FREED_GRACE_MS - 1000 - 1);
-    expect(puts().length).toBe(1);
-
-    await vi.advanceTimersByTimeAsync(1);
-    expect(puts().length, 'grace expiry still sends the claim').toBe(2);
-    off();
-    await vi.advanceTimersByTimeAsync(1);
-  });
-
-  it('skips visibilitychange, online, pageshow, resync_required and stream reopen claims while freed-court grace is pending, then claims when grace ends', async () => {
-    vi.useFakeTimers();
-    reply = () => ({ body: OTHER });
-    const { mountCourtControl, COURT_FREED_GRACE_MS } = await load();
-    const off = track(mountCourtControl('A', () => 'pw'));
-    await vi.advanceTimersByTimeAsync(1);
-    expect(puts().length).toBe(1);
-
-    emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
-    document.dispatchEvent(new Event('visibilitychange'));
-    window.dispatchEvent(new Event('online'));
-    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
-    emit({ type: 'resync_required' });
-    status('error');
-    status('open');
-
-    await vi.advanceTimersByTimeAsync(COURT_FREED_GRACE_MS - 1);
-    expect(puts().length, 'no non-take claim during freed grace').toBe(1);
-
-    await vi.advanceTimersByTimeAsync(1);
-    expect(puts().length, 'grace expiry still sends the claim').toBe(2);
-    off();
-    await vi.advanceTimersByTimeAsync(1);
-  });
-
-  it('takeCourtControl still sends while freed-court grace is pending', async () => {
-    vi.useFakeTimers();
-    reply = (_url, _init, body) => ({ body: body && body.take ? HOLDS : OTHER });
-    const { mountCourtControl, takeCourtControl, courtControlView, COURT_FREED_GRACE_MS } = await load();
-    const off = track(mountCourtControl('A', () => 'pw'));
-    await vi.advanceTimersByTimeAsync(1);
-    expect(puts().length).toBe(1);
-
-    emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
-    const taking = takeCourtControl('A');
-    await vi.advanceTimersByTimeAsync(1);
-    await taking;
-    expect(puts().length).toBe(2);
-    expect(puts()[1].body.take).toBe(true);
-    expect(courtControlView('A').state).toBe('holds');
-
-    await vi.advanceTimersByTimeAsync(COURT_FREED_GRACE_MS);
-    expect(puts().length, 'no extra claim after grace once take succeeded').toBe(2);
-    off();
     await vi.advanceTimersByTimeAsync(1);
   });
 

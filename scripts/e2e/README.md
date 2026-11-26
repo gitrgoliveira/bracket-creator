@@ -87,12 +87,18 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             match an editor holds)
     fixtures/court-control.mjs  the court console's control bar (state, text,
                             Take control) and releaseCourtControl /
-                            releaseOnClose: a closing tab gives its shiaijo
-                            back on pagehide, which Playwright context.close()
-                            does not fire, so releaseCourtControl leaves the
-                            page the way a closing tab does and
-                            fixtures/test.mjs calls it for every page before
-                            its context or page closes
+                            releaseOnClose. A closing tab gives its shiaijo
+                            back on pagehide, which Playwright's
+                            context.close() does not fire, so
+                            releaseCourtControl leaves the page the way a
+                            closing tab does. fixtures/test.mjs calls it for
+                            every page before its context or page closes;
+                            page.close({ pagehide: false }) closes a page as
+                            a crash would, leaving its shiaijo held. A
+                            shiaijo given back stays with its tablet for the
+                            server's half-minute grace, so the next test's
+                            console (another tablet) takes it with Take
+                            control, as openShiaijo does by default
     fixtures/scores.mjs     the Scores tab and its overlay editor
     fixtures/scoring.mjs    scoring an individual bout on either editor, Start
                             match (startMatch), clearMarks, Mark draw

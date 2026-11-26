@@ -62,8 +62,6 @@ export const TAB_CHECK_MS = 150;
 export const COURT_HEARTBEAT_MS = 30_000;
 // A claim or take that hangs is given up so neither piles up or locks the bar.
 export const CLAIM_DEADLINE_MS = 12_000;
-// Grace a watching console waits before claiming a newly freed shiaijo, so a reloading holder can reclaim it first.
-export const COURT_FREED_GRACE_MS = 5000;
 
 // The sentence Take control answers with when there is no connection: taking
 // control means nothing offline (the plan's assumption).
@@ -77,7 +75,7 @@ let _tabCheck = null; // { ready: Promise, channel, loadedAt }
 let _listening = false;
 let _reqSeq = 0;
 // court -> { mounts, listeners:Set, answer, connected, refusedStatus, notListed,
-//            answeredSeq, settledSeq, timer, freedTimer, unsubEvents, getPassword, releaseTimer }
+//            settledSeq, timer, unsubEvents, getPassword, releaseTimer }
 const _courts = new Map();
 // The stamps courtControlFor handed out, to the shiaijo each was for.
 const _stampCourts = new WeakMap();
@@ -220,19 +218,12 @@ function _rec(court) {
     if (!r) {
         r = {
             mounts: 0, listeners: new Set(), answer: _cachedAnswer(court), connected: false,
-            refusedStatus: 0, notListed: false, answeredSeq: 0, settledSeq: 0, timer: null, freedTimer: null, unsubEvents: null,
+            refusedStatus: 0, notListed: false, settledSeq: 0, timer: null, unsubEvents: null,
             getPassword: () => '', releaseTimer: null,
         };
         _courts.set(court, r);
     }
     return r;
-}
-
-function _clearFreedTimer(r) {
-    if (r && r.freedTimer) {
-        clearTimeout(r.freedTimer);
-        r.freedTimer = null;
-    }
 }
 
 function _mounted(court) {
@@ -262,12 +253,10 @@ function _noteAnswer(court, seq, answer) {
     const r = _rec(court);
     if (seq < r.settledSeq) return;
     r.settledSeq = seq;
-    r.answeredSeq = seq;
     r.connected = true;
     r.refusedStatus = 0;
     r.notListed = false;
     r.answer = answer;
-    if (answer && (answer.youHold === true || answer.holderKey)) _clearFreedTimer(r);
     try {
         if (answer) sessionStorage.setItem(COURT_ANSWER_PREFIX + court, JSON.stringify(answer));
         else sessionStorage.removeItem(COURT_ANSWER_PREFIX + court);
@@ -279,7 +268,6 @@ function _noteNotListed(court, seq) {
     const r = _rec(court);
     if (seq < r.settledSeq) return;
     r.settledSeq = seq;
-    r.answeredSeq = seq;
     r.connected = true;
     r.refusedStatus = 0;
     r.notListed = true;
@@ -350,9 +338,7 @@ function _withDeadline(fn) {
 // Answers the server's answer, or null when none came. A take throws its
 // refusal; a claim never does.
 async function _claim(court, { take = false } = {}) {
-    if (!take && _courts.get(court)?.freedTimer) return null;
     await _tabReady();
-    if (!take && _courts.get(court)?.freedTimer) return null;
     const seq = ++_reqSeq;
     const body = {
         tabId: courtTabId(), pageId: courtPageId(), deviceId: courtDeviceId(), take, device: deviceWord(),
@@ -487,6 +473,8 @@ function _listenOnce() {
     _listening = true;
     // Closing or reloading the tab gives the shiaijo back when courtReleasable
     // allows it (not while the tablet still holds a result stamped for it).
+    // The server keeps it for this tablet for a grace, so the reloaded page
+    // (the same tab id) claims it back before any other console can.
     window.addEventListener('pagehide', () => {
         for (const court of _courts.keys()) if (_mounted(court)) _release(court, { keepalive: true });
     });
@@ -512,23 +500,11 @@ function _startCourt(court) {
             if (!event || !_mounted(court)) return;
             // A new stream: what this tab knew may be stale.
             if (event.type === 'resync_required') { _claim(court); return; }
+            // A change of holder, or the shiaijo free: claim at once. The
+            // server keeps a shiaijo a tab gave back for its tablet for a
+            // grace (courtReleaseGrace, court_control.go) and announces it
+            // free only once that grace is over, so no console here waits.
             if (event.type === 'court_control_updated' && event.data && event.data.court === court) {
-                _clearFreedTimer(r);
-                if (!event.data.holderKey) {
-                    // A tab that still holds the shiaijo (the server freed it under
-                    // it: a restore, a new tournament) takes it back at once; only
-                    // the consoles that watch wait, so none can win the race.
-                    if (r.answer && r.answer.youHold === true) { _claim(court); return; }
-                    const seqAtFreed = r.answeredSeq;
-                    r.freedTimer = setTimeout(() => {
-                        r.freedTimer = null;
-                        if (!_mounted(court)) return;
-                        if (r.answeredSeq > seqAtFreed && r.answer && (r.answer.youHold === true || r.answer.holderKey)) return;
-                        _claim(court);
-                    }, COURT_FREED_GRACE_MS);
-                    if (r.freedTimer && typeof r.freedTimer.unref === 'function') r.freedTimer.unref();
-                    return;
-                }
                 _claim(court);
             }
         }, (status) => {
@@ -546,7 +522,6 @@ function _stopCourt(court) {
     if (!r) return;
     if (r.timer) clearInterval(r.timer);
     r.timer = null;
-    _clearFreedTimer(r);
     if (typeof r.unsubEvents === 'function') r.unsubEvents();
     r.unsubEvents = null;
 }

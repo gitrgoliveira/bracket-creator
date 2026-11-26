@@ -837,7 +837,7 @@ The `.restore/` folder under the data root holds temporary staging directories a
 
 `court-control.json` sits at the root of the data folder and records which tablet runs each shiai-jo, and from which of its court console tabs, so that one console writes for a shiai-jo at a time and the server can tell which results are the court's (refer to [Write guarantees](#5-write-guarantees)). It is not a tournament record. It is written as a temporary file and a rename like every other file, and a missing, unreadable or unparseable file reads as every shiai-jo free.
 
-The file holds one object, `courts`, keyed by the shiai-jo letter. A shiai-jo with no entry is free and remembers nobody. Each entry carries:
+The file holds one object, `courts`, keyed by the shiai-jo letter. A shiai-jo with no entry is free and remembers nobody. An entry with an empty `holderKey` is free too, and is kept only while one of its displaced lists names a tab or a tablet. Each entry carries:
 
 - `holderKey`: a one-way key (the first 16 hex characters of the SHA-256) of the holding tab's id. The raw id is never stored, so the file grants nothing.
 - `deviceKey`: the same kind of key for the holding tablet's id. A result has the court's standing when it comes from a court console tab of this tablet, so a take between two tabs of one tablet keeps it.
@@ -847,7 +847,9 @@ The file holds one object, `courts`, keyed by the shiai-jo letter. A shiai-jo wi
 - `pageId`: the holding tab's page load, so a late release from a reloaded page never frees the new page's claim.
 - `displaced` and `displacedDevices`: the keys of the tabs and of the tablets that lost the shiai-jo to a take, oldest first, at most 8 of each.
 
-A holder's last activity is kept in memory only and is not in the file. The file is not part of any backup archive, so a restore never brings an old holder back. Every whole-tournament replacement clears it, because shiai-jo letters repeat from one tournament to the next: a full restore, live or from the command line, and the creation of a first tournament. An import only adds competitions and leaves the file as it is.
+A court console's finish or decision on a shiai-jo nobody holds claims it, with `standingFrom` 0, as opening the console would, unless its tab or tablet is on a displaced list or its tab already holds another shiai-jo. That is how a console opened with no connection comes to run its shiai-jo. A holder's last activity is kept in memory only and is not in the file.
+
+When the holding tab gives the shiai-jo back (its page closes or reloads), the file has it free at once, but the server keeps the hold that was given back in memory for a grace of 30 seconds, so that a reload over a slow venue network gets it back before any other console. During the grace, a claim or a court console's finish or decision from a tab of that tablet takes it back with its `since` (for the same tab) and its `standingFrom` as they were; a claim from another tablet is answered as a shiai-jo that tablet runs and takes nothing, a finish or decision from another tablet is an ordinary one, and Take control takes it at once, as from a running holder. When the grace ends with no claim from that tablet, the shiai-jo is announced free. Replacing the whole tournament ends every grace at once. The grace is not in the file, so a server restart during one ends it: the shiai-jo is free after the restart, and the first court console to claim it takes it. The file is not part of any backup archive, so a restore never brings an old holder back. Every whole-tournament replacement clears it, because shiai-jo letters repeat from one tournament to the next: a full restore, live or from the command line, and the creation of a first tournament. An import only adds competitions and leaves the file as it is.
 
 ### Archive format and manifest
 
@@ -1093,16 +1095,17 @@ fought, or has already started.
 of the tablet that runs the match's shiai-jo, as `court-control.json` records it. The server
 judges each finish or decision on arrival: it has the court's standing when its tablet runs the
 shiai-jo the match is on at that moment, through any of its court console tabs, and it was made
-at or after that tablet's `standingFrom`. Neither id is kept with the write; its baseline line in
+at or after that tablet's `standingFrom`. In a self-run tournament, no result has the standing.
+Neither the tab's id nor the tablet's is kept with the write; its baseline line in
 the score log carries `court: true` instead, and a line written before the field existed reads
 false, which is how it was recorded. A result with the court's standing is no rival of a result
-another device recorded that it never saw: it replaces it in either arrival order, the replaced
+another device recorded that it never saw: it replaces it in either arrival order. The replaced
 result is kept in the history as replaced by the court's result, and the court's own taps made
 after the replaced result count. Two results from devices without the standing, and two results
-that both had it, keep the first recorded result. When other matches were already built on the
-result the court's would replace (a later Swiss round paired from it, a tie-break or
-representative match added from the standings it decided, or the competition finished), the
-court's result is held instead, as a late result is held once the next knockout match was
+that both had it, keep the first recorded result. Other matches may already be built on the
+result the court's would replace: a later Swiss round paired from it, a tie-break or
+representative match added from the standings it decided, or the competition finished. The
+court's result is then held instead, as a late result is held once the next knockout match was
 played, and the history says that other matches were already built on it. That wait is the
 court's alone: a late result from any other screen keeps the rules above.
 

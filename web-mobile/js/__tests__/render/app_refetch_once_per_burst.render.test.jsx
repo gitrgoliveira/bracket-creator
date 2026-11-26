@@ -143,4 +143,21 @@ describe('the public competition page fetches once per burst (bc-sseq FR4)', () 
     expect(details(), 'the detail is read again').toBe(before + 1);
     expect(loads(), 'the tournament is read again').toBe(beforeLoads + 1);
   });
+
+  it('a list refetch that fails is asked for once more, after the same wait', async () => {
+    head.tournament = 50;
+    head.competitions = 50;
+    await pastWindow();
+    const before = loads();
+    window.API.fetchCompetitions.mockRejectedValueOnce(new Error('offline'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await emit({ type: 'tournament_updated', seq: 50, data: null });
+    await pastWindow();
+    expect(loads(), 'the failed read').toBe(before + 1);
+    await pastWindow();
+    expect(loads(), 'the gate asked once more, and it answered').toBe(before + 2);
+    await pastWindow();
+    expect(loads(), 'and no third one: the answer named the event').toBe(before + 2);
+    error.mockRestore();
+  });
 });

@@ -943,11 +943,9 @@ function App() {
   // The SSE effect's refetch gates (createRefetchGate, patch.jsx), told of the
   // reads made outside it: listGateRef the tournament's (load below), and
   // detailGateRef the open competition's detail, as { compId, gate }. Null
-  // while no SSE effect runs. listReadRef holds the value of load's last read
-  // that names the lower seq (read_seq.jsx), for the list gate's own fetch.
+  // while no SSE effect runs.
   const listGateRef = useRef(null);
   const detailGateRef = useRef(null);
-  const listReadRef = useRef(null);
   // What the page already holds, for a gate made after the read (the first
   // load can finish before the SSE effect runs, and a change of competition
   // or mode makes new gates): the seq of the list's last read, and the open
@@ -957,15 +955,17 @@ function App() {
   const listSeedRef = useRef(0);
   const detailSeedRef = useRef({ compId: null, seq: 0 });
 
-  // `viaGate` is the list gate's own fetch: it takes the seq off listReadRef,
-  // so the read is not also reported to the gate here.
-  const load = async (viaGate) => {
+  // readList reads the tournament and its competitions and shows them. It
+  // answers the read that names the lower seq (read_seq.jsx) when the page now
+  // holds both, true when no tournament is configured, and READ_SUPERSEDED for
+  // a read dropped as below; a read that failed REJECTS, after the page's own
+  // state is tended, so whoever asked sees the failure. It reports nothing to
+  // the list gate: the gate's own fetch takes the seq off the answer, and
+  // load below reports for every read made outside the gate.
+  const readList = async () => {
     // bc-hnam: an answer read as another audience than the page reads as by
     // the time it lands (the route changed meanwhile) is dropped: the change
-    // of audience reads again. It answers true when the page now holds an
-    // answer read as that audience, READ_SUPERSEDED for a read dropped as
-    // above, and false for a read that failed (the reload effect below waits
-    // for the first, reports the last and ignores the middle one).
+    // of audience reads again.
     const readAs = currentReadAudienceKey();
     try {
       const t = await window.API.fetchTournament();
@@ -975,6 +975,7 @@ function App() {
         // the bootstrap state (a 200 with a null body on newer servers, or a 404
         // on older ones). Open the create-tournament gate without logging an error.
         setTournament(null);
+        return true;
       } else {
         const comps = await window.API.fetchCompetitions();
         if (currentReadAudienceKey() !== readAs) return READ_SUPERSEDED;
@@ -986,12 +987,8 @@ function App() {
         applyTheme(t.theme); // mp-scf: apply custom colors
         // The page now holds both reads, so it is covered only up to the
         // lower of their seqs (bc-sseq FR4): that read is the one reported.
-        const lower = readSeqOf(t) <= readSeqOf(comps) ? t : comps;
-        listReadRef.current = lower;
-        if (!listGateRef.current) listSeedRef.current = readSeqOf(lower);
-        else if (!viaGate) listGateRef.current.applied(readSeqOf(lower));
+        return readSeqOf(t) <= readSeqOf(comps) ? t : comps;
       }
-      return true;
     } catch (e) {
       // A failed fetch (network, 5xx) says nothing about whether a tournament
       // exists, so it never opens the create-tournament gate over one already
@@ -1005,14 +1002,34 @@ function App() {
       // either: dropStaleCredential has taken the page off the admin audience,
       // and that change of audience reads again.
       if (!(e && e.code === CREDENTIAL_REFUSED)) setTournament((prev) => (prev === undefined ? null : prev));
-      return false;
+      throw e;
     } finally {
       setLoading(false);
     }
   };
 
+  // load is every read of the list the page makes outside the list gate. It
+  // answers what readList does, except that a failed read answers false (the
+  // reload effect below waits for a truthy answer, reports false and ignores
+  // READ_SUPERSEDED), and it tells the list gate the seq of a read it
+  // showed, or keeps it for a gate made later.
+  const load = async () => {
+    let read;
+    try {
+      read = await readList();
+    } catch {
+      return false;
+    }
+    if (read && typeof read === "object") {
+      if (listGateRef.current) listGateRef.current.applied(readSeqOf(read));
+      else listSeedRef.current = readSeqOf(read);
+    }
+    return read;
+  };
+
   // The effects below run load() as it is now, never re-running for it.
   const loadRef = useLatestRef(load);
+  const readListRef = useLatestRef(readList);
   useEffect(() => { loadRef.current(); }, [loadRef]);
 
   // Pace projections move on with the clock on the pace tick. The tournament
@@ -1318,10 +1335,8 @@ function App() {
     // score for no benefit (mp-9h1f). `mode` is fresh (effect dep); the active
     // admin view is read from the ref so this closure need not be recreated on
     // navigation. Every other mode/view loads exactly as before.
-    const maybeLoad = (viaGate) => {
-        if (mode === "admin" && adminViewRef.current && adminViewRef.current.kind === "shiaijo") return undefined;
-        return loadRef.current(viaGate);
-    };
+    const listLoadSkipped = () => mode === "admin" && adminViewRef.current && adminViewRef.current.kind === "shiaijo";
+    const maybeLoad = () => (listLoadSkipped() ? undefined : loadRef.current());
 
     // bc-sseq FR4: one refetch per burst. Every event that used to schedule
     // its own fetch asks a gate instead (createRefetchGate, patch.jsx), which
@@ -1334,14 +1349,13 @@ function App() {
     //   detailGate: the open competition's detail, up to 500 ms.
     // A load made outside the gate reports its seq from load itself
     // (listGateRef), and the detail's first read from its own effect below
-    // (detailGateRef). The list gate's fetch answers the read load reported,
-    // or nothing when the load was skipped or failed (it covers no event).
+    // (detailGateRef). The list gate's fetch answers the read it made, or
+    // nothing when the load was skipped (it covers no event), and rejects
+    // when the read failed, so the gate asks for it again.
     const listGate = createRefetchGate({
         schedule: timerPool.schedule,
-        fetch: () => {
-            listReadRef.current = null;
-            return Promise.resolve(maybeLoad(true)).then(() => listReadRef.current);
-        },
+        fetch: () => (listLoadSkipped() ? null : readListRef.current()
+            .then((read) => (read && typeof read === 'object' ? read : null))),
         maxDelayMs: 2000,
         // Read at each schedule, so a test's Math.random stub reaches it.
         random: () => Math.random(),

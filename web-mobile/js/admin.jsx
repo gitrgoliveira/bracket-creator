@@ -194,12 +194,22 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // returned (readSeqOf), before any merge.
   const detailGateRef = useRef(null);
   const listGateRef = useRef(null);
+  // What the view already holds, for a gate made after the read (a detail or
+  // list read can land before the SSE effect makes its gates, and each
+  // competition opened makes new ones): the seq of the list's last read, and
+  // the shown competition's as { compId, seq }. A gate seeds itself from them
+  // as it is made and hands its applied seq back as it goes, so its first
+  // event never fetches what the view holds already.
+  const listSeedRef = useRef(0);
+  const detailSeedRef = useRef({ compId: null, seq: 0 });
   const reportDetailRead = (compId, data) => {
     const held = detailGateRef.current;
     if (held && held.compId === compId) held.gate.applied(readSeqOf(data));
+    else if (!held) detailSeedRef.current = { compId, seq: readSeqOf(data) };
   };
   const reportListRead = (comps) => {
     if (listGateRef.current) listGateRef.current.applied(readSeqOf(comps));
+    else listSeedRef.current = readSeqOf(comps);
   };
   // Bumped by the Edit Tournament page's Reload, which remounts it from the
   // current settings after a save was refused as stale (tournament_changed).
@@ -956,6 +966,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       });
       detailGateRef.current = { compId, gate: detailGate };
       listGateRef.current = listGate;
+      listGate.applied(listSeedRef.current);
+      if (detailSeedRef.current.compId === compId) detailGate.applied(detailSeedRef.current.seq);
       const refetchDetail = (seq) => detailGate.event(seq);
       const scheduleTournamentRefresh = (needsTournament, seq) => {
         if (needsTournament) {
@@ -1054,6 +1066,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       return () => {
         cancelled = true;
         timerPool.clearAll();
+        listSeedRef.current = listGate.appliedSeq();
+        detailSeedRef.current = { compId, seq: detailGate.appliedSeq() };
         detailGate.dispose();
         listGate.dispose();
         if (detailGateRef.current && detailGateRef.current.gate === detailGate) detailGateRef.current = null;

@@ -57,20 +57,22 @@ afterAll(() => {
 
 // mount opens the competition page; its first detail read answers at `seq`.
 // Each test mounts its own: the render cleanup unmounts it after the test.
+const adminElement = (id) => (
+  <AdminApp
+    tournament={{ name: 'Cup', courts: ['A'], competitions: [{ ...config }] }}
+    onUpdate={vi.fn()} onLogout={vi.fn()} onViewerMode={vi.fn()} onPasswordChange={vi.fn()}
+    tweaks={{}} password="pw" view={{ kind: 'competition', id, section: 'overview' }} setView={vi.fn()}
+    showToast={vi.fn()} authConfig={{}}
+  />
+);
+
 async function mount(seq) {
   head.detail = seq;
   head.competitions = seq;
-  await act(async () => {
-    render(
-      <AdminApp
-        tournament={{ name: 'Cup', courts: ['A'], competitions: [{ ...config }] }}
-        onUpdate={vi.fn()} onLogout={vi.fn()} onViewerMode={vi.fn()} onPasswordChange={vi.fn()}
-        tweaks={{}} password="pw" view={{ kind: 'competition', id: 'c1', section: 'overview' }} setView={vi.fn()}
-        showToast={vi.fn()} authConfig={{}}
-      />,
-    );
-  });
+  let view;
+  await act(async () => { view = render(adminElement('c1')); });
   await pastWindow();
+  return view;
 }
 
 describe('the admin competition page fetches once per burst (bc-sseq FR4)', () => {
@@ -134,6 +136,24 @@ describe('the admin competition page fetches once per burst (bc-sseq FR4)', () =
     await emit(tap(1, ['M']));
     await pastWindow();
     expect(details(), 'an event the old 20 would have called covered').toBe(before + 2);
+  });
+
+  it('a competition opened again starts from the list seq the page already held', async () => {
+    const first = await mount(20);
+    head.detail = 25;
+    head.competitions = 25;
+    await emit(tap(25, ['M']));
+    await pastWindow();
+    // Another competition is opened and this one again: the page is the same
+    // and holds the list read, so the new list gate starts at 25.
+    await act(async () => { first.rerender(adminElement('c2')); });
+    await pastWindow();
+    await act(async () => { first.rerender(adminElement('c1')); });
+    await pastWindow();
+    const beforeLists = lists();
+    await emit(tap(24, ['M', 'K']));
+    await pastWindow();
+    expect(lists(), 'no tournament refresh for an event the page holds').toBe(beforeLists);
   });
 
   it('tournament_updated reads the tournament whatever the seqs say', async () => {

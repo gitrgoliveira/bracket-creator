@@ -259,8 +259,8 @@ func (s *Store) SaveCourtControl(c CourtControl, listed []string) error {
 
 // ClearCourtControl removes court-control.json, freeing every shiaijo and
 // forgetting both displaced lists: the whole tournament was replaced (a new
-// tournament, an import, a full restore), and its shiaijo letters repeat. A
-// file already gone is no error.
+// tournament, a full restore), and its shiaijo letters repeat. A file
+// already gone is no error.
 func (s *Store) ClearCourtControl() error {
 	courtControlMu.Lock()
 	defer courtControlMu.Unlock()

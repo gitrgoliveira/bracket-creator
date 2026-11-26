@@ -1029,7 +1029,8 @@ paths:
         via a multipart form upload. The server accepts files under any field name(s).
         One of the uploaded files must be named `manifest.yaml` (or `.yml`); it declares
         which competitions to create and which participant/seed CSV files to associate with each.
-        When at least one competition row lands, every shiaijo is freed (see
+        An import only adds competitions next to the existing ones, so it
+        leaves who runs each shiaijo alone (see
         `/api/courts/{court}/control`).
 
         Each competition row is validated against the same rules
@@ -2075,8 +2076,9 @@ paths:
       description: |
         A court console's claim of the shiaijo it shows. One tab runs each
         shiaijo (the green bar), and the server tracks the tablet that tab is
-        on and when its standing started (the score and decision endpoints do
-        not check court standing on writes yet).
+        on and when its standing started (the score and decision endpoints
+        judge a write by it: see `courtControl` on
+        `/api/competitions/{id}/matches/{mid}/score`).
 
         - A shiaijo nobody runs is taken at once, unless this tab or this
           tablet lost it earlier by a take: then only `take: true` takes it.
@@ -2118,8 +2120,8 @@ paths:
                   description: >
                     The tablet's id, a lowercase UUID v4 shared by every tab of
                     the browser. Used to tell tabs of one tablet apart from
-                    another tablet; the score and decision endpoints do not
-                    judge court standing by it yet.
+                    another tablet; the score and decision endpoints judge
+                    court standing by it.
                 take:
                   type: boolean
                   description: Take control from whoever runs the shiaijo.

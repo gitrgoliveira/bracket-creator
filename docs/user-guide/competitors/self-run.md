@@ -14,7 +14,7 @@ When the tournament is self-run, a public self-registration page is open for ind
 </figure>
 
 !!! note
-    Self-registration is not available for team competitions; the organiser adds the team roster directly. In an officiated tournament, the registration page is not available at all, and the organiser adds you to the competition directly.
+    Self-registration is not available for team competitions; the organiser adds the team roster directly. While a team competition is still in setup, its card on the public home has no Register button and says "Teams are entered by the tournament organizer." instead. If you open the registration link of a team competition anyway, the page says the same and tells you to ask the organiser to add your team. In an officiated tournament, the registration page is not available at all, and the organiser adds you to the competition directly.
 
 If the form says someone with your name is already registered, your name and dojo are already on the list and you are done. A namesake from another dojo registers normally. If you are a different person with the same name at the same dojo, ask the organiser to add you.
 
@@ -51,11 +51,17 @@ Your device may fail to send a result you entered, because there is no connectio
 - An item the server keeps refusing has a Discard button. After you confirm, that item alone is discarded. You can then check the match and enter the result again if it is still needed.
 - An item that is only waiting for the connection cannot be discarded; it is sent automatically when the connection returns.
 
+While a finished result is waiting on your phone, the match card says so: "Result entered on this phone, not sent yet. It is sent when the connection returns." While the phone is sending it, the line says it is being sent. The card does not offer **Report result** then, so you cannot enter the same result a second time over your own. If the server has been refusing it, the line says that the server has not accepted it and that the phone is still trying. If it is waiting for another entry from your phone that is not sent yet, the line says that instead. Once the result has been sent, or discarded, the card goes back to what the server holds.
+
+## If your result is refused
+
+The server can refuse a result you entered for good, for example because someone on another device finished the same match first: the server keeps the first result recorded, so yours is not applied. Unlike a result the server keeps refusing (refer to [If your result cannot be sent](#if-your-result-cannot-be-sent)), it is not tried again. A refusal is told once, in a message at the bottom of the screen that names the match and gives the reason, for instance that the match result has already been reported and the organiser can correct it. The message is also shown when your phone was offline when you entered the result and the refusal only comes back once the connection returns. When the match had already finished, any scoring taps you made in it are not listed separately: the one message covers the match. The refused result does not stay on the device, so it leaves the list of unsent results and nothing in it needs discarding. Check the match card to see the result that stands, and ask the organiser if it needs correcting.
+
 ## Follow your matches and standings
 
 To track your progress, view the draw, and see standings, refer to [Following a tournament](../spectators/following.md).
 
 <figure class="bc-fig" markdown="span">
-  ![The public home on a phone: the tournament header, a watchlist, the schedule, and a competition card with a Register for this competition button.](../../screenshots/selfrun-viewer-home.png){ .bc-phone }
-  <figcaption>The public home in self-run mode: each open competition carries a Register button.</figcaption>
+  ![The public home on a phone: the tournament header, a watchlist, the schedule, individual competition cards with a Register for this competition button, and a team competition card that says teams are entered by the tournament organizer.](../../screenshots/selfrun-viewer-home.png){ .bc-phone }
+  <figcaption>The public home in self-run mode: each open individual competition carries a Register button, and a team competition says the organiser enters teams.</figcaption>
 </figure>

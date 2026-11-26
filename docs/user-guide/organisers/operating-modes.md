@@ -14,7 +14,7 @@ Only an officiated tournament can hide competitor names from the public pages, b
 
 ### Self-run mode
 
-In self-run mode, scoring and starting a competition are open to anyone without a password. Competitors or table helpers can run and score their own matches. Completing a competition needs no password either: in self-run mode the server accepts it from anyone. The **Complete competition** button is on the organiser's competition page, which you reach by signing in. A public self-registration page also becomes available for competitors to sign themselves up. It serves individual competitions only, and only while the competition is still in setup, before the draw is generated.
+In self-run mode, scoring and starting a competition are open to anyone without a password. Competitors or table helpers can run and score their own matches. Completing a competition needs no password either: in self-run mode the server accepts it from anyone. The **Complete competition** button is on the organiser's competition page, which you reach by signing in. A public self-registration page also becomes available for competitors to sign themselves up. It serves individual competitions only, and only while the competition is still in setup, before the draw is generated. A team competition has no public registration. While it is in setup, its card on the public home says "Teams are entered by the tournament organizer." in place of the Register button, and you add the teams yourself.
 
 Organiser actions stay behind the admin password in self-run mode:
 

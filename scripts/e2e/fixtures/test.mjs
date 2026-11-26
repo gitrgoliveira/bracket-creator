@@ -91,6 +91,12 @@ const CONSOLE_ALLOWLIST = [
     url: /\/dist\/(?:[0-9a-f]+\/)?app\.jsx?$/,
     whileOffline: true,
   },
+  {
+    reason: 'A public page logs its tournament refetch failing while the journey has the phone offline (the self-run offline journeys; the refetch gate\'s onError in app.jsx, which keeps the last good data); it refetches again once back online.',
+    text: /^Tournament refresh failed: TypeError: Failed to fetch\b/,
+    url: /\/dist\/(?:[0-9a-f]+\/)?app\.jsx?$/,
+    whileOffline: true,
+  },
   // The self-run public journey (self-run-public.public.spec.mjs) makes these
   // refusals on purpose. A refused tap is a 200 per event and logs nothing.
   {

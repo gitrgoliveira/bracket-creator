@@ -30,6 +30,7 @@ const STUBBED_GLOBALS = {
     fetchCompetitions: vi.fn(async () => withSeq([{ ...config }], head.competitions)),
     fetchTournament: vi.fn(async () => withSeq({ name: 'Cup', courts: ['A'] }, head.competitions)),
     fetchCompetitionDetails: vi.fn(async () => detail()),
+    recordScore: vi.fn(async () => ({ applied: true })),
   },
 };
 
@@ -99,6 +100,20 @@ describe('the admin competition page fetches once per burst (bc-sseq FR4)', () =
     expect(lists(), 'one tournament refresh for the burst of five').toBe(beforeLists + 1);
     await pastWindow();
     expect(details(), 'and no second one').toBe(before + 1);
+  });
+
+  it('the refresh after a score write tells the list gate what it read, so the write\'s own event refetches no list', async () => {
+    await mount(20);
+    head.competitions = 30;
+    await act(async () => {
+      await probe.props.onEditScore('c1', 'Pool A-0', { id: 'Pool A-0', status: 'running', court: 'A', ipponsA: ['M'], ipponsB: [] }, running([]));
+    });
+    expect(window.API.recordScore).toHaveBeenCalled();
+    const beforeLists = lists();
+    // The write's own match_updated arrives after the refresh that read it.
+    await emit(tap(30, ['M']));
+    await pastWindow();
+    expect(lists(), 'the refresh already held the event').toBe(beforeLists);
   });
 
   it('a Reload outside the events tells the gate what it read', async () => {

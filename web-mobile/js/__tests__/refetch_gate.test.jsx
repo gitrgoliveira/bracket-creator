@@ -570,6 +570,17 @@ describe('createRefetchGate', () => {
     expect(h.timers).toHaveLength(1);
   });
 
+  it('pending: true while a refetch is scheduled or out, false when idle, so a host can hand an owed read on', async () => {
+    const h = harness();
+    expect(h.gate.pending()).toBe(false);
+    h.gate.event(1);
+    expect(h.gate.pending()).toBe(true); // scheduled
+    h.fireTimers();
+    expect(h.gate.pending()).toBe(true); // out
+    await h.answer(answerAt(1));
+    expect(h.gate.pending()).toBe(false);
+  });
+
   it('dispose: an answer landing after it is not applied and asks for nothing more', async () => {
     const h = harness();
     h.gate.event(1);

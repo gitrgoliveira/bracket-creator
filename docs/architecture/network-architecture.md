@@ -470,9 +470,8 @@ for per-tier audience guidance (for example, GCP free tier compared with Oracle 
 ### What one point costs on the wire
 
 A point is announced by one small `match_updated` event, but a page that hears it fetches the
-competition (or the list) again, and that answer is far larger than the event. The test
-`internal/mobileapp/sync_bytes_measure_test.go` records one point through the real router and
-counts the bytes. The tournament it seeds is small: two competitions of 12 competitors each, a full
+competition (or the list) again, and that answer is far larger than the event. Recording one point
+through the real router and counting the bytes gives the figures below. The tournament measured is small: two competitions of 12 competitors each, a full
 round robin of 66 bouts apiece, so a real event is larger.
 
 | What is sent | Bytes as sent | Bytes gzipped |
@@ -484,7 +483,7 @@ round robin of 66 bouts apiece, so a real event is larger.
 Every `/api` answer over 1 KiB that is JSON is gzipped for a browser that accepts it, so the saving
 applies to each refetch. The embedded page files are not compressed, so a first load is unchanged.
 Compressing the largest list answer (317 KB of JSON, which becomes 41 KB) takes about 0.6 ms on a
-laptop-class core (`BenchmarkCompressViewerList`), and the shared builds compress once for every
+laptop-class core, and the shared builds compress once for every
 viewer waiting on them, so a crowd does not multiply that cost.
 
 One point, with every viewer fetching both the competition and the list again:
@@ -510,8 +509,7 @@ holding (it gathers a running match's points for up to 250 ms) go out before the
 number, so the read covers it too. The pushed scores themselves show at once, without waiting.
 
 Five points scored in quick succession on a competition the viewer has open cause one fetch of the
-competition instead of five (the render test `app_refetch_once_per_burst.render.test.jsx` counts
-it). Using the competition refetch measured above:
+competition instead of five. Using the competition refetch measured above:
 
 | Viewers | Five fetches, as sent | One fetch, as sent | Five fetches, gzipped | One fetch, gzipped |
 |---|---|---|---|---|

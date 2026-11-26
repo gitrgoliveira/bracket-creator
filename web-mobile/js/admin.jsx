@@ -340,6 +340,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       const comps = await window.API.fetchCompetitions({ bounded: true });
       if (!mountedRef.current) return;
       onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
+      reportListRead(comps);
     } catch (e) {
       console.warn(`refresh after ${actionLabel} failed (action did succeed):`, e);
       const toast = refreshFailureToast(actionLabel, e);

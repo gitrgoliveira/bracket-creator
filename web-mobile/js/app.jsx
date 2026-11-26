@@ -953,6 +953,7 @@ function App() {
   // made and hands its applied seq back as it goes, so its first event never
   // fetches what the page holds already.
   const listSeedRef = useRef(0);
+  const listReadOwedRef = useRef(false);
   const detailSeedRef = useRef({ compId: null, seq: 0 });
 
   // fetchList reads the tournament and its competitions and answers the
@@ -1401,6 +1402,13 @@ function App() {
     listGateRef.current = listGate;
     detailGateRef.current = detailGate ? { compId: viewerCompId, gate: detailGate } : null;
     listGate.seed(listSeedRef.current);
+    // A list read the last effect still owed (out or waiting when the viewer
+    // moved on) is asked for again here: the list does not depend on the
+    // competition shown, so its read must not be lost to a navigation.
+    if (listReadOwedRef.current) {
+        listReadOwedRef.current = false;
+        listGate.now();
+    }
     if (detailGate && detailSeedRef.current.compId === viewerCompId) detailGate.seed(detailSeedRef.current.seq);
 
     // The pace tick's refetch: on a competition page the tournament list is
@@ -1714,6 +1722,7 @@ function App() {
         if (detailGate) detailSeedRef.current = { compId: viewerCompId, seq: detailGate.appliedSeq() };
         // A fetch still out must not show its answer, or send another, once
         // this effect is over (the competition may have changed).
+        listReadOwedRef.current = listGate.pending();
         listGate.dispose();
         if (detailGate) detailGate.dispose();
         if (listGateRef.current === listGate) listGateRef.current = null;

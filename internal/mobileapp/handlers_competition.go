@@ -2905,8 +2905,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
-
 		// A pools competition that generated zero matches (e.g. single
 		// participant) has nothing to score, so trip the auto-complete check
 		// at start time. The non-zero case will trip via score handlers.
@@ -2916,6 +2914,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// tie-breaker) is followed by its event here too, not only the
 		// completion; its error arm sets the same sanitized header.
 		outcome, acErr := eng.MaybeAutoCompletePools(id)
+		// competition_started goes out once: a knockout the pass just seeded
+		// is announced by answerAutoComplete itself.
+		if outcome != engine.AutoCompleteKnockoutStarted || acErr != nil {
+			hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
+		}
 		answerAutoComplete(c, hub, id, outcome, acErr)
 		if acErr == nil {
 			// Reflect what the pass did in the response body so the caller doesn't

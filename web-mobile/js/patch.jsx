@@ -482,6 +482,9 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
         dispose() { disposed = true; },
         // appliedSeq: the seq the gate counts as applied (tests and logs).
         appliedSeq() { return applied; },
+        // pending: a refetch is scheduled, asked for again, or out. A host
+        // that ends a gate read this first, to hand the read on to the next.
+        pending() { return wanted.scheduled || wanted.again || flight !== null; },
     };
 }
 

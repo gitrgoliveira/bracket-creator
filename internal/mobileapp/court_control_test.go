@@ -555,9 +555,28 @@ func holderOfA(t *testing.T, rig *backupTestRig) string {
 	return decodeCourtAnswer(t, courtControlReq(t, rig.r, http.MethodGet, "A", backupTestPassword, nil)).HolderKey
 }
 
+// A first tournament replaces nothing the app still holds, but shiaijo letters
+// repeat, so a holder left over from an earlier tournament is freed.
 func TestCourtControl_ANewTournamentFreesEveryShiaijo(t *testing.T) {
 	rig := newBackupRig(t)
 	claimA(t, rig)
+	require.NoError(t, os.Remove(filepath.Join(rig.dir, "tournament.md")))
+	w := httptest.NewRecorder()
+	req := jsonReq(http.MethodPost, "/api/tournament", ccBody{
+		"name": "Next Taikai", "date": "02-06-2026", "venue": "Dojo", "courts": []string{"A"}, "password": backupTestPassword,
+	})
+	rig.r.ServeHTTP(w, req)
+	require.Less(t, w.Code, 300, w.Body.String())
+	assert.Empty(t, holderOfA(t, rig), "the new tournament's shiaijo A is run by nobody")
+}
+
+// A re-POST over a stored tournament keeps its mode, password, pauses and every
+// competition, so the matches are still on their courts and nobody loses one.
+func TestCourtControl_ARePostedTournamentLeavesEveryShiaijoHeld(t *testing.T) {
+	rig := newBackupRig(t)
+	claimA(t, rig)
+	held := holderOfA(t, rig)
+	require.NotEmpty(t, held)
 	w := httptest.NewRecorder()
 	req := jsonReq(http.MethodPost, "/api/tournament", ccBody{
 		"name": "Next Taikai", "date": "02-06-2026", "venue": "Dojo", "courts": []string{"A"}, "password": backupTestPassword,
@@ -565,7 +584,7 @@ func TestCourtControl_ANewTournamentFreesEveryShiaijo(t *testing.T) {
 	req.Header.Set("X-Tournament-Password", backupTestPassword)
 	rig.r.ServeHTTP(w, req)
 	require.Less(t, w.Code, 300, w.Body.String())
-	assert.Empty(t, holderOfA(t, rig), "the new tournament's shiaijo A is run by nobody")
+	assert.Equal(t, held, holderOfA(t, rig), "the re-POST frees no shiaijo")
 }
 
 // An import only adds competitions next to the existing ones (a duplicate id is

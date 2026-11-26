@@ -97,6 +97,12 @@ const CONSOLE_ALLOWLIST = [
     url: /\/dist\/(?:[0-9a-f]+\/)?app\.jsx?$/,
     whileOffline: true,
   },
+  {
+    reason: 'A competition page logs its refetch gates failing while the journey has the tablet offline (concurrent-taps case i, the Scores page finishing offline; the onError of the details and list gates in admin.jsx, which keep the last good data); they refetch again once back online.',
+    text: /^Failed to refresh competition(?:s| details) TypeError: Failed to fetch\b/,
+    url: /\/dist\/(?:[0-9a-f]+\/)?admin\.jsx?$/,
+    whileOffline: true,
+  },
   // The self-run public journey (self-run-public.public.spec.mjs) makes these
   // refusals on purpose. A refused tap is a 200 per event and logs nothing.
   {

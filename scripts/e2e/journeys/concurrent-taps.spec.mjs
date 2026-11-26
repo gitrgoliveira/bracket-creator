@@ -74,8 +74,8 @@ import { createTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import { editorIdentity, inlineEditor, openShiaijo, sides, startUpNext, upNextCard } from '../fixtures/shiaijo.mjs';
-import { EDITOR, INLINE_EDITOR, armFinish, ipponButton, running, settled, unsentCount } from '../fixtures/scoring.mjs';
-import { openRunningScoreEditor } from '../fixtures/scores.mjs';
+import { EDITOR, INLINE_EDITOR, armFinish, finishMatch, ipponButton, running, settled, unsentCount } from '../fixtures/scoring.mjs';
+import { openRunningScoreEditor, scoreRows } from '../fixtures/scores.mjs';
 import { OTHER_DEVICE_TEXT, HOLDS_TEXT, awaitControl, controlState, controlText, takeControl } from '../fixtures/court-control.mjs';
 import { toastText } from '../fixtures/roster.mjs';
 import { editorSides, inlineRunning, rosterOf, slotMarks } from '../fixtures/individual.mjs';
@@ -588,6 +588,77 @@ test.describe('concurrent taps from two devices', () => {
       record({ journey: JOURNEY, case: 'h second console', watching, asked });
     } finally {
       await ctx3.close();
+      await ops.close();
+    }
+  });
+
+  // FR6.3. The device that finishes offline is device 2, the Scores page, and
+  // the one that finishes online is device 1, the court's tablet. Not the other
+  // way round: the court console that runs the shiaijo is the court's
+  // authoritative operator, and its result counts over another device's
+  // (FR8), so an offline finish made there would be recorded on its return,
+  // not turned away. Device 2's result is an ordinary one, stamped before the
+  // court's and arriving after it, so the server holds it (superseded,
+  // court_result) and answers with the match as stored. An offline Finish
+  // closes the overlay at once (writePending), so device 2 opens the match
+  // again while still offline, and its editor is open on the match, showing
+  // device 2's own result, when the refusal lands.
+  test('i an offline finish turned away on its return: the open editor shows the court\'s result with the not-saved note in one go', async ({ browser, baseURL }) => {
+    const ops = await twoDevices(browser, baseURL, 'A', ids.individual);
+    try {
+      const { d1, d2, ctx2 } = ops;
+      if (!(await inlineRunning(d1))) await startUpNext(d1);
+      await expect.poll(() => inlineRunning(d1)).toBe(true);
+      await ops.openD2();
+      await sameMatchOnBoth(d1, d2);
+      const pair = await editorSides(d2, ROOT.d2);
+      for (const [name, d, root] of both(d1, d2)) {
+        expect(await slotMarks(d, 'shiro', root), `${name}: the bout starts with no points for Shiro`).toEqual([]);
+        expect(await slotMarks(d, 'aka', root), `${name}: and none for Aka`).toEqual([]);
+      }
+      const ed2 = d2.locator(ROOT.d2).first();
+      const note = ed2.locator('.pending-write-banner--failed');
+      const row = scoreRows(d2).filter({ hasText: pair.shiro }).filter({ hasText: pair.aka }).first();
+
+      await ctx2.setOffline(true);
+      try {
+        // Device 2, offline, scores Shiro and finishes: the overlay closes on
+        // the queued Finish, and the row shows Shiro's win at once.
+        await tapOnSide(d2, 'shiro', ipponButton(d2, 'shiro', 'M', ROOT.d2));
+        await expect.poll(() => slotMarks(d2, 'shiro', ROOT.d2)).toEqual(['M']);
+        await (await armFinish(d2, ROOT.d2)).tap();
+        await expect(d2.locator(ROOT.d2), 'the overlay closes on an offline Finish').toHaveCount(0);
+        // Still offline, device 2 opens the match again from its row.
+        await row.getByRole('button', { name: /^(Score|Correct)$/ }).tap();
+        await expect(ed2).toBeVisible();
+        await expect.poll(() => slotMarks(d2, 'shiro', ROOT.d2), { message: 'device 2\'s editor shows its own result' }).toEqual(['M']);
+        await expect(note, 'nothing has been turned away yet').toHaveCount(0);
+        await shot(d2, 'i-device-2-offline-finished');
+
+        // Device 1, the court, online, scores Aka and finishes.
+        await tapOnSide(d1, 'aka', ipponButton(d1, 'aka', 'M'));
+        await expect.poll(() => slotMarks(d1, 'aka')).toEqual(['M']);
+        await finishMatch(d1);
+      } finally {
+        await ctx2.setOffline(false);
+      }
+
+      // Back online: device 2's Finish is turned away, and the editor still
+      // open on the match shows the court's result beside the note, without
+      // being opened again. Read together, so the two are seen at one moment.
+      const shown = async () => ({
+        note: (await note.count()) ? (await note.first().innerText()).replace(/\s+/g, ' ').trim() : '',
+        shiro: await slotMarks(d2, 'shiro', ROOT.d2),
+        aka: await slotMarks(d2, 'aka', ROOT.d2),
+      });
+      await expect.poll(shown, { message: 'device 2\'s editor shows the note and the court\'s result together', timeout: 30_000 })
+        .toEqual({ note: expect.stringMatching(/^Not applied: the court running shiaijo A recorded a different result for this match\./), shiro: [], aka: ['M'] });
+      await expect(ed2, 'the same editor stayed open').toBeVisible();
+      await expect(note).toHaveAttribute('role', 'alert');
+      const told = await shown();
+      await shot(d2, 'i-device-2-refused-shows-court-result');
+      record({ journey: JOURNEY, case: 'i offline finish turned away', pair, told });
+    } finally {
       await ops.close();
     }
   });

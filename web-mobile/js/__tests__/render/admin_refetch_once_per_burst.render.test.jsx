@@ -169,6 +169,29 @@ describe('the admin competition page fetches once per burst (bc-sseq FR4)', () =
     expect(window.API.fetchTournament.mock.calls.length, 'the settings are read').toBe(before + 1);
   });
 
+  it('a settings change is shown even when the list was read at a higher seq than the settings answer', async () => {
+    const onUpdate = vi.fn();
+    await act(async () => {
+      render(<AdminApp
+        tournament={{ name: 'Cup', courts: ['A'], competitions: [{ ...config }] }}
+        onUpdate={onUpdate} onLogout={vi.fn()} onViewerMode={vi.fn()} onPasswordChange={vi.fn()}
+        tweaks={{}} password="pw" view={{ kind: 'competition', id: 'c1', section: 'overview' }} setView={vi.fn()}
+        showToast={vi.fn()} authConfig={{}}
+      />);
+    });
+    await pastWindow();
+    // The list is read at 40 and shown. The settings answer names a lower seq
+    // (a read begun earlier): the competitions read's seq must not cover it.
+    head.competitions = 40;
+    await emit(tap(21, ['M']));
+    await pastWindow();
+    window.API.fetchTournament.mockImplementationOnce(async () => withSeq({ name: 'Renamed Cup', courts: ['A', 'B'] }, 10));
+    onUpdate.mockClear();
+    await emit({ type: 'tournament_updated', seq: 22, data: null });
+    await pastWindow();
+    expect(onUpdate.mock.calls.some(([next]) => next && next.name === 'Renamed Cup'), 'the new settings are shown').toBe(true);
+  });
+
   it('a tournament_updated event counts as seen: an answer built before it is read once more', async () => {
     await mount(20);
     const beforeLists = lists();

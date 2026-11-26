@@ -2,7 +2,7 @@
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
 import { applyPatch as patchCompetitionData, applyPatchToCompetitions, checkSeqGap, createPushLedger, createRefetchGate, matchInComp } from './patch.jsx';
-import { holdReadSeq, readSeqOf } from './read_seq.jsx';
+import { readSeqOf } from './read_seq.jsx';
 import { makeReconnectRefetcher } from './admin_shiaijo_feed.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 // Imported from the leaf, not read off `window`: write_result.jsx is
@@ -934,39 +934,39 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // event. Only one is out at a time (the gate), so an event arriving
       // while it is out can't kick off a second concurrent fetch that might
       // resolve out-of-order and clobber fresher data.
-      // Tracks whether any event in the coalesced burst needs the tournament
-      // config refetched (name/date/venue/courts). Match-level events only
-      // need the competitions list; tournament_updated needs both, and asks
-      // whatever the seqs say (a competitions read's seq says nothing of the
-      // config).
-      let pendingNeedsTournamentFetch = false;
+      // Each gate holds ONE kind of read, so its applied seq covers one kind
+      // of payload: a competitions read (out-of-gate ones included, see
+      // reportListRead) says nothing of the tournament settings, so the
+      // settings (name/date/venue/courts, announced by tournament_updated)
+      // have a gate of their own. tRef moves with each apply, so the two
+      // answers landing in one tick both stand.
       const listGate = createRefetchGate({
         schedule: timerPool.schedule,
-        fetch: () => {
-          const fetchTournament = pendingNeedsTournamentFetch;
-          pendingNeedsTournamentFetch = false;
-          const work = fetchTournament
-            ? Promise.all([window.API.fetchTournament(), window.API.fetchCompetitions()])
-                .then(([tourney, comps]) => ({ tourney, comps }))
-            : window.API.fetchCompetitions().then(comps => ({ tourney: null, comps }));
-          return work.then(({ tourney, comps }) => (
-            // Both reads are joined: covered only up to the lower seq.
-            holdReadSeq({ tourney, comps }, tourney ? Math.min(readSeqOf(tourney), readSeqOf(comps)) : readSeqOf(comps))
-          ), (err) => {
-            // A config that was asked for and not read is asked for again.
-            if (fetchTournament) pendingNeedsTournamentFetch = true;
-            throw err;
-          });
-        },
+        fetch: () => window.API.fetchCompetitions(),
         // The gate shows what it read, so it can leave an older answer than a
         // read the page already shows unshown.
-        take: () => ({ tourney, comps }) => {
-          const base = tourney || tRef.current;
-          onUpdateRef.current({ ...base, competitions: comps });
+        take: () => (comps) => {
+          const next = { ...tRef.current, competitions: comps };
+          tRef.current = next;
+          onUpdateRef.current(next);
         },
         maxDelayMs: 1500,
         random: () => Math.random(),
-        onError: (err) => console.error("Failed to refresh tournament/competitions", err),
+        onError: (err) => console.error("Failed to refresh competitions", err),
+      });
+      const settingsGate = createRefetchGate({
+        schedule: timerPool.schedule,
+        fetch: () => window.API.fetchTournament(),
+        take: () => (tourney) => {
+          // No tournament configured (null): nothing to show.
+          if (!tourney) return;
+          const next = { ...tourney, competitions: (tRef.current && tRef.current.competitions) || [] };
+          tRef.current = next;
+          onUpdateRef.current(next);
+        },
+        maxDelayMs: 1500,
+        random: () => Math.random(),
+        onError: (err) => console.error("Failed to refresh tournament settings", err),
       });
       detailGateRef.current = { compId, gate: detailGate };
       listGateRef.current = listGate;
@@ -974,12 +974,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       if (detailSeedRef.current.compId === compId) detailGate.seed(detailSeedRef.current.seq);
       const refetchDetail = (seq) => detailGate.event(seq);
       const scheduleTournamentRefresh = (needsTournament, seq) => {
-        if (needsTournament) {
-          pendingNeedsTournamentFetch = true;
-          listGate.now(seq);
-        } else {
-          listGate.event(seq);
-        }
+        if (needsTournament) settingsGate.event(seq);
+        listGate.event(seq);
       };
       // F6b: per-subscription seq tracker, reset on each effect run.
       const sseSeq = { lastSeq: 0 };
@@ -1074,6 +1070,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         detailSeedRef.current = { compId, seq: detailGate.appliedSeq() };
         detailGate.dispose();
         listGate.dispose();
+        settingsGate.dispose();
         if (detailGateRef.current && detailGateRef.current.gate === detailGate) detailGateRef.current = null;
         if (listGateRef.current === listGate) listGateRef.current = null;
         document.removeEventListener('visibilitychange', onVisibilityChange);

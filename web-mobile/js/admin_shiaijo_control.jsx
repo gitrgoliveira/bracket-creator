@@ -90,7 +90,7 @@ export function courtControlBar(view, court, { now = serverNowMs(), checked = tr
         const active = lastActivePhrase(view.holderLastActiveAt, now);
         return {
             tone: 'other',
-            text: `Shiaijo ${c} is run from another tab on this tablet${active ? ` (${active})` : ''}.`,
+            text: `Shiaijo ${c} is run from another tab on this tablet${active ? ` (${active})` : ''}. Results this tablet has queued still count as the court's.`,
             take: true,
             ask: `The other tab on this tablet will stop running shiaijo ${c}. Take control?`,
         };

@@ -123,8 +123,7 @@ describe('the mark under the top bar', () => {
     const c = await mount();
     try {
       expect(bar(c).querySelector('.shiaijo-control__text').textContent)
-        .toBe('Shiaijo A is run from another tab on this tablet (last active 2 min ago).');
-      expect(bar(c).textContent).not.toContain('still count');
+        .toBe("Shiaijo A is run from another tab on this tablet (last active 2 min ago). Results this tablet has queued still count as the court's.");
       expect(bar(c).className).toContain('shiaijo-control--other');
       await act(async () => { within(bar(c)).getByRole('button', { name: 'Take control' }).click(); });
       expect(c.utils.getByTestId('take-control-ask').textContent)

@@ -11,9 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // Court control ids: lowercase UUID v4s, as a court console mints them.
@@ -270,6 +272,47 @@ func TestCourtControl_ClaimingAnotherShiaijoReleasesTheFirst(t *testing.T) {
 	assert.Equal(t, "B", rig.rec.events[2].Court)
 }
 
+func TestCourtControl_ClaimingAnotherShiaijoKeepsListedShiaijoHeld(t *testing.T) {
+	rig := newCourtRig(t)
+	rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+
+	b, err := rig.reg.Claim(CourtClaim{
+		Court: "B", TabID: ccTab1, DeviceID: ccTablet1, PageID: ccPage1, Device: "ipad", Keep: []string{"A"},
+	})
+	require.NoError(t, err)
+	assert.True(t, b.YouHold)
+	assert.True(t, rig.stored(t, "A").Held(), "shiaijo listed in keep stays held")
+	assert.Equal(t, state.CourtControlKey(ccTab1), rig.stored(t, "A").HolderKey)
+	require.Len(t, rig.rec.events, 2, "no freed event for A")
+	assert.Equal(t, "A", rig.rec.events[0].Court)
+	assert.Equal(t, "B", rig.rec.events[1].Court)
+
+	other := rig.claim(t, "A", ccTab2, ccTablet2, ccPage2, false, 0)
+	assert.False(t, other.YouHold, "another tablet sees A held, not free")
+	assert.Equal(t, state.CourtControlKey(ccTab1), other.HolderKey)
+}
+
+func TestCourtControl_KeepIgnoresShiaijoTheTabDoesNotHold(t *testing.T) {
+	rig := newCourtRig(t)
+	rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+	b, err := rig.reg.Claim(CourtClaim{
+		Court: "B", TabID: ccTab1, DeviceID: ccTablet1, PageID: ccPage1, Device: "ipad", Keep: []string{"Z"},
+	})
+	require.NoError(t, err)
+	assert.True(t, b.YouHold)
+	assert.False(t, rig.stored(t, "A").Held(), "A is not in keep, so it is freed")
+	assert.False(t, rig.stored(t, "Z").Held(), "unlisted shiaijo in keep is ignored")
+
+	rig2 := newCourtRig(t)
+	rig2.claim(t, "A", ccTab2, ccTablet2, ccPage2, false, 0)
+	b2, err := rig2.reg.Claim(CourtClaim{
+		Court: "B", TabID: ccTab1, DeviceID: ccTablet1, PageID: ccPage1, Device: "ipad", Keep: []string{"A"},
+	})
+	require.NoError(t, err)
+	assert.True(t, b2.YouHold)
+	assert.Equal(t, state.CourtControlKey(ccTab2), rig2.stored(t, "A").HolderKey, "keep ignores a shiaijo held by another tab")
+}
+
 func TestCourtControl_ATabletThatLostItTakesItBackOnlyByATake(t *testing.T) {
 	rig := newCourtRig(t)
 	rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
@@ -421,6 +464,22 @@ func TestCourtControl_AWriteClaimsAFreeShiaijo(t *testing.T) {
 	}
 }
 
+func TestCourtControl_AWriteFromATabHoldingAnotherShiaijoLeavesFreeShiaijoFree(t *testing.T) {
+	rig := newCourtRig(t)
+	rig.claim(t, "B", ccTab1, ccTablet1, ccPage1, false, 0)
+	require.Len(t, rig.rec.events, 1)
+
+	assert.True(t, rig.standing(t, "A", ccTab1, ccTablet1, 1), "write still has court standing")
+	lookA, err := rig.reg.Look("A")
+	require.NoError(t, err)
+	assert.Empty(t, lookA.HolderKey, "free shiaijo stays free when tab holds another shiaijo")
+	assert.False(t, rig.stored(t, "A").Held(), "no orphan hold is saved")
+	lookB, err := rig.reg.Look("B")
+	require.NoError(t, err)
+	assert.Equal(t, state.CourtControlKey(ccTab1), lookB.HolderKey, "the tab keeps its held shiaijo")
+	assert.Len(t, rig.rec.events, 1, "nothing is broadcast for A")
+}
+
 func TestCourtControl_ARestartKeepsWhoRunsEachShiaijo(t *testing.T) {
 	rig := newCourtRig(t)
 	rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
@@ -458,6 +517,7 @@ func TestCourtControl_Refusals(t *testing.T) {
 		"no page load":        {Court: "A", TabID: ccTab1, DeviceID: ccTablet1},
 		"an upper-case id":    {Court: "A", TabID: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", DeviceID: ccTablet1, PageID: ccPage1},
 		"a take with no time": {Court: "A", TabID: ccTab1, DeviceID: ccTablet1, PageID: ccPage1, Take: true},
+		"more than 16 keep":   {Court: "A", TabID: ccTab1, DeviceID: ccTablet1, PageID: ccPage1, Keep: make([]string, helper.MaxCourts+1)},
 	} {
 		_, err := rig.reg.Claim(req)
 		assert.ErrorIs(t, err, errCourtControlBadRequest, name)
@@ -535,6 +595,38 @@ func TestCourtControlRoutes_ClaimTakeReleaseAndRefusals(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
 		w := courtControlReq(t, rig.r, method, "A", "", ccBody{"tabId": ccTab1, "deviceId": ccTablet1, "pageId": ccPage1})
 		assert.Equal(t, http.StatusUnauthorized, w.Code, "%s without the password", method)
+	}
+}
+
+func TestCourtControlRoutes_KeepAndBadKeepRefusals(t *testing.T) {
+	rig := newBackupRig(t)
+	tour, err := rig.store.LoadTournament()
+	require.NoError(t, err)
+	tour.Courts = []string{"A", "B"}
+	require.NoError(t, rig.store.SaveTournament(tour))
+
+	a := decodeCourtAnswer(t, courtControlReq(t, rig.r, http.MethodPut, "A", backupTestPassword, ccBody{
+		"tabId": ccTab1, "deviceId": ccTablet1, "pageId": ccPage1,
+	}))
+	require.True(t, a.YouHold)
+
+	b := decodeCourtAnswer(t, courtControlReq(t, rig.r, http.MethodPut, "B", backupTestPassword, ccBody{
+		"tabId": ccTab1, "deviceId": ccTablet1, "pageId": ccPage1, "keep": []string{"A"},
+	}))
+	assert.True(t, b.YouHold)
+	assert.Equal(t, state.CourtControlKey(ccTab1), holderOfA(t, rig), "keep keeps A held through the route")
+
+	for name, keep := range map[string]any{
+		"more than 16 entries": make([]string, helper.MaxCourts+1),
+		"non-string integer":   []any{"A", 123},
+		"null entry":           []any{nil},
+		"not an array":         "A",
+	} {
+		w := courtControlReq(t, rig.r, http.MethodPut, "B", backupTestPassword, ccBody{
+			"tabId": ccTab1, "deviceId": ccTablet1, "pageId": ccPage1, "keep": keep,
+		})
+		assert.Equal(t, http.StatusBadRequest, w.Code, name)
+		assert.Equal(t, courtControlBadRequestCode, responseCode(t, w), name)
 	}
 }
 

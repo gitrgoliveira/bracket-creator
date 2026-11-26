@@ -328,10 +328,11 @@ type CourtControlStore interface {
 
 // CourtControls is the consumer-boundary view of the court control registry:
 // which court console tab runs each shiaijo, and whether a court console's
-// write has the court's standing. The claim routes (handlers_court_control.go)
-// and the whole-tournament replacements (a new tournament, an import, a full
-// restore) reach it through this; the score and decision doors are not wired
-// to it yet. *courtControlRegistry satisfies it.
+// write has the court's standing. The claim routes (handlers_court_control.go),
+// the score and decision doors (which call WriteStanding through
+// judgeCourtStanding in write_tag.go), and the whole-tournament replacements
+// (a new tournament, a full restore) reach it through this.
+// *courtControlRegistry satisfies it.
 type CourtControls interface {
 	// Look is the shiaijo's control as any caller sees it.
 	Look(court string) (CourtControlAnswer, error)
@@ -344,8 +345,10 @@ type CourtControls interface {
 	// standing: true when the write's tablet runs the shiaijo and the write was
 	// made at or after the standing's start. A write naming a shiaijo nobody
 	// holds, from a tab and a tablet on neither displaced list, claims it
-	// first. Called by the score and decision doors (judgeCourtStanding,
-	// write_tag.go) in the write's transaction.
+	// first when the tab holds no other shiaijo, or answers true without
+	// recording a hold when the tab already holds another shiaijo. Called by
+	// the score and decision doors (judgeCourtStanding, write_tag.go) in the
+	// write's transaction.
 	WriteStanding(court, tabID, deviceID string, stamp int64) (bool, error)
 	// Clear frees every shiaijo and forgets both displaced lists: the whole
 	// tournament was replaced.

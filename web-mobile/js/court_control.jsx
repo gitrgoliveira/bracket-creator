@@ -20,6 +20,8 @@
 //     decision doors (api_client_matches.jsx _stampCourtControl) put it on the
 //     court console's writes, so the tab's release waits while the tablet's
 //     outbox still holds a write stamped for that shiaijo (courtReleasable).
+//     A claim of another shiaijo names those kept shiaijo in `keep` so the
+//     server does not free them either (_keptOtherCourts).
 //
 // The ids, sent only to the server, which stores and compares only their
 // one-way keys (no answer or event carries one):
@@ -355,6 +357,8 @@ async function _claim(court, { take = false } = {}) {
     const body = {
         tabId: courtTabId(), pageId: courtPageId(), deviceId: courtDeviceId(), take, device: deviceWord(),
     };
+    const keep = _keptOtherCourts(court);
+    if (keep.length > 0) body.keep = keep;
     // The take's time on this tablet's clock as the outbox stamps a write
     // (the server's clock as this tablet reads it): only stamps from the
     // taking tablet are ever compared with it.
@@ -430,6 +434,16 @@ function _tabletQueuedFor(court) {
 export function courtReleasable(court) {
     const r = _courts.get(court);
     return !!r && courtControlState(r.answer) === 'holds' && !_tabletQueuedFor(court);
+}
+
+// _keptOtherCourts: other shiaijo this tab holds that courtReleasable does not
+// let go yet, named in `keep` on a claim so the server does not free them.
+function _keptOtherCourts(court) {
+    const kept = [];
+    for (const [other, r] of _courts) {
+        if (other !== court && courtControlState(r.answer) === 'holds' && !courtReleasable(other)) kept.push(other);
+    }
+    return kept;
 }
 
 // _release: gives `court` back when courtReleasable allows it (never while

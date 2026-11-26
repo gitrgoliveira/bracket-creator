@@ -820,4 +820,33 @@ describe('giving the shiaijo back', () => {
     expect(courtControlView('B').state).toBe('holds');
     offB();
   });
+
+  it('claiming B while this tab holds A with a stamped queued entry for A sends keep ["A"]', async () => {
+    reply = (url) => ({ body: answer({ ...HOLDS, court: url.includes('/B/') ? 'B' : 'A' }) });
+    localStorage.setItem(queueKey, JSON.stringify([['k1', entry('A')]]));
+    const { mountCourtControl } = await load();
+    const offA = track(mountCourtControl('A', () => 'pw'));
+    await settle();
+    offA();
+    await settle();
+    const offB = track(mountCourtControl('B', () => 'pw'));
+    await settle();
+    const putB = puts().find((c) => c.url === '/api/courts/B/control');
+    expect(putB.body.keep).toEqual(['A']);
+    offB();
+  });
+
+  it('claiming B while this tab holds A with nothing queued for A omits keep', async () => {
+    reply = (url) => ({ body: answer({ ...HOLDS, court: url.includes('/B/') ? 'B' : 'A' }) });
+    const { mountCourtControl } = await load();
+    const offA = track(mountCourtControl('A', () => 'pw'));
+    await settle();
+    const offB = track(mountCourtControl('B', () => 'pw'));
+    await settle();
+    const putB = puts().find((c) => c.url === '/api/courts/B/control');
+    expect(putB.body.take).toBe(false);
+    expect('keep' in putB.body).toBe(false);
+    offA();
+    offB();
+  });
 });

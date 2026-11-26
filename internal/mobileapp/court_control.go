@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -29,13 +30,15 @@ import (
 var errUnknownCourt = errors.New("unknown shiaijo")
 
 // errCourtControlBadRequest is a claim or release whose ids are not the
-// lowercase UUID v4 a court console mints, or a take with no takenAt.
+// lowercase UUID v4 a court console mints, a take with no takenAt, or a claim
+// whose keep list exceeds helper.MaxCourts entries.
 var errCourtControlBadRequest = errors.New("bad court control request")
 
 // CourtClaim is one claim of a shiaijo: a console opening it, its heartbeat,
 // or (Take) an explicit Take control. TakenAt is the take's time on the
 // taking tab's own clock, server-relative unix milliseconds, stamped as the
-// outbox stamps a write.
+// outbox stamps a write. Keep names other shiaijo this tab must keep holding
+// because its tablet still has court-stamped results queued for them.
 type CourtClaim struct {
 	Court    string
 	TabID    string
@@ -44,6 +47,7 @@ type CourtClaim struct {
 	Device   string
 	Take     bool
 	TakenAt  int64
+	Keep     []string
 }
 
 // CourtControlAnswer is a shiaijo's control as one caller sees it. HolderKey
@@ -172,10 +176,13 @@ func clampTakenAt(takenAt int64, now time.Time) int64 {
 	return min(takenAt, now.UnixMilli()+modifiedAtRefuseSkewMs)
 }
 
-// validCourtClaim reports whether req carries the ids a court console mints
-// and, for a take, its time.
+// validCourtClaim reports whether req carries the ids a court console mints,
+// at most helper.MaxCourts entries in Keep, and, for a take, its time.
 func validCourtClaim(req CourtClaim) bool {
 	if !state.IsClientUUID(req.TabID) || !state.IsClientUUID(req.DeviceID) || !state.IsClientUUID(req.PageID) {
+		return false
+	}
+	if len(req.Keep) > helper.MaxCourts {
 		return false
 	}
 	return !req.Take || req.TakenAt > 0
@@ -199,7 +206,8 @@ func validCourtClaim(req CourtClaim) bool {
 //     tablet moves the bar only, so nothing the tablet queued earlier loses
 //     the court's standing;
 //   - claiming one shiaijo releases any other the same tab held (switching
-//     the console's shiaijo).
+//     the console's shiaijo), except those named in Keep. Entries in Keep
+//     that this tab does not already hold are ignored.
 func (r *courtControlRegistry) Claim(req CourtClaim) (CourtControlAnswer, error) {
 	if !validCourtClaim(req) {
 		return CourtControlAnswer{}, errCourtControlBadRequest
@@ -266,7 +274,7 @@ func (r *courtControlRegistry) Claim(req CourtClaim) (CourtControlAnswer, error)
 	next[req.Court] = h
 	changed = append(changed, req.Court)
 	for court, other := range next {
-		if court != req.Court && other.Held() && other.HolderKey == tabKey {
+		if court != req.Court && other.Held() && other.HolderKey == tabKey && !slices.Contains(req.Keep, court) {
 			next[court] = freed(other)
 			changed = append(changed, court)
 		}
@@ -338,12 +346,14 @@ func (r *courtControlRegistry) standingLocked(court, devKey string, stamp int64)
 // court control (judgeCourtStanding, write_tag.go). Ids that are not a
 // console's, or a shiaijo the tournament does not list, have no standing. A
 // shiaijo nobody holds, from a tab and a tablet on neither displaced list (a
-// console opened offline), is claimed by the write with standingFrom 0, as
-// the claim route would claim it; its page load and device word arrive with
-// the console's next claim. One that another tab of the SAME tablet holds
-// has the standing and takes nothing. One that another tablet holds is
-// ordinary. A write never releases another shiaijo its tab holds: it is no
-// switch of the console.
+// console opened offline), is claimed by the write with standingFrom 0 when
+// the tab holds no other shiaijo, as the claim route would claim it; its
+// page load and device word arrive with the console's next claim. When that
+// tab already holds another shiaijo, WriteStanding answers true without
+// recording a hold, so no orphan hold is left behind. One that another tab
+// of the SAME tablet holds has the standing and takes nothing. One that
+// another tablet holds is ordinary. A write never releases another shiaijo
+// its tab holds: it is no switch of the console.
 func (r *courtControlRegistry) WriteStanding(court, tabID, deviceID string, stamp int64) (bool, error) {
 	if !state.IsClientUUID(tabID) || !state.IsClientUUID(deviceID) {
 		return false, nil
@@ -363,6 +373,9 @@ func (r *courtControlRegistry) WriteStanding(court, tabID, deviceID string, stam
 		if h.IsDisplaced(tabKey) || h.IsDisplacedDevice(devKey) {
 			return false, nil
 		}
+		if r.tabHoldsOtherLocked(tabKey, court) {
+			return true, nil
+		}
 		nowMs := r.now().UnixMilli()
 		next := r.copyLocked()
 		next[court] = holdBy(h, tabKey, devKey, state.CourtDeviceOther, "", nowMs, 0)
@@ -373,6 +386,17 @@ func (r *courtControlRegistry) WriteStanding(court, tabID, deviceID string, stam
 		r.announceLocked([]string{court})
 	}
 	return r.standingLocked(court, devKey, stamp), nil
+}
+
+// tabHoldsOtherLocked reports whether tabKey already holds a shiaijo other than
+// court. Caller holds r.mu.
+func (r *courtControlRegistry) tabHoldsOtherLocked(tabKey, court string) bool {
+	for c, h := range r.holds {
+		if c != court && h.Held() && h.HolderKey == tabKey {
+			return true
+		}
+	}
+	return false
 }
 
 // Clear frees every shiaijo and forgets both displaced lists, on disk and in

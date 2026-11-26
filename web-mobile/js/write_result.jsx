@@ -250,6 +250,15 @@ export function displacedAlertText(n, one) {
         : `${n} held results were saved. Later changes to those matches were moved to each match's history.`;
 }
 
+// courtDisplacedAlertText: the queue alert when every held finish that landed
+// and moved a stored group to the match's history was a court result replacing
+// a different result recorded on another device (writeDisplacedByCourtResult).
+export function courtDisplacedAlertText(n, one) {
+    return one
+        ? "A held result was saved as the court's. A different result recorded on another device for that match was moved to the match's history."
+        : `${n} held results were saved as the court's. Different results recorded on other devices for those matches were moved to each match's history.`;
+}
+
 // The tap outcomes the score-events door answers per event (score_events.jsx
 // names them). QUIET ones need no word: the tap is in the match's log.
 // Everything else was not applied, and the server's `message` is its sentence

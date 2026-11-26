@@ -751,6 +751,48 @@ describe('a queued finish that moved a later change to the history', () => {
         expect(alerts.find((a) => a.kind === 'displaced')).toEqual(expect.objectContaining({ count: 1 }));
         expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
     });
+
+    it("a court result that replaced another device's result counts in byCourt", async () => {
+        const s = server({ answer: () => ({ id: 'm1', status: 'completed', displacedGroups: ['points', 'result'] }) });
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M'] }, 'pw', null);
+        await settleOfflinePass();
+        const failed = [];
+        const alerts = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((i) => failed.push(i));
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+        s.online();
+        await tick(50);
+        unsubFail();
+        unsubAlert();
+        expect(failed).toEqual([]);
+        expect(alerts.map((a) => a.kind)).toEqual(['sent', 'displaced']);
+        expect(alerts.find((a) => a.kind === 'displaced')).toEqual(expect.objectContaining({
+            count: 1, terminalCount: 1, byCourt: 1,
+        }));
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
+    });
+
+    it('a pass with both a court replacement and a closed-match move counts both in count and only the court one in byCourt', async () => {
+        const s = server({
+            answer: (url) => (url.includes('/m1/')
+                ? { id: 'm1', status: 'completed', displacedGroups: ['result'] }
+                : { id: 'm2', status: 'completed', displacedGroups: ['points'], heldReason: 'match_closed' }),
+        });
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M'] }, 'pw', null);
+        vi.advanceTimersByTime(1000);
+        await API.recordScore('c1', 'm2', { status: 'completed', winner: 'B', ipponsB: ['K'] }, 'pw', null);
+        await settleOfflinePass();
+        const alerts = [];
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+        s.online();
+        await tick(50);
+        unsubAlert();
+        expect(alerts.map((a) => a.kind)).toEqual(['sent', 'displaced']);
+        expect(alerts.find((a) => a.kind === 'displaced')).toEqual(expect.objectContaining({
+            count: 2, terminalCount: 2, byCourt: 1,
+        }));
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
+    });
 });
 
 describe('a write that leaves the queue leaves browser storage at once', () => {

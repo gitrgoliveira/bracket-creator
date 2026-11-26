@@ -392,6 +392,38 @@ func TestCourtStanding_AnOrdinaryResultArrivingAfterTheCourtsIsHeld(t *testing.T
 	assert.Equal(t, mgBob, stored.Winner, "the court's result stands")
 }
 
+func TestCourtStanding_SupersededScoreAnswerCarriesReplacedResult(t *testing.T) {
+	rig := newStandingRig(t, "standing-replaced-result", state.TournamentModeOfficiated)
+	rig.claim(t, ccTab1, ccTablet1, ccPage1, false, 0)
+	now := time.Now().UnixMilli()
+	courtStampAt := now - 1_000
+	ordinaryStampAt := now - 5_000
+
+	code, out := rig.send(t, "PUT", "score", "", map[string]any{
+		"sideA": mgAlice, "sideB": mgBob, "status": "completed", "winner": mgBob,
+		"ipponsA": []string{}, "ipponsB": []string{"K"},
+		"modifiedAt": courtStampAt, "writeId": "w-court", "basis": map[string]any{"seen": 0},
+		"courtControl": courtStamp(ccTab1, ccTablet1),
+	})
+	assertCourtCounts(t, rig, code, out)
+
+	code, out = rig.send(t, "PUT", "score", "", map[string]any{
+		"sideA": mgAlice, "sideB": mgBob, "status": "completed", "winner": mgAlice,
+		"ipponsA": []string{"M"}, "ipponsB": []string{},
+		"modifiedAt": ordinaryStampAt, "writeId": "w-ordinary", "basis": map[string]any{"seen": 0},
+	})
+	require.Equal(t, http.StatusOK, code, out)
+	assert.Equal(t, false, out["applied"], out)
+	assert.Equal(t, "superseded", out["reason"], out)
+	assert.Equal(t, state.HeldReasonCourtResult, out["heldReason"], out)
+	replaced, ok := out["replacedResult"].(map[string]any)
+	require.True(t, ok, "superseded answer carries top-level replacedResult: %v", out)
+	assert.Equal(t, map[string]any{
+		"writeId": "w-ordinary",
+		"stamp":   float64(ordinaryStampAt),
+	}, replaced)
+}
+
 // The sentence for each FR8 code, on a path that knows the stored match and on
 // bulk-score's, which knows only the code: never the generic newer-change one.
 func TestCourtStanding_HeldReasonSentences(t *testing.T) {

@@ -2091,7 +2091,10 @@ paths:
           at `takenAt` and puts the former tablet on the displaced tablets
           list; a take between two tabs of one tablet moves the green bar and
           keeps the standing start where it was.
-        - Claiming one shiaijo gives back any other this tab ran.
+        - Claiming one shiaijo frees any other this tab held, except those
+          named in `keep` (the shiaijo its tablet still has queued results
+          for). `keep` never lets a tab take or hold a shiaijo it did not
+          already hold.
 
         The control never lapses on a timer. A change of holder is announced
         as `court_control_updated`; a heartbeat announces nothing. The tab and
@@ -2136,6 +2139,18 @@ paths:
                   type: string
                   enum: [ipad, android-tablet, iphone, android-phone, mac, windows, other]
                   description: The kind of device, shown to the other consoles. Anything else reads `other`.
+                keep:
+                  type: array
+                  maxItems: 16
+                  items:
+                    type: string
+                  description: >
+                    Optional list of shiaijo letters this tab must keep
+                    holding when claiming another shiaijo, because its tablet
+                    still has court-stamped results queued for them. Entries
+                    this tab does not already hold are ignored; `keep` never
+                    takes or creates a hold. More than 16 entries or a
+                    non-string entry is refused with 400.
       responses:
         '200':
           description: The shiaijo's control as this tab sees it.
@@ -2144,7 +2159,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CourtControl'
         '400':
-          description: "`invalid_court_control`: an id is not a lowercase UUID v4, or a take carries no `takenAt`."
+          description: "`invalid_court_control`: an id is not a lowercase UUID v4, a take carries no `takenAt`, or `keep` has more than 16 entries or a non-string entry."
           content:
             application/json:
               schema:
@@ -11587,7 +11602,9 @@ components:
         another tablet took the shiaijo; from the first claim otherwise). A
         shiaijo nobody runs is claimed by the write, from a tab and a tablet
         that did not lose it by a take, with the writing tab as its holder
-        (a console opened offline). A shiaijo another tab of the same tablet
+        (a console opened offline) when the tab holds no other shiaijo; if the
+        tab already holds another shiaijo, the write still has the standing
+        without recording a hold. A shiaijo another tab of the same tablet
         runs is left with that tab, and the write still has the standing. A
         shiaijo another tablet runs makes the write an ordinary one. A result
         with the court's standing replaces a result another device recorded

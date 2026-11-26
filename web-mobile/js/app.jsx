@@ -9,7 +9,8 @@ import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
 import {
-  queuedWritesNoun, supersededAlertText, displacedAlertText, tapNotAppliedAlertText, tapNotAppliedText, courtReplacedAlertText,
+  queuedWritesNoun, supersededAlertText, displacedAlertText, courtDisplacedAlertText,
+  tapNotAppliedAlertText, tapNotAppliedText, courtReplacedAlertText,
 } from './write_result.jsx';
 import { VersionBanner } from './version_banner.jsx';
 import { PublicHeldWrites } from './held_writes_panel.jsx';
@@ -516,10 +517,13 @@ export function queueAlertMessage(alert) {
       return "A team member this device treated as not added was kept by the server. Check the team's member names and lineups.";
     case "member_unsent":
       return "A change to a team member's name was not sent, because the member was never added. Add the member again if the name is still needed.";
-    // Held finishes that landed and moved a later change of their match to
-    // its history. Recorded, so not an error: the history has the change.
+    // Held finishes that landed and moved a later change (or, for the court's
+    // result, a different result recorded on another device) to the match's
+    // history. Recorded, so not an error: the history has the moved entry.
     case "displaced":
-      return displacedAlertText(n, one);
+      return alert.byCourt > 0 && alert.byCourt === alert.count
+        ? courtDisplacedAlertText(n, one)
+        : displacedAlertText(n, one);
     // bc-sseq FR8: a result this device recorded, applied, that the court
     // running the match's shiaijo replaced with its own later result. Told
     // once per replaced write, as information: the court's result counts and

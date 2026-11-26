@@ -48,7 +48,7 @@ describe('the mark under the top bar', () => {
     const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
     await settle(200);
     try {
-      expect(bar(c).textContent).toBe('This tablet runs shiaijo A');
+      expect(bar(c).textContent).toBe('This tablet runs shiaijo A.');
       expect(bar(c).className).toContain('shiaijo-control--holds');
       expect(bar(c).querySelector('.shiaijo-control__dot')).toBeTruthy();
       expect(within(bar(c)).queryByRole('button', { name: 'Take control' })).toBeNull();
@@ -87,7 +87,7 @@ describe('the mark under the top bar', () => {
     const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
     await settle(200);
     try {
-      expect(bar(c).textContent).toContain('Shiaijo A is run from another device (an iPad, last active 2 min ago)');
+      expect(bar(c).textContent).toContain('Shiaijo A is run from another device (an iPad, last active 2 min ago).');
       expect(bar(c).className).toContain('shiaijo-control--other');
       expect(queueScope(c).disabled).toBe(true);
       expect(probe.props.readOnly).toBe(true);
@@ -100,7 +100,7 @@ describe('the mark under the top bar', () => {
       await act(async () => { within(ask).getByRole('button', { name: 'Take control' }).click(); });
       await settle();
       expect(takes()).toHaveLength(1);
-      expect(bar(c).textContent).toBe('This tablet runs shiaijo A');
+      expect(bar(c).textContent).toBe('This tablet runs shiaijo A.');
       expect(c.utils.queryByTestId('take-control-ask')).toBeNull();
       expect(queueScope(c).disabled).toBe(false);
     } finally { c.restore(); c.utils.unmount(); }
@@ -110,7 +110,7 @@ describe('the mark under the top bar', () => {
     reply = () => ({ body: answer({ holderKey: 'bbbb', device: 'windows' }) });
     const c = await mount();
     try {
-      expect(bar(c).textContent).toContain('Shiaijo A is run from another device (a Windows PC)');
+      expect(bar(c).textContent).toContain('Shiaijo A is run from another device (a Windows PC).');
       await act(async () => { within(bar(c)).getByRole('button', { name: 'Take control' }).click(); });
       await act(async () => { within(c.utils.getByTestId('take-control-ask')).getByRole('button', { name: 'Cancel' }).click(); });
       expect(c.utils.queryByTestId('take-control-ask')).toBeNull();
@@ -156,7 +156,7 @@ describe('the mark under the top bar', () => {
       await settle();
       expect(c.utils.queryByTestId('take-control-ask')).toBeNull();
       expect(takes()).toHaveLength(1);
-      expect(bar(c).textContent).toBe('This tablet runs shiaijo A');
+      expect(bar(c).textContent).toBe('This tablet runs shiaijo A.');
     } finally { c.restore(); c.utils.unmount(); }
   });
 
@@ -172,7 +172,7 @@ describe('the mark under the top bar', () => {
       await settle();
       expect(c.utils.queryByTestId('take-control-ask')).toBeNull();
       expect(takes()).toHaveLength(1);
-      expect(bar(c).textContent).toBe('This tablet runs shiaijo A');
+      expect(bar(c).textContent).toBe('This tablet runs shiaijo A.');
     } finally { c.restore(); c.utils.unmount(); }
   });
 
@@ -225,7 +225,7 @@ describe('the mark under the top bar', () => {
     try {
       expect(bar(c).textContent).toBe('Checking who runs shiaijo A…');
       await act(async () => { await new Promise((r) => setTimeout(r, 1600)); });
-      expect(bar(c).textContent).toBe('Not connected: this tablet runs shiaijo A once it connects, unless another device already does');
+      expect(bar(c).textContent).toBe('Not connected: this tablet runs shiaijo A once it connects, unless another device already does.');
       expect(bar(c).className).toContain('shiaijo-control--warn');
       expect(queueScope(c).disabled).toBe(false);
     } finally { c.restore(); c.utils.unmount(); }
@@ -238,7 +238,7 @@ describe('a console handler checks the control when it acts', () => {
     const c = await mountCourt([running, courtMatch('m2', 'scheduled')]);
     await settle(200);
     try {
-      expect(bar(c).textContent).toBe('This tablet runs shiaijo A');
+      expect(bar(c).textContent).toBe('This tablet runs shiaijo A.');
       await act(async () => { c.utils.getByRole('button', { name: 'Send back to queue' }).click(); });
       const dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
       expect(dialog).toBeTruthy();
@@ -306,14 +306,14 @@ describe('the words and the check', () => {
 
   it('names no device for one the server reads as other', () => {
     const view = { state: 'other', holderDevice: 'other', holderLastActiveAt: 0, sameDevice: false, youWereDisplaced: false, tabWasDisplaced: false };
-    expect(courtControlBar(view, 'B').text).toBe('Shiaijo B is run from another device');
+    expect(courtControlBar(view, 'B').text).toBe('Shiaijo B is run from another device.');
   });
 
   it('tabWasDisplaced alone does not raise the tablet-displacement warning when held by another device', () => {
     const view = { state: 'other', holderDevice: 'ipad', holderLastActiveAt: 0, sameDevice: false, youWereDisplaced: false, tabWasDisplaced: true };
     const barView = courtControlBar(view, 'A');
     expect(barView.tone).toBe('other');
-    expect(barView.text).toBe('Shiaijo A is run from another device (an iPad)');
+    expect(barView.text).toBe('Shiaijo A is run from another device (an iPad).');
   });
 
   it('refusedNotHeld refuses only a tab that may not write, quietly when asked', () => {

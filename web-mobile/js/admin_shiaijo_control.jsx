@@ -84,7 +84,7 @@ export function courtControlBar(view, court, { now = serverNowMs(), checked = tr
         };
     }
     if (state === 'holds') {
-        return { tone: 'holds', text: `This tablet runs shiaijo ${c}`, take: false, ask: null };
+        return { tone: 'holds', text: `This tablet runs shiaijo ${c}.`, take: false, ask: null };
     }
     if (state === 'other' && view.sameDevice) {
         const active = lastActivePhrase(view.holderLastActiveAt, now);
@@ -107,7 +107,7 @@ export function courtControlBar(view, court, { now = serverNowMs(), checked = tr
         const parts = [devicePhrase(view.holderDevice), lastActivePhrase(view.holderLastActiveAt, now)].filter(Boolean);
         return {
             tone: 'other',
-            text: `Shiaijo ${c} is run from another device${parts.length ? ` (${parts.join(', ')})` : ''}`,
+            text: `Shiaijo ${c} is run from another device${parts.length ? ` (${parts.join(', ')})` : ''}.`,
             take: true,
             ask: `The other device will stop running shiaijo ${c}. Take control?`,
         };
@@ -147,7 +147,7 @@ export function courtControlBar(view, court, { now = serverNowMs(), checked = tr
     }
     return {
         tone: 'warn',
-        text: `Not connected: this tablet runs shiaijo ${c} once it connects, unless another device already does`,
+        text: `Not connected: this tablet runs shiaijo ${c} once it connects, unless another device already does.`,
         take: false,
         ask: null,
     };

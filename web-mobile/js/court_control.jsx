@@ -59,7 +59,7 @@ export const TAB_CHECK_MS = 150;
 export const COURT_HEARTBEAT_MS = 30_000;
 // A claim or take that hangs is given up so neither piles up or locks the bar.
 export const CLAIM_DEADLINE_MS = 12_000;
-// Grace before claiming a newly freed shiaijo, so a reloading holder can reclaim it first.
+// Grace a watching console waits before claiming a newly freed shiaijo, so a reloading holder can reclaim it first.
 export const COURT_FREED_GRACE_MS = 5000;
 
 // The sentence Take control answers with when there is no connection: taking
@@ -501,6 +501,10 @@ function _startCourt(court) {
             if (event.type === 'court_control_updated' && event.data && event.data.court === court) {
                 _clearFreedTimer(r);
                 if (!event.data.holderKey) {
+                    // A tab that still holds the shiaijo (the server freed it under
+                    // it: a restore, a new tournament) takes it back at once; only
+                    // the consoles that watch wait, so none can win the race.
+                    if (r.answer && r.answer.youHold === true) { _claim(court); return; }
                     const seqAtFreed = r.answeredSeq;
                     r.freedTimer = setTimeout(() => {
                         r.freedTimer = null;

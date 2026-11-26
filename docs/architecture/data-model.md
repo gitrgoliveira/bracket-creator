@@ -698,7 +698,8 @@ flowchart TB
         wal[".wal/<br/>committed, not yet applied<br/>transactions, replayed on startup"]
         backups_dir["backups/<br/>zip archives: scheduled<br/>backups, safety copies"]
         restore_dir[".restore/<br/>#lt;token#gt;/journal.json<br/>#lt;token#gt;/new/ staged<br/>#lt;token#gt;/old/ moved out<br/>prefixes-pending.json<br/>requeue-pending.json"]
-        wal ~~~ backups_dir ~~~ restore_dir
+        court_control["court-control.json<br/>which console tab runs<br/>each shiaijo"]
+        wal ~~~ backups_dir ~~~ restore_dir ~~~ court_control
     end
 
     root --> top
@@ -823,6 +824,22 @@ The `.restore/` folder under the data root holds temporary staging directories a
 - **Pending requeues (`.restore/requeue-pending.json`)**: a restore brings no match back running. The ids of the matches the archive holds as running, keyed by the competition id as restored, are written here before the journal. Once the store releases its locks, the server (or the `mobile-app restore` command) sends each one back to the queue with its score, as the operator's send back does, writing the match's history line, and removes the file.
 - **Crash recovery**: when the store initializes (`Store.init`), it inspects `.restore/`. If a staging directory contains a complete journal, the store rolls forward all steps in order, skips steps already done, syncs the directories, and removes the journal and token folder. A staging folder left without a journal (meaning the process died before the live rename phase) is deleted. If `prefixes-pending.json` or `requeue-pending.json` remains after a crash, the server reassigns the prefixes and requeues the matches at startup.
 
+### The court-control.json file
+
+`court-control.json` sits at the root of the data folder and records which court console tab runs each shiaijo, so that one console writes for a shiaijo at a time. It is not a tournament record. It is written as a temporary file and a rename like every other file, and a missing, unreadable or unparseable file reads as every shiaijo free.
+
+The file holds one object, `courts`, keyed by the shiaijo letter. A shiaijo with no entry is free and remembers nobody. Each entry carries:
+
+- `holderKey`: a one-way key (the first 16 hex characters of the SHA-256) of the holding tab's id. The raw id is never stored, so the file grants nothing.
+- `deviceKey`: the same kind of key for the holding tablet's id. The shiaijo's standing is judged by the tablet.
+- `device`: the holder's device word (`ipad`, `android-tablet`, `iphone`, `android-phone`, `mac`, `windows` or `other`), which the bar on the other consoles shows. Anything else reads as `other`.
+- `since`: when the holder took the shiaijo, in unix milliseconds on the server's clock.
+- `standingFrom`: the earliest write stamp of the holding tablet that has the shiaijo's standing. It is 0 for a free shiaijo taken at once, and the take's own stamp when a tablet took it from another.
+- `pageId`: the holding tab's page load, so a late release from a reloaded page never frees the new page's claim.
+- `displaced` and `displacedDevices`: the keys of the tabs and of the tablets that lost the shiaijo to a take, oldest first, at most 8 of each.
+
+A holder's last activity is kept in memory only and is not in the file. The file is not part of any backup archive, so a restore never brings an old holder back. Every whole-tournament replacement clears it, because shiaijo letters repeat from one tournament to the next: a full restore, live or from the command line, and the creation of a first tournament. An import only adds competitions and leaves the file as it is.
+
 ### Archive format and manifest
 
 Backup archives are standard zip files whose internal layout mirrors the data folder:
@@ -838,7 +855,7 @@ competitions/<id>/<files>           (config.md, participants.csv, seeds.csv, poo
                                      history/*.jsonl, events/*.jsonl, and *.corrupt-* files)
 ```
 
-Working directories (`.wal/`, `backups/`, `.restore/`) and temporary and write-check files (`*.tmp`, `*.tmp-*`, `.write-check-*`) are never written into an archive.
+Working directories (`.wal/`, `backups/`, `.restore/`), `court-control.json` and temporary and write-check files (`*.tmp`, `*.tmp-*`, `.write-check-*`) are never written into an archive.
 
 The `manifest.json` file contains:
 

@@ -50,7 +50,7 @@ export const SAME_TABLET_TEXT = (court) => new RegExp(`^Shiaijo ${court} is run 
 // The grey bar a console on another tablet shows.
 export const OTHER_DEVICE_TEXT = (court) => new RegExp(`^Shiaijo ${court} is run from another device\\b`);
 // The green bar of the tab that runs it.
-export const HOLDS_TEXT = (court) => `This tablet runs shiaijo ${court}`;
+export const HOLDS_TEXT = (court) => `This tablet runs shiaijo ${court}.`;
 
 // The bar's text, one line.
 export const controlText = async (page) => (await courtControlBar(page).locator('.shiaijo-control__text').innerText()).replace(/\s+/g, ' ').trim();

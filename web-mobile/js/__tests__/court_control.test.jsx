@@ -394,8 +394,23 @@ describe('the claim and the state', () => {
     expect(puts().length).toBe(2);
   });
 
+  it('takes the shiaijo back at once when the server frees it under the tab that holds it', async () => {
+    vi.useFakeTimers();
+    const { mountCourtControl } = await load();
+    const off = track(mountCourtControl('A', () => 'pw'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length).toBe(1);
+
+    emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length, 'the holder does not wait out the grace the watching consoles do').toBe(2);
+    off();
+    await vi.advanceTimersByTimeAsync(1);
+  });
+
   it('waits COURT_FREED_GRACE_MS before claiming after a freed-court event', async () => {
     vi.useFakeTimers();
+    reply = () => ({ body: OTHER });
     const { mountCourtControl, COURT_FREED_GRACE_MS } = await load();
     const off = track(mountCourtControl('A', () => 'pw'));
     await vi.advanceTimersByTimeAsync(1);
@@ -413,6 +428,7 @@ describe('the claim and the state', () => {
 
   it('never claims after a freed-court event when unmounted during the grace period', async () => {
     vi.useFakeTimers();
+    reply = () => ({ body: OTHER });
     const { mountCourtControl, COURT_FREED_GRACE_MS } = await load();
     const off = track(mountCourtControl('A', () => 'pw'));
     await vi.advanceTimersByTimeAsync(1);

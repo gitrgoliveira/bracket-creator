@@ -948,6 +948,14 @@ function App() {
   const listGateRef = useRef(null);
   const detailGateRef = useRef(null);
   const listReadRef = useRef(null);
+  // What the page already holds, for a gate made after the read (the first
+  // load can finish before the SSE effect runs, and a change of competition
+  // or mode makes new gates): the seq of the list's last read, and the open
+  // competition's as { compId, seq }. A gate seeds itself from them as it is
+  // made and hands its applied seq back as it goes, so its first event never
+  // fetches what the page holds already.
+  const listSeedRef = useRef(0);
+  const detailSeedRef = useRef({ compId: null, seq: 0 });
 
   // `viaGate` is the list gate's own fetch: it takes the seq off listReadRef,
   // so the read is not also reported to the gate here.
@@ -980,7 +988,8 @@ function App() {
         // lower of their seqs (bc-sseq FR4): that read is the one reported.
         const lower = readSeqOf(t) <= readSeqOf(comps) ? t : comps;
         listReadRef.current = lower;
-        if (!viaGate && listGateRef.current) listGateRef.current.applied(readSeqOf(lower));
+        if (!listGateRef.current) listSeedRef.current = readSeqOf(lower);
+        else if (!viaGate) listGateRef.current.applied(readSeqOf(lower));
       }
       return true;
     } catch (e) {
@@ -1348,6 +1357,8 @@ function App() {
     }) : null;
     listGateRef.current = listGate;
     detailGateRef.current = detailGate ? { compId: viewerCompId, gate: detailGate } : null;
+    listGate.applied(listSeedRef.current);
+    if (detailGate && detailSeedRef.current.compId === viewerCompId) detailGate.applied(detailSeedRef.current.seq);
 
     // The pace tick's refetch: on a competition page the tournament list is
     // refetched every PACE_TICK_MS so shared-court pace drift stays current.
@@ -1638,13 +1649,18 @@ function App() {
             streamLost = true;
         } else if (streamLost) {
             streamLost = false;
-            resync(false);
+            // The server may have restarted (its seqs begin again): no
+            // answer held counts as applied, and one refetch follows.
+            listGate.restart();
+            if (detailGate) detailGate.restart();
         }
     });
     return () => {
         unsub();
         clearInterval(paceRefetch);
         timerPool.clearAll();
+        listSeedRef.current = listGate.appliedSeq();
+        if (detailGate) detailSeedRef.current = { compId: viewerCompId, seq: detailGate.appliedSeq() };
         if (listGateRef.current === listGate) listGateRef.current = null;
         if (detailGateRef.current && detailGateRef.current.gate === detailGate) detailGateRef.current = null;
         document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -1667,6 +1683,7 @@ function App() {
           // read off the fetched value, since the merged one carries no seq.
           const held = detailGateRef.current;
           if (held && held.compId === viewerCompId) held.gate.applied(readSeqOf(data));
+          else detailSeedRef.current = { compId: viewerCompId, seq: readSeqOf(data) };
           setLoading(false);
         })
         .catch(err => {

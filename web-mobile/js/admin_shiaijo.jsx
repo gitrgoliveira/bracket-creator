@@ -305,9 +305,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 // doesn't stay stale until the next ordinary event happens to arrive.
                 "resync_required",
             ]);
-            // A RECONNECT (an 'open' following an 'error') forces an immediate
-            // refetch so a court that missed events while disconnected self-heals.
-            const onStatus = makeReconnectRefetcher(() => { if (!cancelled) refreshNow(); });
+            // A RECONNECT (an 'open' following an 'error') restarts the gate:
+            // the server may have restarted (its seqs begin again), so no feed
+            // held counts as applied, and one refetch follows (still coalesced,
+            // 300 to 600 ms) so a court that missed events while disconnected
+            // self-heals.
+            const onStatus = makeReconnectRefetcher(() => { if (!cancelled) feedGate.restart(); });
             const off = window.API.subscribeToEvents(
                 (event) => {
                     if (cancelled || !event) return;
@@ -318,8 +321,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                     if (event.type === "resync_required") {
                         // A new stream: no feed held counts as applied, and
                         // the refetch is asked for whatever its seq says.
-                        feedGate.forget();
-                        refreshNow();
+                        feedGate.restart();
                         return;
                     }
                     if (event.type === "competitor_status_updated") {

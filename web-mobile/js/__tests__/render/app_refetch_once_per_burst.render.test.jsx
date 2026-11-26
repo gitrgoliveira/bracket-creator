@@ -27,7 +27,7 @@ const detail = () => withSeq({
   pools: [], poolMatches: [running([])], standings: {}, bracket: null,
 }, head.detail);
 
-const sse = { emit: null };
+const sse = { emit: null, status: null };
 
 const STUBBED_GLOBALS = {
   ViewerCompetition: page.Component,
@@ -37,7 +37,7 @@ const STUBBED_GLOBALS = {
     fetchAuthConfig: vi.fn(async () => ({ mode: 'file', resetEnabled: true })),
     fetchAnnouncements: vi.fn(async () => []),
     fetchCompetitionDetails: vi.fn(async () => detail()),
-    subscribeToEvents: vi.fn((onEvent) => { sse.emit = onEvent; return () => {}; }),
+    subscribeToEvents: vi.fn((onEvent, onStatus) => { sse.emit = onEvent; sse.status = onStatus; return () => {}; }),
     reconnectEvents: vi.fn(),
     resumeAfterAuth: vi.fn(),
   },
@@ -126,5 +126,21 @@ describe('the public competition page fetches once per burst (bc-sseq FR4)', () 
     await emit(tap(4, ['M']));
     await pastWindow();
     expect(details(), 'the new stream counts from its own reads').toBe(before + 2);
+  });
+
+  it('a stream that reopens after an error restarts the gates: a restarted server\'s low seqs still refetch', async () => {
+    // The server restarted: its head seq starts again, and the page, which
+    // held no id'd event, gets no resync_required.
+    head.detail = 1;
+    head.tournament = 1;
+    head.competitions = 1;
+    await pastWindow();
+    const before = details();
+    const beforeLoads = loads();
+    await act(async () => { sse.status('error'); });
+    await act(async () => { sse.status('open'); });
+    await pastWindow();
+    expect(details(), 'the detail is read again').toBe(before + 1);
+    expect(loads(), 'the tournament is read again').toBe(beforeLoads + 1);
   });
 });

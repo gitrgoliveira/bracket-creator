@@ -26,7 +26,7 @@ const STUBBED_GLOBALS = {
   AdminCompetition: (props) => { probe.props = props; return <div data-testid="competition" />; },
   confirmDialog: vi.fn(),
   API: {
-    subscribeToEvents: vi.fn((onEvent) => { sse.emit = onEvent; return () => {}; }),
+    subscribeToEvents: vi.fn((onEvent, onStatus) => { sse.emit = onEvent; sse.status = onStatus; return () => {}; }),
     fetchCompetitions: vi.fn(async () => withSeq([{ ...config }], head.competitions)),
     fetchTournament: vi.fn(async () => withSeq({ name: 'Cup', courts: ['A'] }, head.competitions)),
     fetchCompetitionDetails: vi.fn(async () => detail()),
@@ -114,6 +114,26 @@ describe('the admin competition page fetches once per burst (bc-sseq FR4)', () =
     await emit(tap(31, ['M', 'K']));
     await pastWindow();
     expect(details(), 'an event above it').toBe(before + 2);
+  });
+
+  it('a stream that reopens after an error restarts both gates, so a restarted server\'s seqs refetch', async () => {
+    await mount(20);
+    // The server restarted: its head seq starts again, and the page, which
+    // held no id'd event, gets no resync_required.
+    head.detail = 0;
+    head.competitions = 0;
+    const before = details();
+    const beforeLists = lists();
+    await act(async () => { sse.status('error'); });
+    await act(async () => { sse.status('open'); });
+    await pastWindow();
+    expect(details(), 'the detail is read again').toBe(before + 1);
+    expect(lists(), 'the competitions are read again').toBe(beforeLists + 1);
+    head.detail = 1;
+    head.competitions = 1;
+    await emit(tap(1, ['M']));
+    await pastWindow();
+    expect(details(), 'an event the old 20 would have called covered').toBe(before + 2);
   });
 
   it('tournament_updated reads the tournament whatever the seqs say', async () => {

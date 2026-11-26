@@ -226,7 +226,7 @@ describe('createRefetchGate', () => {
     expect(h.sent).toHaveLength(3);
   });
 
-  it('an answer naming a lower seq is a new stream: adopted, with one refetch for the events above it', async () => {
+  it('a late answer naming a lower seq than the applied one changes nothing', async () => {
     const h = harness();
     h.gate.event(1);
     h.fireTimers();
@@ -235,24 +235,60 @@ describe('createRefetchGate', () => {
     h.fireTimers();
     await h.answer(answerAt(12));
     expect(h.gate.appliedSeq()).toBe(12);
-    // A fetch outside the gate answers at seq 3: a restarted server.
+    // A read made outside the gate answers late, at seq 3 (a build that began earlier).
     h.gate.applied(3);
-    expect(h.gate.appliedSeq()).toBe(3);
-    expect(h.timers).toHaveLength(1);
-    h.fireTimers();
-    await h.answer(answerAt(4));
-    expect(h.gate.appliedSeq()).toBe(4);
-    expect(h.timers).toHaveLength(0); // one refetch, no loop
-    expect(h.gate.event(4)).toBe(false);
-    expect(h.gate.event(5)).toBe(true);
+    expect(h.gate.appliedSeq()).toBe(12);
+    expect(h.timers).toHaveLength(0); // no refetch for it
+    expect(h.gate.event(12)).toBe(false);
+    expect(h.gate.event(13)).toBe(true);
   });
 
-  it('a lower seq with no event above it is adopted without a refetch', () => {
+  it('a gate fetch answering lower than the applied seq, with nothing newer seen, asks for nothing', async () => {
     const h = harness();
     h.gate.applied(10);
-    h.gate.applied(3);
-    expect(h.gate.appliedSeq()).toBe(3);
+    h.gate.now();
+    h.fireTimers();
+    await h.answer(answerAt(4));
+    expect(h.gate.appliedSeq()).toBe(10);
     expect(h.timers).toHaveLength(0);
+    expect(h.sent).toHaveLength(1);
+  });
+
+  it('restart() (the stream reopened) drops every seq and asks for one refetch whatever its seq says', async () => {
+    const h = harness();
+    h.gate.event(1);
+    h.fireTimers();
+    await h.answer(answerAt(50));
+    expect(h.gate.event(40)).toBe(false);
+    h.gate.restart();
+    expect(h.gate.appliedSeq()).toBe(0);
+    expect(h.timers).toHaveLength(1);
+    h.fireTimers();
+    // A restarted server's head seq starts again: its answer names 0 (no
+    // event yet) and then 3.
+    await h.answer(answerAt(0));
+    expect(h.gate.appliedSeq()).toBe(0);
+    expect(h.gate.event(1)).toBe(true); // not covered by the old 50
+    h.fireTimers();
+    await h.answer(answerAt(3));
+    expect(h.gate.appliedSeq()).toBe(3);
+    expect(h.gate.event(3)).toBe(false);
+    expect(h.gate.event(4)).toBe(true);
+  });
+
+  it('restart() while a fetch is out sends one more after it, and the old answer is not adopted', async () => {
+    const h = harness();
+    h.gate.event(1);
+    h.fireTimers();
+    await h.answer(answerAt(50));
+    h.gate.event(51);
+    h.fireTimers();
+    h.gate.restart();
+    await h.answer(answerAt(51));
+    expect(h.gate.appliedSeq()).toBe(0);
+    expect(h.timers).toHaveLength(1);
+    h.fireTimers();
+    expect(h.sent).toHaveLength(3);
   });
 
   it('a fetch applied outside the gate covers its events, read before any merge', () => {
@@ -358,12 +394,44 @@ describe('createRefetchGate', () => {
     h.fireTimers();
     await h.fail(new Error('offline'));
     expect(h.errors).toHaveLength(1);
-    expect(h.timers).toHaveLength(0); // no retry loop on its own
-    expect(h.gate.event(1)).toBe(true); // nothing was applied
+    expect(h.timers).toHaveLength(1); // the burst rode on it alone: asked for again
     h.fireTimers();
     h.gate.event(2);
     await h.fail(new Error('offline'));
+    expect(h.timers).toHaveLength(1); // the event seen while it was out
+  });
+
+  it('a failed fetch is asked for again once, then waits for the next event (no polling)', async () => {
+    const h = harness();
+    h.gate.event(1);
+    h.fireTimers();
+    await h.fail(new Error('offline'));
     expect(h.timers).toHaveLength(1);
+    h.fireTimers();
+    expect(h.sent).toHaveLength(2);
+    await h.fail(new Error('offline'));
+    expect(h.errors).toHaveLength(2);
+    expect(h.timers).toHaveLength(0); // the retry failed too: no loop
+    // The next event asks again, and its failure is retried once more.
+    expect(h.gate.event(2)).toBe(true);
+    h.fireTimers();
+    await h.fail(new Error('offline'));
+    expect(h.timers).toHaveLength(1);
+    // A retry that lands ends it.
+    h.fireTimers();
+    await h.answer(answerAt(2));
+    expect(h.timers).toHaveLength(0);
+    expect(h.gate.appliedSeq()).toBe(2);
+  });
+
+  it('the retry of a failed fetch is dropped when an out-of-gate read applied meanwhile', async () => {
+    const h = harness();
+    h.gate.event(1);
+    h.fireTimers();
+    await h.fail(new Error('offline'));
+    h.gate.applied(1); // a save's own refresh holds the event
+    h.fireTimers();
+    expect(h.sent).toHaveLength(1);
   });
 
   it('a take that throws is reported and its seq is not adopted', async () => {

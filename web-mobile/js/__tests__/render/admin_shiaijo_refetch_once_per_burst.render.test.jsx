@@ -87,6 +87,58 @@ describe('the court console reads its feed once per burst (bc-sseq FR4)', () => 
     }
   });
 
+  it('a stream that reopens after an error restarts the gate, so a restarted server\'s seqs refetch', async () => {
+    vi.useFakeTimers();
+    const side = (id, name) => ({ id, name });
+    const running = (ipponsA) => ({
+      id: 'm1', status: 'running', phase: 'pool', poolName: 'Pool A', court: 'A', scheduledAt: '09:00',
+      sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'), ipponsA, ipponsB: [], modifiedAt: 100 + ipponsA.length,
+    });
+    const head = { seq: 20 };
+    let emit = () => {};
+    let status = () => {};
+    const prev = {
+      fetch: window.API.fetchCourtMatches, sub: window.API.subscribeToEvents,
+      tm: window.tournamentMatches, fbc: window.filterMatchesByCourt,
+    };
+    const fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve(
+      withSeq([{ id: 'c1', name: 'Cup', status: 'pools', poolMatches: [running([])] }], head.seq),
+    ));
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    window.API.subscribeToEvents = (cb, onStatus) => { emit = cb; status = onStatus; return () => {}; };
+    window.tournamentMatches = (t) => (t.competitions || [])
+      .flatMap((c) => (c.poolMatches || []).map((m) => ({ ...m, compId: c.id, compName: c.name })));
+    window.filterMatchesByCourt = (matches) => matches;
+    const pastWindow = async () => {
+      await act(async () => { vi.advanceTimersByTime(700); });
+      await act(async () => { await Promise.resolve(); });
+    };
+    try {
+      await act(async () => { renderPage(makeMinimalTournament(), 'A'); });
+      await act(async () => { await Promise.resolve(); });
+      const first = fetchCourtMatches.mock.calls.length;
+
+      // The server restarted: its head seq starts again at 0.
+      head.seq = 0;
+      await act(async () => { status('error'); });
+      await act(async () => { status('open'); });
+      await pastWindow();
+      expect(fetchCourtMatches.mock.calls.length, 'the feed is read again').toBe(first + 1);
+      head.seq = 1;
+      await act(async () => {
+        emit({ type: 'match_updated', seq: 1, data: { competitionId: 'c1', matchId: 'm1', result: running(['M']) } });
+      });
+      await pastWindow();
+      expect(fetchCourtMatches.mock.calls.length, 'an event the old 20 would have called covered').toBe(first + 2);
+    } finally {
+      window.API.fetchCourtMatches = prev.fetch;
+      window.API.subscribeToEvents = prev.sub;
+      window.tournamentMatches = prev.tm;
+      window.filterMatchesByCourt = prev.fbc;
+      vi.useRealTimers();
+    }
+  });
+
   it('an answer to a feed read sent before a resync is not adopted (the gate forgot it)', async () => {
     vi.useFakeTimers();
     const side = (id, name) => ({ id, name });

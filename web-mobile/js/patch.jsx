@@ -273,12 +273,20 @@ const HELD_PUSH_WAIT_MS = 300;
 //     only one, since a fetch that repeats it never asks again;
 //   - now() (reconnect, tab resume, a gap) asks for one whatever the seq,
 //     still coalescing;
-//   - an answer naming a lower seq than the applied one (a server restart, a
-//     late answer) is read as a new stream: it is adopted, and one refetch
-//     is asked for when an event above it was seen;
+//   - an answer naming a lower seq than the applied one is a late answer (a
+//     build that began earlier, openapi EventSeq) and changes nothing: the
+//     applied seq only ever rises. A seq cannot be compared across a server
+//     restart (the head seq starts again at 0 and no header names the
+//     stream), so a host whose stream ended and reopened calls restart();
+//   - a refetch that fails is asked for again once, after the same wait; a
+//     second failure waits for the next event or now() (an offline device
+//     must not poll);
 //   - forget() (resync_required) drops every seq: nothing counts as applied,
 //     and an answer to a fetch sent before it is taken but its seq is not
-//     adopted. The host asks for its refetch with now().
+//     adopted. The host asks for its refetch with now();
+//   - restart() (the stream reopened, resync_required) is forget() and now():
+//     nothing counts as applied and one refetch is asked for whatever its
+//     seq says.
 // Every fetch that applies the same state outside the gate (a first load, a
 // refresh after a save) reports the seq of the value its fetcher returned,
 // before any merge: `applied(readSeqOf(fetched))`. The gate's own fetch never
@@ -301,26 +309,19 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
     let recheck = false;  // the refetch wanted is that repeat
     let forced = false;   // the refetch wanted is one applied() cannot cancel
     let generation = 0;
+    let failed = false;   // the last fetch failed and has been asked for again
 
     const isSeq = (seq) => typeof seq === 'number' && Number.isSafeInteger(seq) && seq > 0;
 
-    // adopt records an answer's seq; true when it asks for one more refetch
-    // (a new stream, with an event above it already seen).
+    // adopt records an answer's seq. It only ever rises: a lower one is a
+    // late answer (a build that began earlier) and holds nothing new.
     const adopt = (seq) => {
-        if (!isSeq(seq)) return false;
-        if (seq < applied) {
-            applied = seq;
-            const refetch = seen > seq;
-            seen = seq;
-            return refetch;
-        }
-        applied = seq;
-        return false;
+        if (isSeq(seq) && seq > applied) applied = seq;
     };
 
     // forced: the refetch asked for is one an applied answer cannot cancel
-    // (now(), an event with no seq, a new stream, a failed fetch): fire()
-    // sends it whatever has been applied since.
+    // (now(), an event with no seq, a failed fetch): fire() sends it
+    // whatever has been applied since.
     const want = (force) => {
         if (force) forced = true;
         if (scheduled) return;
@@ -342,10 +343,16 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
             // once more. Only once, so a server whose seq restarted below
             // the page's cannot loop it.
             else if (!flightRecheck && isSeq(seq) && seq < flightSent) more = recheck = true;
-            if (adopt(seq)) more = force = true;
+            adopt(seq);
+            failed = false;
         } else if (flightUnknown || flightSeq > 0) {
             more = force = true;
         }
+        // A failed fetch is asked for again once: the burst it served rode on
+        // it alone, so no later fetch covers it. A second failure waits for
+        // an event or now().
+        if (gen === generation && !ok && !failed) failed = more = true;
+        else if (!ok) failed = false;
         flightSeq = 0;
         flightUnknown = false;
         if (more) want(force);
@@ -389,6 +396,12 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
         });
     }
 
+    const forget = () => {
+        generation += 1;
+        applied = 0;
+        seen = 0;
+    };
+
     return {
         event(seq) {
             if (isSeq(seq) && seq <= applied) return false;
@@ -404,13 +417,11 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
             return true;
         },
         now() { want(true); },
-        applied(seq) {
-            if (adopt(seq)) want(true);
-        },
-        forget() {
-            generation += 1;
-            applied = 0;
-            seen = 0;
+        applied(seq) { adopt(seq); },
+        forget,
+        restart() {
+            forget();
+            want(true);
         },
         // appliedSeq: the seq the gate counts as applied (tests and logs).
         appliedSeq() { return applied; },

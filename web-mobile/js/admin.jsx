@@ -3,6 +3,7 @@
 
 import { applyPatch as patchCompetitionData, applyPatchToCompetitions, checkSeqGap, createPushLedger, createRefetchGate, matchInComp } from './patch.jsx';
 import { readSeqOf } from './read_seq.jsx';
+import { makeReconnectRefetcher } from './admin_shiaijo_feed.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 // Imported from the leaf, not read off `window`: write_result.jsx is
 // import-only (see its header) and every consumer ES-imports it directly.
@@ -991,10 +992,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           // Every held copy may be wrong: no push outranks the refetch,
           // and no answer held counts as applied (a new stream).
           pushes.clear();
-          detailGate.forget();
-          listGate.forget();
-          detailGate.now();
-          listGate.now();
+          detailGate.restart();
+          listGate.restart();
           return;
         }
 
@@ -1044,7 +1043,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             scheduleTournamentRefresh(true, event.seq);
           }
         }
-      });
+      // A stream that reopens after an error may be a restarted server's
+      // (its seqs begin again): no answer held counts as applied, and one
+      // refetch of each follows.
+      }, makeReconnectRefetcher(() => {
+        if (cancelled) return;
+        detailGate.restart();
+        listGate.restart();
+      }));
       return () => {
         cancelled = true;
         timerPool.clearAll();

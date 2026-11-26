@@ -31,6 +31,13 @@ describe('a whole-match local patch never replaces a newer copy held', () => {
         expect(next.poolMatches[0].status).toBe('completed');
     });
 
+    it('orders equal scoreVersions by modifiedAt (a court or time move adds no score-log line)', () => {
+        const held = comp({ status: 'scheduled', court: 'B', scoreVersion: 5, modifiedAt: 800 });
+        expect(applyPatch(held, whole({ status: 'scheduled', court: 'A', scoreVersion: 5, modifiedAt: 500 })), 'older stamp: court kept').toBe(held);
+        const newer = applyPatch(held, whole({ status: 'scheduled', court: 'A', scoreVersion: 5, modifiedAt: 900 }));
+        expect(newer.poolMatches[0].court, 'newer stamp').toBe('A');
+    });
+
     it('falls back to modifiedAt when either copy has no scoreVersion', () => {
         const held = comp({ status: 'completed', winner: 'A', modifiedAt: 800 });
         expect(applyPatch(held, whole({ status: 'completed', winner: 'B', scoreVersion: 5, modifiedAt: 500 })), 'older stamp').toBe(held);

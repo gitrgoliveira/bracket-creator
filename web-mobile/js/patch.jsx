@@ -463,6 +463,12 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
             ask(true);
         },
         applied(seq) { adopt(seq); },
+        // late(seq): whether an answer read at `seq`, made outside the gate,
+        // is older than one the gate applied, the rule its own answers keep
+        // (a seed is no answer shown, so nothing is late against it). A host
+        // drops such an answer before showing it: shown, it would put older
+        // data back while the applied seq stayed above it.
+        late(seq) { return !seeded && isSeq(seq) && seq < applied; },
         // seed(seq): a gate made after the page read starts from that read's
         // seq, so its first event does not fetch what the page holds. The
         // seed may be older than a server restart, so the first answer that
@@ -646,12 +652,14 @@ function patchCompetition(prev, event) {
 // copy a refused write's answer carries, marked `whole` by the outbox,
 // _showStoredMatch in api_client_overlays.jsx), is older than the copy `held`
 // already shows: by the server's scoreVersion when both carry one
-// (olderByScoreVersion), else by `modifiedAt` when both are stamped. An answer
-// read before a newer push it lands after then changes nothing. A court or
-// time patch is never whole, so it applies as it always did.
+// (olderByScoreVersion), else by `modifiedAt` when both are stamped: a court
+// or time move writes no score-log line, so two copies at ONE version can still
+// differ by it, and the stamp orders them. An answer read before a newer push
+// it lands after then changes nothing. A court or time patch is never whole,
+// so it applies as it always did.
 function isOlderWholeCopy(update, held) {
-    const byVersion = olderByScoreVersion(update, held);
-    if (byVersion !== null) return byVersion;
+    if (olderByScoreVersion(update, held) === true) return true;
+    if (olderByScoreVersion(held, update) === true) return false;
     const u = Number(update.modifiedAt) || 0;
     const h = Number(held.modifiedAt) || 0;
     return u > 0 && h > u;

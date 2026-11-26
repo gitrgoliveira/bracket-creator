@@ -43,6 +43,24 @@ function harness({ maxDelayMs = 500, random = () => 0, result = () => undefined 
   return { gate, timers, deadlines, sent, taken, errors, fireTimers, fireDeadlines, answer, fail };
 }
 
+describe('late(seq): an answer read outside the gate, against the one it applied', () => {
+  it('is late only when its seq is below the applied one', () => {
+    const { gate } = harness();
+    expect(gate.late(5), 'nothing applied yet').toBe(false);
+    gate.applied(10);
+    expect(gate.late(9)).toBe(true);
+    expect(gate.late(10)).toBe(false);
+    expect(gate.late(11)).toBe(false);
+    expect(gate.late(0), 'an answer naming no seq is never late').toBe(false);
+  });
+
+  it('is never late against a seed, which is no answer shown', () => {
+    const { gate } = harness();
+    gate.seed(10);
+    expect(gate.late(4)).toBe(false);
+  });
+});
+
 describe('read_seq: an answer keeps its stream position beside its value', () => {
   it('reads the header the answer carried', () => {
     const v = noteReadSeq({ a: 1 }, resWithSeq(42));

@@ -1010,22 +1010,22 @@ function App() {
     return t;
   };
 
-  // readList is fetchList and showList in one, for a read made outside the
-  // list gate. It reports nothing to the gate: load below does.
-  const readList = async () => {
-    const readAs = currentReadAudienceKey();
-    return showList(await fetchList(), readAs);
-  };
-
   // load is every read of the list the page makes outside the list gate. It
-  // answers what readList does, except that a failed read is logged and
-  // answers false (the reload effect below waits for a truthy answer, reports
-  // false and ignores READ_SUPERSEDED), and it tells the list gate the seq of
-  // a read it showed, or keeps it for a gate made later.
+  // fetches and shows the list as the gate's read does, except that a failed
+  // read is logged and answers false (the reload effect below waits for a
+  // truthy answer, reports false and ignores READ_SUPERSEDED), and an answer
+  // older than one the gate already applied is dropped like the gate's own
+  // late answer (createRefetchGate, patch.jsx): shown, it would put older data
+  // back while the gate's applied seq stayed above it, so the events up to that
+  // seq would read as covered and nothing would heal the screen. It tells the
+  // list gate the seq of a read it showed, or keeps it for a gate made later.
   const load = async () => {
+    const readAs = currentReadAudienceKey();
     let read;
     try {
-      read = await readList();
+      const fetched = await fetchList();
+      const gate = listGateRef.current;
+      read = gate && gate.late(readSeqOf(fetched)) ? showList(READ_SUPERSEDED, readAs) : showList(fetched, readAs);
     } catch (e) {
       console.error("Failed to load tournament", e);
       return false;
@@ -1756,10 +1756,13 @@ function App() {
       window.API.fetchCompetitionDetails(viewerCompId)
         .then(data => {
           if (cancelled) return;
-          setSelectedCompData((prev) => keep(prev, data));
           // The detail gate counts the events this read holds (bc-sseq FR4),
-          // read off the fetched value, since the merged one carries no seq.
+          // read off the fetched value, since the merged one carries no seq. An
+          // answer older than one the gate applied is dropped, as the gate's
+          // own are (late, patch.jsx).
           const held = detailGateRef.current;
+          if (held && held.compId === viewerCompId && held.gate.late(readSeqOf(data))) { setLoading(false); return; }
+          setSelectedCompData((prev) => keep(prev, data));
           if (held && held.compId === viewerCompId) held.gate.applied(readSeqOf(data));
           else detailSeedRef.current = { compId: viewerCompId, seq: readSeqOf(data) };
           setLoading(false);

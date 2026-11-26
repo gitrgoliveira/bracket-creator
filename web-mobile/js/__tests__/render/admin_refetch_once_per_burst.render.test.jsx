@@ -1,6 +1,6 @@
 // bc-sseq FR4: the admin competition page fetches once per burst. Its
 // per-event detail refetch and its tournament refresh each ask a gate
-// (createRefetchGate, patch.jsx), which sends one fetch per burst and none for
+// (createRefetchGate, refetch_gate.jsx), which sends one fetch per burst and none for
 // an event the answer it applied already holds (X-Event-Seq, read_seq.jsx).
 // Every read of the detail made outside the events (the first one, the data
 // issue banner's Reload) tells the gate the seq it applied.
@@ -8,7 +8,7 @@ import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { HELD_PUSH_WAIT_MS } from '../../patch.jsx';
+import { HELD_PUSH_WAIT_MS } from '../../refetch_gate.jsx';
 import { noteReadSeq } from '../../read_seq.jsx';
 
 const probe = { props: null, editProps: null };
@@ -200,6 +200,25 @@ describe('the admin competition page fetches once per burst (bc-sseq FR4)', () =
     await emit(tap(24, ['M', 'K']));
     await pastWindow();
     expect(lists(), 'no tournament refresh for an event the page holds').toBe(beforeLists);
+  });
+
+  it('a list and settings read still owed when another competition opens is asked for again', async () => {
+    const first = await mount(20);
+    head.competitions = 30;
+    const beforeLists = lists();
+    const beforeSettings = window.API.fetchTournament.mock.calls.length;
+    // The event schedules both reads; the organiser opens another competition
+    // before either is sent, which ends the effect and its timers.
+    await emit({ type: 'tournament_updated', seq: 30, data: null });
+    await act(async () => { first.rerender(adminElement('c2')); });
+    await pastWindow();
+    expect(lists(), 'the list is read by the next gate').toBe(beforeLists + 1);
+    expect(window.API.fetchTournament.mock.calls.length, 'the settings are read by the next gate').toBe(beforeSettings + 1);
+    // Nothing is owed after that: a later effect asks for nothing.
+    await act(async () => { first.rerender(adminElement('c1')); });
+    await pastWindow();
+    expect(lists(), 'no read is carried twice').toBe(beforeLists + 1);
+    expect(window.API.fetchTournament.mock.calls.length).toBe(beforeSettings + 1);
   });
 
   it('tournament_updated reads the tournament whatever the seqs say', async () => {

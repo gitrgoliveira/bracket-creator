@@ -1,7 +1,7 @@
 // bc-sseq FR4: a page fetches again once per burst, never for an event its
 // answer already holds. read_seq.jsx owns the answer's stream position (the
 // X-Event-Seq header, kept beside the value a fetcher returns); the refetch
-// gate (createRefetchGate, patch.jsx) is the one owner of "does this event
+// gate (createRefetchGate, refetch_gate.jsx) is the one owner of "does this event
 // need a refetch". Its wait before a fetch is pinned to the server's push
 // hold by the shared table internal/mobileapp/testdata/held_push_wait.json
 // (the Go half is held_push_wait_test.go).
@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createRefetchGate, HELD_PUSH_WAIT_MS, FETCH_DEADLINE_MS } from '../patch.jsx';
+import { createRefetchGate, HELD_PUSH_WAIT_MS, FETCH_DEADLINE_MS } from '../refetch_gate.jsx';
 import { noteReadSeq, readSeqOf, EVENT_SEQ_HEADER } from '../read_seq.jsx';
 import { API } from '../api_client.jsx';
 

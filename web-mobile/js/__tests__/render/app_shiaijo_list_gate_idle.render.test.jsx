@@ -7,7 +7,7 @@ import React from 'react';
 import { act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { mountApp } from '../helpers/mount_app.js';
-import { HELD_PUSH_WAIT_MS, FETCH_DEADLINE_MS } from '../../patch.jsx';
+import { HELD_PUSH_WAIT_MS, FETCH_DEADLINE_MS } from '../../refetch_gate.jsx';
 
 const sse = { emit: null };
 

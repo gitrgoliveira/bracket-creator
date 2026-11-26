@@ -1,7 +1,8 @@
 // Main App: single tournament per app/url. Tournament has multiple Competitions
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
-import { applyPatch as patchCompetitionData, checkSeqGap, createPushLedger, createRefetchGate, keepNewerTournament } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap, createPushLedger, keepNewerTournament } from './patch.jsx';
+import { createRefetchGate } from './refetch_gate.jsx';
 import { holdReadSeq, readSeqOf } from './read_seq.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
@@ -940,7 +941,7 @@ function App() {
   // in flight at once.
   const updateTournament = useCallback((next) => setTournament((prev) => keepNewerTournament(prev, next)), []);
 
-  // The SSE effect's refetch gates (createRefetchGate, patch.jsx), told of the
+  // The SSE effect's refetch gates (createRefetchGate, refetch_gate.jsx), told of the
   // reads made outside it: listGateRef the tournament's (load below), and
   // detailGateRef the open competition's detail, as { compId, gate }. Null
   // while no SSE effect runs.
@@ -1015,7 +1016,7 @@ function App() {
   // read is logged and answers false (the reload effect below waits for a
   // truthy answer, reports false and ignores READ_SUPERSEDED), and an answer
   // older than one the gate already applied is dropped like the gate's own
-  // late answer (createRefetchGate, patch.jsx): shown, it would put older data
+  // late answer (createRefetchGate, refetch_gate.jsx): shown, it would put older data
   // back while the gate's applied seq stayed above it, so the events up to that
   // seq would read as covered and nothing would heal the screen. It tells the
   // list gate the seq of a read it showed, or keeps it for a gate made later.
@@ -1037,7 +1038,7 @@ function App() {
     return read;
   };
 
-  // The list gate's two halves (createRefetchGate, patch.jsx): fetchListRef
+  // The list gate's two halves (createRefetchGate, refetch_gate.jsx): fetchListRef
   // reads, and takeList, called as the read is sent, answers what shows it
   // (false when it dropped the answer). A refused password is no failure of
   // the read: the audience change that follows reads again, so the gate must
@@ -1380,7 +1381,7 @@ function App() {
     const maybeLoad = () => (listLoadSkipped() ? undefined : loadRef.current());
 
     // bc-sseq FR4: one refetch per burst. Every event that used to schedule
-    // its own fetch asks a gate instead (createRefetchGate, patch.jsx), which
+    // its own fetch asks a gate instead (createRefetchGate, refetch_gate.jsx), which
     // sends one per burst and none for an event the applied answer already
     // holds (its X-Event-Seq, read_seq.jsx). Each fetch waits a delay drawn
     // from HELD_PUSH_WAIT_MS to the top of the page's window, so the many
@@ -1455,7 +1456,7 @@ function App() {
     // included, and each sends ONE refetch, however many of these arrive in a
     // row (a reconnect and then resync_required would otherwise read the list
     // twice). The seqs the page kept for a gate made later need no reset: a
-    // seeded gate lets its first answer replace the seed (seed(), patch.jsx).
+    // seeded gate lets its first answer replace the seed (seed(), refetch_gate.jsx).
     const restartReads = () => {
         listGate.restart();
         if (detailGate) detailGate.restart();

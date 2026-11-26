@@ -1,7 +1,7 @@
 // bc-sseq FR4: the court console reads its feed again once per burst, and
 // not at all for an event the feed it applied already holds (the answer's
 // X-Event-Seq, read_seq.jsx). Its refresh asks a gate (createRefetchGate,
-// patch.jsx), 300 to 600 ms after the event; every read of the feed (the
+// refetch_gate.jsx), 300 to 600 ms after the event; every read of the feed (the
 // first one, the operator's Refresh) tells the gate the seq it applied.
 import { act } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';

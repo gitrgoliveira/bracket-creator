@@ -12,7 +12,7 @@ import React from 'react';
 import { act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, afterAll } from 'vitest';
 import { mountApp, settle, propsProbe } from '../helpers/mount_app.js';
-import { HELD_PUSH_WAIT_MS } from '../../patch.jsx';
+import { HELD_PUSH_WAIT_MS } from '../../refetch_gate.jsx';
 
 const home = propsProbe((props) => <div data-testid="viewer-home">{props.tournament && props.tournament.name}</div>);
 

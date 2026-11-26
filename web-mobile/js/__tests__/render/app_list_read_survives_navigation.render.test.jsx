@@ -10,7 +10,7 @@ import React from 'react';
 import { act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { mountApp, propsProbe } from '../helpers/mount_app.js';
-import { HELD_PUSH_WAIT_MS } from '../../patch.jsx';
+import { HELD_PUSH_WAIT_MS } from '../../refetch_gate.jsx';
 import { noteReadSeq } from '../../read_seq.jsx';
 
 const page = propsProbe(() => <div data-testid="viewer-competition" />);

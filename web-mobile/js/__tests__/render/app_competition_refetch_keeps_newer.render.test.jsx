@@ -14,10 +14,10 @@ import { act } from '@testing-library/react';
 import { describe, it, expect, vi, afterAll } from 'vitest';
 import { mountApp, propsProbe } from '../helpers/mount_app.js';
 import { readCode } from '../helpers/source.js';
-import { HELD_PUSH_WAIT_MS } from '../../patch.jsx';
+import { HELD_PUSH_WAIT_MS } from '../../refetch_gate.jsx';
 
 // settle: past the shortest delay the page's refetch gate draws (the start of
-// its window, HELD_PUSH_WAIT_MS, createRefetchGate in patch.jsx).
+// its window, HELD_PUSH_WAIT_MS, createRefetchGate in refetch_gate.jsx).
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, HELD_PUSH_WAIT_MS + 20)); });
 
 const page = propsProbe(() => <div data-testid="viewer-competition" />);

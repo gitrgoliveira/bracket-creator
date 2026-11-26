@@ -15,7 +15,8 @@
 import { createTimerPool } from './timer_pool.jsx';
 import { Icon } from './icon.jsx';
 import { courtQueueEntriesOf } from './court_queue.jsx';
-import { applyPatch, createPushLedger, createRefetchGate, matchInComp } from './patch.jsx';
+import { applyPatch, createPushLedger, matchInComp } from './patch.jsx';
+import { createRefetchGate } from './refetch_gate.jsx';
 import { readSeqOf } from './read_seq.jsx';
 import { useCourtPaceLookup } from './court_pace.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
@@ -131,7 +132,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // the SSE effect, the reconnect handler, AND the manual Refresh button all
     // drive the same fetch. Guarded by mountedRef so a late resolve after
     // unmount is dropped. Returns the promise so callers can await completion.
-    // The feed effect's refetch gate (createRefetchGate, patch.jsx), as
+    // The feed effect's refetch gate (createRefetchGate, refetch_gate.jsx), as
     // { court, gate }: every read of the feed tells it the seq of the answer
     // it applied (bc-sseq FR4), so an event that answer holds fetches nothing.
     const feedGateRef = useRef(null);
@@ -160,7 +161,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     }, [pushes]);
     // An answer read outside the feed gate that is older than one the gate
     // already applied is dropped before it is shown (createRefetchGate.late,
-    // patch.jsx), so it never puts older data over a newer feed while the
+    // refetch_gate.jsx), so it never puts older data over a newer feed while the
     // gate's applied seq stays above it.
     const lateCourtRead = useCallback((comps) => {
         const held = feedGateRef.current;
@@ -291,7 +292,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // One refetch per burst of events, not one per event: a running match
         // broadcasts every saved point, and each used to schedule its own
         // full fetch of the court's feed. The gate (createRefetchGate,
-        // patch.jsx; bc-sseq FR4) sends it 300 to 600 ms after the event, and
+        // refetch_gate.jsx; bc-sseq FR4) sends it 300 to 600 ms after the event, and
         // none for an event the feed applied already holds.
         const feedGate = createRefetchGate({
             schedule: timerPool.schedule,

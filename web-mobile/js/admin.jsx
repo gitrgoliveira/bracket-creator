@@ -1,7 +1,8 @@
 // Admin side: single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
-import { applyPatch as patchCompetitionData, applyPatchToCompetitions, checkSeqGap, createPushLedger, createRefetchGate, matchInComp } from './patch.jsx';
+import { applyPatch as patchCompetitionData, applyPatchToCompetitions, checkSeqGap, createPushLedger, matchInComp } from './patch.jsx';
+import { createRefetchGate } from './refetch_gate.jsx';
 import { readSeqOf } from './read_seq.jsx';
 import { makeReconnectRefetcher } from './admin_shiaijo_feed.jsx';
 import { createTimerPool } from './timer_pool.jsx';
@@ -186,7 +187,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // createPushLedger, patch.jsx): every refetch of it takes its answer through
   // a keeper made as it is sent (pushes.detail()).
   const [pushes] = useState(() => createPushLedger());
-  // The competition view's refetch gates (createRefetchGate, patch.jsx; the
+  // The competition view's refetch gates (createRefetchGate, refetch_gate.jsx; the
   // SSE effect below makes them), told of the reads made outside it (bc-sseq
   // FR4): detailGateRef the shown competition's detail, as { compId, gate },
   // listGateRef the competitions list, and settingsGateRef the tournament
@@ -203,6 +204,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // event never fetches what the view holds already.
   const listSeedRef = useRef(0);
   const detailSeedRef = useRef({ compId: null, seq: 0 });
+  // A list or settings read the last effect still owed (out or waiting when
+  // the organiser opened another competition): neither depends on the
+  // competition shown, so the next effect's gates ask for it again. The
+  // detail read is dropped with its competition.
+  const readsOwedRef = useRef({ list: false, settings: false });
   const reportDetailRead = (compId, data) => {
     const held = detailGateRef.current;
     if (held && held.compId === compId) held.gate.applied(readSeqOf(data));
@@ -213,7 +219,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     else listSeedRef.current = readSeqOf(comps);
   };
   // An answer read outside a gate that is older than one the gate already
-  // applied is dropped before it is shown (createRefetchGate.late, patch.jsx):
+  // applied is dropped before it is shown (createRefetchGate.late, refetch_gate.jsx):
   // shown, it would put older data back while the gate's applied seq stayed
   // above it, so events up to that seq would read as covered and nothing would
   // heal the page.
@@ -931,7 +937,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       const compId = view.id;
       const timerPool = createTimerPool();
       // bc-sseq FR4: one refetch per burst. Every event that used to schedule
-      // its own fetch asks a gate (createRefetchGate, patch.jsx), which sends
+      // its own fetch asks a gate (createRefetchGate, refetch_gate.jsx), which sends
       // one per burst and none for an event the applied answer already holds
       // (its X-Event-Seq, read_seq.jsx).
       // detailGate: the competition shown, 300 to 500 ms after the event; its
@@ -998,6 +1004,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       settingsGateRef.current = settingsGate;
       listGate.seed(listSeedRef.current);
       if (detailSeedRef.current.compId === compId) detailGate.seed(detailSeedRef.current.seq);
+      if (readsOwedRef.current.list) listGate.now();
+      if (readsOwedRef.current.settings) settingsGate.now();
+      readsOwedRef.current = { list: false, settings: false };
       const refetchDetail = (seq) => detailGate.event(seq);
       const scheduleTournamentRefresh = (needsTournament, seq) => {
         if (needsTournament) settingsGate.event(seq);
@@ -1098,6 +1107,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         timerPool.clearAll();
         listSeedRef.current = listGate.appliedSeq();
         detailSeedRef.current = { compId, seq: detailGate.appliedSeq() };
+        readsOwedRef.current = { list: listGate.pending(), settings: settingsGate.pending() };
         detailGate.dispose();
         listGate.dispose();
         settingsGate.dispose();

@@ -6,7 +6,7 @@
 // `X-Event-Seq`: the seq of the newest event the server had sent when the read
 // began (internal/mobileapp/event_seq.go). An answer at seq N already holds
 // every change announced at or below N, so a page that applied it needs no
-// refetch for those events (createRefetchGate, patch.jsx).
+// refetch for those events (createRefetchGate, refetch_gate.jsx).
 //
 // The seq rides beside the value a fetcher returns, never inside it: no
 // payload or normaliser changes, and a host that merges what it fetched

@@ -11,7 +11,7 @@ import React from 'react';
 import { act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { mountApp, settle } from '../helpers/mount_app.js';
-import { HELD_PUSH_WAIT_MS } from '../../patch.jsx';
+import { HELD_PUSH_WAIT_MS } from '../../refetch_gate.jsx';
 import { noteReadSeq } from '../../read_seq.jsx';
 
 const withSeq = (value, seq) => noteReadSeq(value, { headers: { get: (k) => (k === 'X-Event-Seq' ? String(seq) : null) } });

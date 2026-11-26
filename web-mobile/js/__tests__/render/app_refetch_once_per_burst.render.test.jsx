@@ -1,6 +1,6 @@
 // bc-sseq FR4: the public competition page fetches once per burst. Every
 // event that used to schedule its own refetch asks a gate (createRefetchGate,
-// patch.jsx), which sends one fetch per burst and none for an event the answer
+// refetch_gate.jsx), which sends one fetch per burst and none for an event the answer
 // it applied already holds (the answer's X-Event-Seq, read_seq.jsx).
 //
 // Mounts the real App on /competition/c1 (app.jsx renders itself into #root
@@ -12,7 +12,7 @@ import React from 'react';
 import { act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { mountApp, propsProbe } from '../helpers/mount_app.js';
-import { HELD_PUSH_WAIT_MS } from '../../patch.jsx';
+import { HELD_PUSH_WAIT_MS } from '../../refetch_gate.jsx';
 import { noteReadSeq } from '../../read_seq.jsx';
 
 const page = propsProbe(() => <div data-testid="viewer-competition" />);

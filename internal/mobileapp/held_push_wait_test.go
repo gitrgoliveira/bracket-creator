@@ -12,7 +12,7 @@ import (
 
 // TestHeldPushWaitMatchesCoalesceWindow pins the page's refetch wait to the
 // server's push hold (bc-sseq FR4). A page sends no refetch sooner than
-// HELD_PUSH_WAIT_MS (web-mobile/js/patch.jsx) after the event that asked for
+// HELD_PUSH_WAIT_MS (web-mobile/js/refetch_gate.jsx) after the event that asked for
 // it, so a running match's push the coalescer is still holding goes out first
 // and the read's X-Event-Seq covers it. The shared table
 // testdata/held_push_wait.json is read here and by

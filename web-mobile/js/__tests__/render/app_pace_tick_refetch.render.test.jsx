@@ -3,14 +3,14 @@ import { act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { mountApp, settle, propsProbe } from '../helpers/mount_app.js';
 import { PACE_TICK_MS } from '../../court_pace.jsx';
-import { HELD_PUSH_WAIT_MS } from '../../patch.jsx';
+import { HELD_PUSH_WAIT_MS } from '../../refetch_gate.jsx';
 
 // On a competition page the pace tick refetches the tournament every
 // PACE_TICK_MS, so shared-court pace drift stays current. That refetch goes
 // through the SSE effect's gates (maybeLoad, the sign-in prompt, a hidden
 // tab) and lands after a random delay, so the open tabs do not all ask at the
 // same moment. The delay starts at HELD_PUSH_WAIT_MS (the list gate's window,
-// createRefetchGate, patch.jsx), so even a zero draw lands after it.
+// createRefetchGate, refetch_gate.jsx), so even a zero draw lands after it.
 
 const page = propsProbe(() => <div data-testid="viewer-competition" />);
 

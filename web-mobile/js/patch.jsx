@@ -270,7 +270,10 @@ const FETCH_DEADLINE_MS = 30000;
 //   - asked for: by an event above the applied seq, or, forced, by an event
 //     with no seq, now(seq?) (reconnect, tab resume, a gap; a seq it names
 //     counts as seen) or restart(). An ask while one is scheduled joins it;
-//     an ask while one is out asks for one more after it.
+//     an ask while one is out asks for one more after it, except now() and
+//     restart(), which let the one out go (its answer is ignored, as after
+//     the deadline) and schedule a new one, since it may be hung on the
+//     connection they resync.
 //   - sent: after the wait, unless it is not forced and an answer applied
 //     meanwhile (an out-of-gate read, such as a save's own refresh) covers
 //     every event seen.
@@ -290,7 +293,8 @@ const FETCH_DEADLINE_MS = 30000;
 //   - ended: forget() (resync_required) drops every seq: nothing counts as
 //     applied, and an answer to a fetch sent before it is applied but not
 //     adopted. restart() (the stream reopened; a seq cannot be compared
-//     across a server restart) is forget() and a forced ask. dispose() (the
+//     across a server restart) is forget() and a forced ask, which lets a
+//     fetch out go. dispose() (the
 //     host's effect ended): a fetch still out is neither applied nor followed
 //     by another, and nothing is sent again.
 // A host made after its page read seeds the gate with that read's seq:
@@ -347,11 +351,18 @@ function createRefetchGate({ schedule, fetch, take, maxDelayMs = HELD_PUSH_WAIT_
     };
 
     // ask wants a refetch. A forced one (now(), an event with no seq, a failed
-    // fetch) is sent whatever has been applied since.
+    // fetch) is sent whatever has been applied since. now() and restart()
+    // ask while a fetch is out only to resync a connection that may have
+    // dropped it, so the fetch out is let go (its answer, if one comes, is
+    // ignored) and a new one is sent, never waited for behind it.
     const ask = (force) => {
         if (disposed) return;
         if (force) wanted.forced = true;
         if (wanted.scheduled) return;
+        if (flight && force) {
+            flight = null;
+            wanted.again = false;
+        }
         if (flight) { wanted.again = true; return; }
         wanted.scheduled = true;
         schedule(fire, HELD_PUSH_WAIT_MS + random() * (top - HELD_PUSH_WAIT_MS));

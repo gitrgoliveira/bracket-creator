@@ -327,7 +327,7 @@ describe('createRefetchGate', () => {
     expect(h.gate.event(4)).toBe(true);
   });
 
-  it('restart() while a fetch is out sends one more after it, and the old answer is not adopted', async () => {
+  it('restart() while a fetch is out lets it go and sends a new one, and the old answer is neither applied nor adopted', async () => {
     const h = harness();
     h.gate.event(1);
     h.fireTimers();
@@ -337,9 +337,33 @@ describe('createRefetchGate', () => {
     h.gate.restart();
     await h.answer(answerAt(51));
     expect(h.gate.appliedSeq()).toBe(0);
+    expect(h.taken).toHaveLength(1);
     expect(h.timers).toHaveLength(1);
     h.fireTimers();
     expect(h.sent).toHaveLength(3);
+  });
+
+  it('now() or restart() while a fetch hangs sends a new one without waiting for the deadline', async () => {
+    for (const resync of ['now', 'restart']) {
+      const h = harness();
+      h.gate.event(1);
+      h.fireTimers();
+      expect(h.sent).toHaveLength(1);
+      h.gate[resync]();
+      // The hung fetch is let go: the new one is scheduled now, not after it.
+      expect(h.timers).toHaveLength(1);
+      h.fireTimers();
+      expect(h.sent).toHaveLength(2);
+      await h.answer(answerAt(7));
+      expect(h.gate.appliedSeq()).toBe(7);
+      // The hung one answering later, or its deadline running, changes nothing.
+      await h.answer(answerAt(3), 0);
+      h.fireDeadlines();
+      expect(h.gate.appliedSeq()).toBe(7);
+      expect(h.errors).toHaveLength(0);
+      expect(h.sent).toHaveLength(2);
+      expect(h.timers).toHaveLength(0);
+    }
   });
 
   it('a fetch applied outside the gate covers its events, read before any merge', () => {
@@ -404,7 +428,7 @@ describe('createRefetchGate', () => {
     expect(timers).toHaveLength(0);
   });
 
-  it('forget() drops every seq, and an answer sent before it is taken but not adopted', async () => {
+  it('forget() drops every seq, and the answer of a fetch it left out is not adopted', async () => {
     const h = harness();
     h.gate.event(1);
     h.fireTimers();
@@ -413,10 +437,10 @@ describe('createRefetchGate', () => {
     h.gate.event(9);
     h.fireTimers();
     h.gate.forget();
-    h.gate.now(); // the host's resync refetch
+    h.gate.now(); // the host's resync refetch lets the fetch out go
     const stale = answerAt(9);
     await h.answer(stale);
-    expect(h.taken).toContain(stale);
+    expect(h.taken).not.toContain(stale);
     expect(h.gate.appliedSeq()).toBe(0);
     expect(h.timers).toHaveLength(1);
     h.fireTimers();

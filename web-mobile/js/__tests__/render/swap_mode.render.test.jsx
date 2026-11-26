@@ -12,6 +12,7 @@ import { installWindowStubs } from '../helpers/stub_globals.js';
 import { pointerTap, keyboardClick } from '../helpers/tap_events.js';
 
 let restore;
+let askSwapMode;
 let AdminPools;
 let AdminBracket;
 let PoolsViewer;
@@ -32,6 +33,7 @@ beforeAll(async () => {
   ({ PoolsViewer } = await import('../../viewer_standings.jsx'));
   await import('../../admin_pools.jsx');
   await import('../../admin_competition_bracket.jsx');
+  ({ askSwapMode } = await import('../../swap_mode_request.jsx'));
   AdminPools = window.AdminPools;
   AdminBracket = window.AdminBracket;
   BracketTree = window.BracketTree;
@@ -103,6 +105,40 @@ describe('Swap competitors on Pools (preview)', () => {
       expect.stringContaining('Elijah Everdeen'), expect.stringContaining('Arthur Dick'),
       expect.stringContaining('Lena Park'), expect.stringContaining('Omar Sy'),
     ]);
+  });
+
+  it('opens with the mode on when the Draw review card asked for it, once', async () => {
+    askSwapMode('c1');
+    await mountPools();
+    expect(screen.getByTestId('swap-mode')).toBeInTheDocument();
+    expect(screen.queryByTestId('swap-mode-on')).toBeNull();
+    cleanup();
+    await mountPools();
+    expect(screen.getByTestId('swap-mode-on'), 'the next visit starts with the mode off').toBeInTheDocument();
+    cleanup();
+    askSwapMode('another');
+    await mountPools();
+    expect(screen.getByTestId('swap-mode-on'), 'an ask for another competition').toBeInTheDocument();
+  });
+
+  it('pins its banner while on, publishes its height, and opens the check beside it, not inside it', async () => {
+    window.API.swapDrawPlaces = vi.fn().mockResolvedValue(dryRun);
+    await mountPools();
+    expect(screen.getByTestId('swap-mode-on').closest('.swap-mode').className, 'the button that turns it on is not pinned')
+      .toBe('swap-mode swap-mode--off');
+    await turnOn();
+    const banner = screen.getByTestId('swap-mode');
+    expect(banner.className).toBe('swap-mode swap-mode--pinned');
+    expect(document.documentElement.style.getPropertyValue('--swap-banner-h')).toMatch(/px$/);
+    await pointerTap(targetNamed('Elijah Everdeen'));
+    later();
+    await pointerTap(targetNamed('Lena Park'));
+    const check = screen.getByTestId('draw-swap-check');
+    expect(banner.contains(check), 'the pinned banner would hold the backdrop under the top bar').toBe(false);
+    await keyboardClick(within(check).getByText('Cancel'));
+    later();
+    await pointerTap(screen.getByTestId('swap-mode-done'));
+    expect(document.documentElement.style.getPropertyValue('--swap-banner-h'), 'removed with the banner').toBe('');
   });
 
   it('is not offered once a result is recorded, on a league, or once the competition has started', async () => {

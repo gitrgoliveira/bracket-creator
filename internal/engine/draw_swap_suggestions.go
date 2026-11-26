@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -15,8 +16,8 @@ import (
 // separation summary it improves on.
 //
 // A suggestion never trades one dojo's pairing for another's: it is made only
-// when no pair of dojo-mates can meet earlier after it and at least one pair
-// meets later. Seeded competitors are never suggested, since moving a seed
+// when no dojo is worse off after it and at least one is better off, each
+// dojo judged as a whole (judgeDojos). Seeded competitors are never suggested, since moving a seed
 // rebuilds a pools + knockout bracket, which a suggestion must never do on its
 // own. Without a rebuild the bracket keeps its shape, so a swap changes only
 // the meetings of the pairs that hold one of the two competitors, and each
@@ -57,27 +58,33 @@ type SwapSuggestion struct {
 	Byes     []SwapBye         `json:"byes,omitempty"`
 }
 
-// StuckDojo is a dojo with a pair that shares a pool or can meet before the
-// final, which no returned suggestion keeps apart for longer without bringing
-// another pair of dojo-mates together earlier. Meeting is the dojo's earliest summary row.
-type StuckDojo struct {
-	Dojo    string      `json:"dojo"`
-	Meeting DojoMeeting `json:"meeting"`
-}
-
 // SwapSuggestions is the answer of GET .../draw/swap-suggestions.
 type SwapSuggestions struct {
 	Suggestions []SwapSuggestion `json:"suggestions"`
-	Stuck       []StuckDojo      `json:"stuck"`
 }
 
 // meetingRank says how late a pair of dojo-mates can first meet, larger is
-// later: depth is -1 for a shared pool, the round of the earliest meeting
-// (0 = the first round), or the bracket's round count when they cannot meet;
-// winners is the same for the if-both-win meeting, which breaks a tie.
+// later: depth is how far from the end of the bracket the earliest meeting
+// is, counted down to 0 for the final (-1 the semi-finals, and so on, by the
+// match's display round when it carries one, as the bracket names it), below
+// every round for a shared pool and above every round when they cannot meet;
+// winners is the same for the if-both-win meeting, which breaks a tie. A
+// pair with an earliest meeting and no if-both-win one (a knockout-only draw,
+// or a pool whose winner the first round does not hold) breaks no tie:
+// winners is its depth. This is the browser's meetingLateness
+// (admin_draw_swap_check.jsx) exactly, so the two sort a dojo's meetings
+// alike, and it reads every meeting on its own bracket's rounds, so a swap
+// that rebuilds the bracket compares meetings in two brackets fairly.
 type meetingRank struct {
 	depth, winners int
 }
+
+// sharedPoolDepth and noMeetingDepth rank a shared pool below, and a pair
+// that cannot meet above, every round of any bracket.
+const (
+	sharedPoolDepth = -1000
+	noMeetingDepth  = 1000
+)
 
 func (r meetingRank) compare(o meetingRank) int {
 	if r.depth != o.depth {
@@ -86,19 +93,92 @@ func (r meetingRank) compare(o meetingRank) int {
 	return r.winners - o.winners
 }
 
-// rankMeeting ranks a summary row. rounds is the bracket's round count.
-func rankMeeting(dm DojoMeeting, rounds int) meetingRank {
-	if dm.SamePool != "" {
-		return meetingRank{depth: -1, winners: -1}
+// meetingDepth is minus how many rounds before the final m is (0 = the
+// final): by its display round when it carries one, else by its index in its
+// bracket's rounds.
+func meetingDepth(m *BracketMeeting) int {
+	if m.DisplayRound > 0 {
+		return -(m.DisplayRound - 1)
 	}
-	r := meetingRank{depth: rounds, winners: rounds}
-	if dm.Earliest != nil {
-		r.depth = dm.Earliest.Round
+	return -(m.Rounds - 1 - m.Round)
+}
+
+// rankMeeting ranks a summary row.
+func rankMeeting(dm DojoMeeting) meetingRank {
+	switch {
+	case dm.SamePool != "":
+		return meetingRank{depth: sharedPoolDepth, winners: sharedPoolDepth}
+	case dm.Earliest == nil:
+		return meetingRank{depth: noMeetingDepth, winners: noMeetingDepth}
 	}
+	r := meetingRank{depth: meetingDepth(dm.Earliest)}
+	r.winners = r.depth
 	if dm.IfBothWin != nil {
-		r.winners = dm.IfBothWin.Round
+		r.winners = meetingDepth(dm.IfBothWin)
 	}
 	return r
+}
+
+// dojoTally is one dojo's pairs of dojo-mates in a swap: where each can first
+// meet before it and after it, in any order (one entry per pair in each).
+type dojoTally struct {
+	key           string
+	before, after []meetingRank
+}
+
+// tallyIndex is the index of the dojo key's tally in tallies, added when it
+// holds none.
+func tallyIndex(tallies *[]dojoTally, key string) int {
+	for i := range *tallies {
+		if (*tallies)[i].key == key {
+			return i
+		}
+	}
+	*tallies = append(*tallies, dojoTally{key: key})
+	return len(*tallies) - 1
+}
+
+// shift is how the dojo fares in the swap, judged as a whole (operator
+// decision C1): its meetings before and after, each sorted earliest first,
+// are compared from the earliest, and the first difference decides. Positive
+// is better off (that meeting is later after the swap), negative worse off,
+// zero unchanged. Pairs that meet where they did weigh nothing, so a tally
+// may hold only the pairs the swap can move. A swap between two of the dojo's
+// own competitors that only trades their meetings changes nothing.
+func (d *dojoTally) shift() int {
+	slices.SortFunc(d.before, meetingRank.compare)
+	slices.SortFunc(d.after, meetingRank.compare)
+	for i := 0; i < len(d.before) && i < len(d.after); i++ {
+		if c := d.after[i].compare(d.before[i]); c != 0 {
+			return c
+		}
+	}
+	return 0
+}
+
+// judgeDojos is the ONE rule that calls a swap better, worse or the same
+// (operator decision C1), for the suggestions and the swap candidates alike:
+// worse when any dojo is worse off, even if another is better off; better when
+// none is worse off and at least one is better off; the same otherwise.
+// better says, tally by tally, which dojos are better off.
+func judgeDojos(tallies []dojoTally) (verdict string, better []bool) {
+	better = make([]bool, len(tallies))
+	worse, gained := false, false
+	for i := range tallies {
+		switch c := tallies[i].shift(); {
+		case c < 0:
+			worse = true
+		case c > 0:
+			better[i], gained = true, true
+		}
+	}
+	switch {
+	case worse:
+		return SwapVerdictWorse, better
+	case gained:
+		return SwapVerdictBetter, better
+	}
+	return SwapVerdictSame, better
 }
 
 // suggestEntrant is one drawn competitor as the suggestions see them: the
@@ -122,7 +202,6 @@ type swapSuggester struct {
 	entrants []suggestEntrant
 	byDojo   map[string][]int
 	meet     func(a, b drawnCompetitor) DojoMeeting
-	rounds   int
 	ranks    map[[2]int]meetingRank
 	before   map[[2]string]DojoMeeting
 	// groupSize is how many drawn competitors each first-round match holds, in
@@ -144,17 +223,16 @@ func pairIDs(a, b string) [2]string {
 // has any; every other answers empty lists.
 //
 // A candidate is two unseeded competitors in different pools (pools draw) or
-// different first-round matches (knockout only). It is suggested when no
-// pair of dojo-mates meets earlier after it and at least one meets later: a
-// shared pool is the earliest of all, then earlier rounds before later ones,
-// with the if-both-win meeting breaking a tie. Suggestions are ranked by the
-// earliest meeting they fix (a shared pool first), then by how much later it
-// becomes, then by how many pairs improve, then by the two ids, and at most
-// maxSwapSuggestions are returned. Stuck lists, in summary order, every dojo
-// with a pair that shares a pool or meets before the final that no returned
-// suggestion keeps apart for longer, quoting the earliest such pair.
+// different first-round matches (knockout only). It is suggested when
+// judgeDojos calls it better: no dojo is worse off and at least one is better
+// off, where a shared pool is the earliest meeting of all, then earlier rounds
+// before later ones, with the if-both-win meeting breaking a tie. Its
+// improvements are the pairs of the dojos better off that meet later.
+// Suggestions are ranked by the earliest meeting they fix (a shared pool
+// first), then by how much later it becomes, then by how many pairs improve,
+// then by the two ids, and at most maxSwapSuggestions are returned.
 func SuggestSwaps(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, roster []domain.Player) SwapSuggestions {
-	out := SwapSuggestions{Suggestions: []SwapSuggestion{}, Stuck: []StuckDojo{}}
+	out := SwapSuggestions{Suggestions: []SwapSuggestion{}}
 	if comp == nil || comp.Status != state.CompStatusDrawReady || !CompetitionDrawsBracket(comp.EffectiveFormat()) {
 		return out
 	}
@@ -204,27 +282,6 @@ func SuggestSwaps(comp *state.Competition, pools []helper.Pool, bracket *state.B
 	for i := 0; i < len(found) && i < maxSwapSuggestions; i++ {
 		out.Suggestions = append(out.Suggestions, found[i].suggestion)
 	}
-
-	// A pair counts as helped only by a suggestion the organiser is shown: one
-	// that only a swap past the cap helps would otherwise appear in neither list.
-	helped := map[[2]string]bool{}
-	for _, sug := range out.Suggestions {
-		for _, imp := range sug.Improves {
-			helped[pairIDs(imp.Before.A.ID, imp.Before.B.ID)] = true
-		}
-	}
-
-	listed := map[string]bool{}
-	for _, dm := range summary {
-		key := helper.DojoKey(dm.Dojo)
-		// The summary is sorted earliest first, so a dojo's first unhelped row
-		// is its earliest pair that no swap keeps apart for longer.
-		if listed[key] || rankMeeting(dm, s.rounds).depth >= s.rounds-1 || helped[pairIDs(dm.A.ID, dm.B.ID)] {
-			continue
-		}
-		listed[key] = true
-		out.Stuck = append(out.Stuck, StuckDojo{Dojo: dm.Dojo, Meeting: dm})
-	}
 	return out
 }
 
@@ -240,9 +297,6 @@ func newSwapSuggester(comp *state.Competition, pools []helper.Pool, bracket *sta
 	}
 	for _, dm := range summary {
 		s.before[pairIDs(dm.A.ID, dm.B.ID)] = dm
-	}
-	if bracket != nil {
-		s.rounds = len(bracket.Rounds)
 	}
 	var drawn []drawnCompetitor
 	seeds := map[string]int{}
@@ -335,7 +389,7 @@ func (s *swapSuggester) rank(a, b suggestEntrant) meetingRank {
 	if r, ok := s.ranks[k]; ok {
 		return r
 	}
-	r := rankMeeting(s.meet(a.c, b.c), s.rounds)
+	r := rankMeeting(s.meet(a.c, b.c))
 	s.ranks[k] = r
 	return r
 }
@@ -366,37 +420,53 @@ type laterPair struct {
 	before, after meetingRank
 }
 
-// pairShifts compares the first meeting of every pair of dojo-mates that
-// holds entrant x or y before and after the swap of the two: gained lists the
-// pairs that meet later, earlier says at least one pair meets earlier. Only
-// valid for a swap that rebuilds nothing (no seed leaves a pools + knockout
-// pool), where the bracket keeps its shape and no other pair's meeting can
-// change. Any two entrants, seeded or not, in one group or two.
-func (s *swapSuggester) pairShifts(x, y int) (gained []laterPair, earlier bool) {
+// pairShifts judges the swap of entrants x and y by judgeDojos, from the
+// first meeting of every pair of dojo-mates that holds x or y before and
+// after the swap of the two (no other pair's meeting can change): verdict is
+// the swap's, gained lists the pairs that meet later from the dojos better
+// off. Only valid for a swap that rebuilds nothing (no seed leaves a pools +
+// knockout pool), where the bracket keeps its shape. Any two entrants, seeded
+// or not, in one group or two.
+func (s *swapSuggester) pairShifts(x, y int) (gained []laterPair, verdict string) {
 	ex, ey := s.entrants[x], s.entrants[y]
-	type pair struct{ i, j int }
+	type pair struct {
+		i, j  int
+		tally int
+	}
 	var pairs []pair
+	// At most two dojos: x's and y's.
+	tallies := make([]dojoTally, 0, 2)
+	add := func(i, j int, key string) { pairs = append(pairs, pair{i, j, tallyIndex(&tallies, key)}) }
 	for _, m := range s.byDojo[ex.key] {
 		if m != x {
-			pairs = append(pairs, pair{x, m})
+			add(x, m, ex.key)
 		}
 	}
 	for _, m := range s.byDojo[ey.key] {
 		if m != y && m != x {
-			pairs = append(pairs, pair{y, m})
+			add(y, m, ey.key)
 		}
 	}
+	var moved []laterPair
+	var movedTally []int
 	for _, p := range pairs {
 		before := s.rank(s.entrants[p.i], s.entrants[p.j])
 		after := s.rank(s.view(p.i, x, y), s.view(p.j, x, y))
-		switch c := after.compare(before); {
-		case c < 0:
-			earlier = true
-		case c > 0:
-			gained = append(gained, laterPair{p.i, p.j, before, after})
+		t := &tallies[p.tally]
+		t.before = append(t.before, before)
+		t.after = append(t.after, after)
+		if after.compare(before) > 0 {
+			moved = append(moved, laterPair{p.i, p.j, before, after})
+			movedTally = append(movedTally, p.tally)
 		}
 	}
-	return gained, earlier
+	verdict, better := judgeDojos(tallies)
+	for k, g := range moved {
+		if better[movedTally[k]] {
+			gained = append(gained, g)
+		}
+	}
+	return gained, verdict
 }
 
 // improvement is a SwapImprovement with the ranks the search sorts by.
@@ -407,17 +477,17 @@ type improvement struct {
 }
 
 // evaluate scores the swap of entrants x and y. ok is true when it is a
-// candidate (both unseeded, in different groups) that no pair of dojo-mates
-// meets earlier after and at least one meets later; improves then lists the
-// pairs that meet later, the earliest meeting first, with the largest gain
+// candidate (both unseeded, in different groups) that judgeDojos calls
+// better; improves then lists the pairs of the dojos better off that meet
+// later, the earliest meeting first, with the largest gain
 // first among equals.
 func (s *swapSuggester) evaluate(x, y int) (improves []improvement, ok bool) {
 	ex, ey := s.entrants[x], s.entrants[y]
 	if ex.seed > 0 || ey.seed > 0 || ex.group == ey.group {
 		return nil, false
 	}
-	gained, earlier := s.pairShifts(x, y)
-	if earlier || len(gained) == 0 {
+	gained, verdict := s.pairShifts(x, y)
+	if verdict != SwapVerdictBetter || len(gained) == 0 {
 		return nil, false
 	}
 	improves = make([]improvement, len(gained))
@@ -482,7 +552,7 @@ func (s *swapSuggester) side(i int) SuggestedSide {
 // loaded it to decide between 200 and 404. A draw that cannot be read is an
 // error, never an empty answer, which would say there is nothing to improve.
 func (e *Engine) SwapSuggestionsFor(comp *state.Competition) (*SwapSuggestions, error) {
-	empty := &SwapSuggestions{Suggestions: []SwapSuggestion{}, Stuck: []StuckDojo{}}
+	empty := &SwapSuggestions{Suggestions: []SwapSuggestion{}}
 	if comp == nil || comp.Status != state.CompStatusDrawReady || !CompetitionDrawsBracket(comp.EffectiveFormat()) {
 		return empty, nil
 	}

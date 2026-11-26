@@ -2798,24 +2798,25 @@ paths:
       tags: [competitions]
       summary: Swaps that keep competitors of the same dojo apart for longer
       description: |
-        Up to five swaps of two unseeded competitors, each of which makes at
-        least one pair of dojo-mates meet later and no pair meet earlier.
-        `improves` lists the pairs a suggestion helps, before and after;
+        Up to five swaps of two unseeded competitors, each of which leaves no
+        dojo worse off and at least one dojo better off. Each dojo is judged
+        as a whole: where its pairs of dojo-mates can first meet, sorted
+        earliest first, before and after the swap, compared from the earliest;
+        the first difference decides (later is better off). `improves` lists
+        the pairs of the dojos better off that meet later, before and after;
         `byes` lists the first-round byes a knockout-only swap hands over.
-        `stuck` lists the dojos with a pair that shares a pool or can meet
-        before the final which none of the listed suggestions keeps apart for longer, with that
-        dojo's earliest summary row. Seeded competitors are never suggested.
+        Seeded competitors are never suggested.
 
         Recomputed from the stored draw on every request and never stored.
         Organiser only, in self-run mode too. A competition with no draw
-        answers 200 with two empty lists.
+        answers 200 with an empty list.
       security:
         - TournamentPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
         '200':
-          description: The suggestions and the dojos none of them helps, possibly empty.
+          description: The suggestions, possibly none.
           content:
             application/json:
               schema:
@@ -2838,10 +2839,16 @@ paths:
         judged on the dojo separation before and after, the same rows the swap
         answers in `separation`:
 
-        - `worse`: at least one pair of dojo-mates would first meet earlier
-          (sharing a pool is earliest of all);
-        - `better`: no pair meets earlier and at least one meets later;
-        - `same`: every pair first meets where it does now. A move to another
+        each dojo judged as a whole: where its pairs of dojo-mates can first
+        meet, sorted earliest first, before and after, compared from the
+        earliest, the first difference deciding:
+
+        - `worse`: at least one dojo is worse off, its first different meeting
+          earlier (sharing a pool is earliest of all), whatever another dojo
+          gains;
+        - `better`: no dojo is worse off and at least one is better off;
+        - `same`: every dojo's meetings are the ones it has now, so two
+          competitors of one dojo trading places is `same`. A move to another
           match of the same round is not earlier.
 
         Seeded competitors are candidates too: a swap that moves a seed out of
@@ -9269,7 +9276,7 @@ components:
 
     SwapSuggestions:
       type: object
-      required: [suggestions, stuck]
+      required: [suggestions]
       properties:
         suggestions:
           type: array
@@ -9298,16 +9305,6 @@ components:
                 type: array
                 items:
                   $ref: '#/components/schemas/SwapBye'
-        stuck:
-          type: array
-          items:
-            type: object
-            required: [dojo, meeting]
-            properties:
-              dojo:
-                type: string
-              meeting:
-                $ref: '#/components/schemas/DojoMeeting'
 
     SuggestedSide:
       type: object

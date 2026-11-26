@@ -305,14 +305,11 @@ export const competitionsApi = {
         return Array.isArray(body.meetings) ? body.meetings : [];
     },
     // fetchSwapSuggestions: GET /competitions/:id/draw/swap-suggestions,
-    // {suggestions, stuck}: swaps of two unseeded competitors that keep
-    // dojo-mates apart for longer, and the dojos no swap helps.
+    // {suggestions}: swaps of two unseeded competitors that keep dojo-mates
+    // apart for longer.
     async fetchSwapSuggestions(id, password) {
         const body = await _drawReviewRead(`/api/competitions/${id}/draw/swap-suggestions`, password, 'the swap suggestions');
-        return {
-            suggestions: Array.isArray(body.suggestions) ? body.suggestions : [],
-            stuck: Array.isArray(body.stuck) ? body.stuck : [],
-        };
+        return { suggestions: Array.isArray(body.suggestions) ? body.suggestions : [] };
     },
     // fetchSwapCandidates: GET /competitions/:id/draw/swap-candidates?id=,
     // {pick: {id, place}, candidates: [{id, place, verdict}]}: for the

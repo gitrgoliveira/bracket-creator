@@ -60,8 +60,8 @@ describe('If you swap them', () => {
     expect(window.API.swapDrawPlaces).toHaveBeenCalledWith('c1',
       { a: { id: 'a', place: a.place }, b: { id: 'b', place: b.place }, dryRun: true }, 'pw');
     const verdict = screen.getByTestId('swap-verdict');
-    expect(verdict.textContent).toBe('No dojo-mates meet earlier.');
-    expect(verdict.className, 'nothing gets earlier: the normal style').toBe('draw-swap-check__line');
+    expect(verdict.textContent).toBe('Team Omega can meet later.');
+    expect(verdict.className, 'no dojo is worse off: the normal style').toBe('draw-swap-check__line');
     expect(verdict.compareDocumentPosition(screen.getByTestId('swap-moves')) & Node.DOCUMENT_POSITION_FOLLOWING, 'the verdict comes first').toBeTruthy();
     expect(screen.getByTestId('swap-moves').textContent).toBe('IMS4 Arthur Dick goes to Pool C, IMS8 Lena Park to Pool B.');
     expect(screen.getByTestId('swap-separation').textContent).toContain('Team Omega: shared Pool B; now not before the Semifinals.');
@@ -75,7 +75,7 @@ describe('If you swap them', () => {
     expect(screen.getByTestId('swap-them').className).toBe('btn btn--primary');
   });
 
-  it('warns first when the swap brings dojo-mates together earlier, and asks to Swap anyway', async () => {
+  it('warns first when the swap leaves a dojo worse off, and asks to Swap anyway', async () => {
     vi.useFakeTimers();
     const pair = (bId, m) => ({ dojo: 'Fudo', a: { id: 'a', name: 'Arthur Dick' }, b: { id: bId, name: bId }, ...m });
     const sf = { matchId: 'r1-m0', round: 1, rounds: 3, matchNumber: 5 };
@@ -90,7 +90,7 @@ describe('If you swap them', () => {
     await open();
     await act(async () => { vi.advanceTimersByTime(1); });
     const verdict = screen.getByTestId('swap-verdict');
-    expect(verdict.textContent).toBe('2 pairs would share a pool and 1 would meet earlier.');
+    expect(verdict.textContent, 'the dojo is named, judged as a whole').toBe('Fudo would share a pool.');
     expect(verdict.className).toBe('draw-swap-check__line draw-swap-check__line--warn');
     const swap = screen.getByTestId('swap-them');
     expect(swap.textContent).toBe('Swap anyway');

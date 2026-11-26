@@ -3,7 +3,7 @@
 // so each one is pinned against an answer of the shape the routes give.
 import { describe, it, expect } from 'vitest';
 import {
-  reviewsDraw, canFirstMeet, stuckSentences, improvementSentence, optionLabel, drawVerdict, noSwapNeeded, byDojo,
+  reviewsDraw, canFirstMeet, improvementSentence, drawVerdict, noSwapNeeded, byDojo, drawConclusion, swapModeSection,
 } from '../admin_draw_review.jsx';
 import {
   drawEntrants, drawPlaceLabel, meetingChange, separationSentences, movesSentence, numbersSentence,
@@ -68,22 +68,9 @@ describe('the suggestions', () => {
       .toBe('Team Omega: could first meet in the Quarterfinals; now cannot meet in the knockout.');
   });
 
-  it('words the dojos no swap helps: one line for those meeting in the bracket, one per shared pool', () => {
-    expect(stuckSentences([
-      { dojo: 'Team Pi', meeting: { earliest: meet('r0-m1', 0) } },
-      { dojo: 'Team Rho', meeting: { samePool: 'Pool A' } },
-      { dojo: 'Team Sigma', meeting: { earliest: meet('r1-m0', 1) } },
-    ])).toEqual([
-      'Team Rho: no suggested swap takes them out of Pool A without making another dojo meet earlier.',
-      'For Team Pi and Team Sigma, no suggested swap makes their first meeting later without making another dojo meet earlier.',
-    ]);
-    expect(stuckSentences([{ dojo: 'Team Pi', meeting: { earliest: meet('r0-m1', 0) } }]))
-      .toEqual(['For Team Pi, no suggested swap makes their first meeting later without making another dojo meet earlier.']);
-    expect(stuckSentences([])).toEqual([]);
-  });
 });
 
-describe('the pickers', () => {
+describe('the draw\'s competitors, as a swap names them', () => {
   it('list a pools draw by pool, each place 1-based in the pool\'s own order', () => {
     const pools = [
       { poolName: 'Pool A', players: [side('p1', 'Ann', { dojo: 'D1', seed: 1, number: 'K1' }), side('p2', 'Bo', { dojo: 'D2' })] },
@@ -93,8 +80,7 @@ describe('the pickers', () => {
     expect(groups.map((g) => g.label)).toEqual(['Pool A', 'Pool B']);
     expect(groups[0].entrants.map((e) => e.place)).toEqual([{ pool: 'Pool A', position: 1 }, { pool: 'Pool A', position: 2 }]);
     expect(groups[1].entrants.map((e) => e.id), 'a place with no participant id cannot be named').toEqual(['p3']);
-    expect(optionLabel(groups[0].entrants[0])).toBe('K1 Ann (D1), seed 1');
-    expect(optionLabel(groups[0].entrants[1])).toBe('Bo (D2)');
+    expect(groups[0].entrants.map((e) => e.seed)).toEqual([1, undefined]);
   });
 
   it('list a knockout draw by first-round match, side A of match m at slot 2m', () => {
@@ -112,8 +98,7 @@ describe('the pickers', () => {
     const bracket = { rounds: [[{ matchNumber: 1, sideA: side('k1', 'Ann', { dojo: 'D1' }), sideB: side('k2', 'Bo', { dojo: 'D2' }) }]] };
     const comp = { format: 'knockout', players: [{ id: 'k1', seed: 1 }, { id: 'k2', seed: null }] };
     const [group] = drawEntrants(comp, [], bracket);
-    expect(optionLabel(group.entrants[0])).toBe('Ann (D1), seed 1');
-    expect(optionLabel(group.entrants[1])).toBe('Bo (D2)');
+    expect(group.entrants.map((e) => e.seed)).toEqual([1, 0]);
   });
 });
 
@@ -163,7 +148,7 @@ describe('If you swap them', () => {
     const before = [pair({ earliest: meet('r1-m0', 1, { matchNumber: 5 }), ifBothWin: meet('r2-m0', 2, { matchNumber: 7 }) })];
     const after = [pair({ earliest: meet('r1-m1', 1, { matchNumber: 6 }), ifBothWin: meet('r2-m0', 2, { matchNumber: 7 }) })];
     expect(separationSentences({ before, after })).toEqual([{ dojo: 'Fudo', text: 'Fudo: no change.', earlier: false }]);
-    expect(swapVerdict({ before, after })).toEqual({ worse: false, text: 'No dojo-mates meet earlier.' });
+    expect(swapVerdict({ before, after })).toEqual({ worse: false, text: 'No change for any dojo.' });
     // Sharing another pool is still sharing a pool.
     expect(separationSentences({ before: [pair({ samePool: 'Pool A' })], after: [pair({ samePool: 'Pool B' })] })[0].text).toBe('Fudo: no change.');
   });
@@ -232,28 +217,94 @@ describe('a meeting that moves, in words', () => {
   });
 });
 
-describe('the check\'s verdict', () => {
-  const pair = (bId, m) => ({ dojo: 'D', a: side('a', 'Ann'), b: side(bId, bId), ...m });
-  const sf = meet('r1-m0', 1);
+describe('the check\'s verdict, each dojo judged as a whole', () => {
+  const row = (dojo, aId, bId, m) => ({ dojo, a: side(aId, aId), b: side(bId, bId), ...m });
   const qf = meet('r0-m0', 0);
+  const sf = meet('r1-m0', 1);
+  const fin = meet('r2-m0', 2);
 
-  it('counts the pairs brought into a pool and the pairs brought earlier, either part alone', () => {
-    const before = [pair('x', { earliest: sf }), pair('y', { earliest: sf }), pair('z', { earliest: sf }), pair('w', { earliest: sf })];
-    expect(swapVerdict({ before, after: [pair('x', { samePool: 'Pool A' }), pair('y', { samePool: 'Pool B' }), pair('z', { earliest: qf }), pair('w', { earliest: qf })] }))
-      .toEqual({ worse: true, text: '2 pairs would share a pool and 2 would meet earlier.' });
-    expect(swapVerdict({ before, after: [pair('x', { samePool: 'Pool A' }), pair('y', { earliest: sf }), pair('z', { earliest: qf }), pair('w', { earliest: sf })] }).text)
-      .toBe('1 pair would share a pool and 1 would meet earlier.');
-    expect(swapVerdict({ before, after: [pair('x', { samePool: 'Pool A' }), pair('y', { earliest: sf }), pair('z', { earliest: sf }), pair('w', { earliest: sf })] }).text)
-      .toBe('1 pair would share a pool.');
-    expect(swapVerdict({ before, after: [pair('x', { earliest: qf }), pair('y', { earliest: qf }), pair('z', { earliest: sf }), pair('w', { earliest: sf })] }).text)
-      .toBe('2 pairs would meet earlier.');
+  it('names the dojos that would meet earlier, or share a pool when that decides it', () => {
+    const before = [row('Fudo', 'a', 'x', { earliest: sf }), row('Kenyu', 'b', 'y', { earliest: fin })];
+    expect(swapVerdict({ before, after: [row('Fudo', 'a', 'x', { earliest: qf }), row('Kenyu', 'b', 'y', { earliest: fin })] }))
+      .toEqual({ worse: true, text: 'Fudo would meet earlier.' });
+    expect(swapVerdict({ before, after: [row('Fudo', 'a', 'x', { earliest: qf }), row('Kenyu', 'b', 'y', { earliest: sf })] }).text)
+      .toBe('Fudo and Kenyu would meet earlier.');
+    expect(swapVerdict({ before, after: [row('Fudo', 'a', 'x', { samePool: 'Pool A' }), row('Kenyu', 'b', 'y', { earliest: sf })] }).text)
+      .toBe('Fudo would share a pool and Kenyu would meet earlier.');
+    expect(swapVerdict({ before, after: [row('Fudo', 'a', 'x', { samePool: 'Pool A' }), row('Kenyu', 'b', 'y', { earliest: fin })] }).text)
+      .toBe('Fudo would share a pool.');
   });
 
-  it('says no dojo-mates meet earlier when every move is later, or there is none', () => {
-    expect(swapVerdict({ before: [pair('x', { samePool: 'Pool A' })], after: [pair('x', { earliest: sf })] }))
-      .toEqual({ worse: false, text: 'No dojo-mates meet earlier.' });
-    expect(swapVerdict({ before: [], after: [] }).worse).toBe(false);
+  it('is worse when one dojo gains and another loses', () => {
+    const before = [row('Fudo', 'a', 'x', { earliest: qf }), row('Kenyu', 'b', 'y', { earliest: fin })];
+    const after = [row('Fudo', 'a', 'x', { earliest: fin }), row('Kenyu', 'b', 'y', { earliest: sf })];
+    expect(swapVerdict({ before, after })).toEqual({ worse: true, text: 'Kenyu would meet earlier.' });
+  });
+
+  it('says what happens to each dojo when none is worse off', () => {
+    const before = [row('Fudo', 'a', 'x', { earliest: sf }), row('Kenyu', 'b', 'y', { earliest: qf })];
+    expect(swapVerdict({ before, after: [row('Fudo', 'a', 'x', { earliest: sf }), row('Kenyu', 'b', 'y', { earliest: fin })] }))
+      .toEqual({ worse: false, text: 'Kenyu can meet later. No change for Fudo.' });
+    expect(swapVerdict({ before, after: [row('Fudo', 'a', 'x', { earliest: fin }), row('Kenyu', 'b', 'y', { earliest: fin })] }).text)
+      .toBe('Fudo and Kenyu can meet later.');
+    expect(swapVerdict({ before: [row('Fudo', 'a', 'x', { samePool: 'Pool A' })], after: [row('Fudo', 'a', 'x', { earliest: sf })] }).text)
+      .toBe('Fudo can meet later.');
+    expect(swapVerdict({ before: [], after: [] })).toEqual({ worse: false, text: 'No change for any dojo.' });
     expect(swapVerdict(undefined).worse).toBe(false);
+  });
+
+  it('calls two of one dojo trading places no change, though each pair moves', () => {
+    // Player 08 and Player 12 of Fudo trade places: 08 now meets Player 02 in
+    // a quarter-final and 12 in a semi-final, as it was the other way round.
+    const before = [row('Fudo', 'p08', 'p02', { earliest: sf }), row('Fudo', 'p12', 'p02', { earliest: qf }), row('Fudo', 'p08', 'p12', { earliest: fin })];
+    const after = [row('Fudo', 'p08', 'p02', { earliest: qf }), row('Fudo', 'p12', 'p02', { earliest: sf }), row('Fudo', 'p08', 'p12', { earliest: fin })];
+    expect(swapVerdict({ before, after })).toEqual({ worse: false, text: 'No change for any dojo.' });
+    expect(separationSentences({ before, after })).toEqual([{ dojo: 'Fudo', text: 'Fudo: no change.', earlier: false }]);
+  });
+
+  it('calls a dojo whose meetings get later better off, and does not warn for its pair that meets earlier', () => {
+    // A quarter-final and two semi-finals become a quarter-final, a
+    // semi-final and a final, although the pair a-y meets earlier.
+    const before = [row('Fudo', 'a', 'x', { earliest: qf }), row('Fudo', 'a', 'y', { earliest: sf }), row('Fudo', 'a', 'z', { earliest: sf })];
+    const after = [row('Fudo', 'a', 'x', { earliest: sf }), row('Fudo', 'a', 'y', { earliest: qf }), row('Fudo', 'a', 'z', { earliest: fin })];
+    expect(swapVerdict({ before, after })).toEqual({ worse: false, text: 'Fudo can meet later.' });
+    expect(separationSentences({ before, after })).toEqual([
+      { dojo: 'Fudo', text: 'Fudo (a and x): could first meet in the Quarterfinals; now not before the Semifinals.', earlier: false },
+      { dojo: 'Fudo', text: 'Fudo (a and y): could first meet in the Semifinals; now as early as the Quarterfinals.', earlier: false },
+      { dojo: 'Fudo', text: 'Fudo (a and z): could first meet in the Semifinals; now not before the Final.', earlier: false },
+    ]);
+  });
+});
+
+describe('the card\'s conclusion', () => {
+  const row = (dojo, bId, m) => ({ dojo, a: side(`a-${bId}`, 'A'), b: side(bId, bId), ...m });
+  const sf = meet('r1-m0', 1);
+  const fin = meet('r2-m0', 2);
+
+  it('says no swap is needed when no pair can meet before the Final, before the suggestions are read', () => {
+    expect(drawConclusion([row('D1', 'a', { earliest: fin })], null)).toBe('No swap is needed.');
+    expect(drawConclusion([], null)).toBe('No swap is needed.');
+  });
+
+  it('says no swap can do better when the server suggests none', () => {
+    expect(drawConclusion([row('D1', 'a', { earliest: sf })], { suggestions: [] })).toBe('No swap can do better.');
+  });
+
+  it('counts the suggestions and says where they are', () => {
+    const rows = [row('D1', 'a', { samePool: 'Pool A' })];
+    expect(drawConclusion(rows, { suggestions: [{}] })).toBe('1 swap would keep dojo-mates apart longer. It is under Change the draw.');
+    expect(drawConclusion(rows, { suggestions: [{}, {}, {}] })).toBe('3 swaps would keep dojo-mates apart longer. They are under Change the draw.');
+  });
+
+  it('says nothing while it waits for a read, or when the suggestions could not be read', () => {
+    expect(drawConclusion(null, { suggestions: [] })).toBe('');
+    expect(drawConclusion([row('D1', 'a', { earliest: sf })], null)).toBe('');
+  });
+
+  it('opens the pools of a pools draw and the bracket of a knockout-only one', () => {
+    expect(swapModeSection({ format: 'mixed' })).toBe('pools');
+    expect(swapModeSection({ format: 'knockout' })).toBe('bracket');
+    expect(swapModeSection({})).toBe('bracket');
   });
 });
 

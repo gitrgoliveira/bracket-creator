@@ -237,6 +237,7 @@ const CHECK_MODULES = [
   'squad_member_label.jsx',
   'stable_id.jsx',
   'streaming_overlay.jsx',
+  'swap_mode_request.jsx',
   'tap_guard.jsx',
   'team_default_credit.jsx',
   'timer_pool.jsx',

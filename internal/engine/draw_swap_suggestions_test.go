@@ -102,7 +102,6 @@ func checkAgainstTheSummary(t *testing.T, comp *state.Competition, pools []helpe
 	require.NotNil(t, s)
 	snap := swapSnapshot{comp: comp, pools: pools, poolMatches: poolMatches, bracket: bracket, roster: roster}
 	before := rowsByPair(summary)
-	rounds := len(bracket.Rounds)
 	accepted := 0
 	for x := range s.entrants {
 		for y := x + 1; y < len(s.entrants); y++ {
@@ -122,20 +121,32 @@ func checkAgainstTheSummary(t *testing.T, comp *state.Competition, pools []helpe
 			after := rowsByPair(DojoSeparation(comp, plan.pools, plan.bracket, roster))
 			require.Len(t, after, len(before), "a swap keeps every pair")
 
-			var want []SwapImprovement
-			earlier := false
+			// Every pair of the whole summary, per dojo, judged by the one rule.
+			var tallies []dojoTally
+			type laterRow struct {
+				tally int
+				imp   SwapImprovement
+			}
+			var later []laterRow
 			for k, b := range before {
 				a, has := after[k]
 				require.True(t, has, "pair %v after the swap", k)
-				switch c := rankMeeting(a, rounds).compare(rankMeeting(b, rounds)); {
-				case c < 0:
-					earlier = true
-				case c > 0:
-					want = append(want, SwapImprovement{Dojo: b.Dojo, Before: b, After: a})
+				i := tallyIndex(&tallies, helper.DojoKey(b.Dojo))
+				tallies[i].before = append(tallies[i].before, rankMeeting(b))
+				tallies[i].after = append(tallies[i].after, rankMeeting(a))
+				if rankMeeting(a).compare(rankMeeting(b)) > 0 {
+					later = append(later, laterRow{i, SwapImprovement{Dojo: b.Dojo, Before: b, After: a}})
+				}
+			}
+			verdict, better := judgeDojos(tallies)
+			var want []SwapImprovement
+			for _, l := range later {
+				if better[l.tally] {
+					want = append(want, l.imp)
 				}
 			}
 			label := fmt.Sprintf("swap %s and %s", ex.c.side.ID, ey.c.side.ID)
-			require.Equal(t, !earlier && len(want) > 0, ok, label)
+			require.Equal(t, verdict == SwapVerdictBetter, ok, label)
 			if !ok {
 				continue
 			}
@@ -195,7 +206,6 @@ func TestSwapSuggestions_SplitsASharedPool(t *testing.T) {
 	assert.Equal(t, 1, imp.After.IfBothWin.Round, "and in the final if both win their pools")
 	assert.Equal(t, "a2", imp.After.A.ID, "a2 is now the earlier in the draw")
 	assert.Equal(t, DojoSide{ID: "a1", Name: "A1", Number: "K4", Pool: "Pool B"}, imp.After.B, "a1 takes b1's place and its number")
-	assert.Empty(t, got.Stuck, "Omega has a fix")
 	assert.Positive(t, checkAgainstTheSummary(t, comp, pools, nil, bracket, nil))
 
 	t.Run("a seeded competitor is never suggested", func(t *testing.T) {
@@ -238,7 +248,6 @@ func TestSwapSuggestions_NobodyElseMeetsEarlier(t *testing.T) {
 		assert.Equal(t, 2, sug.Improves[0].After.Earliest.Round)
 		assert.NotNil(t, sug.B.Place.Slot)
 	}
-	assert.Empty(t, got.Stuck, "Omega has a fix and Kappa meets only in the final")
 	assert.Positive(t, checkAgainstTheSummary(t, comp, nil, nil, bracket, roster))
 }
 
@@ -280,71 +289,20 @@ func TestSwapSuggestions_RankedByTheMeetingTheyFix(t *testing.T) {
 	assert.Positive(t, checkAgainstTheSummary(t, comp, pools, nil, bracket, nil))
 }
 
-func TestSwapSuggestions_StuckDojo(t *testing.T) {
+func TestSwapSuggestions_NoSwapCanDoBetter(t *testing.T) {
 	// Three of one dojo in four leaves: two of them always share a
-	// first-round match, so no swap helps without another pair meeting
-	// earlier.
+	// first-round match, so every swap leaves Omega's meetings as they are.
 	roster := koRoster("Omega", "Omega", "Omega", "Solo")
 	bracket := koDraw(roster)
 	comp := drawReady(state.CompFormatKnockout)
 	got := SuggestSwaps(comp, nil, bracket, roster)
 	assert.Empty(t, got.Suggestions)
-	require.Len(t, got.Stuck, 1)
-	assert.Equal(t, "Omega", got.Stuck[0].Dojo)
-	assert.Equal(t, "s0", got.Stuck[0].Meeting.A.ID)
-	assert.Equal(t, "s1", got.Stuck[0].Meeting.B.ID)
-	assert.Equal(t, 0, got.Stuck[0].Meeting.Earliest.Round, "the dojo's earliest meeting")
 	assert.Zero(t, checkAgainstTheSummary(t, comp, nil, nil, bracket, roster))
 
-	// A pair that meets only in the final is not stuck: there is nothing
-	// later to move it to.
+	// A pair that meets only in the final has nothing later to move to.
 	roster = koRoster("Omega", "Solo 1", "Solo 2", "Omega")
 	got = SuggestSwaps(comp, nil, koDraw(roster), roster)
 	assert.Empty(t, got.Suggestions)
-	assert.Empty(t, got.Stuck)
-}
-
-func TestSwapSuggestions_AHelpPastTheCapIsNeitherSuggestedNorHidden(t *testing.T) {
-	// Eight dojos each hold a first-round match to themselves, so far more than
-	// maxSwapSuggestions swaps help. Omega's pair is helped only by swaps that
-	// rank below the cap: the card shows none of them, so the dojo must be
-	// listed as stuck rather than left out of both lists.
-	roster := koRoster("A", "A", "B", "B", "Omega", "Omega", "C", "C", "D", "D", "E", "E", "F", "F", "G", "G")
-	got := SuggestSwaps(drawReady(state.CompFormatKnockout), nil, koDraw(roster), roster)
-	require.Len(t, got.Suggestions, maxSwapSuggestions)
-	for _, sug := range got.Suggestions {
-		for _, imp := range sug.Improves {
-			assert.NotEqual(t, "Omega", imp.Dojo, "no shown suggestion helps Omega")
-		}
-	}
-	var stuck []string
-	for _, st := range got.Stuck {
-		stuck = append(stuck, st.Dojo)
-	}
-	assert.Contains(t, stuck, "Omega")
-}
-
-func TestSwapSuggestions_StuckDojoNamesThePairNoSwapHelps(t *testing.T) {
-	// Omega holds slots 0, 2, 4 and 5. Swaps can move the pair at 4 and 5
-	// apart, but none helps the pair at slots 0 and 2, which meet in the
-	// semi-final: moving either of them brings it next to another Omega and
-	// that pair meets sooner. The dojo is stuck on that pair even though other
-	// pairs of it have a fix.
-	roster := koRoster("Omega", "Solo 1", "Omega", "Solo 3", "Omega", "Omega", "Solo 6", "Solo 7")
-	bracket := koDraw(roster)
-	comp := drawReady(state.CompFormatKnockout)
-	got := SuggestSwaps(comp, nil, bracket, roster)
-	require.NotEmpty(t, got.Suggestions, "some pair of the dojo has a fix")
-	require.Len(t, got.Stuck, 1)
-	assert.Equal(t, "Omega", got.Stuck[0].Dojo)
-	assert.Equal(t, "s0", got.Stuck[0].Meeting.A.ID)
-	assert.Equal(t, "s2", got.Stuck[0].Meeting.B.ID)
-	for _, sug := range got.Suggestions {
-		for _, imp := range sug.Improves {
-			assert.NotEqual(t, pairIDs("s0", "s2"), pairIDs(imp.Before.A.ID, imp.Before.B.ID), "no suggestion helps the stuck pair")
-		}
-	}
-	assert.Positive(t, checkAgainstTheSummary(t, comp, nil, nil, bracket, roster))
 }
 
 func TestSwapSuggestions_ReportsAByeThatChangesHands(t *testing.T) {
@@ -385,7 +343,7 @@ func TestSwapSuggestions_EmptyAnswers(t *testing.T) {
 		got := SuggestSwaps(comp, pools, handBracket([4]string{"Pool A-1st", "", "", "Pool A-2nd"}), nil)
 		raw, err := json.Marshal(got)
 		require.NoError(t, err)
-		assert.JSONEq(t, `{"suggestions":[],"stuck":[]}`, string(raw), "lists, never null")
+		assert.JSONEq(t, `{"suggestions":[]}`, string(raw), "a list, never null")
 	}
 }
 
@@ -441,17 +399,10 @@ func TestSwapSuggestions_GeneratedDrawsMatchTheSummary(t *testing.T) {
 			got, err := eng.SwapSuggestionsFor(comp)
 			require.NoError(t, err)
 			assert.Equal(t, SuggestSwaps(comp, pools, bracket, nil), *got)
-			// Pi now shares a pool: either a suggestion splits them, ranked
-			// first, or no swap can without another Pi pair meeting earlier,
-			// and Pi is stuck on that shared pool.
+			// Pi now shares a pool: a suggestion that splits a shared pool is
+			// ranked first, and here that pool is Pi's.
 			if len(got.Suggestions) > 0 && got.Suggestions[0].Improves[0].Before.SamePool != "" {
 				assert.Equal(t, "Pi", got.Suggestions[0].Improves[0].Dojo)
-			} else {
-				var stuck []string
-				for _, st := range got.Stuck {
-					stuck = append(stuck, st.Dojo+"|"+st.Meeting.SamePool)
-				}
-				assert.Contains(t, stuck, "Pi|"+b.Place.Pool)
 			}
 		}
 	})
@@ -481,13 +432,14 @@ func TestSwapSuggestions_GeneratedDrawsMatchTheSummary(t *testing.T) {
 		require.NoError(t, err)
 		got, err := eng.SwapSuggestionsFor(comp)
 		require.NoError(t, err)
-		assert.Equal(t, &SwapSuggestions{Suggestions: []SwapSuggestion{}, Stuck: []StuckDojo{}}, got)
+		assert.Equal(t, &SwapSuggestions{Suggestions: []SwapSuggestion{}}, got)
 	})
 }
 
 func TestSwapSuggestions_TimingFor256(t *testing.T) {
 	// FR8: a 256-competitor draw answers within one second on a normal
-	// machine (about 40 ms measured locally). The assertion allows ten
+	// machine (about 150 ms measured locally since each dojo is judged as a
+	// whole, which sorts its meetings per candidate). The assertion allows ten
 	// seconds because a loaded CI runner under the race detector measured
 	// 1.4 s, so it only catches a slowdown of an order of magnitude, such as
 	// a candidate search gone quadratic, not machine noise. Sixteen dojos of

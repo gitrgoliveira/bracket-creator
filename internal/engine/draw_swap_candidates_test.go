@@ -2,10 +2,13 @@ package engine
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,32 +64,56 @@ func browserLateness(row DojoMeeting) [2]int {
 }
 
 // browserVerdict is the verdict the swap's dry run answer implies, read the
-// browser's way: worse when any pair of its separation rows is less late
-// after, better when none is and one is later, the same otherwise.
+// browser's way (swapVerdict's separationChanges, ported): each dojo's pairs,
+// matched by their two ids, are ranked by browserLateness before and after,
+// each list sorted earliest first and compared from the earliest; the first
+// difference decides that dojo. Worse when any dojo is worse off, better when
+// none is and one is better off, the same otherwise.
 func browserVerdict(sep SwapSeparation) string {
-	before := map[[2]string][2]int{}
+	key := func(dojo string) string { return strings.ToLower(strings.Join(strings.Fields(dojo), " ")) }
+	before := map[[2]string]DojoMeeting{}
 	for _, dm := range sep.Before {
-		before[pairIDs(dm.A.ID, dm.B.ID)] = browserLateness(dm)
+		before[pairIDs(dm.A.ID, dm.B.ID)] = dm
 	}
-	later, earlier := false, false
+	type lists struct{ before, after [][2]int }
+	byDojo := map[string]*lists{}
 	for _, dm := range sep.After {
 		was, ok := before[pairIDs(dm.A.ID, dm.B.ID)]
 		if !ok {
 			continue
 		}
-		now := browserLateness(dm)
-		c := now[0] - was[0]
-		if c == 0 {
-			c = now[1] - was[1]
+		k := key(was.Dojo)
+		if byDojo[k] == nil {
+			byDojo[k] = &lists{}
 		}
-		switch {
-		case c < 0:
-			earlier = true
-		case c > 0:
-			later = true
+		byDojo[k].before = append(byDojo[k].before, browserLateness(was))
+		byDojo[k].after = append(byDojo[k].after, browserLateness(dm))
+	}
+	cmp := func(x, y [2]int) int {
+		if x[0] != y[0] {
+			return x[0] - y[0]
+		}
+		return x[1] - y[1]
+	}
+	worse, better := false, false
+	for _, l := range byDojo {
+		sort.Slice(l.before, func(i, j int) bool { return cmp(l.before[i], l.before[j]) < 0 })
+		sort.Slice(l.after, func(i, j int) bool { return cmp(l.after[i], l.after[j]) < 0 })
+		for i := range l.before {
+			if c := cmp(l.after[i], l.before[i]); c != 0 {
+				worse = worse || c < 0
+				better = better || c > 0
+				break
+			}
 		}
 	}
-	return shiftVerdict(later, earlier)
+	switch {
+	case worse:
+		return SwapVerdictWorse
+	case better:
+		return SwapVerdictBetter
+	}
+	return SwapVerdictSame
 }
 
 // checkCandidatesAgainstTheDryRun is the oracle: for every pick of the draw,
@@ -179,6 +206,108 @@ func TestSwapCandidates_AgreeWithTheSwapDryRun(t *testing.T) {
 		require.True(t, comp.IsTeam())
 		verdicts, _ := checkCandidatesAgainstTheDryRun(t, eng, comp, 12)
 		assert.Positive(t, verdicts[SwapVerdictWorse]+verdicts[SwapVerdictBetter], "%v", verdicts)
+	})
+}
+
+// --- each dojo judged as a whole (operator decision C1) ---------------------
+
+// fourPoolDraw is four pools of two over an eight-leaf knockout that takes
+// both places of each pool: A's at leaves 0 and 7, B's at 2 and 5, C's at 4
+// and 3, D's at 6 and 1. So A and B can first meet in a semi-final (and in
+// one if both win), A and C in a semi-final (the final if both win), and B
+// and C in the first round (the final if both win).
+func fourPoolDraw(dojos [4][2]string) ([]helper.Pool, *state.Bracket) {
+	var pools []helper.Pool
+	for p, names := range "ABCD" {
+		pool := helper.Pool{PoolName: "Pool " + string(names)}
+		for i, d := range dojos[p] {
+			id := fmt.Sprintf("%c%d", 'a'+p, i+1)
+			pool.Players = append(pool.Players, helper.Player{ID: id, Name: strings.ToUpper(id), Dojo: d})
+		}
+		pools = append(pools, pool)
+	}
+	labels := []string{"Pool A-1st", "Pool D-2nd", "Pool B-1st", "Pool C-2nd", "Pool C-1st", "Pool B-2nd", "Pool D-1st", "Pool A-2nd"}
+	roster := make([]domain.Player, len(labels))
+	for i := range roster {
+		roster[i] = domain.Player{ID: fmt.Sprintf("x%d", i)}
+	}
+	bracket := koDraw(roster)
+	bracket.DrawOrder = nil
+	for mi := range bracket.Rounds[0] {
+		m := &bracket.Rounds[0][mi]
+		m.SideA, m.SideAID, m.SideB, m.SideBID = labels[2*mi], "", labels[2*mi+1], ""
+		m.PlaceholderA, m.PlaceholderB = labels[2*mi], labels[2*mi+1]
+	}
+	return pools, bracket
+}
+
+// verdictOf is the swap candidates' verdict for swapping a and b, checked
+// against the verdict the swap's own dry run separation gives by the
+// whole-separation path (separationVerdict, the one a rebuilt bracket takes)
+// and by the browser's reading of it, so the three agree.
+func verdictOf(t *testing.T, snap swapSnapshot, a, b string) string {
+	t.Helper()
+	got, err := swapCandidates(snap, a)
+	require.NoError(t, err)
+	verdict := ""
+	var place DrawPlace
+	for _, c := range got.Candidates {
+		if c.ID == b {
+			verdict, place = c.Verdict, c.Place
+		}
+	}
+	require.NotEmpty(t, verdict, "%s is a candidate", b)
+	plan, err := planSwap(snap, SwapRequest{A: got.Pick, B: SwapSide{ID: b, Place: place}, DryRun: true})
+	require.NoError(t, err)
+	assert.Equal(t, verdict, separationVerdict(plan.answer.Separation), "the whole separation judges it alike")
+	assert.Equal(t, verdict, browserVerdict(plan.answer.Separation), "the browser reads it alike")
+	return verdict
+}
+
+func TestSwapVerdict_EachDojoAsAWhole(t *testing.T) {
+	t.Run("two of one dojo trading places changes nothing for it", func(t *testing.T) {
+		// Fudo holds a1, b1 and c1. Swapping a1 and b1 moves a1's meeting with
+		// c1 earlier (A-C to B-C) and b1's later (B-C to A-C): pair by pair
+		// one is earlier, but Fudo's three meetings are the three it had.
+		pools, bracket := fourPoolDraw([4][2]string{{"Fudo", "S1"}, {"Fudo", "S2"}, {"Fudo", "S3"}, {"S4", "S5"}})
+		comp := drawReady(state.CompFormatMixed)
+		snap := swapSnapshot{comp: comp, pools: pools, bracket: bracket}
+		assert.Equal(t, SwapVerdictSame, verdictOf(t, snap, "a1", "b1"))
+		assert.NotContains(t, suggestedPairs(SuggestSwaps(comp, pools, bracket, nil)), [2]string{"a1", "b1"})
+		checkAgainstTheSummary(t, comp, pools, nil, bracket, nil)
+	})
+
+	t.Run("a dojo whose earliest meeting gets later is better off though one pair meets earlier", func(t *testing.T) {
+		// Omega holds leaves 0, 1, 2 and 6 of eight: its meetings are a
+		// quarter-final, two semi-finals and three finals. Moving s0 to leaf
+		// 5 brings s0 and s6 from the final to a semi-final, but takes the
+		// quarter-final away: two semi-finals and four finals.
+		roster := koRoster("Omega", "Omega", "Omega", "D3", "D4", "D5", "Omega", "D7")
+		bracket := koDraw(roster)
+		comp := drawReady(state.CompFormatKnockout)
+		snap := swapSnapshot{comp: comp, bracket: bracket, roster: roster}
+		assert.Equal(t, SwapVerdictBetter, verdictOf(t, snap, "s0", "s5"))
+
+		s := newSwapSuggester(comp, nil, bracket, roster, DojoSeparation(comp, nil, bracket, roster))
+		improves, ok := s.evaluate(indexOf(t, s, "s0"), indexOf(t, s, "s5"))
+		require.True(t, ok, "a suggestion")
+		var pairs [][2]string
+		for _, imp := range improves {
+			pairs = append(pairs, pairIDs(imp.Before.A.ID, imp.Before.B.ID))
+		}
+		assert.ElementsMatch(t, [][2]string{pairIDs("s0", "s1"), pairIDs("s0", "s2")}, pairs,
+			"the pairs that meet later; s0 and s6, who meet earlier, are not an improvement")
+		assert.Positive(t, checkAgainstTheSummary(t, comp, nil, nil, bracket, roster))
+	})
+
+	t.Run("one dojo better off and another worse off is worse", func(t *testing.T) {
+		// Omega meets in the first round (leaves 0 and 1), Kappa only in the
+		// final (2 and 4). Swapping s1 and s4 sends Omega to the final and
+		// brings Kappa to a semi-final.
+		roster := koRoster("Omega", "Omega", "Kappa", "Solo 3", "Kappa", "Solo 5", "Solo 6", "Solo 7")
+		bracket := koDraw(roster)
+		snap := swapSnapshot{comp: drawReady(state.CompFormatKnockout), bracket: bracket, roster: roster}
+		assert.Equal(t, SwapVerdictWorse, verdictOf(t, snap, "s1", "s4"))
 	})
 }
 

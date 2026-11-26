@@ -305,8 +305,9 @@ export const recipes = [
   {
     // The Overview's Draw review card of the same draw-ready competition:
     // Dojo separation first (ROSTER_18 holds nine dojos of two, so the table
-    // has a row per pair), then Change the draw with the suggestions and the
-    // two pickers. Both sections are read after the page loads, so the
+    // has a row per pair), then Change the draw with the button to the Swap
+    // competitors mode and the suggestions. Both reads land after the page
+    // loads, so the
     // capture waits until neither still says it is reading. The viewport is
     // tall enough to hold the whole Overview, so the card is photographed
     // where it stands: scrolled to, its top would sit under the sticky topbar.

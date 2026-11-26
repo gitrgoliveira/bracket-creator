@@ -12811,7 +12811,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border-top: 1px solid var(--line-2);
 }
 /* The card's title is its h2 and the largest heading in it; the two
-   sections' h3 and the picker's h4 step down from it. */
+   sections' h3 step down from it. */
 .draw-review__title {
   font-size: 16px;
 }
@@ -12821,17 +12821,23 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   line-height: 1.5;
   color: var(--ink-2);
 }
+/* The conclusion under the facts, one step larger and in the body ink. It
+   holds a line from the first render (a no-break space while the suggestions
+   load), so their arriving moves nothing below it. */
+.draw-review__conclusion {
+  margin: 2px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-1);
+}
 .draw-review__heading {
   margin: 0 0 4px;
   font-size: 14px;
   font-weight: 700;
   color: var(--ink-1);
 }
-.draw-review__subheading {
-  margin: 16px 0 8px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--ink-1);
+.draw-review__swap-mode {
+  margin-bottom: 12px;
 }
 .draw-review__lead {
   margin: 0 0 10px;
@@ -12840,10 +12846,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 /* The review's sentences never leave their last word alone on a line. */
 .draw-review__verdict,
+.draw-review__conclusion,
 .draw-review__lead,
 .draw-review__empty,
 .draw-review__effect,
-.draw-review__stuck li,
 .draw-swap-check__line,
 .draw-swap-check__list li {
   text-wrap: pretty;
@@ -12890,8 +12896,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-size: 12px;
   color: var(--ink-3);
 }
-.draw-review__suggestions,
-.draw-review__stuck {
+.draw-review__suggestions {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -12912,23 +12917,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .draw-review__effect {
   font-size: 13px;
   color: var(--ink-2);
-}
-.draw-review__stuck {
-  margin-top: 10px;
-}
-.draw-review__stuck li {
-  font-size: 13px;
-  color: var(--ink-2);
-  padding: 2px 0;
-}
-.draw-review__picks {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-  margin-bottom: 10px;
-}
-.draw-review__pick .select {
-  width: 100%;
 }
 
 /* "If you swap them": the check every swap passes through, on the confirm
@@ -12981,6 +12969,26 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border-radius: 6px;
   font-size: 13px;
   color: var(--ink-1);
+}
+/* While the mode is on, its banner is pinned under the admin top bar (whose
+   height AdminTopbar publishes as --topbar-stack-h), opaque so the pools and
+   bracket cards scrolling under it never show through. z 25: over the page's
+   own sticky parts (the team sheet's pin at 9, its footer dock at 20), under
+   the top bar (30), and so under every layer of the modal scale. The banner
+   publishes its own height as --swap-banner-h, the scroll margin a tappable
+   competitor carries below. The button that turns the mode on is not pinned. */
+.swap-mode.swap-mode--pinned {
+  position: sticky;
+  top: var(--topbar-stack-h, 0px);
+  z-index: 25;
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface);
+}
+/* A competitor a keyboard Tab or a scroll brings into view stops clear of the
+   top bar and the pinned banner: margin on the competitor, never padding on a
+   scroller (a bar's own buttons lie in a padded strip, and focusing one
+   scrolls the page for nothing). */
+button.swap-pick {
+  scroll-margin-top: calc(var(--topbar-stack-h, 0px) + var(--swap-banner-h, 0px));
 }
 .swap-mode__head {
   display: flex;

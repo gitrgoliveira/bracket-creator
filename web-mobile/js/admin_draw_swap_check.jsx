@@ -2,13 +2,13 @@
 // competitors in a drawn competition passes through first (bc-drev FR7), and
 // the words the draw review uses for places and meetings.
 //
-// Every swap door opens this panel: a suggestion and the two pickers on the
-// Overview's Draw review card (admin_draw_review.jsx), and the preview tabs'
-// Swap competitors mode, which imports it from here without touching the card.
-// On open it asks the server for a dry run of the swap (POST .../draw/swap with
-// dryRun, which saves nothing) and shows what the swap would do in plain words,
-// opening with whether any dojo-mates would meet earlier; "Swap them" ("Swap
-// anyway", in the warning colour, when some would) sends the same two places
+// Every swap door opens this panel: a suggestion on the Overview's Draw review
+// card (admin_draw_review.jsx), and the preview tabs' Swap competitors mode,
+// which imports it from here without touching the card. On open it asks the
+// server for a dry run of the swap (POST .../draw/swap with dryRun, which
+// saves nothing) and shows what the swap would do in plain words, opening
+// with what it does to each dojo as a whole (swapVerdict); "Swap them" ("Swap
+// anyway", in the warning colour, when a dojo would be worse off) sends the same two places
 // without dryRun. The server judges
 // everything (refusals, where each goes, the numbers, the seed warning, the
 // lineups, the byes, the separation before and after); this module only words
@@ -25,6 +25,7 @@ import { useDialogFocus } from './dialog_focus.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { useEscapeToClose } from './ui.jsx';
 import { useLatestRef } from './latest_ref.jsx';
+import { andList } from './list_phrase.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -170,58 +171,96 @@ function fromEnd(meeting) {
   return (meeting.rounds || 0) - 1 - (meeting.round || 0);
 }
 
+// A shared pool is earlier, and a pair that cannot meet later, than any round
+// of any bracket (the server's sharedPoolDepth and noMeetingDepth).
+const SHARED_POOL = -1000;
+const NO_MEETING = 1000;
+
 // meetingLateness: larger is a later first meeting. A shared pool is the
 // earliest of all, a pair that cannot meet in the knockout the latest; the
 // if-both-win meeting breaks a tie, as the server ranks suggestions.
 export function meetingLateness(row) {
   if (!row) return [0, 0];
-  if (row.samePool) return [-1000, -1000];
-  if (!row.earliest) return [1000, 1000];
+  if (row.samePool) return [SHARED_POOL, SHARED_POOL];
+  if (!row.earliest) return [NO_MEETING, NO_MEETING];
   return [-fromEnd(row.earliest), row.ifBothWin ? -fromEnd(row.ifBothWin) : -fromEnd(row.earliest)];
 }
 
-function compareLateness(a, b) {
-  const x = meetingLateness(a);
-  const y = meetingLateness(b);
-  return x[0] - y[0] || x[1] - y[1];
+const compareLatenessValues = (x, y) => x[0] - y[0] || x[1] - y[1];
+
+// compareLateness: positive when row a can first meet later than row b.
+export function compareLateness(a, b) {
+  return compareLatenessValues(meetingLateness(a), meetingLateness(b));
 }
 
 const pairKey = (row) => [row.a && row.a.id, row.b && row.b.id].sort().join('\u001f');
+// dojoKey: one dojo however its name is spaced or cased, as the server groups
+// dojo-mates (helper.DojoKey).
+const dojoKey = (name) => String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+// dojoShift: how one dojo fares in a swap, judged as a whole (the server's
+// judgeDojos, by the same rule): where each of its pairs can first meet,
+// before and after, each list sorted earliest first and compared from the
+// earliest; the first difference decides. `shift` is positive when the dojo
+// is better off, negative when worse off, 0 when its meetings are the ones it
+// had (two of its own competitors trading places changes nothing for it).
+// `intoPool` says the deciding meeting after the swap is a shared pool.
+function dojoShift(before, after) {
+  const sorted = (rows) => rows.map(meetingLateness).sort(compareLatenessValues);
+  const b = sorted(before);
+  const a = sorted(after);
+  for (let i = 0; i < a.length && i < b.length; i++) {
+    const shift = compareLatenessValues(a[i], b[i]);
+    if (shift !== 0) return { shift, intoPool: a[i][0] === SHARED_POOL };
+  }
+  return { shift: 0, intoPool: false };
+}
 
 // separationChanges: the dojo separation rows a swap touches, before and
 // after (the answer's `separation`), as one entry per dojo, in the order the
-// dojos first appear: `changes` lists each pair whose first meeting moves
-// earlier or later (`later` true when it moves later), empty when the dojo's
-// pairs all meet when they did. A move to another match at the same depth,
-// with the pool winners' meeting just as deep (or to share another pool), is
-// not a change of when they can meet, so it is no change. A pair is keyed by
-// its two ids, which a swap never changes.
+// dojos first appear. Each dojo is judged as a whole (dojoShift: `shift` and
+// `intoPool`); `changes` lists, for a dojo better or worse off, each pair
+// whose first meeting moves earlier or later (`later` true when it moves
+// later), and is empty for a dojo whose meetings are the ones it had. A move
+// to another match at the same depth, with the pool winners' meeting just as
+// deep (or to share another pool), is not a change of when they can meet. A
+// pair is matched by its two ids, which a swap never changes; a row in one
+// list only changes nothing.
 export function separationChanges(separation) {
   const before = (separation && separation.before) || [];
   const after = (separation && separation.after) || [];
   const dojos = [];
   const byDojo = new Map();
   const dojoOf = (name) => {
-    if (!byDojo.has(name)) { byDojo.set(name, { dojo: name, pairs: 0, changes: [] }); dojos.push(byDojo.get(name)); }
-    return byDojo.get(name);
+    const key = dojoKey(name);
+    if (!byDojo.has(key)) { byDojo.set(key, { dojo: name, pairs: 0, changes: [], before: [], after: [] }); dojos.push(byDojo.get(key)); }
+    return byDojo.get(key);
   };
   const afterByPair = new Map(after.map((r) => [pairKey(r), r]));
   for (const row of before) {
     const d = dojoOf(row.dojo);
     d.pairs += 1;
     const next = afterByPair.get(pairKey(row));
-    const moved = next ? compareLateness(next, row) : 0;
+    if (!next) continue;
+    d.before.push(row);
+    d.after.push(next);
+    const moved = compareLateness(next, row);
     if (moved !== 0) d.changes.push({ a: row.a, b: row.b, before: row, after: next, later: moved > 0 });
   }
   for (const row of after) {
     if (!before.some((r) => pairKey(r) === pairKey(row))) dojoOf(row.dojo).pairs += 1;
   }
-  return dojos;
+  return dojos.map(({ before: was, after: now, ...d }) => {
+    const { shift, intoPool } = dojoShift(was, now);
+    return { ...d, shift, intoPool, changes: shift === 0 ? [] : d.changes };
+  });
 }
 
 // separationSentences: separationChanges in words, one line per dojo:
 // "Team Omega: shared Pool B; now not before the Semifinals (M5)." or "Team
-// Kappa: no change." A dojo of more than one pair names the pair.
+// Kappa: no change." A dojo of more than one pair names the pair, and only a
+// pair of a dojo worse off is marked `earlier` (the warning colour): a pair
+// that meets earlier in a dojo better off as a whole is no warning.
 export function separationSentences(separation) {
   const lines = [];
   for (const d of separationChanges(separation)) {
@@ -231,7 +270,7 @@ export function separationSentences(separation) {
       lines.push({
         dojo: d.dojo,
         text: `${d.dojo}${who}: ${meetingChange(ch.before, ch.after, ch.later)}.`,
-        earlier: !ch.later,
+        earlier: !ch.later && d.shift < 0,
       });
     }
   }
@@ -240,26 +279,28 @@ export function separationSentences(separation) {
 
 const plural = (n, one, many) => (n === 1 ? one : many);
 
-// swapVerdict: the one line the check opens with, counted from the pairs
-// whose first meeting the swap brings earlier: "2 pairs would share a pool
-// and 2 would meet earlier.", either part alone, or "No dojo-mates meet
-// earlier." `worse` is true when any pair would, and the check then warns.
+// swapVerdict: the one line the check opens with, naming the dojos by what
+// the swap does to each as a whole (separationChanges), as the server judges
+// a swap. Worse when any dojo is worse off: "Fudo would meet earlier.",
+// "Fudo and Kenyu would meet earlier.", "Fudo would share a pool." when the
+// deciding meeting is a shared pool, or both parts. Otherwise what happens to
+// each: "Kenyu can meet later. No change for Fudo.", or "No change for any
+// dojo." `worse` is true when any dojo is worse off, and the check then warns.
 export function swapVerdict(separation) {
-  let pool = 0;
-  let earlier = 0;
-  for (const d of separationChanges(separation)) {
-    for (const ch of d.changes) {
-      if (ch.later) continue;
-      if (ch.after && ch.after.samePool) pool += 1;
-      else earlier += 1;
-    }
+  const dojos = separationChanges(separation);
+  const names = (pick) => andList(dojos.filter(pick).map((d) => d.dojo));
+  const pool = names((d) => d.shift < 0 && d.intoPool);
+  const earlier = names((d) => d.shift < 0 && !d.intoPool);
+  if (pool || earlier) {
+    const parts = [];
+    if (pool) parts.push(`${pool} would share a pool`);
+    if (earlier) parts.push(`${earlier} would meet earlier`);
+    return { worse: true, text: `${parts.join(' and ')}.` };
   }
-  if (pool === 0 && earlier === 0) return { worse: false, text: 'No dojo-mates meet earlier.' };
-  const pairs = (n) => `${n} ${plural(n, 'pair', 'pairs')}`;
-  const parts = [];
-  if (pool > 0) parts.push(`${pairs(pool)} would share a pool`);
-  if (earlier > 0) parts.push(`${pool > 0 ? earlier : pairs(earlier)} would meet earlier`);
-  return { worse: true, text: `${parts.join(' and ')}.` };
+  const later = names((d) => d.shift > 0);
+  if (!later) return { worse: false, text: 'No change for any dojo.' };
+  const same = names((d) => d.shift === 0);
+  return { worse: false, text: `${later} can meet later.${same ? ` No change for ${same}.` : ''}` };
 }
 
 // movesSentence: "IMS4 Arthur Dick goes to Pool C, IMS8 Lena Park to Pool

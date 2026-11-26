@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -12,14 +13,17 @@ import (
 // do to the dojo separation. Nothing is stored; the answer is recomputed from
 // the stored draw on every read, like the suggestions it sits beside.
 
-// Swap candidate verdicts, SwapCandidate.Verdict.
+// Swap candidate verdicts, SwapCandidate.Verdict, as judgeDojos names them:
+// each dojo is judged as a whole, by where its pairs of dojo-mates can first
+// meet, sorted earliest first, before and after the swap.
 const (
-	// SwapVerdictWorse: at least one pair of dojo-mates would first meet
-	// earlier (sharing a pool is the earliest of all).
+	// SwapVerdictWorse: at least one dojo is worse off: the first of its
+	// meetings that differs is earlier (sharing a pool is the earliest of
+	// all), whatever another dojo gains.
 	SwapVerdictWorse = "worse"
-	// SwapVerdictBetter: no pair meets earlier and at least one meets later.
+	// SwapVerdictBetter: no dojo is worse off and at least one is better off.
 	SwapVerdictBetter = "better"
-	// SwapVerdictSame: every pair first meets where it does now.
+	// SwapVerdictSame: every dojo's meetings are what they are now.
 	SwapVerdictSame = "same"
 )
 
@@ -110,7 +114,8 @@ func swapCandidates(snap swapSnapshot, pickID string) (*SwapCandidates, error) {
 // seededSwap, as planSwap does): when that rebuilds the knockout, any pair's
 // meeting can move, so the whole separation after it is compared with
 // summary, the separation now. Every other swap keeps the bracket's shape and
-// is scored on the two competitors' own pairs (pairShifts).
+// is scored on the two competitors' own pairs (pairShifts). Both judge by
+// judgeDojos.
 func (s *swapSuggester) candidateVerdict(snap swapSnapshot, summary []DojoMeeting, source DrawSource, x, y int) (string, error) {
 	ex, ey := s.entrants[x], s.entrants[y]
 	if ex.seed > 0 || ey.seed > 0 {
@@ -125,55 +130,34 @@ func (s *swapSuggester) candidateVerdict(snap swapSnapshot, summary []DojoMeetin
 		}
 		if plan.answer.BracketRebuilt {
 			after := DojoSeparation(snap.comp, plan.pools, plan.bracket, snap.roster)
-			return separationVerdict(SwapSeparation{Before: summary, After: after}, bracketRounds(snap.bracket), bracketRounds(plan.bracket)), nil
+			return separationVerdict(SwapSeparation{Before: summary, After: after}), nil
 		}
 	}
-	gained, earlier := s.pairShifts(x, y)
-	return shiftVerdict(len(gained) > 0, earlier), nil
+	_, verdict := s.pairShifts(x, y)
+	return verdict, nil
 }
 
-// shiftVerdict names a swap from what it does to the pairs it moves: worse
-// when any pair meets earlier, whatever else meets later; better when some
-// pair meets later; the same otherwise.
-func shiftVerdict(later, earlier bool) string {
-	switch {
-	case earlier:
-		return SwapVerdictWorse
-	case later:
-		return SwapVerdictBetter
-	}
-	return SwapVerdictSame
-}
-
-// separationVerdict judges a swap from its separation rows before and after,
-// pair by pair (a pair is keyed by its two ids, which a swap never changes),
-// each ranked by rankMeeting on its own bracket's round count. A row that is
-// in one list only changes nothing: a swap keeps every pair.
-func separationVerdict(sep SwapSeparation, roundsBefore, roundsAfter int) string {
-	before := make(map[[2]string]meetingRank, len(sep.Before))
+// separationVerdict judges a swap from its separation rows before and after
+// by judgeDojos, each dojo (helper.DojoKey) holding its pairs' meetings, each
+// ranked by rankMeeting on its own bracket's rounds. A pair is matched
+// by its two ids, which a swap never changes, and a row that is in one list
+// only changes nothing: a swap keeps every pair.
+func separationVerdict(sep SwapSeparation) string {
+	before := make(map[[2]string]DojoMeeting, len(sep.Before))
 	for _, dm := range sep.Before {
-		before[pairIDs(dm.A.ID, dm.B.ID)] = rankMeeting(dm, roundsBefore)
+		before[pairIDs(dm.A.ID, dm.B.ID)] = dm
 	}
-	later, earlier := false, false
+	var tallies []dojoTally
 	for _, dm := range sep.After {
 		was, ok := before[pairIDs(dm.A.ID, dm.B.ID)]
 		if !ok {
 			continue
 		}
-		switch c := rankMeeting(dm, roundsAfter).compare(was); {
-		case c < 0:
-			earlier = true
-		case c > 0:
-			later = true
-		}
+		i := tallyIndex(&tallies, helper.DojoKey(was.Dojo))
+		t := &tallies[i]
+		t.before = append(t.before, rankMeeting(was))
+		t.after = append(t.after, rankMeeting(dm))
 	}
-	return shiftVerdict(later, earlier)
-}
-
-// bracketRounds is a bracket's round count, 0 for none.
-func bracketRounds(b *state.Bracket) int {
-	if b == nil {
-		return 0
-	}
-	return len(b.Rounds)
+	verdict, _ := judgeDojos(tallies)
+	return verdict
 }

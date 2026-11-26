@@ -173,7 +173,7 @@ func TestDrawReview_SwapSuggestions(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	body := decodeBody(t, w)
 	assert.IsType(t, []any{}, body["suggestions"], "a list, never null")
-	assert.IsType(t, []any{}, body["stuck"], "a list, never null")
+	assert.NotContains(t, body, "stuck", "the card says what the suggestions mean itself")
 
 	t.Run("an unknown competition is 404", func(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, g.send(http.MethodGet, "/api/competitions/nope/draw/swap-suggestions", nil).Code)

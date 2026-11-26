@@ -1,11 +1,13 @@
 // bc-drev FR2, FR8, FR9, FR13: the Overview's Draw review card. Dojo
-// separation comes first and on its own (operator note P0); changing the draw
-// is a separate, optional step below it, with the swaps the server suggests
-// and two pickers. Every swap goes through the check panel. The card reads its
-// two answers again after a swap and on a draw_generated event for its
+// separation comes first and on its own (operator note P0), under the facts
+// line and the conclusion line; changing the draw is a separate, optional step
+// below it, with a button to the preview tab's Swap competitors mode and the
+// swaps the server suggests. Every swap goes through the check panel, and
+// focus comes back to the button that opened it. The card reads its two
+// answers again after a swap and on a draw_generated event for its
 // competition, and hides the swap step once a result is recorded.
 import React from 'react';
-import { render, act, screen, cleanup, fireEvent, within } from '@testing-library/react';
+import { render, act, screen, cleanup, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { keyboardClick } from '../helpers/tap_events.js';
@@ -22,10 +24,12 @@ const STUBBED_GLOBALS = {
 
 let restore;
 let DrawReviewPanel;
+let takeSwapMode;
 
 beforeAll(async () => {
   restore = installWindowStubs(STUBBED_GLOBALS);
   ({ DrawReviewPanel } = await import('../../admin_draw_review.jsx'));
+  ({ takeSwapMode } = await import('../../swap_mode_request.jsx'));
 });
 afterAll(() => restore());
 
@@ -42,10 +46,6 @@ const suggestion = {
   improves: [{ dojo: 'Team Omega', before: meetings[0], after: { ...meetings[0], samePool: '', earliest: { matchId: 'r1-m0', round: 1, rounds: 3 } } }],
 };
 const comp = { id: 'c1', name: 'Open', format: 'mixed', status: 'draw-ready', numberPrefix: 'IMS' };
-const pools = [
-  { poolName: 'Pool A', players: [{ id: 'p1', name: 'Arthur Dick', dojo: 'Team Omega', number: 'IMS1', seed: 1 }, { id: 'p3', name: 'Xu Lin', dojo: 'Team Omega', number: 'IMS3' }] },
-  { poolName: 'Pool B', players: [{ id: 'p2', name: 'Lena Park', dojo: 'Team Kappa', number: 'IMS2' }, { id: 'p4', name: 'Yan Wu', dojo: 'Team Kappa', number: 'IMS4' }] },
-];
 const dryRun = {
   applied: false, dryRun: true, moves: [], separation: { before: [], after: [] }, lineupsMoved: 0, lineupsRemoved: 0,
 };
@@ -53,17 +53,17 @@ const dryRun = {
 beforeEach(() => {
   eventListeners = [];
   window.API.fetchDojoSeparation = vi.fn().mockResolvedValue(meetings);
-  window.API.fetchSwapSuggestions = vi.fn().mockResolvedValue({ suggestions: [suggestion], stuck: [] });
+  window.API.fetchSwapSuggestions = vi.fn().mockResolvedValue({ suggestions: [suggestion] });
   window.API.swapDrawPlaces = vi.fn().mockResolvedValue(dryRun);
   window.API.subscribeToEvents = vi.fn((cb) => { eventListeners.push(cb); return () => { eventListeners = eventListeners.filter((l) => l !== cb); }; });
 });
 afterEach(() => cleanup());
 
 async function mount(props = {}) {
-  const handlers = { showToast: vi.fn(), onRefreshCompetition: vi.fn() };
+  const handlers = { showToast: vi.fn(), onRefreshCompetition: vi.fn(), onSection: vi.fn() };
   let view;
   await act(async () => {
-    view = render(<DrawReviewPanel c={comp} pools={pools} poolMatches={[]} bracket={null} password="pw" {...handlers} {...props} />);
+    view = render(<DrawReviewPanel c={comp} poolMatches={[]} bracket={null} password="pw" {...handlers} {...props} />);
   });
   return { ...handlers, view };
 }
@@ -88,13 +88,29 @@ describe('the Draw review card', () => {
     expect(window.API.fetchDojoSeparation).toHaveBeenCalledWith('c1', 'pw');
   });
 
-  it('is headed by its title, an h2 over the h3 and h4 of its steps, with a one-line verdict under it', async () => {
+  it('is headed by its title, an h2 over the h3 of its steps, with the facts and the conclusion under it', async () => {
     await mount();
     const card = screen.getByTestId('draw-review');
     expect(within(card).getByRole('heading', { level: 2 }).textContent).toBe('Draw review');
     expect(within(card).getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Dojo separation', 'Change the draw (optional)']);
-    expect(within(card).getByRole('heading', { level: 4 }).textContent).toBe('Or pick your own swap');
+    expect(within(card).queryByRole('heading', { level: 4 }), 'no picker step of its own').toBeNull();
     expect(screen.getByTestId('draw-review-verdict').textContent).toBe('2 pairs from 2 dojos. 1 pair shares a pool.');
+    const conclusion = screen.getByTestId('draw-review-conclusion');
+    expect(conclusion.textContent)
+      .toBe('1 swap would keep dojo-mates apart longer. It is under Change the draw.');
+    expect(screen.getByTestId('draw-review-verdict').compareDocumentPosition(conclusion) & Node.DOCUMENT_POSITION_FOLLOWING, 'the facts, then what they mean').toBeTruthy();
+  });
+
+  it('holds the conclusion line\'s place while the suggestions are read, and leaves it empty when they fail', async () => {
+    window.API.fetchSwapSuggestions = vi.fn(() => new Promise(() => {}));
+    await mount();
+    const shown = () => screen.getByTestId('draw-review-conclusion');
+    expect(shown().textContent, 'a no-break space holds the line').toBe('\u00a0');
+    cleanup();
+    window.API.fetchSwapSuggestions = vi.fn().mockRejectedValue(new Error('Could not read the swap suggestions. Check the connection and try again.'));
+    await mount();
+    expect(shown().textContent).toBe('\u00a0');
+    expect(within(screen.getByTestId('draw-change')).getByRole('alert').textContent).toContain('Could not read the swap suggestions');
   });
 
   it('names each dojo once, its pairs grouped under it in the server\'s order', async () => {
@@ -119,24 +135,25 @@ describe('the Draw review card', () => {
 
   it('says so when no two competitors share a dojo, with no verdict and no swap needed', async () => {
     window.API.fetchDojoSeparation = vi.fn().mockResolvedValue([]);
-    window.API.fetchSwapSuggestions = vi.fn().mockResolvedValue({ suggestions: [], stuck: [] });
+    window.API.fetchSwapSuggestions = vi.fn().mockResolvedValue({ suggestions: [] });
     await mount();
     expect(screen.getByTestId('dojo-separation-empty').textContent).toBe('No two competitors share a dojo.');
     expect(screen.queryByTestId('draw-review-verdict')).toBeNull();
     expect(screen.getByText('No swap is needed.')).toBeInTheDocument();
   });
 
-  it('says no swap is needed when every pair meets only in the Final, and that none helps otherwise', async () => {
+  it('says no swap is needed when every pair meets only in the Final, and that none can do better otherwise, once', async () => {
     const fin = { matchId: 'r2-m0', round: 2, rounds: 3 };
     window.API.fetchDojoSeparation = vi.fn().mockResolvedValue([{ ...meetings[1], earliest: fin, ifBothWin: fin }]);
-    window.API.fetchSwapSuggestions = vi.fn().mockResolvedValue({ suggestions: [], stuck: [] });
+    window.API.fetchSwapSuggestions = vi.fn().mockResolvedValue({ suggestions: [] });
     await mount();
     expect(screen.getByTestId('draw-review-verdict').textContent).toBe('1 pair from 1 dojo. They can meet only in the Final.');
-    expect(screen.getByText('No swap is needed.')).toBeInTheDocument();
+    expect(screen.getAllByText('No swap is needed.'), 'said in the conclusion alone').toHaveLength(1);
     cleanup();
     window.API.fetchDojoSeparation = vi.fn().mockResolvedValue(meetings);
     await mount();
-    expect(screen.getByText('No swap keeps dojo-mates apart for longer.')).toBeInTheDocument();
+    expect(screen.getAllByText('No swap can do better.')).toHaveLength(1);
+    expect(screen.queryByTestId('swap-suggestion')).toBeNull();
   });
 
   it('says it could not read the summary rather than showing it empty', async () => {
@@ -146,18 +163,12 @@ describe('the Draw review card', () => {
     expect(screen.queryByTestId('dojo-separation-empty')).toBeNull();
   });
 
-  it('lists the suggestions with their effect, and the dojos no swap helps', async () => {
-    window.API.fetchSwapSuggestions = vi.fn().mockResolvedValue({
-      suggestions: [suggestion],
-      stuck: [{ dojo: 'Team Pi', meeting: { earliest: { matchId: 'r0-m1', round: 0, rounds: 3 } } }],
-    });
+  it('lists the suggestions with their effect', async () => {
     await mount();
     const item = screen.getByTestId('swap-suggestion');
     expect(item.textContent).toContain('Swap IMS3 Xu Lin (Pool A) and IMS4 Yan Wu (Pool B)');
     expect(item.textContent).toContain('Team Omega: shared Pool A; now not before the Semifinals.');
-    expect(item.textContent).toContain('Nobody else meets earlier.');
-    expect(screen.getByTestId('swap-stuck').textContent)
-      .toBe('For Team Pi, no suggested swap makes their first meeting later without making another dojo meet earlier.');
+    expect(item.textContent).toContain('No dojo meets earlier.');
   });
 
   it('opens the check for a suggestion with the places the server gave', async () => {
@@ -168,63 +179,59 @@ describe('the Draw review card', () => {
       { a: { id: 'p3', place: suggestion.a.place }, b: { id: 'p4', place: suggestion.b.place }, dryRun: true }, 'pw');
   });
 
-  it('offers Check this swap only for two different competitors, grouped by pool', async () => {
+  it('gives focus back to the suggestion that opened the check when it is cancelled', async () => {
     await mount();
-    const pickA = screen.getByTestId('swap-pick-a');
-    const pickB = screen.getByTestId('swap-pick-b');
-    expect([...pickA.querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['Pool A', 'Pool B']);
-    expect(pickA.querySelector('option[value="p1"]').textContent).toBe('IMS1 Arthur Dick (Team Omega), seed 1');
-    const check = screen.getByTestId('swap-check-btn');
-    expect(check).toBeDisabled();
-    await act(async () => { fireEvent.change(pickA, { target: { value: 'p1' } }); });
-    expect(check).toBeDisabled();
-    expect(pickB.querySelector('option[value="p1"]'), 'Swap with leaves out the competitor already picked').toBeNull();
-    expect(pickB.querySelector('option[value="p3"]')).not.toBeNull();
-    await act(async () => { fireEvent.change(pickB, { target: { value: 'p2' } }); });
-    expect(check).not.toBeDisabled();
-    await keyboardClick(check);
-    expect(window.API.swapDrawPlaces).toHaveBeenCalledWith('c1',
-      { a: { id: 'p1', place: { pool: 'Pool A', position: 1 } }, b: { id: 'p2', place: { pool: 'Pool B', position: 1 } }, dryRun: true }, 'pw');
-    expect(check, 'disabled while the check is open').toBeDisabled();
+    const opener = within(screen.getByTestId('swap-suggestion')).getByRole('button');
+    opener.focus();
+    await keyboardClick(opener);
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(document.activeElement.textContent, 'focus went in to Cancel').toBe('Cancel');
+    expect(opener, 'the opener stays usable, so focus can come back to it').not.toBeDisabled();
+    await keyboardClick(screen.getByText('Cancel'));
+    expect(screen.queryByTestId('draw-swap-check')).toBeNull();
+    expect(document.activeElement).toBe(opener);
   });
 
-  it('drops the second pick when the first picker takes the same competitor', async () => {
-    await mount();
-    await act(async () => { fireEvent.change(screen.getByTestId('swap-pick-b'), { target: { value: 'p2' } }); });
-    await act(async () => { fireEvent.change(screen.getByTestId('swap-pick-a'), { target: { value: 'p2' } }); });
-    expect(screen.getByTestId('swap-pick-b').value).toBe('');
-    expect(screen.getByTestId('swap-check-btn'), 'the same competitor twice is no swap').toBeDisabled();
-    await act(async () => { fireEvent.change(screen.getByTestId('swap-pick-a'), { target: { value: 'p1' } }); });
-    expect(screen.getByTestId('swap-pick-b').value, 'the dropped pick does not come back').toBe('');
+  it('opens Pools (preview) with the Swap competitors mode on, for any swap by hand', async () => {
+    const h = await mount();
+    const button = screen.getByTestId('draw-review-swap-mode');
+    expect(button.textContent).toBe('Swap competitors on Pools');
+    expect(screen.queryByTestId('swap-pick-a'), 'no pickers of its own').toBeNull();
+    await keyboardClick(button);
+    expect(h.onSection).toHaveBeenCalledWith('pools');
+    expect(takeSwapMode('c1'), 'the tab is asked to start in the mode').toBe(true);
+    expect(takeSwapMode('c1'), 'once').toBe(false);
   });
 
-  it('after an applied swap tells it, resets the pickers and reads everything again', async () => {
+  it('opens Bracket (preview) for a knockout-only draw', async () => {
+    const h = await mount({ c: { ...comp, format: 'knockout' }, bracket: { rounds: [[]] } });
+    const button = screen.getByTestId('draw-review-swap-mode');
+    expect(button.textContent).toBe('Swap competitors on the Bracket');
+    await keyboardClick(button);
+    expect(h.onSection).toHaveBeenCalledWith('bracket');
+    expect(takeSwapMode('other'), 'an ask is for its own competition').toBe(false);
+  });
+
+  it('after an applied swap tells it, closes the check and reads everything again', async () => {
     window.API.swapDrawPlaces = vi.fn().mockResolvedValueOnce(dryRun).mockResolvedValueOnce({ ...dryRun, dryRun: undefined, applied: true, lineupsMoved: 1 });
     const h = await mount();
-    await act(async () => { fireEvent.change(screen.getByTestId('swap-pick-a'), { target: { value: 'p1' } }); });
-    await act(async () => { fireEvent.change(screen.getByTestId('swap-pick-b'), { target: { value: 'p2' } }); });
-    await keyboardClick(screen.getByTestId('swap-check-btn'));
+    await keyboardClick(within(screen.getByTestId('swap-suggestion')).getByRole('button'));
     await keyboardClick(screen.getByTestId('swap-them'));
-    expect(h.showToast).toHaveBeenCalledWith('Swapped Arthur Dick and Lena Park. 1 lineup moved.');
+    expect(h.showToast).toHaveBeenCalledWith('Swapped Xu Lin and Yan Wu. 1 lineup moved.');
     expect(screen.queryByTestId('draw-swap-check')).toBeNull();
-    expect(screen.getByTestId('swap-pick-a').value).toBe('');
-    expect(screen.getByTestId('swap-pick-b').value).toBe('');
     expect(h.onRefreshCompetition).toHaveBeenCalledTimes(1);
     expect(window.API.fetchDojoSeparation).toHaveBeenCalledTimes(2);
     expect(window.API.fetchSwapSuggestions).toHaveBeenCalledTimes(2);
   });
 
-  it('on draw_changed closes the check, resets the pickers, says why and reads everything again', async () => {
+  it('on draw_changed closes the check, says why and reads everything again', async () => {
     window.API.swapDrawPlaces = vi.fn().mockResolvedValueOnce(dryRun)
       .mockRejectedValueOnce(Object.assign(new Error('The draw has changed since you opened it.'), { code: 'draw_changed' }));
     const h = await mount();
-    await act(async () => { fireEvent.change(screen.getByTestId('swap-pick-a'), { target: { value: 'p1' } }); });
-    await act(async () => { fireEvent.change(screen.getByTestId('swap-pick-b'), { target: { value: 'p2' } }); });
-    await keyboardClick(screen.getByTestId('swap-check-btn'));
+    await keyboardClick(within(screen.getByTestId('swap-suggestion')).getByRole('button'));
     await keyboardClick(screen.getByTestId('swap-them'));
     expect(h.showToast).toHaveBeenCalledWith('The draw has changed since you opened it.', 'error');
     expect(screen.queryByTestId('draw-swap-check')).toBeNull();
-    expect(screen.getByTestId('swap-pick-a').value).toBe('');
     expect(h.onRefreshCompetition).toHaveBeenCalledTimes(1);
     expect(window.API.fetchDojoSeparation).toHaveBeenCalledTimes(2);
   });
@@ -256,18 +263,4 @@ describe('the Draw review card', () => {
     });
   }
 
-  it('lists a knockout draw\'s competitors by first-round match', async () => {
-    const bracket = { rounds: [[
-      { id: 'r0-m0', matchNumber: 1, sideA: { id: 'k1', name: 'Ann', dojo: 'D1' }, sideB: { id: 'k2', name: 'Bo', dojo: 'D2' } },
-      { id: 'r0-m1', matchNumber: 2, sideA: { id: 'k3', name: 'Cy', dojo: 'D1' }, sideB: { id: '', name: '' } },
-    ]] };
-    await mount({ c: { ...comp, format: 'knockout' }, pools: [], bracket });
-    const groups = [...screen.getByTestId('swap-pick-a').querySelectorAll('optgroup')];
-    expect(groups.map((g) => g.label)).toEqual(['First-round Match 1', 'First-round Match 2']);
-    await act(async () => { fireEvent.change(screen.getByTestId('swap-pick-a'), { target: { value: 'k2' } }); });
-    await act(async () => { fireEvent.change(screen.getByTestId('swap-pick-b'), { target: { value: 'k3' } }); });
-    await keyboardClick(screen.getByTestId('swap-check-btn'));
-    expect(window.API.swapDrawPlaces).toHaveBeenCalledWith('c1',
-      { a: { id: 'k2', place: { slot: 1 } }, b: { id: 'k3', place: { slot: 2 } }, dryRun: true }, 'pw');
-  });
 });

@@ -12,6 +12,8 @@ import { DrawSwapCheck, effectiveFormat, drawEntrants, drawPlaceLabel, swapDoneT
 import { useSwapCandidates, marksKey, SwapMarksKey, SwapVerdictWord } from './admin_swap_candidates.jsx';
 import { acceptTap } from './tap_guard.jsx';
 import { useEscapeToClose } from './ui.jsx';
+import { publishHeight } from './published_height.jsx';
+import { takeSwapMode } from './swap_mode_request.jsx';
 const { useState, useEffect, useRef, useMemo } = React;
 
 const hasBothSides = window.hasBothSides;
@@ -227,8 +229,13 @@ RunningMatchPanel.displayName = "RunningMatchPanel";
 // until the pick is cancelled or the second tap opens the check. After a
 // swap the mode stays on with nothing picked, so a
 // second swap can follow; Done, Escape, or leaving the tab (the host
-// unmounts) turns it off. The page reads the swapped draw on the
-// draw_generated broadcast the swap makes (admin.jsx).
+// unmounts) turns it off. The Draw review card's "Swap competitors on Pools"
+// button opens the tab with the mode already on (swap_mode_request.jsx, taken
+// once as the tab mounts). While the mode is on its banner is pinned under
+// the admin top bar, and publishes its height as --swap-banner-h
+// (published_height.jsx) for the scroll margin that keeps a tapped or
+// focused competitor clear of both bars. The page reads the swapped draw on
+// the draw_generated broadcast the swap makes (admin.jsx).
 // ---------------------------------------------------------------------------
 
 // swapModeAvailable: does this tab offer the mode now? A pools + knockout
@@ -253,13 +260,22 @@ export function swapPickLine(picked, bracket) {
 // (the button or banner, and the check panel) for the host to draw above the
 // viewer. `beforeTurnOn` may refuse (an editor holding unsaved entries).
 export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, password, beforeTurnOn, onTurnOn }) {
-  const [on, setOn] = useState(false);
+  // Taken once, as the tab mounts: on when the Draw review card's button
+  // opened the tab to swap competitors.
+  const [on, setOn] = useState(() => takeSwapMode(c && c.id));
   const [pickedId, setPickedId] = useState(null);
+  const bannerRef = useRef(null);
   const [checking, setChecking] = useState(null);
   const [note, setNote] = useState(null);
   const tapRef = useRef(null);
   const available = swapModeAvailable(c, tab, poolMatches, bracket);
   const active = on && available;
+  // The pinned banner's height, for the competitors' scroll margin, published
+  // while the banner is drawn.
+  useEffect(() => {
+    if (!active || !bannerRef.current) return undefined;
+    return publishHeight(bannerRef.current, document.documentElement, '--swap-banner-h');
+  }, [active]);
   const entrants = useMemo(() => {
     const byId = new Map();
     if (available) drawEntrants(c, pools, bracket).forEach((g) => g.entrants.forEach((e) => byId.set(e.id, e)));
@@ -333,8 +349,12 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
       </div>
     );
   } else if (active) {
+    // The check panel is drawn beside the banner, never inside it: the pinned
+    // banner is a stacking context under the top bar, which would hold the
+    // panel's backdrop under the bar too.
     controls = (
-      <div className="swap-mode" role="region" aria-label="Swap competitors" data-testid="swap-mode">
+      <>
+      <div className="swap-mode swap-mode--pinned" role="region" aria-label="Swap competitors" data-testid="swap-mode" ref={bannerRef}>
         <div className="swap-mode__head">
           <p className="swap-mode__lead">
             <strong>Swap competitors: on.</strong> Tap two competitors to swap them. Taps do not open score sheets now.
@@ -357,11 +377,12 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
             the height of its longest sentence, so the marks arriving move
             nothing. */}
         {picked && <SwapMarksKey current={checking ? null : marksKey({ marks, failed })} />}
-        {checking && (
-          <DrawSwapCheck comp={c} bracket={bracket} a={checking.a} b={checking.b} password={password}
-            onClose={() => setChecking(null)} onSwapped={onSwapped} onDrawChanged={onDrawChanged} />
-        )}
       </div>
+      {checking && (
+        <DrawSwapCheck comp={c} bracket={bracket} a={checking.a} b={checking.b} password={password}
+          onClose={() => setChecking(null)} onSwapped={onSwapped} onDrawChanged={onDrawChanged} />
+      )}
+      </>
     );
   }
   return { swap, active, controls };

@@ -807,8 +807,8 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
         return (
           <div>
             <div className="row">{previewCard}</div>
-            <DrawReviewPanel c={c} pools={pools ?? c.pools} poolMatches={poolMatches ?? c.poolMatches} bracket={effectiveBracket}
-              password={password} showToast={showToast} onRefreshCompetition={onRefreshCompetition} />
+            <DrawReviewPanel c={c} poolMatches={poolMatches ?? c.poolMatches} bracket={effectiveBracket}
+              password={password} showToast={showToast} onRefreshCompetition={onRefreshCompetition} onSection={onSection} />
           </div>
         );
       }

@@ -52,8 +52,8 @@ func RegisterDrawReviewHandlers(r *gin.RouterGroup, comps CompetitionLoader, eng
 		c.JSON(http.StatusOK, gin.H{"meetings": meetings})
 	})
 
-	// GET /competitions/:id/draw/swap-suggestions: 200 {suggestions, stuck},
-	// both empty lists unless the competition is draw-ready with a draw that
+	// GET /competitions/:id/draw/swap-suggestions: 200 {suggestions}, an
+	// empty list unless the competition is draw-ready with a draw that
 	// has a bracket; 404 for an unknown competition.
 	r.GET("/competitions/:id/draw/swap-suggestions", func(c *gin.Context) {
 		comp, ok := drawReviewCompetition(c, comps)
@@ -70,9 +70,6 @@ func RegisterDrawReviewHandlers(r *gin.RouterGroup, comps CompetitionLoader, eng
 		}
 		if answer.Suggestions == nil {
 			answer.Suggestions = []engine.SwapSuggestion{}
-		}
-		if answer.Stuck == nil {
-			answer.Stuck = []engine.StuckDojo{}
 		}
 		c.JSON(http.StatusOK, answer)
 	})

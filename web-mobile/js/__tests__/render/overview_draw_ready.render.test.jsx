@@ -11,7 +11,7 @@ import { installWindowStubs } from '../helpers/stub_globals.js';
 const STUBBED_GLOBALS = {
   API: {
     fetchDojoSeparation: vi.fn().mockResolvedValue([]),
-    fetchSwapSuggestions: vi.fn().mockResolvedValue({ suggestions: [], stuck: [] }),
+    fetchSwapSuggestions: vi.fn().mockResolvedValue({ suggestions: [] }),
     subscribeToEvents: vi.fn(() => () => {}),
     estimateCompetitionSchedule: vi.fn(() => new Promise(() => {})),
   },

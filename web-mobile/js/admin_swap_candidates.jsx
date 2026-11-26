@@ -1,9 +1,10 @@
 // admin_swap_candidates.jsx: the marks of the Swap competitors mode (bc-drev
 // K4). Once the organiser picks a first competitor on Pools (preview) or
 // Bracket (preview), every other drawn competitor is marked by what swapping
-// the two would do to dojo-mates: green "better" keeps them apart for longer,
-// amber "worse" brings a pair together earlier or into one pool, and a plain
-// pick neither. The server judges each candidate (GET
+// the two would do to dojo-mates, each dojo judged as a whole: green
+// "better" keeps a dojo apart for longer and leaves none worse off, amber
+// "worse" leaves a dojo worse off (earlier, or into one pool), and a plain
+// pick changes no dojo. The server judges each candidate (GET
 // .../draw/swap-candidates, by the same rule as the swap check's before and
 // after), this module only reads it and words it, and useSwapCompetitors
 // (admin_competition_bracket.jsx) is its one caller, for both tabs.

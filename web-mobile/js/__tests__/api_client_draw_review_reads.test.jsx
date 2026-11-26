@@ -60,7 +60,7 @@ describe('the other draw review reads keep their shape', () => {
 
   it('fetchSwapSuggestions and fetchDojoSeparation answer lists, and a refusal carries its code', async () => {
     global.fetch = vi.fn().mockResolvedValue(answer(200, {}));
-    expect(await API.fetchSwapSuggestions('c1', 'pw')).toEqual({ suggestions: [], stuck: [] });
+    expect(await API.fetchSwapSuggestions('c1', 'pw')).toEqual({ suggestions: [] });
     expect(await API.fetchDojoSeparation('c1', 'pw')).toEqual([]);
     global.fetch = vi.fn().mockResolvedValue(answer(409, { error: 'no_draw', message: 'There is no draw to change yet.' }));
     const err = await API.fetchSwapSuggestions('c1', 'pw').catch((e) => e);

@@ -8,6 +8,7 @@
 // browser can say what they draw.
 import { expect } from '@playwright/test';
 import zlib from 'node:zlib';
+import { settled } from './pace.mjs';
 
 // The A4 page in PDF points, and the box @page poster leaves inside its 10 mm
 // margins, in CSS px (96 per inch): 190 x 277 mm.
@@ -84,6 +85,13 @@ export async function printWithoutDialog(page, buttonName) {
     window.print = () => { window.__posterPrints += 1; };
   });
   await page.getByRole('button', { name: buttonName }).tap();
+  // Print all asks first (the sheets, the address, scan one first).
+  if (buttonName === 'Print all posters') {
+    const ask = page.getByRole('dialog').filter({ hasText: 'Print all posters?' });
+    await settled(ask);
+    await expect(ask).toContainText(/This prints \d+ A4 sheets/);
+    await ask.getByRole('button', { name: 'Print all', exact: true }).tap();
+  }
   await expect.poll(() => page.evaluate(() => window.__posterPrints)).toBe(1);
   const root = page.locator('body > .poster-print-root');
   await expect(root).toHaveCount(1);

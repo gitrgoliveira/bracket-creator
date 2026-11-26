@@ -242,6 +242,39 @@
   margin-bottom: 16px;
 }
 
+/* The chosen poster reads plainly as chosen: the accent under its label. */
+.posters-picker button.is-active {
+  box-shadow: inset 0 -2px 0 var(--accent), var(--shadow-sm);
+  font-weight: 600;
+}
+
+/* A poster with unsaved changes (a dot) or text over a limit (a "!"), so the
+ * organiser can find it from the picker. */
+.posters-mark {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.posters-mark--error {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* The name of the poster the form edits. */
+.posters-editing {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
 /* The choices beside the preview; the preview drops under them on a phone. */
 .posters-grid {
   display: grid;
@@ -259,7 +292,20 @@
 .posters-save-row {
   align-items: center;
   gap: 12px;
-  margin-bottom: 16px;
+  margin: -4px -4px 12px;
+  padding: 4px;
+  /* Save and its status stay in sight while the form scrolls under the topbar. */
+  position: sticky;
+  top: var(--topbar-stack-h, 0px);
+  z-index: 2;
+  background: var(--surface);
+}
+
+.posters-too-long {
+  flex-basis: 100%;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--red);
 }
 
 .posters-print-row {
@@ -273,13 +319,67 @@
   margin: 0;
 }
 
-.posters-address {
+/* Copy this court poster's choices to every court poster, with what it did. */
+.posters-apply {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+/* The hint on where the logo and the sponsors come from closes the choices,
+ * spaced like a field from what follows. */
+.posters-branding {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 14px;
+}
+
+/* The address warning and the print hint keep their distance from what is
+ * next to them. */
+.posters-page > .alert {
+  margin-bottom: 12px;
+}
+
+.posters-print-hint {
+  margin-top: 8px;
+}
+
+.posters-address__url {
+  display: block;
+  font-size: 13px;
+  color: var(--ink);
   overflow-wrap: anywhere;
 }
 
 .posters-preview {
   max-width: 480px;
   width: 100%;
+}
+
+/* A finger's worth of target on a touch screen (44px), for every control of
+ * the page. */
+@media (pointer: coarse) {
+  .posters-page .seg button,
+  .posters-page .btn,
+  .posters-page .checkbox {
+    min-height: 44px;
+  }
+  .posters-page .checkbox input {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/* On a phone the preview comes first, small enough to keep the form in reach. */
+@media (max-width: 640px) {
+  .posters-preview {
+    order: -1;
+    max-width: 240px;
+    margin: 0 auto;
+  }
 }
 
 /* ---- print -------------------------------------------------------------- */

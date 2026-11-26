@@ -15,15 +15,15 @@ Click **Posters** on the dashboard, beside **Backup and restore**. The page work
 
 ## Choose what a poster says
 
-Pick a poster from the list. The preview beside the choices changes as you type, before you save anything.
+Pick a poster from the list. The name of the poster you are editing heads the choices, and the preview beside them changes as you type, before you save anything. On a phone the preview comes first, above the choices.
 
-- **Heading**: the line above the code. Leave it empty to use the standard words ("Follow the tournament live" on the viewer-home poster, "Follow this court live" on a shiai-jo poster). The box shows the standard words in grey while it is empty. A heading holds up to 80 characters.
+- **Heading**: the line above the code. Leave it empty to use the standard words ("Follow the tournament live" on the viewer-home poster, "Follow this court live" on a shiai-jo poster). While the box is empty it shows the standard words in grey, and the line under it says which words print. A heading holds up to 80 characters.
 - **Call to action**: an optional second line under the heading, for example "Scan for live results". Leave it empty and nothing prints. It holds up to 120 characters.
-- **Over a limit**: a counter under each box shows how many characters it holds. While a heading or call to action is over its limit, **Save** is switched off and the page says so; shorten the text to save.
+- **Over a limit**: a counter under each box shows how many characters it holds. While a heading or call to action is over its limit, **Save** and both print buttons are switched off, the poster's name in the list carries a red **!**, and the line beside **Save** names the poster to shorten.
 - **Logo**: shown only when the tournament has a logo. Choose **Logo in the centre of the code**, the choice a new poster starts with, or **Logo above the code**. The code stays readable with a logo in its centre because the poster uses the code's strongest error correction. A very long address does not leave room for that, so the centre choice is switched off and a sentence under the choices says why. The logo then goes above the code, and a shorter public address brings the centre choice back.
 - **Show sponsors**: shown only when the tournament has sponsors. Untick it to leave the sponsor strip off this poster.
 
-Each poster keeps its own choices, so the viewer-home poster and the poster for each shiai-jo can say different things.
+Each poster keeps its own choices, so the viewer-home poster and the poster for each shiai-jo can say different things. To give every shiai-jo poster the same words, set up one of them and click **Use these choices on every shiaijo**. The button copies that poster's heading, call to action, logo place and sponsor choice onto the other shiai-jo posters, and asks first when it would replace what they hold. The viewer-home poster is left as it is, and nothing is saved until you click **Save**.
 
 ## Add the logo and the sponsors
 
@@ -38,9 +38,9 @@ Sponsors print along the foot of the poster in one row, evenly spaced, up to six
 
 ## Save your choices
 
-Nothing is sent until you click **Save**. The line beside the button reads **Unsaved changes** while what you see differs from what is stored, **Saving** while the save is on its way, and **Saved** once it has landed. Saving shares the choices with every device, so the posters look the same wherever you open the page.
+Nothing is sent until you click **Save**. Each poster with unsaved changes carries a dot beside its name in the list. The line beside the button reads **Unsaved changes** while what you see differs from what is stored, **Saving** while the save is on its way, and **Saved** once it has landed. Saving shares the choices with every device, so the posters look the same wherever you open the page.
 
-- Click **Print this poster** or **Print all posters** at any time: it prints what is on screen, saved or not. Printing never saves.
+- Click **Print this poster** or **Print all posters** at any time, unless a text is over its limit: it prints what is on screen, saved or not. Printing never saves.
 - If you leave the page with unsaved changes, the app asks **Leave Posters anyway?**. Choose **Keep entries** to stay and save, or **Discard entries** to leave.
 - If another device changed the tournament settings while you were typing, the page says "Not saved: the tournament settings were changed on another device. Your poster text is still here." Your text stays on screen. Click **Save again** to save it over the current settings.
 - If the save fails for any other reason, the page says **Not saved** and why, and your text stays on screen.
@@ -59,7 +59,7 @@ If no public address is set, the codes open the address the page is open at. Whe
 
 ## Print the posters
 
-Click **Print this poster** for the poster in the preview, or **Print all posters** for the viewer-home poster followed by every shiai-jo poster, one per sheet. The browser's own print dialog opens.
+Click **Print this poster** for the poster in the preview, or **Print all posters** for the viewer-home poster followed by every shiai-jo poster, one per sheet. **Print all posters** asks first: it says how many sheets will print and which address the codes open, and warns when no public address is set. The browser's own print dialog then opens.
 
 - **A4 portrait** is the poster's size. Each poster fits one sheet, and no blank sheet is added at the end.
 - **A3**: choose A3 paper in the dialog and set the scale to fit the page. The poster scales as a whole, so nothing moves.

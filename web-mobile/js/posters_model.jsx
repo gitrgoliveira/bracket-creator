@@ -253,6 +253,19 @@ export function logoURL(key) {
 // One entry cleaned: empty fields dropped, a logo only when it is a real value.
 // `trim` also trims the text (what is saved); a draft keeps it as typed so a
 // space between two words is not eaten while the organiser types.
+// withChoicesOnEveryCourt: the block with one court poster's choices (its
+// heading, call to action, logo place and sponsors) copied onto every other
+// court poster in `list`. `others` names the courts whose choices it changes,
+// so the page can say what it replaced, or that nothing needed to change.
+export function withChoicesOnEveryCourt(posters, from, list, courts) {
+  const src = cleanEntry(storedChoices(posters, from), false);
+  const patch = { heading: src.heading || "", callToAction: src.callToAction || "", logo: src.logo || "", hideSponsors: !!src.hideSponsors };
+  const same = (p) => JSON.stringify(sortKeys(cleanEntry(storedChoices(posters, p), false))) === JSON.stringify(sortKeys(src));
+  const others = list.filter((p) => p.kind === "court" && p.key !== from.key && !same(p));
+  const next = others.reduce((acc, p) => withChoice(acc, p, patch, courts), posters || {});
+  return { posters: next, others };
+}
+
 function cleanEntry(e, trim) {
   const out = {};
   const entry = e || {};
@@ -300,6 +313,19 @@ export function postersTooLong(posters) {
   return [viewer, ...Object.values(courts || {})].some((e) =>
     e && (textLength(e.heading) > POSTER_RULES.headingMaxLength
       || textLength(e.callToAction) > POSTER_RULES.callToActionMaxLength));
+}
+
+// posterFlags: one poster's markers on the Posters page. `changed`: its choices
+// differ between the draft and the saved block (once normalised). `tooLong`:
+// its heading or call to action passes its maximum, as postersTooLong judges.
+export function posterFlags(draft, saved, poster) {
+  const a = storedChoices(normalisePosters(draft), poster);
+  const b = storedChoices(normalisePosters(saved), poster);
+  return {
+    changed: JSON.stringify(sortKeys(a)) !== JSON.stringify(sortKeys(b)),
+    tooLong: textLength(a.heading) > POSTER_RULES.headingMaxLength
+      || textLength(a.callToAction) > POSTER_RULES.callToActionMaxLength,
+  };
 }
 
 function sortKeys(v) {

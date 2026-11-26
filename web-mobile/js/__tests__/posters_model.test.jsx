@@ -19,6 +19,8 @@ import {
   normalisePosters,
   postersChanged,
   postersTooLong,
+  posterFlags,
+  withChoicesOnEveryCourt,
   textLength,
   trimText,
   logoURL,
@@ -286,6 +288,46 @@ describe('logoURL', () => {
   it('versions the logo address with the key the page was opened with', () => {
     expect(logoURL('17')).toBe('/api/branding/logo?v=17');
     expect(logoURL(undefined)).toBe('/api/branding/logo');
+  });
+});
+
+describe('posterFlags', () => {
+  const viewer = { kind: 'viewer', key: 'viewer' };
+  const courtA = { kind: 'court', key: 'court:A', letter: 'A' };
+  it('marks only the poster whose choices changed, trailing spaces aside', () => {
+    const saved = { viewer: { heading: 'Hi' } };
+    expect(posterFlags({ viewer: { heading: 'Hi  ' } }, saved, viewer)).toEqual({ changed: false, tooLong: false });
+    const draft = { viewer: { heading: 'Hi' }, courts: { A: { logo: 'above' } } };
+    expect(posterFlags(draft, saved, viewer).changed).toBe(false);
+    expect(posterFlags(draft, saved, courtA).changed).toBe(true);
+  });
+  it('marks a poster whose heading or call to action passes its maximum', () => {
+    const long = { courts: { A: { callToAction: 'y'.repeat(POSTER_RULES.callToActionMaxLength + 1) } } };
+    expect(posterFlags(long, {}, courtA).tooLong).toBe(true);
+    expect(posterFlags(long, {}, viewer).tooLong).toBe(false);
+  });
+});
+
+describe('withChoicesOnEveryCourt', () => {
+  const list = [
+    { kind: 'viewer', key: 'viewer' },
+    { kind: 'court', key: 'court:A', letter: 'A' },
+    { kind: 'court', key: 'court:B', letter: 'B' },
+    { kind: 'court', key: 'court:C', letter: 'C' },
+  ];
+  it('copies one court poster onto the others, clearing what the source leaves empty, and leaves the viewer home', () => {
+    const block = { viewer: { heading: 'Home' }, courts: { A: { heading: 'A words', hideSponsors: true }, B: { callToAction: 'Old', logo: 'above' } } };
+    const { posters, others } = withChoicesOnEveryCourt(block, list[1], list, ['A', 'B', 'C']);
+    expect(others.map((p) => p.key)).toEqual(['court:B', 'court:C']);
+    expect(posters).toEqual({ viewer: { heading: 'Home' }, courts: {
+      A: { heading: 'A words', hideSponsors: true },
+      B: { heading: 'A words', hideSponsors: true },
+      C: { heading: 'A words', hideSponsors: true },
+    } });
+  });
+  it('names no court when every court already matches', () => {
+    const block = { courts: { A: { heading: 'Same' }, B: { heading: 'Same' }, C: { heading: 'Same' } } };
+    expect(withChoicesOnEveryCourt(block, list[2], list, ['A', 'B', 'C']).others).toEqual([]);
   });
 });
 

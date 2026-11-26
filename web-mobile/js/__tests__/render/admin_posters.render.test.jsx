@@ -85,8 +85,8 @@ describe('the poster list and the choices', () => {
 
   it('counts each box against the shared limits', () => {
     mount();
-    expect(screen.getByTestId('poster-viewer-heading-count').textContent).toBe(`0 of ${POSTER_RULES.headingMaxLength} characters`);
-    expect(screen.getByTestId('poster-viewer-cta-count').textContent).toBe(`0 of ${POSTER_RULES.callToActionMaxLength} characters`);
+    expect(screen.getByTestId('poster-viewer-heading-count').textContent).toBe(`Prints \u201c${POSTER_RULES.defaultHeadings.viewer}\u201d. Up to ${POSTER_RULES.headingMaxLength} characters.`);
+    expect(screen.getByTestId('poster-viewer-cta-count').textContent).toBe(`Nothing prints here. Up to ${POSTER_RULES.callToActionMaxLength} characters.`);
     type(headingBox(), 'x'.repeat(POSTER_RULES.headingMaxLength + 2));
     const over = screen.getByTestId('poster-viewer-heading-count');
     expect(over.textContent).toContain('2 too many');
@@ -113,6 +113,23 @@ describe('the poster list and the choices', () => {
     expect(screen.getByLabelText('Logo in the centre of the code')).not.toBeDisabled();
     fireEvent.click(screen.getByLabelText('Logo above the code'));
     expect(preview().querySelector('.poster').getAttribute('data-placement')).toBe('above');
+  });
+
+  it('keeps the logo choice checked after switching posters', () => {
+    mount();
+    fireEvent.click(screen.getByLabelText('Logo above the code'));
+    fireEvent.click(screen.getByRole('button', { name: 'Shiaijo A' }));
+    expect(screen.getByLabelText('Logo in the centre of the code')).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: /^Viewer home/ }));
+    expect(screen.getByLabelText('Logo above the code')).toBeChecked();
+    expect(screen.getByLabelText('Logo in the centre of the code')).not.toBeChecked();
+  });
+
+  it('names the poster the form edits', () => {
+    mount();
+    expect(screen.getByRole('heading', { level: 2, name: 'Viewer home poster' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Shiaijo B' }));
+    expect(screen.getByRole('heading', { level: 2, name: 'Shiaijo B poster' })).toBeInTheDocument();
   });
 
   it('disables Centre, and says why, for an address too long for a logo in the code', () => {
@@ -310,6 +327,79 @@ describe('what counts as unsaved', () => {
   });
 });
 
+describe('use these choices on every shiaijo', () => {
+  const applyBtn = () => screen.queryByRole('button', { name: 'Use these choices on every shiaijo' });
+
+  it('is offered on a court poster only, with two or more courts', () => {
+    mount();
+    expect(applyBtn()).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Shiaijo A' }));
+    expect(applyBtn()).not.toBeNull();
+    cleanup();
+    mount(base({ courts: ['A'] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Shiaijo A' }));
+    expect(applyBtn()).toBeNull();
+  });
+
+  it('asks, then copies the choices onto the other courts, unsaved', async () => {
+    mount(base({ courts: ['A', 'B', 'C'], posters: { courts: { C: { heading: 'Mine' } } } }));
+    fireEvent.click(screen.getByRole('button', { name: 'Shiaijo A' }));
+    type(headingBox(), 'Scan for this shiaijo');
+    fireEvent.click(screen.getByLabelText('Logo above the code'));
+    await tap('Use these choices on every shiaijo');
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.confirmDialog.mock.calls[0][0].message).toContain('replace those on Shiaijo B, Shiaijo C.');
+    expect(screen.getByTestId('posters-apply-note').textContent).toBe('Copied to Shiaijo B, Shiaijo C.');
+    fireEvent.click(screen.getByRole('button', { name: /^Shiaijo C/ }));
+    expect(headingBox()).toHaveValue('Scan for this shiaijo');
+    expect(screen.getByLabelText('Logo above the code')).toBeChecked();
+    expect(onSave).not.toHaveBeenCalled();
+    await tap('Save');
+    expect(saves[0].patch.posters.courts).toEqual({
+      A: { heading: 'Scan for this shiaijo', logo: 'above' },
+      B: { heading: 'Scan for this shiaijo', logo: 'above' },
+      C: { heading: 'Scan for this shiaijo', logo: 'above' },
+    });
+  });
+
+  it('changes nothing on Cancel, and says so when every court already matches', async () => {
+    window.confirmDialog = vi.fn(async () => false);
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Shiaijo A' }));
+    await tap('Use these choices on every shiaijo');
+    expect(window.confirmDialog).not.toHaveBeenCalled();
+    expect(screen.getByTestId('posters-apply-note').textContent).toBe('Every shiaijo poster already has these choices.');
+    type(headingBox(), 'Only A');
+    await tap('Use these choices on every shiaijo');
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Shiaijo B' }));
+    expect(headingBox()).toHaveValue('');
+  });
+});
+
+describe('the picker marks', () => {
+  it('marks a poster with unsaved changes until it is saved', async () => {
+    mount();
+    expect(screen.queryByTestId('posters-mark-viewer')).toBeNull();
+    type(headingBox(), 'New words');
+    expect(screen.getByRole('button', { name: /^Viewer home\s*\(unsaved\)$/ })).toBeInTheDocument();
+    expect(screen.queryByTestId('posters-mark-court:A')).toBeNull();
+    await tap('Save');
+    expect(screen.queryByTestId('posters-mark-viewer')).toBeNull();
+  });
+
+  it('marks a poster over a limit, names it by the Save button, and holds Print', () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Shiaijo B' }));
+    type(headingBox(), 'x'.repeat(POSTER_RULES.headingMaxLength + 1));
+    fireEvent.click(screen.getByRole('button', { name: 'Viewer home' }));
+    expect(screen.getByRole('button', { name: /^Shiaijo B\s*\(over a limit\)$/ })).toBeInTheDocument();
+    expect(screen.getByTestId('posters-too-long').textContent).toBe('Over a limit on Shiaijo B: shorten it to save or print.');
+    expect(screen.getByRole('button', { name: /Print this poster/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Print all posters/ })).toBeDisabled();
+  });
+});
+
 describe('text over a limit', () => {
   it('disables Save and says why until the text is shortened', async () => {
     mount();
@@ -413,9 +503,24 @@ describe('Print', () => {
     expect(document.body).not.toHaveClass(PRINTING_CLASS);
   });
 
+  it('Print all asks first, naming the sheets and the address, and prints nothing on Cancel', async () => {
+    window.confirmDialog = vi.fn(async () => false);
+    mount(base({ publicURL: '' }));
+    await tap('Print all posters');
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    const asked = window.confirmDialog.mock.calls[0][0];
+    expect(asked).toMatchObject({ title: 'Print all posters?', confirmLabel: 'Print all' });
+    expect(asked.message).toContain('This prints 3 A4 sheets, one poster on each.');
+    expect(asked.message).toContain(`The codes open pages under ${window.location.origin}.`);
+    expect(asked.message).toContain('scan it with a phone first');
+    expect(printRoot()).toBeNull();
+    expect(window.print).not.toHaveBeenCalled();
+  });
+
   it('Print all renders every poster, in order, into the print root', async () => {
     mount();
     await tap('Print all posters');
+    expect(window.confirmDialog.mock.calls[0][0].message).toContain('The codes open pages under https://kendo.example.org.');
     expect([...printRoot().querySelectorAll('.poster')].map((p) => p.getAttribute('data-poster'))).toEqual(['viewer', 'court:A', 'court:B']);
     await waitFor(() => expect(window.print).toHaveBeenCalledTimes(1));
     await act(async () => { window.dispatchEvent(new Event('afterprint')); });

@@ -26,11 +26,13 @@ import {
   posterList,
   postersChanged,
   postersTooLong,
+  posterFlags,
+  withChoicesOnEveryCourt,
   textLength,
   trimText,
   withChoice,
 } from "./posters_model.jsx";
-import { isNonPublicOrigin } from "./viewer_utils.jsx";
+import { isNonPublicOrigin, linkBase } from "./viewer_utils.jsx";
 import { confirmDiscardUnsaved, whenConfirmed } from "./unsaved_entries.jsx";
 import { Icon } from "./icon.jsx";
 import { useLatestRef } from "./latest_ref.jsx";
@@ -58,16 +60,31 @@ export function decodeImages(node, ms) {
   return Promise.race([all, bound]).finally(() => clearTimeout(timer));
 }
 
-function Counter({ id, text, max }) {
+// Counter: the characters a box holds against its maximum. An empty box says
+// what prints instead (`empty`), since nothing typed is not nothing printed.
+function Counter({ id, text, max, empty }) {
   const n = textLength(text);
   const over = n - max;
   return (
     <div id={id} className={over > 0 ? "field__hint field__hint--error" : "field__hint"} data-testid={id}>
       {over > 0
-        ? `${n} of ${max} characters: ${over} too many, so it cannot be saved. Shorten it.`
-        : `${n} of ${max} characters`}
+        ? `${n} of ${max} characters: ${over} too many, so it cannot be saved or printed. Shorten it.`
+        : n === 0 && empty
+          ? `${empty} Up to ${max} characters.`
+          : `${n} of ${max} characters`}
     </div>
   );
+}
+
+// The Print all question: how many sheets, the address the codes open, a
+// warning when phones at the venue may not reach it, and the advice to test one.
+export function printAllMessage(count, base, unreachable) {
+  return [
+    `This prints ${count} A4 sheets, one poster on each.`,
+    `The codes open pages under ${base}.`,
+    unreachable ? "No public address is set, so phones at the venue may not reach it." : "",
+    "Print one poster and scan it with a phone first, to check the code opens the right page.",
+  ].filter(Boolean).join(" ");
 }
 
 // AdminPostersPage
@@ -144,6 +161,9 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
   const showAddressWarning = !String(t.publicURL || "").trim() && isNonPublicOrigin(window.location.origin);
 
   const tooLong = postersTooLong(draft);
+  // Each poster's markers on the picker, and the posters a too-long text sits on.
+  const flags = new Map(list.map((p) => [p.key, posterFlags(draft, savedBlock, p)]));
+  const overLabels = list.filter((p) => flags.get(p.key).tooLong).map((p) => p.label);
 
   const change = (patch) => setDraft((d) => withChoice(d, selected, patch, t.courts));
 
@@ -202,15 +222,45 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
   };
 
   // Print: the chosen posters, from the draft, into a print root of their own
-  // under <body>, which the print sheet alone shows on paper.
+  // under <body>, which the print sheet alone shows on paper. Nothing prints
+  // while a text is over its limit (it would not fit the poster).
   const print = (posters) => {
-    if (printingRef.current) return;
+    if (printingRef.current || tooLong) return;
     printingRef.current = true;
     const node = document.createElement("div");
     node.className = "poster-print-root";
     document.body.appendChild(node);
     document.body.classList.add(PRINTING_CLASS);
     setPrintJob({ node, posters });
+  };
+  // Every shiaijo the same: this court poster's choices copied onto the other
+  // court posters of the draft, asked first because it replaces what they hold.
+  const courtCount = list.filter((p) => p.kind === "court").length;
+  const [applyNote, setApplyNote] = useState("");
+  useEffect(() => { setApplyNote(""); }, [selectedKey]);
+  const applyToEveryCourt = async () => {
+    const { others } = withChoicesOnEveryCourt(draft, selected, list, t.courts);
+    if (others.length === 0) { setApplyNote("Every shiaijo poster already has these choices."); return; }
+    const ok = await window.confirmDialog({
+      title: "Use these choices on every shiaijo?",
+      message: `The heading, call to action, logo place and sponsors of ${selected.label} replace those on ${others.map((p) => p.label).join(", ")}. Nothing is saved until you tap Save.`,
+      confirmLabel: "Use on every shiaijo",
+    });
+    if (!ok || !mountedRef.current) return;
+    setDraft((d) => withChoicesOnEveryCourt(d, selected, list, t.courts).posters);
+    setApplyNote(`Copied to ${others.map((p) => p.label).join(", ")}.`);
+  };
+
+  // Print all asks first: it is many sheets, and every code on them opens the
+  // address the page names.
+  const printAll = async () => {
+    if (printingRef.current || tooLong) return;
+    const ok = await window.confirmDialog({
+      title: "Print all posters?",
+      message: printAllMessage(list.length, linkBase(t).replace(/\/+$/, ""), showAddressWarning),
+      confirmLabel: "Print all",
+    });
+    if (ok && mountedRef.current) print(list);
   };
   useEffect(() => {
     if (!printJob) return undefined;
@@ -264,6 +314,15 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
               onClick={() => setSelectedKey(p.key)}
             >
               {p.label}
+              {flags.get(p.key).tooLong ? (
+                <span className="posters-mark posters-mark--error" data-testid={"posters-mark-" + p.key}>
+                  <span aria-hidden="true">!</span><span className="sr-only"> (over a limit)</span>
+                </span>
+              ) : flags.get(p.key).changed ? (
+                <span className="posters-mark" data-testid={"posters-mark-" + p.key}>
+                  <span aria-hidden="true">•</span><span className="sr-only"> (unsaved)</span>
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
@@ -276,12 +335,13 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                   {refusal && refusal.changed ? "Save again" : "Save"}
                 </button>
                 <span role="status" aria-live="polite" data-testid="posters-status">{status}</span>
+                {tooLong && (
+                  <span className="posters-too-long" data-testid="posters-too-long">
+                    Over a limit on {overLabels.join(", ")}: shorten it to save or print.
+                  </span>
+                )}
               </div>
-              {tooLong && (
-                <div className="field__hint field__hint--error" data-testid="posters-too-long">
-                  A heading or call to action is over its limit, so it cannot be saved. Shorten it first.
-                </div>
-              )}
+              <h2 className="posters-editing">{selected.label} poster</h2>
               {refusal && (
                 <div className="alert alert--error" role="alert" data-testid="posters-refusal">{refusal.message}</div>
               )}
@@ -296,7 +356,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                   aria-describedby={idBase + "-heading-count"}
                   onChange={(e) => change({ heading: e.target.value })}
                 />
-                <Counter id={idBase + "-heading-count"} text={trimText(choices.heading)} max={POSTER_RULES.headingMaxLength} />
+                <Counter id={idBase + "-heading-count"} text={trimText(choices.heading)} max={POSTER_RULES.headingMaxLength} empty={`Prints \u201c${defaultHeading(selected)}\u201d.`} />
               </div>
 
               <div className="field">
@@ -309,11 +369,11 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                   aria-describedby={idBase + "-cta-count"}
                   onChange={(e) => change({ callToAction: e.target.value })}
                 />
-                <Counter id={idBase + "-cta-count"} text={trimText(choices.callToAction)} max={POSTER_RULES.callToActionMaxLength} />
+                <Counter id={idBase + "-cta-count"} text={trimText(choices.callToAction)} max={POSTER_RULES.callToActionMaxLength} empty="Nothing prints here." />
               </div>
 
               {lp.offered && (
-                <fieldset className="field posters-logo-field">
+                <fieldset key={selected.key} className="field posters-logo-field">
                   <legend className="field__label">Logo</legend>
                   <label className="checkbox">
                     <input
@@ -349,6 +409,13 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                 </div>
               )}
 
+              {selected.kind === "court" && courtCount > 1 && (
+                <div className="field posters-apply">
+                  <button type="button" className="btn btn--sm" onClick={applyToEveryCourt}>Use these choices on every shiaijo</button>
+                  <span className="field__hint" role="status" aria-live="polite" data-testid="posters-apply-note">{applyNote}</span>
+                </div>
+              )}
+
               <div className="field__hint posters-branding" data-testid="posters-branding">
                 {lp.offered || sponsorsOffered
                   ? "The logo and the sponsor images come from the Branding and Sponsors sections of Edit details."
@@ -356,17 +423,20 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                 <button type="button" className="btn btn--sm" onClick={guarded(onEditTournament)}>Open Edit details</button>
               </div>
 
-              <div className="field__hint posters-address">The code opens {address}</div>
+              <div className="field posters-address" data-testid="posters-address">
+                <div className="field__label">The code opens</div>
+                <code className="posters-address__url">{address}</code>
+              </div>
 
               <div className="posters-print-row">
-                <button type="button" className="btn" onClick={() => print([selected])} disabled={!!printJob}>
+                <button type="button" className="btn" onClick={() => print([selected])} disabled={!!printJob || tooLong}>
                   <Icon name="printer" /> Print this poster
                 </button>
-                <button type="button" className="btn" onClick={() => print(list)} disabled={!!printJob}>
+                <button type="button" className="btn" onClick={printAll} disabled={!!printJob || tooLong}>
                   <Icon name="printer" /> Print all posters
                 </button>
               </div>
-              <div className="field__hint">Prints on A4. For A3, choose A3 paper and scale to fit in the print dialog. The colours print without turning on background graphics.</div>
+              <div className="field__hint posters-print-hint">Print one poster and scan it with a phone before printing them all. Prints on A4; for A3, choose A3 paper and scale to fit in the print dialog. The colours print without turning on background graphics.</div>
             </div>
           </div>
 

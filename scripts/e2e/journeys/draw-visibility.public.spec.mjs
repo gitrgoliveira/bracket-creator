@@ -53,6 +53,7 @@ const poolRows = (page) => page.locator('.pool-match-numbered-row');
 const drawNumbers = (root) => root.getByText(/^D\d+$/);
 const homeRow = (page) => page.locator('.vlist-item--comp', { hasText: COMP_NAME });
 const cardLine = (op) => op.locator('.tcard', { hasText: COMP_NAME }).getByTestId('card-draw-visibility');
+const cardToggle = (op) => op.locator('.tcard', { hasText: COMP_NAME }).getByTestId('card-draw-visibility-toggle');
 
 // Which roster names the page's text holds.
 async function namesOnPage(page) {
@@ -109,6 +110,8 @@ test.describe('a draft draw kept off the public pages until it is published', ()
     await test.step('the dashboard card says "Hidden from the public"', async () => {
       await op.goto('/admin');
       await expect(cardLine(op)).toHaveText(CARD_LINE.hidden);
+      // The card can publish it too, without opening the competition.
+      await expect(cardToggle(op)).toHaveText(DRAW_VISIBILITY.publish);
       // The organiser's own badge keeps "Draw ready".
       await expect(op.locator('.tcard', { hasText: COMP_NAME }).locator('.badge--draw-ready')).toBeVisible();
     });
@@ -159,6 +162,7 @@ test.describe('a draft draw kept off the public pages until it is published', ()
     await test.step('the dashboard card says "Public"', async () => {
       await op.goto('/admin');
       await expect(cardLine(op)).toHaveText(CARD_LINE.public);
+      await expect(cardToggle(op)).toHaveText(DRAW_VISIBILITY.unpublish);
     });
 
     await test.step('the organiser taps Unpublish: the phone on the Pools tab lands back on the Overview', async () => {

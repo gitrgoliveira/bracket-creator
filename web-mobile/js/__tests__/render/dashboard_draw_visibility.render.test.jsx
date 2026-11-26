@@ -61,14 +61,14 @@ const makeComp = (over = {}) => ({
   ...over,
 });
 
-async function mountCard({ c = makeComp(), tournament = OFFICIATED, onStart = vi.fn() } = {}) {
+async function mountCard({ c = makeComp(), tournament = OFFICIATED, onStart = vi.fn(), onOpen = noop, onSetDrawVisibility = vi.fn().mockResolvedValue(undefined) } = {}) {
   let result;
   await act(async () => {
     result = render(
-      <CompCard c={c} onOpen={noop} onStart={onStart} tournament={tournament} showToast={noop} />
+      <CompCard c={c} onOpen={onOpen} onStart={onStart} onSetDrawVisibility={onSetDrawVisibility} tournament={tournament} showToast={noop} />
     );
   });
-  return { ...result, onStart };
+  return { ...result, onStart, onSetDrawVisibility };
 }
 
 const line = (container) => container.querySelector('[data-testid="card-draw-visibility"]');
@@ -101,6 +101,51 @@ describe('Dashboard card: who can see the draw (FR16)', () => {
   it('a self-run tournament shows no line, even for a draft stored as hidden', async () => {
     const { container } = await mountCard({ c: makeComp({ drawHidden: true }), tournament: SELF_RUN });
     expect(line(container)).toBeNull();
+  });
+});
+
+const visibilityToggle = (container) => container.querySelector('[data-testid="card-draw-visibility-toggle"]');
+
+describe('Dashboard card: Publish draw and Unpublish (round critique-2 D4)', () => {
+  it('a hidden draft offers Publish draw, which asks the host to publish without opening the card', async () => {
+    const onOpen = vi.fn();
+    const { container, onSetDrawVisibility } = await mountCard({ c: makeComp({ drawHidden: true }), onOpen });
+    const btn = visibilityToggle(container);
+    expect(btn.textContent).toBe('Publish draw');
+    expect(btn.querySelector('svg').getAttribute('data-icon')).toBe('eye');
+    await act(async () => { fireEvent.click(btn); });
+    expect(onSetDrawVisibility).toHaveBeenCalledWith(true);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(confirmDialog).not.toHaveBeenCalled();
+  });
+
+  it('a published draft offers Unpublish, which asks the host to hide it', async () => {
+    const { container, onSetDrawVisibility } = await mountCard({ c: makeComp() });
+    const btn = visibilityToggle(container);
+    expect(btn.textContent).toBe('Unpublish');
+    await act(async () => { fireEvent.click(btn); });
+    expect(onSetDrawVisibility).toHaveBeenCalledWith(false);
+  });
+
+  it('the button stays busy until the host has answered', async () => {
+    let answer;
+    const onSetDrawVisibility = vi.fn(() => new Promise((resolve) => { answer = resolve; }));
+    const { container } = await mountCard({ c: makeComp({ drawHidden: true }), onSetDrawVisibility });
+    await act(async () => { fireEvent.click(visibilityToggle(container)); });
+    expect(visibilityToggle(container).disabled).toBe(true);
+    expect(visibilityToggle(container).textContent).toBe('Publishing…');
+    await act(async () => { answer(); });
+    expect(visibilityToggle(container).disabled).toBe(false);
+  });
+
+  it.each(['setup', 'pools', 'knockout', 'completed'])('a competition in %s offers no Publish draw', async (status) => {
+    const { container } = await mountCard({ c: makeComp({ status, drawHidden: true }) });
+    expect(visibilityToggle(container)).toBeNull();
+  });
+
+  it('a self-run tournament offers no Publish draw', async () => {
+    const { container } = await mountCard({ c: makeComp({ drawHidden: true }), tournament: SELF_RUN });
+    expect(visibilityToggle(container)).toBeNull();
   });
 });
 

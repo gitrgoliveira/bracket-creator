@@ -1829,7 +1829,7 @@ a:hover {
   }
 }
 
-/* The public status badge of a hidden draft: "Draw being prepared". A dashed
+/* The public status badge of a hidden draft: "Preparing draw". A dashed
    hairline marks it as not yet settled; the organiser's badge keeps
    .badge--draw-ready. */
 .badge--draw-preparing {
@@ -1965,6 +1965,14 @@ a:hover {
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+}
+
+/* The status badge never breaks over two lines inside its pill ("Draw" over
+   "ready" beside a long details line): the details wrap instead, as on the
+   public home list's .badge--draw-preparing. */
+.tcard__head .badge {
+  white-space: nowrap;
+  flex: none;
 }
 
 .tcard__name {

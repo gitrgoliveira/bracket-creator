@@ -30,7 +30,7 @@ import { dismissToastById } from './toast_queue.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
 import { PUBLIC_NAMES_APPLY_CONFIRM, confirmPublicNamesApply } from './public_names_fields.jsx';
 import { useLatestRef } from './latest_ref.jsx';
-import { startAllHiddenDrawsNote } from './draw_visibility.jsx';
+import { startAllHiddenDrawsNote, DRAW_PUBLISHED_TOAST, DRAW_UNPUBLISHED_TOAST } from './draw_visibility.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -697,6 +697,24 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     showToast(`${c.name} started`);
   };
 
+  // Publish draw / Unpublish from a dashboard card (bc-drpb): the same writes
+  // and toasts as the draw preview header's, then the refetch brings the card
+  // its new state. A refusal (the draft was started or discarded elsewhere
+  // meanwhile) says the server's sentence and refetches, as the header does.
+  const setDrawVisibility = async (cid, publish) => {
+    const action = publish ? "Publish draw" : "Unpublish";
+    try {
+      if (publish) await window.API.publishDraw(cid, password);
+      else await window.API.unpublishDraw(cid, password);
+    } catch (e) {
+      showToast(e.message, "error");
+      if (e.code) await refreshCompsBestEffort(action);
+      return;
+    }
+    await refreshCompsBestEffort(action);
+    showToast(publish ? DRAW_PUBLISHED_TOAST : DRAW_UNPUBLISHED_TOAST);
+  };
+
   // Re-throws after surfacing the error toast, exactly like updateCompetition
   // and addCompetition above, so the Edit-details form can put the server's
   // reason in its own banner. It used to swallow the rejection into a `false`
@@ -1042,6 +1060,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         onOpenShiaijo={(court) => setView({ kind: "shiaijo", court })}
         onStartAll={startAllCompetitions}
         onStartCompetition={startCompetition}
+        onSetDrawVisibility={setDrawVisibility}
         onLogout={onLogout}
         onViewerMode={onViewerMode}
         onUpdate={onUpdate}

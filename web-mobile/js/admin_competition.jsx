@@ -553,7 +553,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                     {discarding ? "Discarding…" : "Discard draw"}
                   </button>
                   {!selfRun && (
-                    <button type="button" className="btn btn--ghost" onClick={toggleDrawVisibility} disabled={navBusy} data-testid="draw-visibility-toggle">
+                    <button type="button" className="btn" onClick={toggleDrawVisibility} disabled={navBusy} data-testid="draw-visibility-toggle">
                       {publishing ? <span className="spinner" /> : <Icon name={drawHidden ? "eye" : "eye-off"} size={14} />}
                       {publishing ? (drawHidden ? "Publishing…" : "Hiding…") : (drawHidden ? PUBLISH_DRAW_LABEL : UNPUBLISH_DRAW_LABEL)}
                     </button>

@@ -14,7 +14,7 @@ import { whenConfirmed } from './unsaved_entries.jsx';
 import { downloadBlob } from './blob_download.jsx';
 import { Icon } from './icon.jsx';
 import { andList } from './list_phrase.jsx';
-import { confirmStartHiddenDraw, drawHiddenFromPublic, drawVisibilityCardLine, drawVisibilityIcon } from './draw_visibility.jsx';
+import { confirmStartHiddenDraw, drawHiddenFromPublic, drawVisibilityCardLine, drawVisibilityIcon, PUBLISH_DRAW_LABEL, UNPUBLISH_DRAW_LABEL } from './draw_visibility.jsx';
 
 const { useState, useMemo, useEffect, useRef, useLayoutEffect } = React;
 
@@ -424,7 +424,7 @@ function AllWinnersModal({ comps, onClose }) {
   );
 }
 
-function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenCalendar, onOpenScoreEditor, onOpenImport, onOpenBackup, onOpenShiaijo, onOpenRegistration, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
+function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenCalendar, onOpenScoreEditor, onOpenImport, onOpenBackup, onOpenShiaijo, onOpenRegistration, onStartAll, onStartCompetition, onSetDrawVisibility, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
   const t = tournament;
   const comps = t.competitions || NO_COMPETITIONS;
   // Whether "Start all" has anything to offer, answered by the same helper the
@@ -633,7 +633,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
 
         <div className="section-title">All competitions</div>
         <div className="tlist">
-          {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, initialSectionFor(c.status))} onStart={() => onStartCompetition(c.id)} tournament={t} showToast={showToast} />)}
+          {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, initialSectionFor(c.status))} onStart={() => onStartCompetition(c.id)} onSetDrawVisibility={(publish) => onSetDrawVisibility(c.id, publish)} tournament={t} showToast={showToast} />)}
           {/* This section only renders when competitions exist (the empty-tournament
               case is handled by the first-run empty state above), so the dashed
               tile stays a quiet "add another", not the promoted first-run CTA. */}
@@ -818,7 +818,7 @@ function ExportPdfModal({ tournament, password, comps, onClose, showToast }) {
   );
 }
 
-function CompCard({ c, onOpen, onStart, tournament, showToast }) {
+function CompCard({ c, onOpen, onStart, onSetDrawVisibility, tournament, showToast }) {
   const { running: runningCount } = compMatchStats(c);
   const playerCount = (c.players || []).length;
   const courts = c.courts || [];
@@ -862,6 +862,16 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
   const start = () => {
     if (!drawHidden) { onStart(); return; }
     confirmStartHiddenDraw(tournament, c).then((ok) => { if (ok) onStart(); });
+  };
+
+  // Publish draw / Unpublish from the card (bc-drpb), a quiet action under
+  // Start, so six hidden draws need no six page visits. The host makes the
+  // write and the toast, as the draw preview header's button does; the card
+  // only keeps the button busy until the refetch brings the new state.
+  const [settingVisibility, setSettingVisibility] = useState(false);
+  const toggleVisibility = () => {
+    setSettingVisibility(true);
+    onSetDrawVisibility(drawHidden).finally(() => setSettingVisibility(false));
   };
 
   return (
@@ -920,6 +930,18 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
               onClick={(e) => { e.stopPropagation(); start(); }}
               disabled={!!startBlocker}
             >Start competition</button>
+          )}
+          {showDrawVisibility && (
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm btn--full"
+              onClick={(e) => { e.stopPropagation(); toggleVisibility(); }}
+              disabled={settingVisibility}
+              data-testid="card-draw-visibility-toggle"
+            >
+              {settingVisibility ? <span className="spinner" /> : <Icon name={drawHidden ? "eye" : "eye-off"} size={14} />}
+              {settingVisibility ? (drawHidden ? "Publishing…" : "Hiding…") : (drawHidden ? PUBLISH_DRAW_LABEL : UNPUBLISH_DRAW_LABEL)}
+            </button>
           )}
           {/* The reason, not just a dead button: the operator has to know
               which screen fixes it. Kept on the card rather than in a tooltip

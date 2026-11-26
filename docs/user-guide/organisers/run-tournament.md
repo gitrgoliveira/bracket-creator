@@ -270,9 +270,9 @@ The line below the buttons reads:
 - While it is hidden: "Hidden from the public. Publish draw or Start competition makes it public."
 - Once it is published: "Published. The public can see this draw. Changes you make show on public pages at once."
 
-The dashboard card of a draw-ready competition shows the same thing at a glance: a crossed-out eye and "Hidden from the public", or an open eye and "Public".
+The dashboard card of a draw-ready competition shows the same thing at a glance: a crossed-out eye and "Hidden from the public", or an open eye and "Public". Under **Start competition**, the card has its own **Publish draw** (**Unpublish** once public), which works as the header's does, so you can publish several draws from the dashboard without opening each competition.
 
-![A dashboard card of a draw-ready competition with a crossed-out eye and the words Hidden from the public.](../../screenshots/draw-hidden-card.png)
+![A dashboard card of a draw-ready competition with a crossed-out eye and the words Hidden from the public, Start competition, and Publish draw under it.](../../screenshots/draw-hidden-card.png)
 
 - **Publish draw** shows the draw on the public pages at once, without waiting for the start. It asks nothing first. Once published, the button reads **Unpublish**.
 - **Unpublish** hides the draw again, for example when you published it by mistake or spotted an error after publishing. The app says "Hidden again. Anyone who looked still has what they saw.": a spectator who already read the draw, took a screenshot or printed it keeps that copy, so tell people when a published draw changes.

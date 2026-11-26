@@ -98,6 +98,12 @@ describe('the draw preview header (bc-drpb)', () => {
     expect(state().className).toContain('draw-visibility-line--hidden');
   });
 
+  it('Publish draw is the bordered secondary button, apart from the ghost Discard draw (round critique-2 D2)', async () => {
+    const { container } = await mount({ hidden: true });
+    const toggle = container.querySelector('[data-testid="draw-visibility-toggle"]');
+    expect(toggle.className.split(' ')).toEqual(['btn']);
+  });
+
   it('the hint ends with a link to this competition\'s public page, in a new tab', async () => {
     await mount({ hidden: true });
     expect(publicLink().getAttribute('href')).toBe('/competition/c1');

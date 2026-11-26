@@ -300,12 +300,12 @@ export function useOwnStatus(feedMatch) {
 // DraftKeptNotice: the note, Save (two taps, as the editors' Finish: the
 // bounce of the arming tap cannot save) and Discard (one tap). `from` is the
 // status the match left: "completed" says it was reopened.
-export function DraftKeptNotice({ onSave, onDiscard, disabled, from }) {
+export function DraftKeptNotice({ onSave, onDiscard, disabled, from, readOnly = false }) {
   const { armed, confirm } = useArmedConfirm();
   return (
     <div className="pending-write-banner" role="status" aria-live="polite" data-testid="draft-kept-notice">
       <span>{from === "completed" ? DRAFT_KEPT_REOPENED_NOTE : DRAFT_KEPT_NOTE}</span>
-      <button type="button" className={`btn btn--sm btn--primary ${armed ? "btn--confirm" : ""}`} data-testid="draft-kept-save" disabled={disabled}
+      <button type="button" className={`btn btn--sm btn--primary ${armed ? "btn--confirm" : ""}`} data-testid="draft-kept-save" disabled={disabled || readOnly}
         onClick={(ev) => { if (confirm(ev)) onSave(); }}>
         {armed ? "Tap again to save" : "Save"}
       </button>
@@ -1104,7 +1104,7 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
 // is always optional, a reopened match included: a match can be reopened
 // without any reason, and ending it again asks for none (operator ruling
 // 2026-09-25).
-function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, submitting }) {
+function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, submitting, readOnly = false }) {
   // No side is preselected (operator decision 2026-10-07, bc-dsid): a
   // withdrawal or no-show recorded against the wrong side inverts the result,
   // so the operator must pick, and Record stays off until they do.
@@ -1132,14 +1132,14 @@ function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, sub
 
   const submit = (e) => {
     e?.preventDefault?.();
-    if (submitting || !side) return;
+    if (submitting || readOnly || !side) return;
     onSubmit({ decisionBy: side, decisionReason: showReason ? reason.trim() : "" });
   };
 
   const verb = isKiken ? "withdrew" : "did not show up";
   const sideOption = (key) => (
     <label className={`radio-pill decision-prompt__side${side === key ? " is-active" : ""}`}>
-      <input type="radio" name="decision-side" value={key} checked={side === key} onChange={() => setSide(key)} />
+      <input type="radio" name="decision-side" value={key} checked={side === key} disabled={submitting || readOnly} onChange={() => setSide(key)} />
       <span>{sideWithColour(key)}{sides[key].name ? `: ${sides[key].name}` : ""}</span>
     </label>
   );
@@ -1172,6 +1172,7 @@ function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, sub
               className="input"
               maxLength={200}
               value={reason}
+              disabled={submitting || readOnly}
               onInput={(e) => setReason(e.target.value)}
               placeholder="e.g. injury, no-show"
               data-testid="decision-reason"
@@ -1181,7 +1182,7 @@ function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, sub
       </div>
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
         <button type="button" className="btn btn--sm" onClick={onCancel} disabled={submitting}>Cancel</button>
-        <button type="submit" className="btn btn--primary btn--sm" disabled={submitting || !side}>
+        <button type="submit" className="btn btn--primary btn--sm" disabled={submitting || readOnly || !side}>
           {submitting ? "Saving…" : side ? `Record: ${sideWord(side)} ${verb}` : "Record"}
         </button>
       </div>
@@ -1560,7 +1561,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
             onMouseDown={(e) => e.preventDefault()} onClick={() => commit("")}><Icon name="x" size={14} /></button>
         )}
       </div>
-      {open && optionCount > 0 && (
+      {open && !disabled && optionCount > 0 && (
         <div
           ref={listRef}
           className="pmf__dropdown lineup-name__dropdown"
@@ -1608,11 +1609,11 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
 // Module-level empty default keeps the prop reference stable across renders
 // (a `= []` inline default allocates a fresh array every call).
 const REASON_PROMPT_NO_PRESETS = [];
-function ReasonPrompt({ label = "Reason for change", presets = REASON_PROMPT_NO_PRESETS, onConfirm, onCancel, submitting = false }) {
+function ReasonPrompt({ label = "Reason for change", presets = REASON_PROMPT_NO_PRESETS, onConfirm, onCancel, submitting = false, readOnly = false }) {
   const [category, setCategory] = useState(presets[0] || "");
   const [note, setNote] = useState("");
   const built = note.trim() ? `${category}: ${note.trim()}` : category;
-  const canConfirm = !!category && !submitting;
+  const canConfirm = !!category && !submitting && !readOnly;
   const submit = (e) => {
     e.preventDefault();
     if (!canConfirm) return;
@@ -1631,7 +1632,7 @@ function ReasonPrompt({ label = "Reason for change", presets = REASON_PROMPT_NO_
           style={{ flex: "0 0 auto", minWidth: 160 }}
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          disabled={submitting}
+          disabled={submitting || readOnly}
           aria-label="Reason category"
         >
           {presets.map((p) => <option key={p} value={p}>{p}</option>)}
@@ -1643,7 +1644,7 @@ function ReasonPrompt({ label = "Reason for change", presets = REASON_PROMPT_NO_
           placeholder="Optional note…"
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          disabled={submitting}
+          disabled={submitting || readOnly}
           aria-label="Reason note"
         />
       </div>
@@ -2180,7 +2181,7 @@ function useWithdrawalRemoval({ match, enabled, held = false, onRemove, onUndo, 
 // warning is NOT optional chrome: the remedy WIPES the blocking match's partial
 // score, and the operator tapping it is looking at their own match, not that
 // one, so the consequence is stated in full above the button.
-function ReopenFeedback({ ctl, testIdPrefix }) {
+function ReopenFeedback({ ctl, testIdPrefix, readOnly = false }) {
   const c = ctl.conflict;
   // bc-adna: on the organiser's admin hosts the panel warns what a second
   // running bout means and offers Reopen anyway; the court console keeps the
@@ -2230,7 +2231,7 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
                 className="btn btn--sm btn--danger"
                 data-testid={`${testIdPrefix}-reopen-anyway-button`}
                 onClick={ctl.reopenAnyway}
-                disabled={ctl.busy}
+                disabled={ctl.busy || readOnly}
               >
                 Reopen anyway
               </button>
@@ -2240,7 +2241,7 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
               className="btn btn--sm btn--danger"
               data-testid={`${testIdPrefix}-requeue-button`}
               onClick={ctl.requeueBlocker}
-              disabled={ctl.busy}
+              disabled={ctl.busy || readOnly}
               title="Returns that match to the queue with its score, then reopens this one"
             >
               {ctl.busy ? "Working…" : "Queue it and reopen"}
@@ -2346,7 +2347,7 @@ export const LATER_MATCHES_HOLD_MS = 2000;
 // fusensho", or "Clear kiken"/"Clear fusenpai" for a competitor barred by
 // another match instead), because such a match may go back to the queue
 // rather than onto the court.
-function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, removal = null }) {
+function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, removal = null, readOnly = false }) {
   const withdrawnKey = withdrawnKeyOf(match);
   const withdrawn = withdrawnSideOf(match);
   const who = withdrawn?.name || "";
@@ -2529,7 +2530,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
               className="btn btn--sm"
               data-testid="clear-withdrawal-reopen"
               onClick={() => ctl.reopen("", !(clearsDefaultWin || barMovesOn) ? REOPEN_ANYWAY : `Clear the ${decisionNoun} anyway?`)}
-              disabled={disabled || ctl.busy || ctl.landed || !settled}
+              disabled={disabled || readOnly || ctl.busy || ctl.landed || !settled}
             >
               {/* bc-cse: "Clear <decision>" -- no "and reopen" -- because a
                   fusensho reopen no longer always lands running: the server
@@ -2553,7 +2554,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
                   // Held until the later-matches lookup settles, like the
                   // clear beside it: the sentence a removal shows (who stays
                   // withdrawn, barMovesOn) depends on it.
-                  disabled={disabled || ctl.busy || ctl.landed || !settled}
+                  disabled={disabled || readOnly || ctl.busy || ctl.landed || !settled}
                 >
                   {`Remove ${decisionNoun}`}
                 </button>

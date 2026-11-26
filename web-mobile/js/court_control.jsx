@@ -74,7 +74,7 @@ let _tabCheck = null; // { ready: Promise, channel, loadedAt }
 let _listening = false;
 let _reqSeq = 0;
 // court -> { mounts, listeners:Set, answer, connected, refusedStatus,
-//            answeredSeq, timer, freedTimer, unsubEvents, getPassword, releaseTimer }
+//            answeredSeq, settledSeq, timer, freedTimer, unsubEvents, getPassword, releaseTimer }
 const _courts = new Map();
 // The stamps courtControlFor handed out, to the shiaijo each was for.
 const _stampCourts = new WeakMap();
@@ -217,7 +217,7 @@ function _rec(court) {
     if (!r) {
         r = {
             mounts: 0, listeners: new Set(), answer: _cachedAnswer(court), connected: false,
-            refusedStatus: 0, answeredSeq: 0, timer: null, freedTimer: null, unsubEvents: null,
+            refusedStatus: 0, answeredSeq: 0, settledSeq: 0, timer: null, freedTimer: null, unsubEvents: null,
             getPassword: () => '', releaseTimer: null,
         };
         _courts.set(court, r);
@@ -257,7 +257,8 @@ function _notify(court) {
 
 function _noteAnswer(court, seq, answer) {
     const r = _rec(court);
-    if (seq < r.answeredSeq) return;
+    if (seq < r.settledSeq) return;
+    r.settledSeq = seq;
     r.answeredSeq = seq;
     r.connected = true;
     r.refusedStatus = 0;
@@ -272,7 +273,8 @@ function _noteAnswer(court, seq, answer) {
 
 function _noteNoAnswer(court, seq) {
     const r = _rec(court);
-    if (seq < r.answeredSeq) return;
+    if (seq < r.settledSeq) return;
+    r.settledSeq = seq;
     if (r.connected || r.refusedStatus !== 0) {
         r.connected = false;
         r.refusedStatus = 0;
@@ -282,7 +284,8 @@ function _noteNoAnswer(court, seq) {
 
 function _noteRefusal(court, seq, status) {
     const r = _rec(court);
-    if (seq < r.answeredSeq) return;
+    if (seq < r.settledSeq) return;
+    r.settledSeq = seq;
     const s = Number(status) || 0;
     if (r.connected || r.refusedStatus !== s) {
         r.connected = false;
@@ -467,7 +470,7 @@ function _startCourt(court) {
     const r = _rec(court);
     _listenOnce();
     const interval = setInterval(() => {
-        if (_visible() && _online()) _claim(court);
+        if (_visible() && _online() && !r.freedTimer) _claim(court);
     }, COURT_HEARTBEAT_MS);
     if (interval && typeof interval.unref === 'function') interval.unref();
     r.timer = interval;
@@ -548,6 +551,17 @@ export function mountCourtControl(court, getPassword, onChange) {
     };
 }
 
+/**
+ * Claim `court` again when this console is mounted and its last claim was
+ * refused (for example a 401 before the operator signed in again).
+ */
+export function retryRefusedCourtControl(court) {
+    const c = String(court || '');
+    const r = c ? _courts.get(c) : null;
+    if (!r || r.mounts <= 0 || r.refusedStatus === 0) return;
+    _claim(c);
+}
+
 // ---------------------------------------------------------------------------
 // What the console and the outbox ask
 // ---------------------------------------------------------------------------
@@ -563,10 +577,17 @@ export function useCourtControl(court, password) {
     const [, bump] = React.useReducer((x) => x + 1, 0);
     const passwordRef = React.useRef(password);
     passwordRef.current = password;
+    const prevPasswordRef = React.useRef(password);
     React.useEffect(() => {
         if (!c) return undefined;
         return mountCourtControl(c, () => passwordRef.current, bump);
     }, [c]);
+    React.useEffect(() => {
+        const prev = prevPasswordRef.current;
+        prevPasswordRef.current = password;
+        if (!c || prev === password) return;
+        retryRefusedCourtControl(c);
+    }, [c, password]);
     const take = React.useCallback(() => takeCourtControl(c), [c]);
     return courtControlView(c, take);
 }

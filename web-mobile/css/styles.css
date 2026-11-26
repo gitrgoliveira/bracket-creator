@@ -10579,6 +10579,16 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex-direction: column;
   gap: 18px;
 }
+.editor-modal__body > .shiaijo-control-scope:not(:empty) {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.editor-modal__foot--nav > .shiaijo-control-scope:not(:empty) {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 /* Nothing to group (no Up next, no upcoming rows): no box, so no gap. */
 .shiaijo-control-scope:empty { display: none; }
 @media (max-width: 640px) {

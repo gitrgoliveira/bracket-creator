@@ -4404,7 +4404,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               body, under the team header and result band (.team-sheet-pin)
               and above the footer, which are pinned in every host and both
               layouts. */}
-          <fieldset className="shiaijo-control-scope" disabled={readOnly}>
           <div className="team-bouts-scroll" onClickCapture={swallowBoutListBounce}>
           {[
             // mp-gmcg: operator-led completion. The banner reads "ended"
@@ -4776,7 +4775,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     // public self-run page it only shows the organiser's
                     // verdict: a participant cannot undo a hantei, nor take
                     // a mark off the bout it decided (bc-dhas).
-                    disabled={rowLocked || (isHt && (selfReport || submitting || decisionSubmitting))}
+                    disabled={readOnly || rowLocked || (isHt && (selfReport || submitting || decisionSubmitting))}
                     onClick={() => {
                       if (isHt) { clearHantei(); return; }
                       // bc-emsl: a tap on an EMPTY slot, or on a fusensho's
@@ -4852,6 +4851,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                               value={rs.playerName || ""}
                               roster={rs.roster}
                               color={rs.color}
+                              disabled={readOnly}
                               // A slot picked by NUMBER and not yet named is a
                               // real placement with an empty name, so the clear
                               // control's `value || clearable` gate is false and
@@ -4918,7 +4918,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                               type="button"
                               className={`btn btn--sm holds-label ${s.fusensho === rs.key ? "btn--primary" : ""}`}
                               onClick={() => (fusenshoAllowed(s, rs.key) ? setFusenshoFor(idx, rs.key) : setFusenshoRefusal(rs.tapKey))}
-                              disabled={rowLocked}
+                              disabled={readOnly || rowLocked}
                               aria-disabled={fusenshoAllowed(s, rs.key) ? undefined : "true"}
                               title={fusenshoButtonTitle(s, rs, rowSides[1 - rsIdx])}
                               // Holds its place (operator decision F1, 2026-10-19,
@@ -4946,9 +4946,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                         <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
                           <span className="tsm-fouls__label">Fouls</span>
                           <div className="tsm-fouls__controls">
-                            <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => sideActions[rs.key].decFoul()} disabled={rs.fouls === 0 || rowLocked}>−</button>
+                            <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => sideActions[rs.key].decFoul()} disabled={readOnly || rs.fouls === 0 || rowLocked}>−</button>
                             <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
-                            <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={(ev) => tapFoulIncrement(ev, rs.tapKey, sideActions[rs.key].onIncrement)} disabled={subBoutDecided || rowLocked}>+</button>
+                            <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={(ev) => tapFoulIncrement(ev, rs.tapKey, sideActions[rs.key].onIncrement)} disabled={readOnly || subBoutDecided || rowLocked}>+</button>
                           </div>
                         </div>
                       </div>
@@ -4990,6 +4990,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                                 data-testid="scoring-modal-tie-button"
                                 className={`btn btn--sm ${s.draw ? "btn--primary" : ""}`}
                                 onClick={() => setDrawFor(idx)}
+                                disabled={readOnly}
                                 title={s.draw ? "Undo tie" : "Mark this bout a draw (hikiwake)"}
                               >
                                 {s.draw ? "✓ Tie (hikiwake)" : "Tie (hikiwake)"}
@@ -5029,7 +5030,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     className="btn btn--ghost btn--sm"
                     data-testid="kachinuki-add-bout-button"
                     onClick={addManualBout}
-                    disabled={submitting || (!kachinukiCurrentBoutPlayed && !kachinukiNoLiveBout) || kachinukiNextManualPos > kachinukiMaxBouts}
+                    disabled={readOnly || submitting || (!kachinukiCurrentBoutPlayed && !kachinukiNoLiveBout) || kachinukiNextManualPos > kachinukiMaxBouts}
                     title={!kachinukiCurrentBoutPlayed && !kachinukiNoLiveBout
                       ? "Score the current bout first"
                       : kachinukiNextManualPos > kachinukiMaxBouts
@@ -5050,7 +5051,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     className="btn btn--ghost btn--sm"
                     data-testid="kachinuki-remove-bout-button"
                     onClick={(ev) => boutChangeTap("bout", removeCurrentBout)(ev)}
-                    disabled={submitting}
+                    disabled={readOnly || submitting}
                     title="Remove this empty bout: added by mistake. Nothing has been recorded for it, so nothing is lost."
                   >
                     <Icon name="x" size={14} />Remove this bout
@@ -5099,7 +5100,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     data-testid="team-daihyosen-remove"
                     title="Remove the representative bout"
                     onClick={(ev) => boutChangeTap("rep", onRemoveDaihyosen)(ev)}
-                    disabled={submitting || decisionSubmitting || namesTyping}
+                    disabled={readOnly || submitting || decisionSubmitting || namesTyping}
                   >
                     Remove daihyosen
                   </button>
@@ -5110,7 +5111,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     className="btn btn--sm"
                     data-testid="team-daihyosen-hantei-arm"
                     onClick={() => setDaihyosenHanteiArmed(true)}
-                    disabled={submitting || decisionSubmitting || !tiedScore}
+                    disabled={readOnly || submitting || decisionSubmitting || !tiedScore}
                     title={!tiedScore ? "Hantei applies only to a tied daihyosen" : "Record a judges' decision"}
                     style={{ marginLeft: "auto" }}
                   >
@@ -5120,11 +5121,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                 {!selfReport && daihyosenHanteiArmed && (
                   <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 6 }}>
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "b" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-shiro"
-                      onClick={() => pickDaihyosenHantei("b")} disabled={submitting || decisionSubmitting}>{sideWithColour("shiro")} wins</button>
+                      onClick={() => pickDaihyosenHantei("b")} disabled={readOnly || submitting || decisionSubmitting}>{sideWithColour("shiro")} wins</button>
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "a" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-aka"
-                      onClick={() => pickDaihyosenHantei("a")} disabled={submitting || decisionSubmitting}>{sideWithColour("aka")} wins</button>
+                      onClick={() => pickDaihyosenHantei("a")} disabled={readOnly || submitting || decisionSubmitting}>{sideWithColour("aka")} wins</button>
                     <button type="button" className="btn btn--ghost btn--sm" data-testid="team-daihyosen-hantei-cancel"
-                      onClick={clearHantei} disabled={submitting || decisionSubmitting}>Cancel</button>
+                      onClick={clearHantei} disabled={submitting || decisionSubmitting || (readOnly && daihyosenHanteiRecorded)}>Cancel</button>
                   </div>
                 )}
               </div>
@@ -5194,7 +5195,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     admin_scoring_shared.jsx). The term is taught in the
                     title/hint above instead. */}
                 {!removingWithdrawal && <div>
-                  <button data-testid="scoring-modal-daihyosen-button" type="button" className={`btn btn--sm ${teamTied ? "btn--primary" : "btn--ghost"}`} onClick={(ev) => boutChangeTap("rep", onDaihyosen)(ev)} disabled={submitting || decisionSubmitting || namesTyping}>
+                  <button data-testid="scoring-modal-daihyosen-button" type="button" className={`btn btn--sm ${teamTied ? "btn--primary" : "btn--ghost"}`} onClick={(ev) => boutChangeTap("rep", onDaihyosen)(ev)} disabled={readOnly || submitting || decisionSubmitting || namesTyping}>
                     Add representative bout
                   </button>
                 </div>}
@@ -5225,13 +5226,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
           {editorErr && (
             <div data-testid="team-editor-error" className="daihyosen-controls__err" style={{ marginTop: 6 }}>{editorErr}</div>
           )}
-          </fieldset>
 
           {/* Ippon-type letter legend: same affordance as the individual
               editor; the per-bout buttons use the same M/K/D/T/H letters. */}
           <IpponLegend isNaginata={isNaginataTeam} />
-
-          <fieldset className="shiaijo-control-scope" disabled={readOnly}>
 
           {/* Decision (kiken/fusenpai) controls for the overall team match.
               Per-bout Fusensho lives on each sub-match row (the Fusensho
@@ -5251,9 +5249,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
             <RecordedWithdrawal
               match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting}
               // null on kachinuki: see useWithdrawalRemoval above.
-              removal={withdrawalRemoval}
+              removal={withdrawalRemoval} readOnly={readOnly}
             />
           )}
+          <fieldset className="shiaijo-control-scope" disabled={readOnly}>
           {!decisionPromptKind && !selfReport && (
             <details className="decision-disclosure">
               <summary className="decision-disclosure__summary">Withdrawal or no-show (kiken · fusenpai)</summary>
@@ -5282,6 +5281,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               </div>
             </details>
           )}
+          </fieldset>
           {decisionErr && (
             <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 6 }}>{decisionErr}</div>
           )}
@@ -5311,10 +5311,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               sideB={{ name: m.sideB?.name || m.sideB }}
               askReason={window.isKikenDecision(decisionPromptKind)}
               submitting={decisionSubmitting}
+              readOnly={readOnly}
               onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}
               onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}
             />
           )}
+          <fieldset className="shiaijo-control-scope" disabled={readOnly}>
           {/* Encho toggle. Placed at the BOTTOM, beside the End/Reopen
               controls (operator feedback: controls belong at the bottom, not the
               top). EnchoControl collapses to a pill when no overtime is active.
@@ -5340,7 +5342,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
         </div>
 
         <div className="editor-modal__foot editor-modal__foot--nav" ref={dockRef}>
-          <fieldset className="shiaijo-control-scope" disabled={readOnly}>
           {/* Audit reason prompt for team-match corrections: same contract
               as ScoreEditorModal: operator must confirm before the patch fires. */}
           {correctionPromptOpen && (
@@ -5348,6 +5349,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               label="Reason for correction"
               presets={CORRECTION_PRESETS}
               submitting={submitting}
+              readOnly={readOnly}
               onConfirm={(r) => {
                 setCorrectionReason(r);
                 setReasonPromptKind("");
@@ -5357,7 +5359,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               onCancel={() => setReasonPromptKind("")}
             />
           )}
-          </fieldset>
           {/* While a reason prompt is open it owns the only Cancel/commit
               row: hide the footer's own nav+actions so the operator never sees
               two Cancels and two commit buttons at the highest-stakes moment
@@ -5448,9 +5449,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               never seen (bc-tmfn). The prefix names the editor's door; a
               kachinuki encounter keeps its existing ids whichever control
               reopened it. */}
-          <fieldset className="shiaijo-control-scope" disabled={readOnly}>
-          <ReopenFeedback ctl={reopenCtl} testIdPrefix={isKachinuki ? "kachinuki-reopen" : "withdrawal-reopen"} />
-          </fieldset>
+          <ReopenFeedback ctl={reopenCtl} testIdPrefix={isKachinuki ? "kachinuki-reopen" : "withdrawal-reopen"} readOnly={readOnly} />
           {/* F5: "not saved" banner, shared class with ScoreEditorModal so both
               editors read identically. Placed once, above score-nav, which
               `inner` shares between the wide overlay and the narrow shiaijo
@@ -5497,8 +5496,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
           {m.status === "scheduled" && isBarredMatch(m) && (
             <BarredMatchNotice match={m} password={password} unsaved={unsavedRef} onDiscard={onDiscardUnsaved} />
           )}
-          {own.kept && <DraftKeptNotice from={own.kept.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
           </fieldset>
+          {own.kept && <DraftKeptNotice from={own.kept.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} readOnly={readOnly} />}
           <StartRefusedNotice text={own.refusal ? ownStartRefusalText(m, own.refusal) : ""} />
           {own.droppedShown && <DraftDroppedNotice />}
           <div className="score-nav">
@@ -5721,7 +5720,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
           )}
           {/* Quiet keyboard-shortcut reminder. It lists only keys that act on
               this host (the same conditions the keydown handler checks). */}
-          <ScoringShortcutHint pointKeys={kachinukiBoutMode ? getValidPointKeys(isNaginataTeam) : ""} hasNav={!!((prevMatch && onPrev) || (nextMatch && onNext))} canClose={canClose} />
+          <ScoringShortcutHint pointKeys={!readOnly && kachinukiBoutMode ? getValidPointKeys(isNaginataTeam) : ""} hasNav={!!((prevMatch && onPrev) || (nextMatch && onNext))} canClose={canClose} />
         </div>
     </>
   );

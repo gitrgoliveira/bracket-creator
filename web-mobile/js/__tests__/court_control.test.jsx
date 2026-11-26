@@ -2,6 +2,8 @@
 // shiaijo": the tab, page and tablet ids, the device word, the claim, the
 // heartbeat, the take, the release on pagehide only when the tablet has
 // nothing queued for the shiaijo, and the mount-scoped answers the outbox asks.
+import RealReact from 'react';
+import { render, act, cleanup } from '@testing-library/react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 let events;
@@ -468,6 +470,108 @@ describe('the claim and the state', () => {
     offW();
     offA2();
     await vi.advanceTimersByTimeAsync(1);
+  });
+
+  it('skips the heartbeat claim while a freed-court grace timer is pending, then claims when the grace ends', async () => {
+    vi.useFakeTimers();
+    reply = () => ({ body: OTHER });
+    const { mountCourtControl, COURT_HEARTBEAT_MS, COURT_FREED_GRACE_MS } = await load();
+    const off = track(mountCourtControl('A', () => 'pw'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(COURT_HEARTBEAT_MS - 1000);
+    expect(puts().length).toBe(1);
+
+    emit({ type: 'court_control_updated', data: { court: 'A', holderKey: '' } });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(puts().length, 'heartbeat inside freed grace sends no claim').toBe(1);
+
+    await vi.advanceTimersByTimeAsync(COURT_FREED_GRACE_MS - 1000 - 1);
+    expect(puts().length).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length, 'grace expiry still sends the claim').toBe(2);
+    off();
+    await vi.advanceTimersByTimeAsync(1);
+  });
+
+  it('a late timeout settling after a newer 401 leaves refusedStatus 401', async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    global.fetch = vi.fn((url, init = {}) => {
+      const body = init.body ? JSON.parse(init.body) : null;
+      calls.push({ url, method: init.method || 'GET', body, init });
+      if (n++ === 0) return new Promise(() => {});
+      return Promise.resolve({ ok: false, status: 401, json: async () => ({ error: 'Unauthorized' }) });
+    });
+    const { mountCourtControl, courtControlView, CLAIM_DEADLINE_MS } = await load();
+    const off = track(mountCourtControl('A', () => 'pw'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length).toBe(1);
+
+    emit({ type: 'resync_required' });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(puts().length).toBe(2);
+    expect(courtControlView('A')).toMatchObject({ state: 'unknown', connected: false, refusedStatus: 401 });
+
+    await vi.advanceTimersByTimeAsync(CLAIM_DEADLINE_MS);
+    expect(courtControlView('A')).toMatchObject({ state: 'unknown', connected: false, refusedStatus: 401 });
+    off();
+    await vi.advanceTimersByTimeAsync(1);
+  });
+
+  it('changing the password after a 401 sends a new claim at once, and an unchanged password does not', async () => {
+    reply = (_url, init) => (
+      init.headers && init.headers['X-Tournament-Password'] === 'good'
+        ? { body: HOLDS }
+        : { status: 401, body: { error: 'Unauthorized' } }
+    );
+    const prevReact = global.React;
+    global.React = RealReact;
+    try {
+      const { useCourtControl } = await load();
+      let latest = null;
+      function Probe({ court, password }) {
+        latest = useCourtControl(court, password);
+        return RealReact.createElement('div', { 'data-state': latest.state });
+      }
+      let view;
+      await act(async () => {
+        view = render(RealReact.createElement(Probe, { court: 'A', password: 'stale' }));
+      });
+      await settle();
+      expect(puts().length).toBe(1);
+      expect(latest).toMatchObject({ state: 'unknown', connected: false, refusedStatus: 401 });
+
+      await act(async () => {
+        view.rerender(RealReact.createElement(Probe, { court: 'A', password: 'stale' }));
+      });
+      await settle();
+      expect(puts().length, 'unchanged password sends no claim').toBe(1);
+
+      await act(async () => {
+        view.rerender(RealReact.createElement(Probe, { court: 'A', password: 'good' }));
+      });
+      await settle();
+      expect(puts().length, 'password change after 401 claims at once').toBe(2);
+      expect(puts()[1].init.headers['X-Tournament-Password']).toBe('good');
+      expect(latest).toMatchObject({ holds: true, state: 'holds', connected: true, refusedStatus: 0 });
+
+      await act(async () => {
+        view.rerender(RealReact.createElement(Probe, { court: 'A', password: 'good2' }));
+      });
+      await settle();
+      expect(puts().length, 'password change while holding sends no extra claim').toBe(2);
+
+      await act(async () => {
+        view.unmount();
+        cleanup();
+      });
+      await settle();
+    } finally {
+      global.React = prevReact;
+    }
   });
 });
 

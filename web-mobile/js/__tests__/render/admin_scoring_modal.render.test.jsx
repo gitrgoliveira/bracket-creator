@@ -38,10 +38,16 @@ const STUBBED_GLOBALS = {
 
 let restoreGlobals;
 let ScoreEditorModal;
+let DraftKeptNotice;
+let ReasonPrompt;
+let DecisionPrompt;
+let RecordedWithdrawal;
+let ReopenFeedback;
 
 beforeAll(async () => {
   restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_scoring_modal.jsx');
+  ({ DraftKeptNotice, ReasonPrompt, DecisionPrompt, RecordedWithdrawal, ReopenFeedback } = await import('../../admin_scoring_shared.jsx'));
   ScoreEditorModal = window.ScoreEditorModal;
 });
 
@@ -243,4 +249,406 @@ describe('ScoreEditorModal read-only (view-only console)', () => {
       expect(scoreBtn.matches(':disabled')).toBe(true);
     });
   }
+
+  it('engi: disables flag counters and save, ignores A/S/Backspace/Enter, hides disabled shortcut hints, and keeps Prev/Next working', async () => {
+    const onSubmit = vi.fn();
+    const onPrev = vi.fn();
+    const onNext = vi.fn();
+    const prevMatch = makeIndividualMatch({ id: 'm0', sideA: { id: 'p3', name: 'Sato' }, sideB: { id: 'p4', name: 'Kato' } });
+    const nextMatch = makeIndividualMatch({ id: 'm9', sideA: { id: 'p5', name: 'Endo' }, sideB: { id: 'p6', name: 'Fujii' } });
+    const engiMatch = makeIndividualMatch({ compId: 'c1', compEngi: true, status: 'scheduled', flagsA: 2, flagsB: 1 });
+    let utils;
+    await act(async () => {
+      utils = render(
+        <ScoreEditorModal
+          match={engiMatch}
+          onClose={vi.fn()}
+          onSubmit={onSubmit}
+          prevMatch={prevMatch}
+          nextMatch={nextMatch}
+          onPrev={onPrev}
+          onNext={onNext}
+          password="pw"
+          readOnly={true}
+        />
+      );
+    });
+
+    for (const id of ['engi-shiro-dec', 'engi-shiro-inc', 'engi-aka-dec', 'engi-aka-inc', 'engi-submit']) {
+      const btn = utils.getByTestId(id);
+      expect(btn.disabled).toBe(true);
+      expect(btn.matches(':disabled')).toBe(true);
+    }
+
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: 'a' });
+      fireEvent.keyDown(document.body, { key: 's' });
+      fireEvent.keyDown(document.body, { key: 'Backspace' });
+      fireEvent.keyDown(document.body, { key: 'Enter' });
+    });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(utils.getByTestId('engi-aka-count').textContent).toBe('2');
+    expect(utils.getByTestId('engi-shiro-count').textContent).toBe('1');
+
+    const prevBtn = utils.getByRole('button', { name: 'Prev' });
+    const nextBtn = utils.getByRole('button', { name: 'Next' });
+    expect(prevBtn.disabled).toBe(false);
+    expect(nextBtn.disabled).toBe(false);
+    await act(async () => {
+      fireEvent.click(prevBtn);
+      fireEvent.click(nextBtn);
+      fireEvent.keyDown(document.body, { key: 'ArrowLeft' });
+      fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    });
+    expect(onPrev).toHaveBeenCalledTimes(2);
+    expect(onNext).toHaveBeenCalledTimes(2);
+
+    const hint = utils.getByTestId('engi-shortcut-hint');
+    expect(hint.textContent).not.toContain('add Aka/Shiro flag');
+    expect(hint.textContent).not.toContain('undo');
+    expect(hint.textContent).not.toContain('save');
+    expect(hint.textContent).toContain('prev/next');
+    expect(hint.textContent).toContain('close');
+
+    await act(async () => {
+      utils.rerender(
+        <ScoreEditorModal
+          match={engiMatch}
+          onClose={vi.fn()}
+          onSubmit={onSubmit}
+          password="pw"
+          canClose={false}
+          readOnly={true}
+        />
+      );
+    });
+    expect(utils.queryByTestId('engi-shortcut-hint')).toBeNull();
+    expect(utils.getByTestId('engi-total').textContent).toContain('Total: 3');
+  });
+
+  it('individual and kachinuki team: ignores scoring keys and Enter, hides point shortcut hints, and keeps arrow navigation', async () => {
+    for (const [label, make] of [
+      ['individual', () => makeIndividualMatch({ compId: 'c1', status: 'scheduled', ipponsA: ['M'], ipponsB: [] })],
+      ['team', () => makeTeamMatch({ compId: 'c1', status: 'scheduled', teamSize: 3, teamMatchType: 'kachinuki' })],
+    ]) {
+      const onSubmit = vi.fn();
+      const onPrev = vi.fn();
+      const onNext = vi.fn();
+      const prevMatch = makeIndividualMatch({ id: 'm0', sideA: { id: 'p3', name: 'Sato' }, sideB: { id: 'p4', name: 'Kato' } });
+      const nextMatch = makeIndividualMatch({ id: 'm9', sideA: { id: 'p5', name: 'Endo' }, sideB: { id: 'p6', name: 'Fujii' } });
+      let utils;
+      await act(async () => {
+        utils = render(
+          <ScoreEditorModal
+            match={make()}
+            onClose={vi.fn()}
+            onSubmit={onSubmit}
+            prevMatch={prevMatch}
+            nextMatch={nextMatch}
+            onPrev={onPrev}
+            onNext={onNext}
+            password="pw"
+            readOnly={true}
+          />
+        );
+      });
+
+      const slotSelector = label === 'individual' ? '.sb-slot--filled' : '.editor-side__pt--filled';
+      const initialFilled = utils.container.querySelectorAll(slotSelector).length;
+
+      await act(async () => {
+        fireEvent.keyDown(document.body, { key: 'm' });
+        fireEvent.keyDown(document.body, { key: 'K', shiftKey: true });
+        fireEvent.keyDown(document.body, { key: 'Enter' });
+        fireEvent.keyDown(document.body, { key: 'ArrowLeft' });
+        fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+      });
+
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(utils.container.querySelectorAll(slotSelector).length).toBe(initialFilled);
+      expect(onPrev).toHaveBeenCalledTimes(1);
+      expect(onNext).toHaveBeenCalledTimes(1);
+
+      const hint = utils.getByTestId('scoring-modal-shortcut-hint');
+      expect(hint.textContent).not.toContain('Shiro,');
+      expect(hint.textContent).not.toContain('Aka');
+      expect(hint.textContent).toContain('prev/next');
+      expect(hint.textContent).toContain('close');
+
+      await act(async () => {
+        utils.rerender(
+          <ScoreEditorModal
+            match={make()}
+            onClose={vi.fn()}
+            onSubmit={onSubmit}
+            password="pw"
+            canClose={false}
+            readOnly={true}
+          />
+        );
+      });
+      expect(utils.queryByTestId('scoring-modal-shortcut-hint')).toBeNull();
+      expect(utils.getByTestId('scoring-modal-ippon-legend')).toBeTruthy();
+      utils.unmount();
+    }
+  });
+
+  it('kachinuki: disables done-bout edit, Remove this bout, and Encho/Undo encho controls when readOnly, while keeping an open bout Collapse button enabled', async () => {
+    const doneBoutMatch = makeTeamMatch({
+      id: 'm-kach-done',
+      status: 'running',
+      teamSize: 3,
+      teamMatchType: 'kachinuki',
+      subResults: [
+        { position: 1, sideA: 'Alice', sideB: 'Bob', ipponsA: ['M'], ipponsB: [], winner: 'Alice', recorded: true },
+        { position: 2, sideA: 'Alice', sideB: 'Carol', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    let utils;
+    await act(async () => {
+      utils = render(
+        <ScoreEditorModal
+          match={doneBoutMatch}
+          onClose={vi.fn()}
+          onSubmit={vi.fn()}
+          password="pw"
+          readOnly={true}
+        />
+      );
+    });
+
+    const doneBout = utils.getByTestId('kachinuki-done-bout-0');
+    expect(doneBout.getAttribute('role')).toBeNull();
+    expect(doneBout.getAttribute('tabIndex')).toBeNull();
+    await act(async () => { fireEvent.click(doneBout); });
+    expect(utils.queryByTestId('kachinuki-done-collapse-0')).toBeNull();
+    expect(utils.getByTestId('kachinuki-remove-bout-button').disabled).toBe(true);
+    expect(utils.getByTestId('kachinuki-add-bout-button').disabled).toBe(true);
+    expect(utils.getByRole('button', { name: 'Record bout' }).disabled).toBe(true);
+    expect(utils.getByTestId('kachinuki-end-match-button').disabled).toBe(true);
+
+    // Open bout 1 while writable, then switch to readOnly: Collapse stays live while scoring buttons disable.
+    await act(async () => {
+      utils.rerender(
+        <ScoreEditorModal
+          match={doneBoutMatch}
+          onClose={vi.fn()}
+          onSubmit={vi.fn()}
+          password="pw"
+          readOnly={false}
+        />
+      );
+    });
+    await act(async () => { fireEvent.click(utils.getByTestId('kachinuki-done-bout-0')); });
+    expect(utils.getByTestId('kachinuki-done-collapse-0')).toBeTruthy();
+
+    await act(async () => {
+      utils.rerender(
+        <ScoreEditorModal
+          match={doneBoutMatch}
+          onClose={vi.fn()}
+          onSubmit={vi.fn()}
+          password="pw"
+          readOnly={true}
+        />
+      );
+    });
+    const collapseBtn = utils.getByTestId('kachinuki-done-collapse-0');
+    expect(collapseBtn.disabled).toBe(false);
+    expect(collapseBtn.matches(':disabled')).toBe(false);
+    expect(utils.container.querySelector('.ipt-btn').disabled).toBe(true);
+
+    await act(async () => { fireEvent.click(collapseBtn); });
+    expect(utils.queryByTestId('kachinuki-done-collapse-0')).toBeNull();
+    expect(utils.getByTestId('kachinuki-done-bout-0')).toBeTruthy();
+    utils.unmount();
+
+    const enchoMatch = makeTeamMatch({
+      id: 'm-kach-encho',
+      status: 'running',
+      teamSize: 3,
+      teamMatchType: 'kachinuki',
+      subResults: [
+        { position: 1, sideA: 'Alice', sideB: 'Bob', ipponsA: ['M'], ipponsB: ['K'], encho: { periodCount: 1 } },
+      ],
+    });
+    await act(async () => {
+      utils = render(
+        <ScoreEditorModal
+          match={enchoMatch}
+          onClose={vi.fn()}
+          onSubmit={vi.fn()}
+          password="pw"
+          readOnly={true}
+        />
+      );
+    });
+    expect(utils.getByTestId('kachinuki-encho-button').disabled).toBe(true);
+    expect(utils.getByTestId('kachinuki-encho-undo-button').disabled).toBe(true);
+    utils.unmount();
+  });
+
+  it('keeps kept-draft Discard enabled and Save disabled when readOnly (individual and engi editors)', async () => {
+    for (const [label, match, incSelector] of [
+      ['individual', makeIndividualMatch({ id: 'm-ind-kept', status: 'scheduled' }), (u) => u.container.querySelector('.ipt-btn')],
+      ['engi', makeIndividualMatch({ id: 'm-engi-kept', compEngi: true, status: 'scheduled' }), (u) => u.getByTestId('engi-aka-inc')],
+    ]) {
+      let utils;
+      await act(async () => {
+        utils = render(
+          <ScoreEditorModal
+            match={match}
+            onClose={vi.fn()}
+            onSubmit={vi.fn()}
+            password="pw"
+            readOnly={false}
+          />
+        );
+      });
+      await act(async () => { fireEvent.click(incSelector(utils)); });
+
+      await act(async () => {
+        utils.rerender(
+          <ScoreEditorModal
+            match={{ ...match, status: 'running' }}
+            onClose={vi.fn()}
+            onSubmit={vi.fn()}
+            password="pw"
+            readOnly={true}
+          />
+        );
+      });
+
+      expect(utils.getByTestId('draft-kept-notice'), `${label}: notice shown`).toBeTruthy();
+      const saveBtn = utils.getByTestId('draft-kept-save');
+      const discardBtn = utils.getByTestId('draft-kept-discard');
+      expect(saveBtn.disabled).toBe(true);
+      expect(saveBtn.matches(':disabled')).toBe(true);
+      expect(discardBtn.disabled).toBe(false);
+      expect(discardBtn.matches(':disabled')).toBe(false);
+
+      await act(async () => { fireEvent.click(discardBtn); });
+      expect(utils.queryByTestId('draft-kept-notice')).toBeNull();
+      utils.unmount();
+    }
+  });
+
+  it('keeps ReasonPrompt, DecisionPrompt, RecordedWithdrawal Undo, and ReopenFeedback dismiss enabled while disabling their write controls when readOnly', async () => {
+    const completedEngi = makeIndividualMatch({ id: 'm-engi-corr', compEngi: true, status: 'completed', flagsA: 3, flagsB: 0 });
+    let utils;
+    await act(async () => {
+      utils = render(
+        <ScoreEditorModal
+          match={completedEngi}
+          onClose={vi.fn()}
+          onSubmit={vi.fn()}
+          password="pw"
+          readOnly={false}
+        />
+      );
+    });
+    await act(async () => { fireEvent.click(utils.getByTestId('engi-submit')); });
+    await act(async () => {
+      utils.rerender(
+        <ScoreEditorModal
+          match={completedEngi}
+          onClose={vi.fn()}
+          onSubmit={vi.fn()}
+          password="pw"
+          readOnly={true}
+        />
+      );
+    });
+    const cancelPromptBtn = utils.getByRole('button', { name: 'Cancel' });
+    const confirmPromptBtn = utils.getByRole('button', { name: 'Confirm' });
+    expect(confirmPromptBtn.disabled).toBe(true);
+    expect(utils.getByLabelText('Reason category').disabled).toBe(true);
+    expect(utils.getByLabelText('Reason note').disabled).toBe(true);
+    expect(cancelPromptBtn.disabled).toBe(false);
+    expect(cancelPromptBtn.matches(':disabled')).toBe(false);
+    await act(async () => { fireEvent.click(cancelPromptBtn); });
+    expect(utils.queryByRole('button', { name: 'Confirm' })).toBeNull();
+    expect(utils.getByTestId('engi-submit').disabled).toBe(true);
+    utils.unmount();
+
+    // Shared recovery components directly with readOnly={true}
+    const onSave = vi.fn();
+    const onDiscard = vi.fn();
+    utils = render(<DraftKeptNotice from="scheduled" onSave={onSave} onDiscard={onDiscard} disabled={false} readOnly={true} />);
+    expect(utils.getByTestId('draft-kept-save').disabled).toBe(true);
+    expect(utils.getByTestId('draft-kept-discard').disabled).toBe(false);
+    fireEvent.click(utils.getByTestId('draft-kept-discard'));
+    expect(onDiscard).toHaveBeenCalledTimes(1);
+    utils.unmount();
+
+    const onConfirm = vi.fn();
+    const onCancelReason = vi.fn();
+    utils = render(<ReasonPrompt presets={['Scoring error']} onConfirm={onConfirm} onCancel={onCancelReason} readOnly={true} />);
+    expect(utils.getByRole('button', { name: 'Confirm' }).disabled).toBe(true);
+    expect(utils.getByRole('button', { name: 'Cancel' }).disabled).toBe(false);
+    fireEvent.click(utils.getByRole('button', { name: 'Cancel' }));
+    expect(onCancelReason).toHaveBeenCalledTimes(1);
+    utils.unmount();
+
+    const onCancelDecision = vi.fn();
+    utils = render(
+      <DecisionPrompt
+        kind="fusenpai"
+        sideA={{ name: 'Yamada' }}
+        sideB={{ name: 'Tanaka' }}
+        askReason={false}
+        submitting={false}
+        readOnly={true}
+        onCancel={onCancelDecision}
+        onSubmit={vi.fn()}
+      />
+    );
+    for (const radio of utils.container.querySelectorAll('input[type="radio"]')) {
+      expect(radio.disabled).toBe(true);
+    }
+    expect(utils.getByRole('button', { name: 'Record' }).disabled).toBe(true);
+    expect(utils.getByRole('button', { name: 'Cancel' }).disabled).toBe(false);
+    fireEvent.click(utils.getByRole('button', { name: 'Cancel' }));
+    expect(onCancelDecision).toHaveBeenCalledTimes(1);
+    utils.unmount();
+
+    const onUndo = vi.fn();
+    const withdrawnMatch = makeIndividualMatch({ status: 'completed', decision: 'fusenpai', decisionBy: 'aka' });
+    utils = render(
+      <RecordedWithdrawal
+        match={withdrawnMatch}
+        ctl={{ reopen: vi.fn(), busy: false, landed: false }}
+        readOnly={true}
+        removal={{ removed: true, held: false, onRemove: vi.fn(), onUndo }}
+      />
+    );
+    expect(utils.getByTestId('remove-withdrawal-undo').disabled).toBe(false);
+    fireEvent.click(utils.getByTestId('remove-withdrawal-undo'));
+    expect(onUndo).toHaveBeenCalledTimes(1);
+    utils.unmount();
+
+    const dismissConflict = vi.fn();
+    utils = render(
+      <ReopenFeedback
+        testIdPrefix="withdrawal-reopen"
+        readOnly={true}
+        ctl={{
+          notice: '',
+          err: '',
+          busy: false,
+          allowCourtForce: true,
+          reopenAnyway: vi.fn(),
+          requeueBlocker: vi.fn(),
+          dismissConflict,
+          conflict: { court: 'A', matchId: 'm-blk', compId: 'c1', label: 'Match 2' },
+        }}
+      />
+    );
+    expect(utils.getByTestId('withdrawal-reopen-reopen-anyway-button').disabled).toBe(true);
+    expect(utils.getByTestId('withdrawal-reopen-requeue-button').disabled).toBe(true);
+    expect(utils.getByTestId('withdrawal-reopen-conflict-dismiss').disabled).toBe(false);
+    fireEvent.click(utils.getByTestId('withdrawal-reopen-conflict-dismiss'));
+    expect(dismissConflict).toHaveBeenCalledTimes(1);
+    utils.unmount();
+  });
 });

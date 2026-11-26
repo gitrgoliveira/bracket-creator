@@ -74,23 +74,37 @@ function PipRow({ count, side }) {
 // reachable via the on-screen counters and Save button). It shares the
 // `.scoring-shortcut-hint` class for its layout, so it hides under a coarse
 // pointer too (bc-kbhn), and lists ←/→ and Esc only where they act.
-function EngiShortcutHint({ hasNav = false, canClose = false }) {
+function EngiShortcutHint({ hasNav = false, canClose = false, readOnly = false }) {
   const kbd = {
     fontFamily: "var(--font-mono)", fontSize: 11, padding: "1px 5px",
     border: "1px solid var(--line)", borderRadius: 4, background: "var(--surface)",
     color: "var(--ink-3)", margin: "0 1px",
   };
+  const groups = [];
+  if (!readOnly) {
+    groups.push({ key: "flags", lead: <><kbd style={kbd}>A</kbd><kbd style={kbd}>S</kbd></>, words: "add Aka/Shiro flag" });
+    groups.push({ key: "undo", lead: <kbd style={kbd}>⌫</kbd>, words: "undo" });
+    groups.push({ key: "save", lead: <kbd style={kbd}>Enter</kbd>, words: "save" });
+  }
+  if (hasNav) {
+    groups.push({ key: "nav", lead: <><kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd></>, words: "prev/next" });
+  }
+  if (canClose) {
+    groups.push({ key: "close", lead: <kbd style={kbd}>Esc</kbd>, words: "close" });
+  }
+  if (groups.length === 0) return null;
   return (
     <div
       className="scoring-shortcut-hint"
       data-testid="engi-shortcut-hint"
       aria-hidden="true"
     >
-      <kbd style={kbd}>A</kbd><kbd style={kbd}>S</kbd><span>add Aka/Shiro flag;</span>
-      <kbd style={kbd}>⌫</kbd><span>undo;</span>
-      <kbd style={kbd}>Enter</kbd><span>{hasNav || canClose ? "save;" : "save"}</span>
-      {hasNav && <><kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd><span>{canClose ? "prev/next;" : "prev/next"}</span></>}
-      {canClose && <><kbd style={kbd}>Esc</kbd><span>close</span></>}
+      {groups.map((g, i) => (
+        <React.Fragment key={g.key}>
+          {g.lead}
+          <span>{i < groups.length - 1 ? `${g.words};` : g.words}</span>
+        </React.Fragment>
+      ))}
     </div>
   );
 }
@@ -659,7 +673,6 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
           with space-between, which would otherwise put the hint beside the
           actions). */}
       <div className="editor-modal__foot editor-modal__foot--nav" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
-        <fieldset className="shiaijo-control-scope" disabled={readOnly}>
         {/* Audit reason prompt: shown when correcting a completed match.
             Operator must confirm a reason before the patch is submitted. */}
         {isComplete && showCorrectionPrompt && (
@@ -667,6 +680,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
             label="Reason for correction"
             presets={CORRECTION_PRESETS}
             submitting={submitting}
+            readOnly={readOnly}
             onConfirm={(r) => {
               setCorrectionReason(r);
               setShowCorrectionPrompt(false);
@@ -677,7 +691,6 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
             onCancel={() => setShowCorrectionPrompt(false)}
           />
         )}
-        </fieldset>
         {/* F5: PERMANENT-failure banner: the write was refused, so it never
             saved. No Retry: a refusal is never fixed by sending the same write
             again (writeRetryable). Takes precedence over the pending banner.
@@ -717,9 +730,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
             row: hide the footer's own actions so the operator never sees two
             Cancels and two commit buttons at the highest-stakes moment
             (amending a recorded result). Mirrors ScoreEditorModal. */}
-        <fieldset className="shiaijo-control-scope" disabled={readOnly}>
-        {own.kept && <DraftKeptNotice from={own.kept.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
-        </fieldset>
+        {own.kept && <DraftKeptNotice from={own.kept.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} readOnly={readOnly} />}
         {own.droppedShown && <DraftDroppedNotice />}
         {!(isComplete && showCorrectionPrompt) && (
           <div className="score-nav">
@@ -752,7 +763,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
         {/* Quiet keyboard-shortcut reminder (parity with the kendo editor's
             ScoringShortcutHint). Hidden during the reason prompt, when keys
             are disabled. */}
-        {!(isComplete && showCorrectionPrompt) && <EngiShortcutHint hasNav={!!((prevMatch && onPrev) || (nextMatch && onNext))} canClose={canClose} />}
+        {!(isComplete && showCorrectionPrompt) && <EngiShortcutHint hasNav={!!((prevMatch && onPrev) || (nextMatch && onNext))} canClose={canClose} readOnly={readOnly} />}
       </div>
     </>
   );

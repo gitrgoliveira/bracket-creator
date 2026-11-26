@@ -19,6 +19,7 @@ import { resolve } from 'node:path';
 // Long past the 300 ms debounce the sheet used to have: nothing is written after it.
 const WAIT_MS = 350;
 import { toBackendMatchResult } from '../../api_serializers.jsx';
+import { toastSnapshot, resetToastQueue } from '../../toast_queue.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -79,6 +80,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetToastQueue();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -163,7 +165,8 @@ describe('a participant runs the representative bout of a tied knockout team mat
       await act(async () => { fireEvent.click(screen.getByText('Tap again to finish')); });
       await settle();
 
-      expect(window.alert).toHaveBeenCalledWith(sentence);
+      expect(toastSnapshot(), 'the server\'s sentence reaches an error toast').toMatchObject({ message: sentence, type: 'error' });
+      expect(window.alert).not.toHaveBeenCalled();
       expect(onClose, 'the sheet stays open').not.toHaveBeenCalled();
     } finally {
       logError.mockRestore();

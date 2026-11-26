@@ -10,9 +10,10 @@
 
 import {
     writeWasRefusedForClock, writeMatchClosed, writeResultLocked, supersededBanner, isFinishedResultWrite,
+    tapsShareReason,
 } from './write_result.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
-import { _revKey, _notifyQueueAlert, _writeQueue, _dequeue } from './api_client_queue.jsx';
+import { _revKey, _notifyQueueAlert, _writeQueue, _dequeue, _baseOf } from './api_client_queue.jsx';
 import {
     _publishOwnStatus, _forgetOwnStatusAnswersWhere, _clearOwnStatusAnswers, _revertLocalFields,
     _CHECKIN_KINDS, _checkInsOf,
@@ -126,6 +127,52 @@ export function _notifyScoreSupersededAlert(count, compID, matchID, matchClosed 
         kind: 'superseded', count, terminalCount: count, compID, matchID,
         ...(matchClosed ? { matchClosed: true } : {}),
     });
+}
+
+// One message per match (decision q-f6-one-message). A pass notes every tap
+// the server did not apply with its match (_noteNotAppliedTap, called by
+// api_client_taps.jsx), and every match whose finished result it saw refused
+// because the match was already closed, told or held (_noteRefusedResult);
+// at its end _notifyNotAppliedTaps tells the taps the server did not apply,
+// one alert per match, leaving out the taps of a match whose result the same
+// pass refused that way: that refusal is the one message (a phone back online
+// after another phone finished the match is told once, by its refused
+// Finish). A result refused for another reason (a missing correction reason, a
+// representative bout already there) says nothing about the taps, which keep
+// their own alert. A tap id is unique only within its match (session and seq),
+// so the match is never looked up from the id.
+// Out of scope by design: a tap the server first answered as landed and a later
+// copy of the match turned away is told on its own by _tellAway
+// (api_client_taps.jsx), from a push or a fetch that has no pass to consult.
+export function _noteNotAppliedTap(pass, base, d, outcome) {
+    pass.notApplied++;
+    pass.notAppliedTaps.push({ outcome, base, d });
+}
+// _refusedAsClosed: a finished result the server turned away because the match
+// was already closed: held for it (_heldForClosedMatch) or refused 409
+// result_finalized (the self-run judge's closed match).
+function _refusedAsClosed(body) {
+    return _heldForClosedMatch(body) || (!!body && body.error === 'result_finalized');
+}
+export function _noteRefusedResult(pass, key, d, body) {
+    if (isFinishedResultWrite(d) && _refusedAsClosed(body)) pass.refusedResults.add(_baseOf(key));
+}
+export function _notifyNotAppliedTaps(pass) {
+    const byMatch = new Map();
+    for (const { outcome, base, d } of pass.notAppliedTaps) {
+        if (pass.refusedResults.has(base)) continue;
+        if (!byMatch.has(base)) byMatch.set(base, { d, outcomes: [] });
+        byMatch.get(base).outcomes.push(outcome);
+    }
+    for (const { d, outcomes } of byMatch.values()) {
+        const where = _whereOf(d);
+        _notifyQueueAlert({
+            kind: 'not_applied', count: outcomes.length, terminalCount: 0, compID: d.compID, matchID: d.matchID,
+            ...(where ? { where } : {}),
+            outcome: outcomes[outcomes.length - 1],
+            ...(tapsShareReason(outcomes) ? { sameReason: true } : {}),
+        });
+    }
 }
 
 // _heldForClosedMatch: the answer turned this write's own change away because

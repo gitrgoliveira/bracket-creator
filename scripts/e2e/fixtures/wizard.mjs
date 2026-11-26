@@ -80,6 +80,10 @@ async function setNumber(page, label, value) {
 //                  ordinary name, and a pair row is refused), anything else
 //                  "Two competitors (pairs)", since Create is refused until
 //                  one is picked
+//   naginata       boolean: "Naginata competition" (individual only): the
+//                  ippon editor gains the Sune (S) button. Ticking it
+//                  re-defaults "Award two joint 3rd places", so a call that
+//                  also gives twoThirdPlaces has that applied after it
 //   teamSize       number (team only)
 //   teamMatchType  'fixed' | 'kachinuki' (team only)
 //   poolSizeMode   'maximum' | 'minimum' (mixed only)
@@ -106,7 +110,7 @@ async function setNumber(page, label, value) {
 export async function createCompetition(page, opts = {}) {
   const {
     name, kind, format, teamSize, teamMatchType, poolSizeMode, poolSize, poolWinners, extraQualifiers,
-    courts, numberPrefix, twoThirdPlaces, engi, engiSolo, checkIn, startTime, day, expected, publicNames,
+    courts, numberPrefix, twoThirdPlaces, engi, engiSolo, naginata, checkIn, startTime, day, expected, publicNames,
   } = opts;
   await page.goto('/admin/create-competition');
   await expect(page.getByRole('heading', { level: 1, name: 'Add competition' })).toBeVisible();
@@ -118,6 +122,8 @@ export async function createCompetition(page, opts = {}) {
   // Picked after Engi: the pills are drawn only while Engi is on, with
   // neither picked, and Create is refused until one is.
   if (engi) await choose(page, 'Competitors per side', engiSolo ? 'Single competitors' : 'Two competitors (pairs)');
+  // Before twoThirdPlaces: ticking it re-defaults that box (twoThirdPlacesForNaginata).
+  if (naginata !== undefined) await page.getByRole('checkbox', { name: /^Naginata competition/ }).setChecked(naginata);
   if (teamSize !== undefined) await setNumber(page, 'Team size', teamSize);
   if (teamMatchType) await choose(page, 'Team match format', TEAM_MATCH_TYPE[teamMatchType]);
   if (poolSizeMode) await choose(page, 'Pool size is a', POOL_SIZE_MODE[poolSizeMode]);

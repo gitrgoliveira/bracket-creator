@@ -26,8 +26,9 @@ import { serverNowMs } from './server_clock.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
 import { useOpenedTapGuard, acceptTap } from './tap_guard.jsx';
 import { courtNotHeldError } from './write_result.jsx';
+import { publishHeight } from './published_height.jsx';
 
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useLayoutEffect, useRef } = React;
 
 // How long a console that has had no answer yet shows "Checking" before it
 // says it is not connected: a claim on a working connection answers well
@@ -193,7 +194,11 @@ export function ShiaijoControlBar({ court, control, showToast }) {
     const mountedRef = useRef(true);
     useEffect(() => () => { mountedRef.current = false; }, []);
     const boxRef = useRef(null);
+    const barRef = useRef(null);
     const confirmTapRef = useRef(null);
+    // The bar sticks under the top bar and covers whatever scrolls under it, so
+    // the inline team sheet sizes its pinned header and scroll margin to it too.
+    useLayoutEffect(() => publishHeight(barRef.current, document.documentElement, '--court-control-h'), []);
     const { openedRef, onClickCapture } = useOpenedTapGuard();
     const open = !!asking;
     window.useEscapeToClose(open && !taking ? () => setAsking(null) : undefined);
@@ -223,7 +228,7 @@ export function ShiaijoControlBar({ court, control, showToast }) {
 
     return (
         <>
-            <div className={`shiaijo-control shiaijo-control--${bar.tone}`} data-testid="court-control" data-state={view.state}>
+            <div ref={barRef} className={`shiaijo-control shiaijo-control--${bar.tone}`} data-testid="court-control" data-state={view.state}>
                 <p className="shiaijo-control__text" role="status">
                     {bar.tone === 'holds' && <span className="shiaijo-control__dot" aria-hidden="true" />}
                     {bar.text}

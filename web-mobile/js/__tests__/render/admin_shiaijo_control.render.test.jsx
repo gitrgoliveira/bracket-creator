@@ -58,6 +58,30 @@ describe('the mark under the top bar', () => {
     } finally { c.restore(); c.utils.unmount(); }
   });
 
+  // The bar sticks under the top bar over the inline team sheet, whose pinned header and
+  // scroll margin read its height (styles.css, team_editor_pinned_bars.render.test.jsx).
+  // jsdom lays nothing out, so the height is stubbed.
+  it('publishes its height as --court-control-h while mounted and takes it back when the console goes', async () => {
+    const realRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function rect() {
+      const h = this.classList && this.classList.contains('shiaijo-control') ? 46 : 0;
+      return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: h, width: 0, height: h, toJSON() {} };
+    };
+    const root = document.documentElement;
+    let c;
+    try {
+      c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
+      await settle(200);
+      expect(root.style.getPropertyValue('--court-control-h')).toBe('46px');
+      c.utils.unmount();
+      expect(root.style.getPropertyValue('--court-control-h')).toBe('');
+    } finally {
+      Element.prototype.getBoundingClientRect = realRect;
+      root.style.removeProperty('--court-control-h');
+      if (c) c.restore();
+    }
+  });
+
   it('another device: a grey bar naming its kind and when it was last active, the queue view only, and Take control asks once', async () => {
     reply = (url, init, body) => (body && body.take ? { body: HOLDS } : { body: answer({ holderKey: 'bbbb', device: 'ipad', lastActiveAt: twoMinAgo() }) });
     const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);

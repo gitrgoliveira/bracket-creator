@@ -4,8 +4,9 @@
 // A sticky bar covers whatever the page scrolls under it, and CSS cannot read an
 // element's height, so anything sized to a bar (the pinned team header sitting
 // under the topbar, the scroll margin that keeps a focused control clear of the
-// bars) is told the height: --topbar-stack-h by AdminTopbar, --team-pin-h and
-// --team-dock-h by the team score sheet.
+// bars) is told the height: --topbar-stack-h by AdminTopbar, --court-control-h
+// by the court console's shiaijo control bar, --team-pin-h and --team-dock-h by
+// the team score sheet.
 //
 // Measured at once (a ResizeObserver first fires after paint, which would leave
 // the first frame unsized), then kept current by the observer, because a bar

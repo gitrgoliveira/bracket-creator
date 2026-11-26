@@ -5979,9 +5979,11 @@ details[open] > summary::before { transform: rotate(90deg); }
    inside the editor body, under the footer dock at 20 and the topbar at
    30). Overlay hosts pin it at the top of their scrolling body; the inline
    hosts sit it under the shell's topbar stack, whose height AdminTopbar
-   publishes as --topbar-stack-h. The sheet publishes this unit's own height as
-   --team-pin-h, and the inline dock's as --team-dock-h, for the scroll margin
-   that keeps a focused control clear of the bars (the content rules below). */
+   publishes as --topbar-stack-h, plus the court console's shiaijo control bar
+   under it (--court-control-h, set only while that bar is mounted). The sheet
+   publishes this unit's own height as --team-pin-h, and the inline dock's as
+   --team-dock-h, for the scroll margin that keeps a focused control clear of
+   the bars (the content rules below). */
 .team-sheet-pin {
   position: sticky;
   top: 0;
@@ -5993,7 +5995,7 @@ details[open] > summary::before { transform: rotate(90deg); }
   background: var(--surface);
 }
 .scoring-panel--team .team-sheet-pin {
-  top: var(--topbar-stack-h, 0px);
+  top: calc(var(--topbar-stack-h, 0px) + var(--court-control-h, 0px));
 }
 /* In the overlay the bar sticks to the body's top edge, over the body's top
    padding, so a bout scrolled past does not show in a strip above the team
@@ -6022,11 +6024,11 @@ details[open] > summary::before { transform: rotate(90deg); }
    the top is margined there. The inline head (the title row and Close) scrolls
    with the page above the pinned header, so only the topbar can cover it. */
 .scoring-panel--team > .editor-modal__body :is(button, a[href], input, select, textarea, summary, [tabindex]):not(.team-sheet-pin *) {
-  scroll-margin-top: calc(var(--topbar-stack-h, 0px) + var(--team-pin-h, 0px));
+  scroll-margin-top: calc(var(--topbar-stack-h, 0px) + var(--court-control-h, 0px) + var(--team-pin-h, 0px));
   scroll-margin-bottom: var(--team-dock-h, 0px);
 }
 .scoring-panel--team > .editor-modal__head :is(button, a[href], input, select, textarea, summary, [tabindex]) {
-  scroll-margin-top: var(--topbar-stack-h, 0px);
+  scroll-margin-top: calc(var(--topbar-stack-h, 0px) + var(--court-control-h, 0px));
 }
 .editor-modal--team > .editor-modal__body :is(button, a[href], input, select, textarea, summary, [tabindex]):not(.team-sheet-pin *) {
   scroll-margin-top: var(--team-pin-h, 0px);
@@ -10516,7 +10518,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* ---------- Court console: who runs this shiaijo (bc-sseq FR9) ---------- */
 /* The mark sits under the admin top bar and sticks with it (the top bar
    publishes its height as --topbar-stack-h), so it is on screen however far
-   the operator scrolls. A static banner, never a pulse: green with a filled
+   the operator scrolls. It publishes its own height as --court-control-h, which
+   the inline team sheet adds under the top bar (the pinned header and the
+   scroll margin), or the bar would cover them. A static banner, never a pulse: green with a filled
    dot for the holder, neutral for a shiaijo another tab or device runs, amber
    for one this tablet lost, a free one it lost earlier, or no connection. */
 .shiaijo-control {

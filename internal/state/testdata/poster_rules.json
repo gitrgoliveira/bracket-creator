@@ -3,6 +3,7 @@
   "headingMaxLength": 80,
   "callToActionMaxLength": 120,
   "logoValues": ["", "centre", "above"],
+  "sizeValues": ["", "code"],
   "maxCourtEntries": 32,
   "defaultHeadings": {
     "viewer": "Follow the tournament live",

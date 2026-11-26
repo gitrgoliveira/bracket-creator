@@ -1,6 +1,7 @@
 // admin_posters.jsx: the Posters page (/admin/posters, bc-qrps). The organiser
 // picks a poster (the viewer home or one court), sets its heading, its
-// call-to-action line, where the logo goes and whether the sponsors show, sees
+// call-to-action line, where the logo goes, a court poster's size (a large
+// letter or a larger code) and whether the sponsors show, sees
 // the change in the preview at once, saves it with the tournament and prints.
 //
 // What a poster IS lives in posters_model.jsx and how it looks in
@@ -48,6 +49,10 @@ export const LEAVE_POSTERS_ANYWAY = "Leave Posters anyway?";
 export const POSTERS_CHANGED_ELSEWHERE =
   "Not saved: the tournament settings were changed on another device. Your poster text is still here.";
 export const POSTER_STATUS = Object.freeze({ unsaved: "Unsaved changes", saving: "Saving", saved: "Saved" });
+
+// The user guide's page on posters, the app's first link into the guide. The
+// guide's "latest" version is the newest release's.
+export const POSTERS_GUIDE_URL = "https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/organisers/posters/";
 
 // The width under which the pinned row is one slim line and Print all moves to
 // the end of the form (the max-width: 640px rules of css/posters.css).
@@ -321,7 +326,7 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
     if (others.length === 0) { setApplyNote("Every shiaijo poster already has these choices."); return; }
     const ok = await window.confirmDialog({
       title: "Use these choices on every shiaijo?",
-      message: `The heading, call to action, logo place and sponsors of ${selected.label} replace those on ${others.map((p) => p.label).join(", ")}. Nothing is saved until you save.`,
+      message: `The heading, call to action, logo place, size and sponsors of ${selected.label} replace those on ${others.map((p) => p.label).join(", ")}. Nothing is saved until you save.`,
       confirmLabel: "Use on every shiaijo",
     });
     if (!ok || !mountedRef.current) return;
@@ -378,7 +383,9 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
         <div className="page-head posters-head">
           <div>
             <h1 className="page-head__title">Posters</h1>
-            <div className="page-head__sub">QR-code posters for the venue: one for the viewer home and one for each shiaijo.</div>
+            <div className="page-head__sub">QR-code posters for the venue: one for the viewer home and one for each shiaijo.{" "}
+              <a href={POSTERS_GUIDE_URL} target="_blank" rel="noopener noreferrer" data-testid="posters-guide-link">How posters work</a>
+            </div>
           </div>
           <div className="page-head__actions">
             <button type="button" className="btn btn--ghost" onClick={guarded(onBack)}>Back</button>
@@ -497,6 +504,32 @@ export function AdminPostersPage({ tournament, onSave, onBack, onEditTournament,
                     Logo {logoElsewhere(selected)}
                   </label>
                   {lp.centreRefusedSentence && <div className="field__hint field__hint--warn">{lp.centreRefusedSentence}</div>}
+                </fieldset>
+              )}
+
+              {selected.kind === "court" && (
+                <fieldset key={selected.key + ":size"} className="field posters-logo-field" data-testid="posters-size">
+                  <legend className="field__label">Size</legend>
+                  <label className="checkbox">
+                    <input
+                      type="radio"
+                      name={idBase + "-size"}
+                      value=""
+                      checked={choices.size !== "code"}
+                      onChange={() => change({ size: "" })}
+                    />
+                    Large letter
+                  </label>
+                  <label className="checkbox">
+                    <input
+                      type="radio"
+                      name={idBase + "-size"}
+                      value="code"
+                      checked={choices.size === "code"}
+                      onChange={() => change({ size: "code" })}
+                    />
+                    Larger code
+                  </label>
                 </fieldset>
               )}
 

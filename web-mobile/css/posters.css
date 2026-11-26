@@ -356,11 +356,12 @@
   order: 2;
 }
 
-/* Its two lines are always kept, so the form never moves when a text crosses
- * its limit; a longer list of posters is cut at two lines. */
+/* One line is always kept, so the form never moves when a text crosses its
+ * limit. A second line comes only when several posters are over (it pushes the
+ * form once), and a longer list is cut at two lines. */
 .posters-too-long {
   flex-basis: 100%;
-  min-height: calc(2 * 1.35em);
+  min-height: 1.35em;
   font-size: 12px;
   font-weight: 600;
   line-height: 1.35;
@@ -513,12 +514,13 @@
   .posters-head > div:first-child { display: contents; }
   .posters-head .page-head__sub { grid-column: 1 / -1; grid-row: 2; }
 
-  /* One slim line over the form: Save and its status, the poster's name,
-   * Preview and Print. It is opaque and ruled off, so the name never reads as
-   * the label of the field under it. Print all is at the end of the form. */
+  /* Over the form: one slim line of Save and its status, the poster's name,
+   * Preview and Print, and under it the over-limit line (below). It is opaque
+   * and ruled off, so the name never reads as the label of the field under it.
+   * Print all is at the end of the form. */
   .posters-save-row {
-    flex-wrap: nowrap;
-    gap: 4px;
+    flex-wrap: wrap;
+    gap: 0 4px;
     min-height: 44px;
     margin: -4px -4px 12px;
     padding: 0 4px;
@@ -559,19 +561,12 @@
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
   }
-  /* The over-limit sentence hangs under the line instead of growing it, so
-   * neither the line nor the form moves. */
+  /* The over-limit sentence is the pinned row's own second line, full width
+   * under its buttons, its one line always kept: it never covers the poster's
+   * name under the row, and the form moves only when it needs a second line. */
   .posters-too-long {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    min-height: 0;
-    padding: 4px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--line);
+    padding-bottom: 2px;
   }
-  .posters-too-long:empty { display: none; }
 }
 
 /* ---- print -------------------------------------------------------------- */

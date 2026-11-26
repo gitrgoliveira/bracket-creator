@@ -46,7 +46,7 @@ func TestTournamentPostersSaveLandsTrimmedAndMovesTheVersion(t *testing.T) {
 	w := versionDo(t, r, "PUT", "/api/tournament", postersSaveBody(before, map[string]any{
 		"viewer": map[string]any{"heading": "  Follow the taikai  ", "logo": "centre"},
 		"courts": map[string]any{
-			"B": map[string]any{"callToAction": "Scan for Shiaijo B", "hideSponsors": true},
+			"B": map[string]any{"callToAction": "Scan for Shiaijo B", "hideSponsors": true, "size": "code"},
 			"A": map[string]any{},
 		},
 	}))
@@ -57,7 +57,7 @@ func TestTournamentPostersSaveLandsTrimmedAndMovesTheVersion(t *testing.T) {
 
 	assert.Equal(t, &state.Posters{
 		Viewer: state.PosterChoices{Heading: "Follow the taikai", Logo: state.PosterLogoCentre},
-		Courts: map[string]state.PosterChoices{"B": {CallToAction: "Scan for Shiaijo B", HideSponsors: true}},
+		Courts: map[string]state.PosterChoices{"B": {CallToAction: "Scan for Shiaijo B", HideSponsors: true, Size: state.PosterSizeCode}},
 	}, storedPosters(t, store), "trimmed, with the empty entry dropped")
 
 	got := decodeMap(t, versionDo(t, r, "GET", "/api/tournament", nil))
@@ -117,6 +117,10 @@ func TestTournamentSaveRefusesABadPostersBlockWithItsSentence(t *testing.T) {
 			"The call to action on the viewer home poster is longer than 120 characters."},
 		"logo": {map[string]any{"viewer": map[string]any{"logo": "left"}},
 			"The logo place on the viewer home poster must be in the centre of the code or above it."},
+		"size": {map[string]any{"courts": map[string]any{"B": map[string]any{"size": "huge"}}},
+			"The size on the Shiaijo B poster must be Large letter or Larger code."},
+		"size on the viewer": {map[string]any{"viewer": map[string]any{"size": "code"}},
+			"The viewer home poster has no shiaijo letter, so it has no size choice."},
 		"key": {map[string]any{"courts": map[string]any{"AB": map[string]any{"heading": "x"}}},
 			`The poster choices name a shiaijo "AB", which is not a shiaijo label: a label is one letter or character.`},
 		"33 entries": {map[string]any{"courts": courts},

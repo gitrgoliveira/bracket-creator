@@ -332,6 +332,45 @@ describe('what counts as unsaved', () => {
   });
 });
 
+describe('the size of a shiaijo poster', () => {
+  it('is offered on a court poster only, Large letter by default', () => {
+    mount();
+    expect(screen.queryByTestId('posters-size')).toBeNull();
+    expect(screen.queryByLabelText('Larger code')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Shiaijo A' }));
+    expect(screen.getByRole('group', { name: 'Size' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Large letter')).toBeChecked();
+    expect(screen.getByLabelText('Larger code')).not.toBeChecked();
+    expect(preview().querySelector('.poster').hasAttribute('data-size')).toBe(false);
+  });
+
+  it('previews Larger code at once, marks the poster unsaved, and saves it', async () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Shiaijo A' }));
+    fireEvent.click(screen.getByLabelText('Larger code'));
+    const poster = preview().querySelector('.poster');
+    expect(poster.getAttribute('data-size')).toBe('code');
+    expect(poster.style.getPropertyValue('--poster-code')).toBe('62cqw');
+    expect(poster.style.getPropertyValue('--poster-letter')).toBe('25cqw');
+    expect(status()).toBe('Unsaved changes');
+    expect(screen.getByTestId('posters-mark-court:A')).toBeInTheDocument();
+    await tap('Save');
+    expect(saves[0].patch.posters).toEqual({ courts: { A: { size: 'code' } } });
+    fireEvent.click(screen.getByLabelText('Large letter'));
+    expect(preview().querySelector('.poster').hasAttribute('data-size')).toBe(false);
+  });
+});
+
+describe('the guide link', () => {
+  it('opens the posters page of the user guide in a new tab', () => {
+    mount();
+    const link = screen.getByRole('link', { name: 'How posters work' });
+    expect(link).toHaveAttribute('href', 'https://gitrgoliveira.github.io/bracket-creator/latest/user-guide/organisers/posters/');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+});
+
 describe('use these choices on every shiaijo', () => {
   const applyBtn = () => screen.queryByRole('button', { name: 'Use these choices on every shiaijo' });
 
@@ -351,19 +390,22 @@ describe('use these choices on every shiaijo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Shiaijo A' }));
     type(headingBox(), 'Scan for this shiaijo');
     fireEvent.click(screen.getByLabelText('Logo in the top corner'));
+    fireEvent.click(screen.getByLabelText('Larger code'));
     await tap('Use these choices on every shiaijo');
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.confirmDialog.mock.calls[0][0].message).toContain('The heading, call to action, logo place, size and sponsors of Shiaijo A');
     expect(window.confirmDialog.mock.calls[0][0].message).toContain('replace those on Shiaijo B, Shiaijo C.');
     expect(screen.getByTestId('posters-apply-note').textContent).toBe('Copied to Shiaijo B, Shiaijo C.');
     fireEvent.click(screen.getByRole('button', { name: /^Shiaijo C/ }));
     expect(headingBox()).toHaveValue('Scan for this shiaijo');
     expect(screen.getByLabelText('Logo in the top corner')).toBeChecked();
+    expect(screen.getByLabelText('Larger code')).toBeChecked();
     expect(onSave).not.toHaveBeenCalled();
     await tap('Save');
     expect(saves[0].patch.posters.courts).toEqual({
-      A: { heading: 'Scan for this shiaijo', logo: 'above' },
-      B: { heading: 'Scan for this shiaijo', logo: 'above' },
-      C: { heading: 'Scan for this shiaijo', logo: 'above' },
+      A: { heading: 'Scan for this shiaijo', logo: 'above', size: 'code' },
+      B: { heading: 'Scan for this shiaijo', logo: 'above', size: 'code' },
+      C: { heading: 'Scan for this shiaijo', logo: 'above', size: 'code' },
     });
   });
 

@@ -132,13 +132,15 @@ export function Poster({ tournament, poster, choices, logoKey }) {
   // corner beside the letter on a court poster (logoElsewhere).
   const logoAbove = lp.offered && lp.placement === "above" && !isCourt;
   const logoCorner = lp.offered && lp.placement === "above" && isCourt;
+  // "Larger code" trades letter height for code width (POSTER_SIZES).
+  const largerCode = isCourt && c.size === "code";
 
   const style = {
     "--poster-primary": primary,
     "--poster-ink": paperInkColour(primary),
     "--poster-band-ink": bandTextColour(primary),
-    "--poster-code": (isCourt ? POSTER_SIZES.courtCode : POSTER_SIZES.viewerCode) + "cqw",
-    "--poster-letter": POSTER_SIZES.courtLetter + "cqw",
+    "--poster-code": (isCourt && !largerCode ? POSTER_SIZES.courtCode : POSTER_SIZES.viewerCode) + "cqw",
+    "--poster-letter": (largerCode ? POSTER_SIZES.courtLetterSmall : POSTER_SIZES.courtLetter) + "cqw",
     "--poster-logo-above": POSTER_SIZES.viewerLogoAbove + "cqw",
     "--poster-logo-corner": POSTER_SIZES.courtLogoCorner + "cqw",
     "--poster-logo-corner-width": POSTER_SIZES.courtLogoCornerWidth + "cqw",
@@ -149,6 +151,7 @@ export function Poster({ tournament, poster, choices, logoKey }) {
       className={"poster poster--" + poster.kind}
       data-poster={poster.key}
       data-placement={lp.placement}
+      data-size={largerCode ? "code" : undefined}
       aria-label={poster.label + " poster"}
       style={style}
     >

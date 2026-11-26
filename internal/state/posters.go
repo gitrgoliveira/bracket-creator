@@ -26,6 +26,11 @@ const (
 	PosterLogoCentre = "centre"
 	PosterLogoAbove  = "above"
 
+	// PosterSizeCode sets a court poster's code as large as the viewer home
+	// poster's and its letter smaller ("Larger code"). "" is the default, the
+	// large letter. The viewer home poster has no letter, so it takes only "".
+	PosterSizeCode = "code"
+
 	// MaxPosterCourtEntries bounds the courts map: twice the court limit, so
 	// the entries of courts since removed are kept without the block growing
 	// without end.
@@ -43,12 +48,17 @@ const (
 // PosterLogoValues lists every logo value a save may send, the default first.
 var PosterLogoValues = []string{"", PosterLogoCentre, PosterLogoAbove}
 
+// PosterSizeValues lists every size value a court poster's save may send, the
+// default first.
+var PosterSizeValues = []string{"", PosterSizeCode}
+
 // PosterChoices is what the organiser chose for one poster. Every field is
 // omitted when empty, so an untouched poster stores nothing.
 type PosterChoices struct {
 	Heading      string `yaml:"heading,omitempty" json:"heading,omitempty"`
 	CallToAction string `yaml:"call_to_action,omitempty" json:"callToAction,omitempty"`
 	Logo         string `yaml:"logo,omitempty" json:"logo,omitempty"`
+	Size         string `yaml:"size,omitempty" json:"size,omitempty"`
 	HideSponsors bool   `yaml:"hide_sponsors,omitempty" json:"hideSponsors,omitempty"`
 }
 
@@ -87,6 +97,7 @@ func trimPosterChoices(c PosterChoices) PosterChoices {
 	c.Heading = strings.TrimSpace(c.Heading)
 	c.CallToAction = strings.TrimSpace(c.CallToAction)
 	c.Logo = strings.TrimSpace(c.Logo)
+	c.Size = strings.TrimSpace(c.Size)
 	return c
 }
 
@@ -197,6 +208,12 @@ func validatePosterChoices(court string, c PosterChoices) error {
 	}
 	if !slices.Contains(PosterLogoValues, c.Logo) {
 		return posterErrorf("The logo place on the %s poster must be in the centre of the code or above it.", name)
+	}
+	if court == "" && c.Size != "" {
+		return posterErrorf("The %s poster has no shiaijo letter, so it has no size choice.", name)
+	}
+	if !slices.Contains(PosterSizeValues, c.Size) {
+		return posterErrorf("The size on the %s poster must be Large letter or Larger code.", name)
 	}
 	return nil
 }

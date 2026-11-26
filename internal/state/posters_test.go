@@ -19,6 +19,7 @@ type posterRulesTable struct {
 	HeadingMaxLength      int      `json:"headingMaxLength"`
 	CallToActionMaxLength int      `json:"callToActionMaxLength"`
 	LogoValues            []string `json:"logoValues"`
+	SizeValues            []string `json:"sizeValues"`
 	MaxCourtEntries       int      `json:"maxCourtEntries"`
 	DefaultHeadings       struct {
 		Viewer string `json:"viewer"`
@@ -50,6 +51,7 @@ func TestPosterRules_SharedTable(t *testing.T) {
 	assert.Equal(t, MaxPosterHeadingLen, table.HeadingMaxLength)
 	assert.Equal(t, MaxPosterCallToActionLen, table.CallToActionMaxLength)
 	assert.Equal(t, PosterLogoValues, table.LogoValues)
+	assert.Equal(t, PosterSizeValues, table.SizeValues)
 	assert.Equal(t, MaxPosterCourtEntries, table.MaxCourtEntries)
 	assert.Equal(t, 2*helper.MaxCourts, table.MaxCourtEntries)
 	assert.Equal(t, PosterViewerHeading, table.DefaultHeadings.Viewer)
@@ -89,6 +91,14 @@ func TestValidatePosters_AcceptsTheLimitsAndEveryLogoValue(t *testing.T) {
 	assert.NoError(t, ValidatePosters(&Posters{Viewer: PosterChoices{Logo: " above "}}), "the logo value is trimmed too")
 }
 
+func TestValidatePosters_AcceptsEverySizeValueOnACourtPoster(t *testing.T) {
+	for _, size := range PosterSizeValues {
+		p := &Posters{Courts: map[string]PosterChoices{"A": {Size: size, Heading: "x"}}}
+		assert.NoError(t, ValidatePosters(p), "size %q", size)
+	}
+	assert.NoError(t, ValidatePosters(&Posters{Courts: map[string]PosterChoices{"A": {Size: " code "}}}), "the size value is trimmed too")
+}
+
 func TestValidatePosters_RefusesEachFieldWithAPlainSentence(t *testing.T) {
 	long := func(n int) string { return strings.Repeat("x", n+1) }
 	cases := []struct {
@@ -108,6 +118,12 @@ func TestValidatePosters_RefusesEachFieldWithAPlainSentence(t *testing.T) {
 			"The call to action on the Shiaijo C poster is longer than 120 characters."},
 		{"court logo", &Posters{Courts: map[string]PosterChoices{"A": {Logo: "Centre"}}},
 			"The logo place on the Shiaijo A poster must be in the centre of the code or above it."},
+		{"court size", &Posters{Courts: map[string]PosterChoices{"A": {Size: "Code"}}},
+			"The size on the Shiaijo A poster must be Large letter or Larger code."},
+		{"viewer size", &Posters{Viewer: PosterChoices{Size: PosterSizeCode}},
+			"The viewer home poster has no shiaijo letter, so it has no size choice."},
+		{"viewer unknown size", &Posters{Viewer: PosterChoices{Size: "big"}},
+			"The viewer home poster has no shiaijo letter, so it has no size choice."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -178,6 +194,10 @@ func TestNormalizePosters(t *testing.T) {
 	assert.Equal(t, "  Follow us  ", in.Viewer.Heading, "the block given is not changed")
 	assert.Len(t, in.Courts, 3)
 
+	sized := NormalizePosters(&Posters{Courts: map[string]PosterChoices{"E": {Size: " code "}}})
+	require.NotNil(t, sized)
+	assert.Equal(t, map[string]PosterChoices{"E": {Size: PosterSizeCode}}, sized.Courts, "a size alone is a choice, kept trimmed")
+
 	onlyCourt := NormalizePosters(&Posters{Courts: map[string]PosterChoices{"D": {Logo: PosterLogoAbove}}})
 	require.NotNil(t, onlyCourt)
 	assert.Equal(t, PosterChoices{}, onlyCourt.Viewer)
@@ -228,7 +248,7 @@ func TestPosters_RoundTripThroughTournamentMD(t *testing.T) {
 		Viewer: PosterChoices{Heading: "Follow the taikai", CallToAction: "Scan with your phone", Logo: PosterLogoCentre},
 		Courts: map[string]PosterChoices{
 			"N": {Heading: "North", HideSponsors: true},
-			"Y": {Logo: PosterLogoAbove},
+			"Y": {Logo: PosterLogoAbove, Size: PosterSizeCode},
 			"1": {CallToAction: "Court one"},
 		},
 	}
@@ -239,6 +259,10 @@ func TestPosters_RoundTripThroughTournamentMD(t *testing.T) {
 	assert.Contains(t, string(raw), "posters:")
 	assert.Contains(t, string(raw), "call_to_action:")
 	assert.Contains(t, string(raw), "hide_sponsors: true")
+	assert.Contains(t, string(raw), "size: code")
+	empty, err := json.Marshal(PosterChoices{Heading: "x"})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"heading":"x"}`, string(empty), "an empty size is omitted")
 
 	fresh, err := NewStore(dir)
 	require.NoError(t, err)

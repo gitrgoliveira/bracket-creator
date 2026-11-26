@@ -9868,6 +9868,14 @@ components:
             default (in the centre of the code when the address fits, else
             above it), `centre` puts it in the middle of the code, `above`
             above the code.
+        size:
+          type: string
+          enum: ['', code]
+          description: >
+            A court poster's size choice, after trimming: empty (the default,
+            a large court letter) or `code` (a larger code and a smaller
+            letter). The viewer home poster has no letter, so the server
+            refuses any value but empty there, and any other value anywhere.
         hideSponsors:
           type: boolean
           description: True leaves the sponsor strip off this poster; absent shows it.

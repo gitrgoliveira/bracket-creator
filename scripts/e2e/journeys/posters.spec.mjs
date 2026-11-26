@@ -270,4 +270,53 @@ test.describe('venue posters', () => {
     expect(note.pages, 'one sheet: the note').toBe(1);
     expect(hasFill(note, band), 'no poster printed').toBe(false);
   });
+
+  // Last, since it makes a court code as large as the viewer's, which the Print
+  // all test above holds smaller.
+  test('Larger code: the longest text, the corner logo and six sponsors still fit, with a code about 118 mm on A4', async ({ page }) => {
+    await login(page);
+    await openPosters(page);
+    const poster = await choosePoster(page, 'Shiaijo C');
+    await page.getByLabel('Heading', { exact: true }).fill(HEADING_80);
+    await page.getByLabel(/^Call to action/).fill(CTA_120);
+    await page.getByRole('radio', { name: 'Logo in the top corner' }).check();
+    await page.getByRole('radio', { name: 'Larger code' }).check();
+    await expect(poster).toHaveAttribute('data-size', 'code');
+    await page.getByRole('button', { name: 'Save', exact: true }).tap();
+    await expect(page.getByTestId('posters-status')).toHaveText('Saved');
+    await imagesSettled(poster);
+    await shot(page, 'court-poster-larger-code');
+
+    const root = await printWithoutDialog(page, 'Print this poster');
+    await imagesSettled(root);
+    await page.setViewportSize(A4_CONTENT_PX);
+    await page.emulateMedia({ media: 'print' });
+    try {
+      const b = await posterBoxes(root.locator('.poster').first());
+      record({ journey: 'posters', step: 'larger code on A4', codeMm: pxToMm(b.code.width), letterMm: pxToMm(b.letter.height), poster: b.poster, strip: b.strip, pieces: b.pieces.map((p) => [p.cls, p.top, p.bottom]) });
+      expect(b.poster.height, 'the poster fits one page').toBeLessThanOrEqual(A4_CONTENT_PX.height + 0.5);
+      expect(pxToMm(b.code.width), 'the code is about 118 mm wide').toBeGreaterThan(112);
+      expect(pxToMm(b.code.width), 'the code is about 118 mm wide').toBeLessThan(124);
+      const label = b.pieces.find((p) => /poster__court-label/.test(p.cls));
+      const titles = b.pieces.find((p) => /poster__titles/.test(p.cls));
+      expect(b.letter.top, 'the letter is under its label').toBeGreaterThanOrEqual(label.bottom - 0.5);
+      expect(b.letter.bottom, 'the letter is still above the heading').toBeLessThanOrEqual(titles.top + 0.5);
+      const body = b.pieces.filter((p) => !/poster__sponsor\b/.test(p.cls));
+      for (let i = 1; i < body.length; i += 1) {
+        expect(body[i].top, `${body[i].cls} starts below ${body[i - 1].cls}`).toBeGreaterThanOrEqual(body[i - 1].bottom - 0.5);
+      }
+      expect(b.sponsors, 'six sponsors drawn').toHaveLength(SPONSORS.length);
+      const [first] = b.sponsors;
+      for (const s of b.sponsors) expect(Math.abs(s.top - first.top), 'one row').toBeLessThan(0.5);
+      expect(b.strip.top, 'the sponsor strip clears the address').toBeGreaterThanOrEqual(b.address.bottom);
+      expect(b.strip.bottom, 'the sponsor strip is on the sheet').toBeLessThanOrEqual(b.poster.bottom + 0.5);
+      expect(b.corner, 'a corner logo is drawn').not.toBeNull();
+      expect(b.corner.right, 'the corner logo clears the letter').toBeLessThanOrEqual(b.letter.left);
+      expect(b.corner.bottom, 'the corner logo is above the code').toBeLessThanOrEqual(b.code.top);
+    } finally {
+      await page.emulateMedia({ media: null });
+      await page.setViewportSize(OPERATOR_DEVICE.viewport);
+      await ensureCoarse(page);
+    }
+  });
 });

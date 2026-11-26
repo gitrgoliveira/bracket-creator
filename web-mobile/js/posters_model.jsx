@@ -25,6 +25,7 @@ export const POSTER_RULES = Object.freeze({
   headingMaxLength: 80,
   callToActionMaxLength: 120,
   logoValues: Object.freeze(["", "centre", "above"]),
+  sizeValues: Object.freeze(["", "code"]),
   maxCourtEntries: 32,
   defaultHeadings: Object.freeze({ viewer: "Follow the tournament live", court: "Follow this court live" }),
 });
@@ -42,6 +43,11 @@ export const POSTER_SIZES = Object.freeze({
   viewerCode: 62,
   courtCode: 43,
   courtLetter: 44,
+  // A court poster's "Larger code" size (size "code"): the code as large as the
+  // viewer home poster's (viewerCode) and the letter about half of courtLetter,
+  // so the 19cqw the code gains is the 19cqw the letter gives up and the poster
+  // keeps the height measured above (the code is about 118 mm wide on A4).
+  courtLetterSmall: 25,
   viewerLogoAbove: 15,
   // A court poster's "above" logo sits in the empty top corner beside the
   // letter, as tall as this and at most courtLogoCornerWidth wide, so it never
@@ -144,6 +150,8 @@ export function posterChoices(t, poster) {
     headingText: trimText(heading) || defaultHeading(poster),
     callToActionText: trimText(callToAction),
     logo: s.logo === "centre" || s.logo === "above" ? s.logo : "",
+    // Court posters only: the viewer home poster has no letter to trade.
+    size: poster.kind === "court" && s.size === "code" ? "code" : "",
     hideSponsors: !!s.hideSponsors,
   };
 }
@@ -265,12 +273,12 @@ export function logoURL(key) {
 // `trim` also trims the text (what is saved); a draft keeps it as typed so a
 // space between two words is not eaten while the organiser types.
 // withChoicesOnEveryCourt: the block with one court poster's choices (its
-// heading, call to action, logo place and sponsors) copied onto every other
+// heading, call to action, logo place, size and sponsors) copied onto every other
 // court poster in `list`. `others` names the courts whose choices it changes,
 // so the page can say what it replaced, or that nothing needed to change.
 export function withChoicesOnEveryCourt(posters, from, list, courts) {
   const src = cleanEntry(storedChoices(posters, from), false);
-  const patch = { heading: src.heading || "", callToAction: src.callToAction || "", logo: src.logo || "", hideSponsors: !!src.hideSponsors };
+  const patch = { heading: src.heading || "", callToAction: src.callToAction || "", logo: src.logo || "", size: src.size || "", hideSponsors: !!src.hideSponsors };
   const same = (p) => JSON.stringify(sortKeys(cleanEntry(storedChoices(posters, p), false))) === JSON.stringify(sortKeys(src));
   const others = list.filter((p) => p.kind === "court" && p.key !== from.key && !same(p));
   const next = others.reduce((acc, p) => withChoice(acc, p, patch, courts), posters || {});
@@ -285,6 +293,7 @@ function cleanEntry(e, trim) {
     if (trimText(v)) out[field] = trim ? trimText(v) : v;
   }
   if (entry.logo === "centre" || entry.logo === "above") out.logo = entry.logo;
+  if (entry.size === "code") out.size = entry.size;
   if (entry.hideSponsors) out.hideSponsors = true;
   return out;
 }

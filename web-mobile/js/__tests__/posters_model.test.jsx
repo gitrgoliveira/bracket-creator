@@ -47,6 +47,7 @@ describe('the shared poster rules table', () => {
     expect(POSTER_RULES.headingMaxLength).toBe(rules.headingMaxLength);
     expect(POSTER_RULES.callToActionMaxLength).toBe(rules.callToActionMaxLength);
     expect([...POSTER_RULES.logoValues]).toEqual(rules.logoValues);
+    expect([...POSTER_RULES.sizeValues]).toEqual(rules.sizeValues);
     expect(POSTER_RULES.maxCourtEntries).toBe(rules.maxCourtEntries);
     expect(POSTER_RULES.defaultHeadings).toEqual(rules.defaultHeadings);
   });
@@ -138,8 +139,16 @@ describe('posterChoices', () => {
       headingText: 'Hello',
       callToActionText: 'Scan me',
       logo: 'above',
+      size: '',
       hideSponsors: true,
     });
+  });
+
+  it('reads the Larger code size on a court poster only, and anything else as the large letter', () => {
+    const t = { ...base, posters: { viewer: { size: 'code' }, courts: { A: { size: 'code' }, B: { size: 'huge' } } } };
+    expect(posterChoices(t, court('A')).size).toBe('code');
+    expect(posterChoices(t, court('B')).size).toBe('');
+    expect(posterChoices(t, viewer).size).toBe('');
   });
 
   it('falls back to the default heading when the box is empty or blank', () => {
@@ -205,6 +214,13 @@ describe('POSTER_SIZES', () => {
     const printWidthMm = 210 - 2 * 10;
     expect((POSTER_SIZES.courtCode / 100) * printWidthMm).toBeGreaterThanOrEqual(80);
     expect(POSTER_SIZES.courtLetter).toBeGreaterThan(POSTER_SIZES.courtCode);
+  });
+
+  it('gives Larger code the viewer code and as much letter as the code gains', () => {
+    const printWidthMm = 210 - 2 * 10;
+    expect(Math.round((POSTER_SIZES.viewerCode / 100) * printWidthMm)).toBe(118);
+    expect(POSTER_SIZES.courtLetterSmall).toBeLessThan(POSTER_SIZES.courtLetter);
+    expect(POSTER_SIZES.viewerCode + POSTER_SIZES.courtLetterSmall).toBe(POSTER_SIZES.courtCode + POSTER_SIZES.courtLetter);
   });
 });
 
@@ -332,6 +348,13 @@ describe('withChoicesOnEveryCourt', () => {
       B: { heading: 'A words', hideSponsors: true },
       C: { heading: 'A words', hideSponsors: true },
     } });
+  });
+  it('copies the size too, and clears it where the source has none', () => {
+    const block = { courts: { A: { size: 'code' }, C: { heading: 'C' } } };
+    const { posters } = withChoicesOnEveryCourt(block, list[1], list, ['A', 'B', 'C']);
+    expect(posters.courts).toEqual({ A: { size: 'code' }, B: { size: 'code' }, C: { size: 'code' } });
+    const back = withChoicesOnEveryCourt({ courts: { A: {}, B: { size: 'code' } } }, list[1], list, ['A', 'B', 'C']).posters;
+    expect(back).toEqual({});
   });
   it('names no court when every court already matches', () => {
     const block = { courts: { A: { heading: 'Same' }, B: { heading: 'Same' }, C: { heading: 'Same' } } };

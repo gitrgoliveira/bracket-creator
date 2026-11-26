@@ -89,6 +89,19 @@ describe('Poster sizes', () => {
     expect(home.querySelector('.poster__court')).toBeNull();
   });
 
+  it('sets a Larger code court poster with the viewer code and the small letter, keeping the letter', () => {
+    const t = { ...base, posters: { courts: { B: { size: 'code' } } } };
+    const court = draw(t, courtB);
+    const poster = court.querySelector('.poster');
+    expect(poster.getAttribute('data-size')).toBe('code');
+    expect(poster.style.getPropertyValue('--poster-code')).toBe(POSTER_SIZES.viewerCode + 'cqw');
+    expect(poster.style.getPropertyValue('--poster-letter')).toBe(POSTER_SIZES.courtLetterSmall + 'cqw');
+    expect(court.querySelector('.poster__court-letter').textContent).toBe('B');
+    // The viewer home poster has no letter, so a size never reaches it.
+    const home = draw({ ...base, posters: { viewer: { size: 'code' } } }, viewer);
+    expect(home.querySelector('.poster').hasAttribute('data-size')).toBe(false);
+  });
+
   it('colours the band from the theme with a readable ink', () => {
     const style = draw(base, viewer).querySelector('.poster').style;
     expect(style.getPropertyValue('--poster-primary')).toBe('#1d3557');

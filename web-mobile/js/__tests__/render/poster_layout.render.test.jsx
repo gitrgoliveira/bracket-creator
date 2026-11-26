@@ -115,6 +115,11 @@ describe('Poster text', () => {
     expect(root.querySelector('.poster__cta')).toBeNull();
   });
 
+  it('keeps its heading out of the page outline', () => {
+    const root = draw(base, viewer);
+    expect(root.querySelectorAll('h1, h2, h3, h4, h5, h6, [role=heading]')).toHaveLength(0);
+  });
+
   it('prints a typed heading and a call to action under it', () => {
     const t = { ...base, posters: { courts: { B: { heading: 'Pools here', callToAction: 'Scan for results' } } } };
     const root = draw(t, courtB);

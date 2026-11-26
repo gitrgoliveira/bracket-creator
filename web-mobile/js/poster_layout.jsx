@@ -165,7 +165,9 @@ export function Poster({ tournament, poster, choices, logoKey }) {
             </div>
           )}
           <div className="poster__titles">
-            <h2 className={"poster__heading poster__heading--" + sizeClass(c.headingText, 28, 52)}>{c.headingText}</h2>
+            {/* Plain text, not a heading: the poster is a picture of a printout,
+              * so its words stay out of the page's outline. */}
+            <p className={"poster__heading poster__heading--" + sizeClass(c.headingText, 28, 52)}>{c.headingText}</p>
             {c.callToActionText && (
               <p className={"poster__cta poster__cta--" + sizeClass(c.callToActionText, 50, 80)}>{c.callToActionText}</p>
             )}

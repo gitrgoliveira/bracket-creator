@@ -12,16 +12,24 @@
  *   --poster-logo-corner-width  its widest
  *   --poster-ink         the colour of the text set on the white paper, the
  *                        primary colour darkened until it reads
- * The paper and the code are fixed white and black, in light and dark mode. */
+ * The paper and the code are fixed white and black, in light and dark mode: the
+ * poster's own colours are named once below and never follow the app's theme. */
 
 .poster {
+  --poster-paper: #fff;
+  --poster-text: #111;
+  --poster-cta-text: #222;
+  --poster-address-text: #333;
+  --poster-rule: #d8d8d8;
+  --poster-warning: #9b1c1c;
+  --poster-warning-text: #7a1212;
   position: relative;
   container-type: inline-size;
   aspect-ratio: 210 / 297;
   width: 100%;
   overflow: hidden;
-  background: #fff;
-  color: #111;
+  background: var(--poster-paper);
+  color: var(--poster-text);
   color-scheme: light;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15), 0 2px 10px rgba(0, 0, 0, 0.12);
 }
@@ -134,7 +142,7 @@
   margin: 0.8cqw 0 0;
   font-weight: 600;
   line-height: 1.2;
-  color: #222;
+  color: var(--poster-cta-text);
   overflow-wrap: anywhere;
 }
 
@@ -169,7 +177,7 @@
   flex: none;
   width: var(--poster-code);
   aspect-ratio: 1;
-  background: #fff;
+  background: var(--poster-paper);
 }
 
 .poster__code-svg {
@@ -195,12 +203,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 0.6cqw dashed #9b1c1c;
+  border: 0.6cqw dashed var(--poster-warning);
   font-size: 3cqw;
   font-weight: 600;
   line-height: 1.3;
-  color: #7a1212;
-  background: #fff;
+  color: var(--poster-warning-text);
+  background: var(--poster-paper);
 }
 
 /* The code and its address stay together, the address just under the code. */
@@ -218,7 +226,7 @@
   margin: 0;
   font-size: 2.2cqw;
   line-height: 1.2;
-  color: #333;
+  color: var(--poster-address-text);
   overflow-wrap: anywhere;
 }
 
@@ -237,7 +245,7 @@
   min-height: calc(var(--poster-sponsor-min) + 2.9cqw);
   max-height: calc(var(--poster-sponsor-max) + 2.9cqw);
   padding: 1.2cqw 0 1.4cqw;
-  border-top: 0.3cqw solid #d8d8d8;
+  border-top: 0.3cqw solid var(--poster-rule);
 }
 
 .poster__sponsors-row {
@@ -372,6 +380,7 @@
 }
 
 .posters-print-hint {
+  max-width: 70ch;
   margin-top: 8px;
 }
 
@@ -412,6 +421,14 @@
     order: -1;
     max-width: 240px;
     margin: 0 auto;
+  }
+  /* The picker sits centred over the poster it chooses. */
+  .posters-picker {
+    display: flex;
+    width: fit-content;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
   }
   /* Too wide to share Save's line, so the name and Preview take the next one
    * together: the name fills it and Preview sits at its end. */

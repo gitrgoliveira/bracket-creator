@@ -75,6 +75,13 @@ describe('If you swap them', () => {
     expect(screen.getByTestId('swap-them').className).toBe('btn btn--primary');
   });
 
+  it('says nothing of the public pages while the draw is hidden from the public', async () => {
+    window.API.swapDrawPlaces = vi.fn().mockResolvedValue(dryRun);
+    await open({ drawHidden: true });
+    expect(screen.getByTestId('swap-verdict')).toBeInTheDocument();
+    expect(screen.queryByText('The public pages update at once.')).toBeNull();
+  });
+
   it('warns first when the swap leaves a dojo worse off, and asks to Swap anyway', async () => {
     vi.useFakeTimers();
     const pair = (bId, m) => ({ dojo: 'Fudo', a: { id: 'a', name: 'Arthur Dick' }, b: { id: bId, name: bId }, ...m });

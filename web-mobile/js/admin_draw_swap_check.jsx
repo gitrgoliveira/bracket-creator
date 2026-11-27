@@ -384,7 +384,7 @@ export function swapBody(a, b, dryRun) {
  *   onDrawChanged(message)      the draw moved under the page (draw_changed,
  *                               draw_started, no_draw): the host reads it again
  */
-export function DrawSwapCheck({ comp, bracket, a, b, password, onClose, onSwapped, onDrawChanged }) {
+export function DrawSwapCheck({ comp, bracket, a, b, password, drawHidden, onClose, onSwapped, onDrawChanged }) {
   const [check, setCheck] = useState(null);
   const [error, setError] = useState(null);
   const [sending, setSending] = useState(false);
@@ -455,7 +455,7 @@ export function DrawSwapCheck({ comp, bracket, a, b, password, onClose, onSwappe
             {details.map((l) => (
               <p key={l.text} className={`draw-swap-check__line${l.kind === 'warn' ? ' draw-swap-check__line--warn' : ''}`}>{l.text}</p>
             ))}
-            <p className="draw-swap-check__line">The public pages update at once.</p>
+            {!drawHidden && <p className="draw-swap-check__line">The public pages update at once.</p>}
           </div>
         )}
         {error && <div className="alert alert--error" role="alert">{error}</div>}

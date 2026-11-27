@@ -238,7 +238,7 @@ function Suggestions({ answer, bracket, onPick }) {
  * whose draw has no bracket to review (league, Swiss) or that is not
  * draw-ready.
  */
-export function DrawReviewPanel({ c, poolMatches, bracket, password, showToast, onRefreshCompetition, onSection }) {
+export function DrawReviewPanel({ c, poolMatches, bracket, password, drawHidden, showToast, onRefreshCompetition, onSection }) {
   const [generation, setGeneration] = useState(0);
   const [checking, setChecking] = useState(null);
   const shown = reviewsDraw(c) && c.status === 'draw-ready';
@@ -311,7 +311,7 @@ export function DrawReviewPanel({ c, poolMatches, bracket, password, showToast, 
       )}
 
       {checking && (
-        <DrawSwapCheck comp={c} bracket={bracket} a={checking.a} b={checking.b} password={password}
+        <DrawSwapCheck comp={c} bracket={bracket} a={checking.a} b={checking.b} password={password} drawHidden={drawHidden}
           onClose={() => setChecking(null)} onSwapped={onSwapped} onDrawChanged={onDrawChanged} />
       )}
     </div>

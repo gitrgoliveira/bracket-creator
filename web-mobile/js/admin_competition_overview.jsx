@@ -809,7 +809,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
           <div>
             <div className="row">{previewCard}</div>
             <DrawReviewPanel c={c} poolMatches={poolMatches ?? c.poolMatches} bracket={effectiveBracket}
-              password={password} showToast={showToast} onRefreshCompetition={onRefreshCompetition} onSection={onSection} />
+              password={password} drawHidden={drawHiddenFromPublic(tournament, c)} showToast={showToast} onRefreshCompetition={onRefreshCompetition} onSection={onSection} />
           </div>
         );
       }

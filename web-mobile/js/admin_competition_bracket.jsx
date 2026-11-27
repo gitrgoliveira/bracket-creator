@@ -261,7 +261,7 @@ export function swapPickLine(picked, bracket) {
 // prop for the viewer, null while the mode is off), `active`, and `controls`
 // (the button or banner, and the check panel) for the host to draw above the
 // viewer. `beforeTurnOn` may refuse (an editor holding unsaved entries).
-export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, password, beforeTurnOn, onTurnOn }) {
+export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, password, drawHidden, beforeTurnOn, onTurnOn }) {
   // Taken once, as the tab mounts: on when the Draw review card's button
   // opened the tab to swap competitors.
   const [on, setOn] = useState(() => takeSwapMode(c && c.id));
@@ -405,7 +405,7 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
         {picked && <SwapMarksKey current={checking ? null : marksKey({ marks, failed })} />}
       </div>
       {checking && (
-        <DrawSwapCheck comp={c} bracket={bracket} a={checking.a} b={checking.b} password={password}
+        <DrawSwapCheck comp={c} bracket={bracket} a={checking.a} b={checking.b} password={password} drawHidden={drawHidden}
           onClose={() => setChecking(null)} onSwapped={onSwapped} onDrawChanged={onDrawChanged} />
       )}
       </>
@@ -414,7 +414,7 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
   return { swap, active, controls };
 }
 
-function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password, hostUnsavedRef = null }) {
+function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password, drawHidden, hostUnsavedRef = null }) {
   const [selected, setSelected] = useState(null);
   // The panel's editor publishes its unsaved entries here: choosing another
   // match puts it in the editor's place (keyed by match id), so over unsaved
@@ -471,7 +471,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   // Swap competitors (knockout-only draws): turning it on closes the scoring
   // panel, so over unsaved entries it asks first, as choosing another match does.
   const swapMode = useSwapCompetitors({
-    c, tab: 'bracket', pools: null, poolMatches: null, bracket, password,
+    c, tab: 'bracket', pools: null, poolMatches: null, bracket, password, drawHidden,
     beforeTurnOn: () => confirmLeave(editorUnsavedRef),
     onTurnOn: () => setSelected(null),
   });

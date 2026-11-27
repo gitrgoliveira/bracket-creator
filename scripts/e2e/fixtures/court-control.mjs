@@ -20,7 +20,7 @@
 //     fixtures/test.mjs calls it for every page before its context or the
 //     page itself closes.
 //   - A shiaijo given back stays with its tablet for the server's grace
-//     (courtReleaseGrace, half a minute), so a reload gets it back first: a
+//     (courtReleaseGrace, 10 seconds), so a reload gets it back first: a
 //     console on another tablet (the next test's context, or the next
 //     context) opened within it reads "View only ... was closed on" and takes it
 //     with Take control, which openShiaijo does by default. Only another tab

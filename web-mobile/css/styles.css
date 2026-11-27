@@ -10793,9 +10793,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 /* On a small phone the "Control lost" band's sentence is long and its two
    buttons squeeze it into a narrow column (169px tall at 320px), so the
-   buttons move under the sentence, right-aligned (101px). Only that band: a
-   wider phone, or a shorter band, is shorter on one row. */
-@media (max-width: 360px) {
+   buttons move under the sentence, right-aligned (101px). 369px is where one
+   row stops being taller (109px up to 369px, 89px from 370px). Only that
+   band: a wider phone, or a shorter band, is shorter on one row. */
+@media (max-width: 369px) {
   .shiaijo-control--lost .shiaijo-control__row { flex-wrap: wrap; row-gap: 4px; padding-bottom: 8px; }
   .shiaijo-control--lost .shiaijo-control__text { flex: 1 1 100%; }
   .shiaijo-control--lost .shiaijo-control__text + .btn { margin-left: auto; }

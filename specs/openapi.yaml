@@ -123,8 +123,9 @@ info:
     add made elsewhere) keeps the stored row, scored or not, unless it finishes the match,
     which is refused with 409 `daihyosen_added`. It carries only what the competitors saw: a match
     `decision` that is empty, `fought`, `hikiwake` or, in a kachinuki competition,
-    `kachinuki-exhaustion` (the End match write, whose winner the server works out
-    from the scored bouts), a numbered bout `decision` that is
+    `kachinuki-exhaustion` (the End match write: the server works its winner out
+    from the scored bouts when it can attribute the last one, and otherwise the
+    winner sent stands, as for `fought`), a numbered bout `decision` that is
     one of those or `fusensho`, and a representative-bout `decision` that is empty or
     `daihyosen` (a draw, a kiken, a fusenpai, or a fusensho there would decide the encounter). Any
     other decision, or the `Ht` judges'-decision mark on a numbered bout, is refused
@@ -609,6 +610,10 @@ paths:
 
         `name` is trimmed and must be non-empty after trim (`tournament name is required`).
         `venue` and `date` are also trimmed but may be empty.
+
+        `posters` is judged as on PUT (400 with its sentence). A POST against
+        an existing tournament that leaves `posters` out keeps the stored
+        block, as it keeps the stored `defaultPublicNames`.
       security:
         - TournamentPassword: []
         - {}
@@ -687,6 +692,11 @@ paths:
             exact branches.
 
         Validation matches POST for `name` (rejected if empty after trim).
+
+        **Posters**: a body that sends `posters` replaces the whole block
+        (`{}` clears it); a body that leaves the key out keeps the stored
+        block. A block the server would not store is 400 with one plain
+        sentence naming the poster and the box (see `Posters`).
 
         **Version check**: the body must carry `tournamentVersion`, the version
         of the settings the save was made from (from `GET /api/tournament`,
@@ -9836,6 +9846,70 @@ components:
               description: >
                 When true and a logo is uploaded, the lobby display shows the
                 tournament logo; absent reads false.
+        posters:
+          $ref: '#/components/schemas/Posters'
+    Posters:
+      type: object
+      description: >
+        The organiser's choices for the printed QR-code posters, saved through
+        PUT /api/tournament and part of `tournamentVersion` when it holds a
+        choice. Absent when nothing is chosen (every poster prints its
+        defaults). Text is trimmed and empty entries are dropped before it is
+        stored. A refusal is 400 with one sentence, for example "The heading
+        on the Shiaijo B poster is longer than 80 characters.". The limits,
+        logo values and default headings are in the table
+        `internal/state/testdata/poster_rules.json`, which the browser's copy is
+        tested against.
+      properties:
+        viewer:
+          $ref: '#/components/schemas/PosterChoices'
+        courts:
+          type: object
+          description: >
+            One entry per court poster, keyed by court label. A key that
+            holds any choice must be one non-blank character; an empty entry
+            may have any key and is dropped before it is counted or stored.
+            An entry for a court the tournament no longer has is kept and
+            valid, and is not shown. At most 32 entries that are not empty
+            (twice the court limit).
+          additionalProperties:
+            $ref: '#/components/schemas/PosterChoices'
+    PosterChoices:
+      type: object
+      description: One poster's choices. Every field is omitted when empty.
+      properties:
+        heading:
+          type: string
+          description: >
+            Heading printed under the band. Empty prints the default, "Follow
+            the tournament live" on the viewer home poster and "Follow this
+            court live" on a court poster, under the court's letter. The server
+            trims it first, then allows at most 80 characters.
+        callToAction:
+          type: string
+          description: >
+            Optional line printed under the heading; empty prints nothing. The
+            server trims it first, then allows at most 120 characters.
+        logo:
+          type: string
+          description: >
+            Where the tournament logo goes when one is uploaded: empty, `centre`
+            or `above`, after trimming (the server refuses any other value).
+            Empty is the
+            default (in the centre of the code when the address fits, else
+            above it), `centre` puts it in the middle of the code, `above`
+            above the code.
+        size:
+          type: string
+          enum: ['', code]
+          description: >
+            A court poster's size choice, after trimming: empty (the default,
+            a large court letter) or `code` (a larger code and a smaller
+            letter). The viewer home poster has no letter, so the server
+            refuses any value but empty there, and any other value anywhere.
+        hideSponsors:
+          type: boolean
+          description: True leaves the sponsor strip off this poster; absent shows it.
     TournamentWithCompetitions:
       description: >
         The response shape for POST and PUT /api/tournament: every Tournament

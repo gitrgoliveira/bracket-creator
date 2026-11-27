@@ -139,6 +139,9 @@ type Tournament struct {
 	// tournament logo (mp-scf). All fields are omitempty so existing
 	// tournament.md files without a theme block round-trip cleanly.
 	Theme *Theme `yaml:"theme,omitempty" json:"theme,omitempty"`
+
+	// Posters: the printed QR-code posters' choices (posters.go).
+	Posters *Posters `yaml:"posters,omitempty" json:"posters,omitempty"`
 }
 
 // TournamentContact is a single contact entry for attendees (mp-ef3).

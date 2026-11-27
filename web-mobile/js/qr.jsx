@@ -1,9 +1,11 @@
 // qr.jsx: Zero-dependency QR Code Model 2 generator.
-// Encodes byte-mode data, error correction level M, versions 2-10.
+// Encodes byte-mode data, error correction level M (default) or H, versions 2-10.
 // (Version 1 / 21×21 modules is excluded: too small for reliable phone scanning.)
 // Implements ISO/IEC 18004:2015.
 //
-// Public API: renderQR(canvas, text, opts)
+// Public API: renderQR(canvas, text, opts), qrMatrix(text, {level}),
+// qrFits(text, {level}). Level M is the default everywhere; level H (about 30%
+// of the code damaged still reads) is for a code with a logo over its centre.
 
 // ---------------------------------------------------------------------------
 // GF(256) arithmetic over the QR Code field (prime poly x^8+x^4+x^3+x^2+1)
@@ -74,14 +76,42 @@ const QR_BLOCKS_M = [
   [18, 2, 32, 0,  0],     // v4:  2 blk(32DC)+18EC/blk  -> 64DC+36EC=100 total
   [24, 2, 43, 0,  0],     // v5:  2 blk(43DC)+24EC/blk  -> 86DC+48EC=134 total
   [16, 4, 27, 0,  0],     // v6:  4 blk(27DC)+16EC/blk  -> 108DC+64EC=172 total
-  [22, 4, 27, 0,  0],     // v7:  4 blk(27DC)+22EC/blk  -> 108DC+88EC=196 total
+  [18, 4, 31, 0,  0],     // v7:  4 blk(31DC)+18EC/blk  -> 124DC+72EC=196 total
   [22, 2, 38, 2, 39],     // v8:  2 blk(38DC)+2 blk(39DC)+22EC/blk -> 154DC+88EC=242 total
   [22, 3, 36, 2, 37],     // v9:  3 blk(36DC)+2 blk(37DC)+22EC/blk -> 182DC+110EC=292 total
   [26, 4, 43, 1, 44],     // v10: 4 blk(43DC)+1 blk(44DC)+26EC/blk -> 216DC+130EC=346 total
 ];
 
-function totalDataCW(v) {
-  const [, n1, dc1, n2, dc2] = QR_BLOCKS_M[v];
+// Block structure for EC level H, versions 1-10 (same columns as QR_BLOCKS_M).
+// Source: ISO/IEC 18004:2015 Table 9. Version 1 is a null placeholder: the
+// encoder starts at version 2 (see selectVersion), so the index stays the version.
+const QR_BLOCKS_H = [
+  null,                    // v0 (unused)
+  null,                    // v1 (never encoded)
+  [28, 1, 16, 0,  0],     // v2:  16DC+28EC=44  total
+  [22, 2, 13, 0,  0],     // v3:  26DC+44EC=70  total
+  [16, 4,  9, 0,  0],     // v4:  36DC+64EC=100 total
+  [22, 2, 11, 2, 12],     // v5:  46DC+88EC=134 total
+  [28, 4, 15, 0,  0],     // v6:  60DC+112EC=172 total
+  [26, 4, 13, 1, 14],     // v7:  66DC+130EC=196 total
+  [26, 4, 14, 2, 15],     // v8:  86DC+156EC=242 total
+  [24, 4, 12, 4, 13],     // v9:  100DC+192EC=292 total
+  [28, 6, 15, 2, 16],     // v10: 122DC+224EC=346 total
+];
+
+// The two-bit EC level indicator of the format information (ISO 18004 Table 12).
+const LEVEL_BITS = { M: 0b00, H: 0b10 };
+
+// blocksFor: the block table of an EC level. Any level but M or H throws, so a
+// typo cannot quietly encode at the wrong strength.
+function blocksFor(level) {
+  if (level === "M") return QR_BLOCKS_M;
+  if (level === "H") return QR_BLOCKS_H;
+  throw new Error(`Unsupported QR error correction level: ${level}`);
+}
+
+function totalDataCW(v, level) {
+  const [, n1, dc1, n2, dc2] = blocksFor(level)[v];
   return n1 * dc1 + n2 * dc2;
 }
 
@@ -89,18 +119,18 @@ function totalDataCW(v) {
 function charCountBits(v) { return v >= 10 ? 16 : 8; }
 
 // Maximum byte-mode payload for version v (after mode indicator + count bits)
-function byteCapacity(v) {
-  return Math.floor((totalDataCW(v) * 8 - 4 - charCountBits(v)) / 8);
+function byteCapacity(v, level) {
+  return Math.floor((totalDataCW(v, level) * 8 - 4 - charCountBits(v)) / 8);
 }
 
-// The largest version QR_BLOCKS_M carries, named once so selectVersion's loop
-// bound, its error message and QR_MAX_BYTES below cannot fall out of step.
+// The largest version the block tables carry, named once so selectVersion's loop
+// bound, its error message and qrMaxBytes below cannot fall out of step.
 const QR_MAX_VERSION = 10;
 
-// The longest text renderQR can encode at all. DERIVED from the block table
-// above rather than written as a literal, so it stays true if that table
-// changes.
-const QR_MAX_BYTES = byteCapacity(QR_MAX_VERSION);
+// The longest text that can be encoded at all, at an EC level. DERIVED from the
+// block tables above rather than written as a literal, so it stays true if they
+// change.
+function qrMaxBytes(level) { return byteCapacity(QR_MAX_VERSION, level); }
 
 // qrFits: can this text be a QR code at all? Asked by any surface that OFFERS
 // a QR, so it can decide before drawing rather than calling renderQR and
@@ -112,9 +142,9 @@ const QR_MAX_BYTES = byteCapacity(QR_MAX_VERSION);
 // `url.length <= max` -- right for ASCII and wrong the moment a dojo name is
 // not. That convention belongs with the encoder that imposes it: this is the
 // same measure selectVersion is given below.
-export function qrFits(text) {
+export function qrFits(text, { level = "M" } = {}) {
   if (!text) return false;
-  return utf8Bytes(text).length <= QR_MAX_BYTES;
+  return utf8Bytes(text).length <= qrMaxBytes(level);
 }
 
 // utf8Bytes: the ONE measure of a payload. qrFits, the encoder and the
@@ -124,23 +154,23 @@ function utf8Bytes(text) {
   return new TextEncoder().encode(text);
 }
 
-function selectVersion(byteLen) {
+function selectVersion(byteLen, level) {
   // Start at version 2 (25×25). Version 1 (21×21) is intentionally excluded for
   // scan reliability: at 1px/module + 4-module quiet zone it renders to only 29×29 px,
   // below the minimum image size most phone cameras can reliably detect (~33×33 px).
   // This applies regardless of payload length.
   for (let v = 2; v <= QR_MAX_VERSION; v++) {
-    if (byteCapacity(v) >= byteLen) return v;
+    if (byteCapacity(v, level) >= byteLen) return v;
   }
-  throw new Error(`Text too long for QR versions 2-${QR_MAX_VERSION} (max ~${QR_MAX_BYTES} bytes)`);
+  throw new Error(`Text too long for QR versions 2-${QR_MAX_VERSION} at level ${level} (max ~${qrMaxBytes(level)} bytes)`);
 }
 
 // ---------------------------------------------------------------------------
 // Data encoding: byte mode
 // ---------------------------------------------------------------------------
-function encodeByte(text, version) {
+function encodeByte(text, version, level) {
   const bytes = utf8Bytes(text);
-  const dataCW = totalDataCW(version);
+  const dataCW = totalDataCW(version, level);
   const totalBits = dataCW * 8;
 
   const bits = [];
@@ -172,8 +202,8 @@ function encodeByte(text, version) {
 // ---------------------------------------------------------------------------
 // Interleave data and EC codewords across blocks
 // ---------------------------------------------------------------------------
-function interleave(version, dataCW) {
-  const [ecPerBlock, n1, dc1, n2, dc2] = QR_BLOCKS_M[version];
+function interleave(version, dataCW, level) {
+  const [ecPerBlock, n1, dc1, n2, dc2] = blocksFor(level)[version];
 
   const blocks = [];
   let offset = 0;
@@ -212,6 +242,14 @@ const ALIGN_POS = [
   [6, 28, 50],  // v10
 ];
 
+// The 18-bit version information of versions 7 and up: the 6-bit version and 12
+// BCH bits, generator x^12+x^11+x^10+x^9+x^8+x^5+x^2+1 = 0x1F25 (ISO 18004 Annex D).
+function computeVersionBits(version) {
+  let rem = version;
+  for (let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >> 11) * 0x1F25);
+  return (version << 12) | rem;
+}
+
 function buildMatrix(version) {
   const size = matrixSize(version);
   const EMPTY = 255;
@@ -240,16 +278,13 @@ function buildMatrix(version) {
   placeFinder(0, size - 7);
   placeFinder(size - 7, 0);
 
-  // Timing patterns
-  for (let i = 8; i < size - 8; i++) {
-    set(6, i, i % 2 === 0 ? 1 : 0);
-    set(i, 6, i % 2 === 0 ? 1 : 0);
-  }
-
   // Dark module
   set(4 * version + 9, 8, 1);
 
-  // Alignment patterns (version ≥ 2)
+  // Alignment patterns (version ≥ 2). Drawn BEFORE the timing patterns so the
+  // only occupied cells they meet are the finders' (those three are skipped).
+  // From version 7 some sit on the timing line, (6,22) and (22,6) at version 7,
+  // and are real patterns: drawing timing first used to skip them.
   if (version >= 2) {
     const pos = ALIGN_POS[version - 1];
     for (const ar of pos) {
@@ -266,11 +301,30 @@ function buildMatrix(version) {
     }
   }
 
+  // Timing patterns
+  for (let i = 8; i < size - 8; i++) {
+    set(6, i, i % 2 === 0 ? 1 : 0);
+    set(i, 6, i % 2 === 0 ? 1 : 0);
+  }
+
   // Mark format info areas as reserved (value 2)
   function reserve(r, c) { if (get(r, c) === EMPTY) set(r, c, 2); }
   for (let i = 0; i <= 8; i++) { reserve(8, i); reserve(i, 8); }           // top-left
   for (let i = size - 8; i < size; i++) reserve(8, i);                      // top-right
   for (let i = size - 8; i < size; i++) reserve(i, 8);                      // bottom-left (includes dark module row)
+
+  // Version information (versions 7+): two 6x3 blocks, one beside the top-right
+  // finder and one above the bottom-left finder, bit i LSB first. They are
+  // function modules, so the data zigzag skips them and the mask leaves them be.
+  if (version >= 7) {
+    const bits = computeVersionBits(version);
+    for (let i = 0; i < 18; i++) {
+      const bit = (bits >> i) & 1;
+      const a = size - 11 + (i % 3), b = Math.floor(i / 3);
+      set(b, a, bit); // top-right block: row b, column a
+      set(a, b, bit); // bottom-left block: row a, column b
+    }
+  }
 
   return mat;
 }
@@ -398,13 +452,13 @@ function penaltyScore(mat, size) {
 
 // ---------------------------------------------------------------------------
 // Format information placement
-// EC level M = binary 00 in QR format bits
+// EC level indicator: M = binary 00, H = binary 10 (LEVEL_BITS)
 // Generator: G(x) = x^10 + x^8 + x^5 + x^4 + x^2 + x + 1 = 0x537
 // XOR mask: 101010000010010 = 0x5412
 // ---------------------------------------------------------------------------
-function computeFormatBits(maskId) {
-  // 5-bit data: EC level M (00) concatenated with 3-bit mask pattern
-  const data = maskId; // (0b00 << 3) | maskId = maskId since EC bits are 0
+function computeFormatBits(maskId, level) {
+  // 5-bit data: the 2-bit EC level indicator concatenated with the 3-bit mask pattern
+  const data = (LEVEL_BITS[level] << 3) | maskId;
   let rem = data << 10;
   // Polynomial division (15-bit format word, generator degree 10)
   for (let i = 14; i >= 10; i--) {
@@ -413,8 +467,8 @@ function computeFormatBits(maskId) {
   return ((data << 10) | rem) ^ 0x5412;
 }
 
-function placeFormatInfo(mat, size, maskId) {
-  const fmt = computeFormatBits(maskId);
+function placeFormatInfo(mat, size, maskId, level) {
+  const fmt = computeFormatBits(maskId, level);
 
   // jsQR reads format info bits by scanning the position sequence left-to-right
   // using pushBit which makes the FIRST cell read the MSB (bit 14) of the
@@ -448,16 +502,16 @@ function placeFormatInfo(mat, size, maskId) {
 // ---------------------------------------------------------------------------
 // Build a complete QR matrix
 // ---------------------------------------------------------------------------
-function buildQR(text) {
+function buildQR(text, level = "M") {
   const bytes = utf8Bytes(text);
-  const version = selectVersion(bytes.length);
+  const version = selectVersion(bytes.length, level);
   const size = matrixSize(version);
 
   const mat = buildMatrix(version);
   const funcMask = makeFuncMask(mat, size);
 
-  const dataCW = encodeByte(text, version);
-  const allCW = interleave(version, dataCW);
+  const dataCW = encodeByte(text, version, level);
+  const allCW = interleave(version, dataCW, level);
 
   placeData(mat, size, allCW);
 
@@ -468,7 +522,7 @@ function buildQR(text) {
     // penaltyScore sees a fully binary matrix (ISO 18004:2015 §7.8.3). Format
     // info cells are reserved as value 2 in buildMatrix; leaving them at 2 would
     // give Rule 4 an inaccurate dark-module proportion and break Rules 1–3 runs.
-    placeFormatInfo(candidate, size, m);
+    placeFormatInfo(candidate, size, m, level);
     candidate[(4 * version + 9) * size + 8] = 1;
     const s = penaltyScore(candidate, size);
     if (s < bestScore) { bestScore = s; bestMat = candidate; }
@@ -487,7 +541,7 @@ export { buildQR as _buildQR_test };
 /**
  * Render a QR code for `text` onto the given `<canvas>` element.
  * @param {HTMLCanvasElement} canvas  Target canvas
- * @param {string}           text    Text to encode (byte mode, EC level M)
+ * @param {string}           text    Text to encode (byte mode, EC level M; use qrMatrix for level H)
  * @param {object}           opts
  * @param {number}           [opts.moduleSize=6]  CSS pixels per module
  * @param {number}           [opts.quietZone=4]   Quiet zone width in modules
@@ -523,6 +577,31 @@ export function renderQR(canvas, text, { moduleSize = 6, quietZone = 4 } = {}) {
       }
     }
   }
+}
+
+/**
+ * The QR matrix for `text`, for a caller that draws it itself (the venue poster
+ * paints it into SVG). A fresh copy: the caller may keep or change it.
+ * @param {string} text
+ * @param {object} [opts]
+ * @param {"M"|"H"} [opts.level="M"]  Error correction level
+ * @returns {{size: number, modules: Uint8Array}} modules is row-major, 1 for dark
+ */
+export function qrMatrix(text, { level = "M" } = {}) {
+  const { mat, size } = buildQR(text, level);
+  return { size, modules: Uint8Array.from(mat, (v) => (v === 1 ? 1 : 0)) };
+}
+
+/**
+ * The share of a level-H code's area a centre logo pad may cover and still
+ * decode, by the code's side in modules. MEASURED with jsQR on codes filled to
+ * capacity (qr_level_h_decode.test.jsx): the 20% limit holds from version 5 up,
+ * but v2 to v4 have too few codewords to spare and decode only up to 10%.
+ * @param {number} size  the matrix side, as qrMatrix returns it
+ * @returns {number} 0.1 or 0.2
+ */
+export function qrLogoPadShare(size) {
+  return (size - 17) / 4 >= 5 ? 0.2 : 0.1;
 }
 
 // Expose on window so non-importing surfaces (the /display StreamingOverlay,

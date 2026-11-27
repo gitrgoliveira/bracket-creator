@@ -643,8 +643,9 @@ test.describe('concurrent taps from two devices', () => {
   // FR6.3. The device that finishes offline is device 2, the Scores page, and
   // the one that finishes online is device 1, the court's tablet. This is the
   // one case where the head table records a result itself rather than
-  // correcting the court's entries: what it pins is an ordinary device's
-  // result losing to the court's, and the head table is that device. Not the other
+  // correcting the court's entries: it stands for a result recorded there by
+  // mistake (operator decision D1, 2026-11-27), the case FR8 exists for, and
+  // what it pins is that result losing to the court's. Not the other
   // way round: the court console that runs the shiaijo is the court's
   // authoritative operator, and its result counts over another device's
   // (FR8), so an offline finish made there would be recorded on its return,

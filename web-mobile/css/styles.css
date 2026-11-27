@@ -13253,13 +13253,16 @@ button.bc-side.swap-pick.swap-pick--worse {
 /* The mark's line, under the dojo: "Worse for Fudo, Hizen" (operator
    decision C9). It is drawn on every pick from the moment the mode is on,
    a no-break space until a mark shows, so the space is held before any mark,
-   and a long list wraps inside the pick rather than pushing the name. */
+   and a long list wraps inside the pick rather than pushing the name. It
+   wraps between words only, so a dojo name is never split mid-word (operator
+   ruling 2026-11-27): break-word, unlike anywhere, leaves a whole word in the
+   pick's min-content width, so a narrow pool column widens to the word. */
 .swap-verdict {
   display: block;
   font-size: 12px;
   font-weight: 600;
   line-height: 1.4;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .swap-verdict--better {
   color: var(--ok-ink);

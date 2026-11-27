@@ -16,7 +16,7 @@ export { PASSWORD };
 // sessionStorage and the tablet id in localStorage. Every capture context is a
 // fresh browser, and closing one sends no pagehide (Playwright's
 // context.close() fires none), so a second capture of the same family's
-// console would open a shiaijo "run from another device" and draw it view
+// console would open a shiaijo another device runs and draw it view
 // only. The capture is the court's own tablet instead: every signed-in
 // context starts as the SAME tab of the SAME tablet, so each console reads as
 // the one that runs its shiaijo (a tab that reopens claims what it held), as a

@@ -22,7 +22,7 @@
 //   - A shiaijo given back stays with its tablet for the server's grace
 //     (courtReleaseGrace, half a minute), so a reload gets it back first: a
 //     console on another tablet (the next test's context, or the next
-//     context) opened within it reads "run from another device" and takes it
+//     context) opened within it reads "View only ... was closed on" and takes it
 //     with Take control, which openShiaijo does by default. Only another tab
 //     of the same tablet, or the grace running out, finds it free.
 import { expect } from '@playwright/test';
@@ -49,12 +49,21 @@ export async function awaitControl(page) {
   return bar.getAttribute('data-state');
 }
 
-// The grey bar a second tab of the tablet that runs the shiaijo shows.
-export const SAME_TABLET_TEXT = (court) => new RegExp(`^Shiaijo ${court} is run from another tab on this tablet\\b.*\\.$`);
-// The grey bar a console on another tablet shows.
-export const OTHER_DEVICE_TEXT = (court) => new RegExp(`^Shiaijo ${court} is run from another device\\b`);
+// The bar's words open with a bold word (admin_shiaijo_control.jsx
+// courtControlBar), then the sentence; a phone leaves out the detail.
+// The slate "View only" bar a second tab of the tablet that runs the shiaijo shows.
+export const SAME_TABLET_TEXT = (court) => new RegExp(`^View only Another tab on this device runs shiaijo ${court}\\.`);
+// The slate "View only" bar a console on another tablet shows: the device runs
+// it, or (within the server's release grace) closed it just now.
+export const OTHER_DEVICE_TEXT = (court) => new RegExp(`^View only (?:(?:An? [A-Za-z ]+|Another device) runs shiaijo ${court}\\.|Shiaijo ${court} was closed on )`);
+// The amber "Control lost" bar of a tablet another tablet took the shiaijo from.
+export const LOST_TEXT = (court) => new RegExp(`^Control lost (?:An? [A-Za-z ]+|Another device) took shiaijo ${court} from this device\\.$`);
 // The green bar of the tab that runs it.
-export const HOLDS_TEXT = (court) => `This tablet runs shiaijo ${court}.`;
+export const HOLDS_TEXT = (court) => `Running This device runs shiaijo ${court}.`;
+// The one-time note a console shows when it stops running its shiaijo while open.
+export const LOST_NOTE = '[data-testid="court-control-lost"]';
+// The confirm's statement when another tablet runs the shiaijo.
+export const TAKE_STATEMENT = /^(?:An? [A-Za-z ]+|Another device) runs it\b.*\. That device becomes view only; results it already saved are kept\.$/;
 
 // The bar's text, one line.
 export const controlText = async (page) => (await courtControlBar(page).locator('.shiaijo-control__text').innerText()).replace(/\s+/g, ' ').trim();

@@ -293,7 +293,7 @@ describe('the claim and the state', () => {
     expect(courtControlFor('A'), 'no console mounted: never stamped').toBeNull();
   });
 
-  it('a free shiaijo this tablet lost earlier is refused too', async () => {
+  it('a free shiaijo this device lost earlier is refused too', async () => {
     reply = () => ({ body: answer({ youWereDisplaced: true }) });
     const { mountCourtControl, consoleWriteRefusal, courtControlView } = await load();
     const off = track(mountCourtControl('A', () => 'pw'));
@@ -439,7 +439,7 @@ describe('the claim and the state', () => {
     expect(puts().length).toBe(1);
   });
 
-  it('a reloading holder gets its shiaijo back while a console opened during the reload is told it is run from another device', async () => {
+  it('a reloading holder gets its shiaijo back while a console opened during the reload is told it was closed on that device', async () => {
     vi.useFakeTimers();
     global.BroadcastChannel = class {
       constructor() { this.onmessage = null; }
@@ -456,11 +456,11 @@ describe('the claim and the state', () => {
     });
     reply = (url, init, body) => {
       if (init.method === 'DELETE') {
-        if (holder && holder.tabId === body.tabId) { graced = holder; holder = null; }
+        if (holder && holder.tabId === body.tabId) { graced = { ...holder, releasedAt: 1_700_000_000_000 }; holder = null; }
         return { body: answer() };
       }
       if (graced) {
-        if (graced.tabId !== body.tabId && graced.deviceId !== body.deviceId && !body.take) return { body: view(graced, body) };
+        if (graced.tabId !== body.tabId && graced.deviceId !== body.deviceId && !body.take) return { body: { ...view(graced, body), releasedAt: graced.releasedAt } };
         holder = { ...graced, tabId: body.tabId, holderKey: `key-${body.tabId}` };
         graced = null;
       }
@@ -489,7 +489,10 @@ describe('the claim and the state', () => {
     const watcher = await load();
     const offW = watcher.mountCourtControl('A', () => 'pw');
     await vi.advanceTimersByTimeAsync(watcher.TAB_CHECK_MS + 1);
-    expect(watcher.courtControlView('A').state, 'the grey bar, with Take control').toBe('other');
+    expect(watcher.courtControlView('A').state, 'the View only bar, with Take control').toBe('other');
+    // The view carries when the hold was given back, for the bar's words; the
+    // state stays `other` (the grace is the server's, nothing waits on it).
+    expect(watcher.courtControlView('A').releasedAt).toBe(1_700_000_000_000);
     expect(holder).toBeNull();
 
     // The reloaded page (the same tab and tablet ids) takes it back.
@@ -619,7 +622,7 @@ describe('Take control', () => {
     off();
     await vi.advanceTimersByTimeAsync(1);
   });
-  it('sends a take with the time on this tablet\'s clock and holds after it', async () => {
+  it('sends a take with the time on this device\'s clock and holds after it', async () => {
     reply = (url, init, body) => ({ body: body && body.take ? HOLDS : OTHER });
     const { mountCourtControl, takeCourtControl, courtControlView } = await load();
     const off = track(mountCourtControl('A', () => 'pw'));

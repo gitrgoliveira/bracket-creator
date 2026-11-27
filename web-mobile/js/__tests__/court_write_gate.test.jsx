@@ -80,7 +80,7 @@ describe('a console another device runs', () => {
     expect(writeCourtNotHeld(res)).toBe(true);
     expect(writeRetryable(res)).toBe(false);
     expect(writeKeepsEditorOpen(finish, res)).toBe(true);
-    expect(notSavedText(notLandedBanner(res))).toMatch(/^Not saved: this tablet does not run this shiaijo/);
+    expect(notSavedText(notLandedBanner(res))).toMatch(/^Not saved: this device does not run this shiaijo/);
     await expect(res.settled).rejects.toMatchObject({ code: 'court_not_held' });
     await settle();
     expect(stored()).toEqual([]);
@@ -142,7 +142,7 @@ describe('a console another device runs', () => {
     API.subscribeTapOutcome('c1', 'm1', (o) => told.push(o));
     const { id } = API.recordTap('c1', 'm1', { kind: 'ippon.add', pos: 0, side: 'a', letter: 'M' }, 'pw', match);
     expect(told).toEqual([{ id, outcome: 'notQueued', reason: 'court_not_held' }]);
-    expect(tapNotAppliedText(told[0])).toMatch(/^Not applied: this tablet does not run this shiaijo/);
+    expect(tapNotAppliedText(told[0])).toMatch(/^Not applied: this device does not run this shiaijo/);
     expect(API.pendingTaps('c1', 'm1')).toEqual([]);
     expect(stored()).toEqual([]);
     // Its seq is given back: the next tap allowed is not a gap.

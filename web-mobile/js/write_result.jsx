@@ -230,7 +230,7 @@ export function writeDisplacedByCourtResult(res) {
 // writeCourtNotHeld is the ONE reader of that answer; a refused tap is told
 // through the tap-outcome channel with the same reason (tapNotAppliedText).
 export const COURT_NOT_HELD = 'court_not_held';
-export const COURT_NOT_HELD_SENTENCE = 'this tablet does not run this shiaijo, so nothing was recorded. To run it, tap Take control at the top of the screen, then enter the change again.';
+export const COURT_NOT_HELD_SENTENCE = 'this device does not run this shiaijo, so nothing was recorded. To run it, tap Take control at the top of the screen, then enter the change again.';
 export function courtNotHeldAnswer() {
     return { applied: false, reason: COURT_NOT_HELD };
 }

@@ -580,7 +580,7 @@ export function retryRefusedCourtControl(court) {
 /**
  * The court console's view of `court`: { holds, state, holderDevice,
  * sameDevice, youWereDisplaced, tabWasDisplaced, holderLastActiveAt,
- * holderSince, connected, refusedStatus, take }. `state` is courtControlState's,
+ * holderSince, releasedAt, connected, refusedStatus, take }. `state` is courtControlState's,
  * or 'not-listed' when the tournament no longer lists the shiaijo; `take()` is
  * takeCourtControl.
  */
@@ -618,6 +618,9 @@ export function courtControlView(court, take = () => takeCourtControl(court)) {
         tabWasDisplaced: !!(a && a.tabWasDisplaced),
         holderLastActiveAt: (a && Number(a.lastActiveAt)) || 0,
         holderSince: (a && Number(a.since)) || 0,
+        // Set while the server's grace keeps the shiaijo for the device that
+        // gave it back (court_control.go); the bar words it, nothing waits on it.
+        releasedAt: (a && Number(a.releasedAt)) || 0,
         connected: !!(r && r.connected),
         refusedStatus: (r && r.refusedStatus) || 0,
         take,

@@ -89,7 +89,8 @@ export const families = {
   // shiaijo): one competition on court A, started, so the court console has a
   // queue, and court A claimed through the control door by a tablet that is
   // not the capture's (lib/ui.mjs CAPTURE_COURT_TAB). The console then draws
-  // its grey bar with Take control and greys out every control that writes.
+  // its slate View only bar with Take control and greys out every control that
+  // writes, each disabled group with its reason beside it.
   otherDeviceCourt: {
     server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the court console and its control
@@ -521,8 +522,9 @@ export const recipes = [
     },
   },
   {
-    // The court console on a shiaijo another tablet runs: the grey bar naming
-    // it, with Take control, over a queue whose controls are greyed out.
+    // The court console on a shiaijo another tablet runs: the slate View only
+    // bar naming it, with Take control, over a queue whose controls are greyed
+    // out with the reason beside them.
     name: 'console-run-from-another-device',
     family: 'otherDeviceCourt',
     viewport: { width: 1180, height: 820 },
@@ -538,7 +540,7 @@ export const recipes = [
     assert: async ({ page }) => {
       const bar = page.locator('[data-testid="court-control"]');
       const text = await bar.innerText();
-      if (!/run from another device/.test(text) || !/Take control/.test(text)) {
+      if (!/^View only\b/.test(text) || !/ runs shiaijo A\./.test(text) || !/Take control/.test(text)) {
         throw new Error(`the control bar reads "${text}", not the other-device bar with Take control`);
       }
     },

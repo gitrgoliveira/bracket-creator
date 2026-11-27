@@ -92,6 +92,7 @@
   --warn-soft: #fffbeb;   /* amber-50: warning fill */
   --warn-border: #fde68a; /* amber-200: warning hairline border */
   --warn-ink: #78350f;    /* amber-900: strongest warning text, ~8:1 on --warn-soft */
+  --warn-fill: #d0700a;   /* saturated amber fill with --ink-1 on it (5:1); 3.3:1 against --bg, 3.5:1 against white */
 
   /* Success / present, green. The "this is checked-in / advancing / a winner /
      succeeded" signal, distinct from the status-pipeline knockout green
@@ -111,6 +112,7 @@
   --ink-2: #3a414e;
   --ink-3: #636a77; /* 4.5:1 or better on every light fill (--line-2 4.77, --surface-2 4.97, --accent-soft 4.53), was #6b7280 (4.24 on --line-2) */
   --ink-4: #6c7480; /* 4.7:1 on white, was #9aa1ac (2.8:1) */
+  --view-fill: #7c8798; /* saturated slate fill with --ink-1 on it (4.9:1); 3.4:1 against --bg, 3.6:1 against white */
   --ink-5: #f1f3f6; /* inverse text/border, use only on dark (--ink / --ink-1) backgrounds */
   --text-link: #2563eb;    /* link blue: standalone text links outside body copy */
   --line: #e4e6eb;
@@ -10656,51 +10658,113 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    publishes its height as --topbar-stack-h), so it is on screen however far
    the operator scrolls. It publishes its own height as --court-control-h, which
    the inline team sheet adds under the top bar (the pinned header and the
-   scroll margin), or the bar would cover them. A static banner, never a pulse: green with a filled
-   dot for the holder, neutral for a shiaijo another tab or device runs, amber
-   for one this tablet lost, a free one it lost earlier, or no connection. */
+   scroll margin), or the bar would cover them. A static banner, never a pulse
+   (DESIGN.md principle 3). Every state opens with a glyph and a bold word, so
+   the meaning never rests on hue, and each meaning has one treatment:
+     --holds    green tint: this device runs the shiaijo.
+     --view     saturated slate (--view-fill): another tab or device runs it;
+                this console is view only.
+     --lost     saturated amber (--warn-fill): this device lost it; view only
+                until it takes it back (Take control is the primary button).
+     --pending  neutral: no answer yet (Checking, Not connected); the console
+                still scores.
+     --error    red tint: a sign-in or check this console must fix.
+   The two saturated fills hold 3:1 or more against the white top bar and the
+   --bg page, with --ink-1 on them (4.5:1 or more). */
 .shiaijo-control {
   position: sticky;
   top: var(--topbar-stack-h, 0px);
   z-index: 29;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 44px;
-  padding: 6px 16px;
   border-bottom: 1px solid var(--line);
   background: var(--surface-2);
   color: var(--ink-2);
   font-size: 14px;
+}
+.shiaijo-control__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 4px 16px;
 }
 .shiaijo-control__text {
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
+  line-height: 20px;
 }
-.shiaijo-control__dot {
+.shiaijo-control__glyph { flex: none; margin-top: 1px; }
+.shiaijo-control__words { min-width: 0; }
+.shiaijo-control__lead { font-weight: 700; color: inherit; }
+.shiaijo-control__offline { font-weight: 600; }
+.shiaijo-control__take {
   flex: none;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--ok);
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
 }
-.shiaijo-control__take { flex: none; min-height: 36px; }
 .shiaijo-control--holds {
   background: var(--ok-soft);
   border-bottom-color: var(--ok);
   color: var(--ok-ink);
-  font-weight: 600;
 }
-.shiaijo-control--warn {
+.shiaijo-control--holds .shiaijo-control__glyph { color: var(--ok-strong); }
+.shiaijo-control--view {
+  background: var(--view-fill);
+  border-bottom-color: var(--ink-3);
+  color: var(--ink-1);
+}
+.shiaijo-control--lost {
+  background: var(--warn-fill);
+  border-bottom-color: var(--warn);
+  color: var(--ink-1);
+}
+.shiaijo-control--pending .shiaijo-control__glyph { color: var(--ink-3); }
+.shiaijo-control--error {
+  background: var(--danger-soft);
+  border-bottom-color: var(--danger-border);
+  color: var(--danger-ink);
+}
+/* The button's own ring is navy, which a saturated fill can swallow: on those
+   two the ring is the dark ink, offset clear of the button. */
+.shiaijo-control--view .shiaijo-control__take:focus-visible,
+.shiaijo-control--lost .shiaijo-control__take:focus-visible {
+  outline: 2px solid var(--ink-1);
+  outline-offset: 2px;
+}
+/* The one-time note when this console stops running the shiaijo while it is
+   open: amber like the loss it tells, static, until Dismiss or a take back. */
+.shiaijo-control__lost {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px;
+  min-height: 52px;
+  border-top: 1px solid var(--warn-border);
   background: var(--warn-soft);
-  border-bottom-color: var(--warn-border);
   color: var(--warn-ink);
+  font-size: 14px;
 }
-.shiaijo-control--checking { color: var(--ink-3); }
+.shiaijo-control__lost .shiaijo-control__glyph { color: var(--warn); margin-top: 0; }
+.shiaijo-control__lost-text { flex: 1 1 auto; min-width: 0; margin: 0; line-height: 20px; font-weight: 500; }
+.shiaijo-control__dismiss { flex: none; min-height: 44px; font-size: 14px; color: var(--warn-ink); }
+.shiaijo-control__dismiss:focus-visible { outline: 2px solid var(--warn-ink); outline-offset: 2px; }
+/* Why a disabled group of the console's write controls is greyed out, set
+   just above it, so a tap on one is never unexplained. */
+.shiaijo-control-reason {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ink-1);
+}
+.shiaijo-control-reason__glyph { flex: none; margin-top: 2px; color: var(--ink-3); }
 /* The console's action areas, disabled as one while this tab does not run the
    shiaijo: a bare grouping box that lays its children out as the column it
    sits in did. */
@@ -10727,8 +10791,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 /* Nothing to group (no Up next, no upcoming rows): no box, so no gap. */
 .shiaijo-control-scope:empty { display: none; }
+/* A phone keeps the bar to the glyph, the bold word, the main sentence and the
+   button on one row: the detail sentence (when it was last active, what still
+   counts) is left to a wider screen. */
 @media (max-width: 640px) {
-  .shiaijo-control { flex-wrap: wrap; gap: 6px 12px; }
+  .shiaijo-control__row { padding: 4px 12px; gap: 8px; }
+  .shiaijo-control__more { display: none; }
+  .shiaijo-control__take { padding: 0 12px; }
+  .shiaijo-control__lost { padding: 4px 12px; }
 }
 
 .shiaijo {

@@ -75,7 +75,7 @@ describe('a tap on a console another device runs', () => {
     expect(r.getByTestId('control').textContent).toBe('other');
     await act(async () => { fireEvent.click(letterBtn(shiroSide(r.container), 'M')); });
     expect(marks(r.container)).toEqual([]);
-    expect(refusal(r.container).textContent).toMatch(/^Not applied: this tablet does not run this shiaijo/);
+    expect(refusal(r.container).textContent).toMatch(/^Not applied: this device does not run this shiaijo/);
     expect(window.API.pendingTaps('c1', 'm1')).toEqual([]);
     r.unmount();
   });
@@ -84,7 +84,7 @@ describe('a tap on a console another device runs', () => {
     const r = await open();
     await act(async () => { fireEvent.keyDown(window, { key: 'm' }); });
     expect(marks(r.container)).toEqual([]);
-    expect(refusal(r.container).textContent).toMatch(/^Not applied: this tablet does not run this shiaijo/);
+    expect(refusal(r.container).textContent).toMatch(/^Not applied: this device does not run this shiaijo/);
     r.unmount();
   });
 

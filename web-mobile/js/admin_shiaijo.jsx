@@ -38,7 +38,7 @@ import {
 import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineligible_match.jsx';
 import { confirmLeave, leaveThen } from './unsaved_entries.jsx';
 import { matchKey, readOwnMove, eventMatchCourt, bracketSideName,ownStatusMoveEnded, withOwnStatusMove, finishWinnerOf, propagateBracketWinnerLocal, applyBronzeLoserLocal, makeReconnectRefetcher } from './admin_shiaijo_feed.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches, COMPLETED_PREVIEW, ShiaijoQueueGroup, forgetTieBreakerStandings, ShiaijoQueueRow } from './admin_shiaijo_queue.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, COMPLETED_PREVIEW, ShiaijoQueueGroup, forgetTieBreakerStandings, ShiaijoQueueRow, shiaijoMatchNo } from './admin_shiaijo_queue.jsx';
 import { ShiaijoContext } from './admin_shiaijo_context.jsx';
 // The start, pick and correct flow, the court calls and the match moves are
 // hooks the page calls on every render, in that order, so functions flow one
@@ -49,7 +49,7 @@ import { useCourtCalls } from './admin_shiaijo_calls.jsx';
 import { useCourtMoves, ShiaijoConfirms } from './admin_shiaijo_moves.jsx';
 // One tab runs each shiaijo (bc-sseq FR9): the mark under the top bar, Take
 // control, and the check every console handler below makes before it writes.
-import { useShiaijoControl, ShiaijoControlBar, refusedNotHeld } from './admin_shiaijo_control.jsx';
+import { useShiaijoControl, ShiaijoControlBar, ShiaijoViewOnlyReason, courtControlIdle, refusedNotHeld } from './admin_shiaijo_control.jsx';
 
 const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
@@ -802,6 +802,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // taking a call down is cleanup the new holder wants too.
     const control = useShiaijoControl(courtKnown ? court : "", password, showToast);
     const { controlRef, canWrite } = control;
+    // The match the feed shows running on this shiaijo, as Take control's
+    // confirm names it ("Open individual, Match 1 of 4").
+    const runningLabel = running[0] ? `${running[0].compName || "a match"}${shiaijoMatchNo(running[0])}` : "";
+    // The idle panel's words while this console is view only (null: it may write).
+    const idleViewOnly = canWrite ? null : courtControlIdle(control.view, court);
     // The pre-start lineup panel saves a lineup: opened only while this tab runs
     // the shiaijo (or has had no answer yet).
     const openLineup = (m) => {
@@ -1034,7 +1039,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             <AdminTopbar onLogout={leaving(onLogout)} onViewerMode={leaving(onViewerMode)} beforeLeave={leaveEditorConfirmed} tournament={tournament} hideRunningStrip />
             {/* Who runs this shiaijo, stuck under the top bar so it is on
                 screen however far the operator scrolls (bc-sseq FR9). */}
-            {courtKnown && <ShiaijoControlBar court={court} control={control} showToast={showToast} />}
+            {courtKnown && <ShiaijoControlBar court={court} control={control} showToast={showToast} running={runningLabel} />}
             <div className="page page--wide">
                 <Breadcrumbs items={[{ label: "Dashboard", onClick: leaving(onBack) }, { label: `Shiaijo ${court}` }]} />
                 <div className="page-head page-head--oneline">
@@ -1200,6 +1205,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 barred row's decision) are view only while this tab
                                 does not run the shiaijo. The Hide toggle and Show all
                                 stay outside: they only change the view. */}
+                            <ShiaijoViewOnlyReason court={court} control={control} />
                             <fieldset className="shiaijo-control-scope shiaijo-control-scope--queue" disabled={!canWrite}>
                             {upNext && (
                                 <ShiaijoUpNextCard
@@ -1272,6 +1278,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     <div className="section-title">
                                         Completed <span className="shiaijo-count" aria-label={`${filteredCompleted.length} matches`}>{filteredCompleted.length}</span>
                                     </div>
+                                    <ShiaijoViewOnlyReason court={court} control={control} />
                                     <fieldset className="shiaijo-control-scope" disabled={!canWrite}>
                                         <ShiaijoQueueGroup
                                             matches={completedShown}
@@ -1362,6 +1369,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 // scoring shortcuts while keeping read-only controls
                                 // (History, Ippon key, Prev/Next, Discard held write)
                                 // usable; the outbox gate still refuses any write.
+                                // The line above it says why (FR9).
+                                <>
+                                <ShiaijoViewOnlyReason court={court} control={control} />
                                 <ScoreEditorModal
                                     readOnly={!canWrite}
                                     hostUnsavedRef={editorUnsavedRef}
@@ -1476,6 +1486,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     }}
                                     password={password}
                                 />
+                                </>
                             )}
 
                             {correctingMatch && correctingMatch.status === "completed" && (
@@ -1527,7 +1538,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                             {!allDone && !selectedMatch && (
                                 <div className="empty shiaijo__placeholder">
-                                    <h3>Ready when you are</h3>
+                                    <h3>{idleViewOnly ? idleViewOnly.title : "Ready when you are"}</h3>
                                     <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
                                         {/* bc-cse: when every scheduled match here is barred there
                                             is no Up Next card at all (upNext skips a barred match on
@@ -1535,7 +1546,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             something not on screen. Name the actual remedy instead:
                                             each barred row in the queue carries its own one-tap
                                             resolution (BarredMatchNotice). */}
-                                        {!upNext && filteredScheduled.length > 0
+                                        {idleViewOnly ? idleViewOnly.body : !upNext && filteredScheduled.length > 0
                                             ? "Every scheduled match on this court is barred. Resolve a withdrawal in the queue to bring one back."
                                             : "Start the next match from the Up Next card to begin scoring on this court."}
                                     </p>

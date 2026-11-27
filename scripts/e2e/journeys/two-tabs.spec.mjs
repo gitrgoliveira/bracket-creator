@@ -9,7 +9,7 @@
 // The two tabs are ONE tablet (pages of one browser context share
 // localStorage, where court_control.jsx keeps the tablet id), and one tab runs
 // each shiaijo (FR9): the first tab to open shiaijo A shows the green bar and
-// runs it; the second shows the grey "another tab on this tablet" bar and is
+// runs it; the second shows the slate "View only: another tab on this device" bar and is
 // view only until Take control. The journey pins both bars, so the calls below come
 // from the tab that runs the shiaijo.
 import { test, expect } from '../fixtures/test.mjs';
@@ -53,7 +53,7 @@ test('a court call and its withdrawal are each sent once with a second tab open'
     expect(opened.state, 'the second tab does not take it by itself').toBe('other');
     await expect(upNextCard(second)).toBeVisible();
     expect(await controlText(page), 'the first tab shows the green bar').toBe(HOLDS_TEXT('A'));
-    expect(await controlText(second), 'the second tab names another tab of this tablet').toMatch(SAME_TABLET_TEXT('A'));
+    expect(await controlText(second), 'the second tab names another tab of this device').toMatch(SAME_TABLET_TEXT('A'));
     await expect(second.getByTestId('court-control').getByRole('button', { name: 'Take control' })).toBeVisible();
     // View only: the second tab's queue cannot call or start the match.
     await expect(upNextCard(second).getByRole('button', { name: 'Call to court' })).toBeDisabled();

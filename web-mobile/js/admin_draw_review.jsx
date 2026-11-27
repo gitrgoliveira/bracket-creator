@@ -121,8 +121,9 @@ export function byDojo(meetings) {
 }
 
 // improvementSentence: one pair a suggestion keeps apart longer.
-export function improvementSentence(imp) {
-  return `${imp.dojo}: ${meetingChange(imp.before, imp.after, true)}.`;
+export function improvementSentence(imp, namePair = false) {
+  const who = namePair ? ` (${imp.before.a.name} and ${imp.before.b.name})` : '';
+  return `${imp.dojo}${who}: ${meetingChange(imp.before, imp.after, true)}.`;
 }
 
 // useDrawReviewReads: the summary and the suggestions of one competition,
@@ -195,8 +196,10 @@ function SeparationTable({ meetings }) {
 // Suggestions: the swaps the server suggests, each with what it does and its
 // own check button. None is a list of nothing: the card's conclusion line
 // already says that no swap can do better.
-function Suggestions({ answer, bracket, onPick }) {
+function Suggestions({ answer, meetings, bracket, onPick }) {
   const { suggestions } = answer;
+  // A dojo of more than one pair names the pair, as the swap check does.
+  const pairsOf = (dojo) => meetings.filter((m) => m.dojo === dojo).length;
   return (
     <div data-testid="swap-suggestions">
       {suggestions.length > 0 && (
@@ -208,7 +211,9 @@ function Suggestions({ answer, bracket, onPick }) {
                   Swap <strong>{competitorLabel(s.a)}</strong> ({drawPlaceLabel(s.a.place, bracket)}) and{' '}
                   <strong>{competitorLabel(s.b)}</strong> ({drawPlaceLabel(s.b.place, bracket)})
                 </div>
-                {(s.improves || []).map((imp) => <div key={improvementSentence(imp)} className="draw-review__effect">{improvementSentence(imp)}</div>)}
+                {(s.improves || []).map((imp) => (
+                  <div key={`${imp.before.a.id}\u001f${imp.before.b.id}`} className="draw-review__effect">{improvementSentence(imp, pairsOf(imp.dojo) > 1)}</div>
+                ))}
                 <div className="draw-review__effect">No dojo meets earlier.</div>
                 {(s.byes || []).map((b) => (
                   <div key={b.id} className="draw-review__effect">
@@ -309,7 +314,7 @@ export function DrawReviewPanel({ c, poolMatches, bracket, password, drawHidden,
           {suggestions.error && <div className="alert alert--warn" role="alert">{suggestions.error}</div>}
           {!suggestions.error && !suggestions.answer && <p className="draw-review__empty" role="status">Looking for swaps…</p>}
           {suggestions.answer && (
-            <Suggestions answer={suggestions.answer} bracket={bracket} onPick={(sa, sb) => setChecking({ a: sa, b: sb })} />
+            <Suggestions answer={suggestions.answer} meetings={separation.meetings || []} bracket={bracket} onPick={(sa, sb) => setChecking({ a: sa, b: sb })} />
           )}
         </section>
       )}

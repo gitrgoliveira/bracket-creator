@@ -368,7 +368,7 @@ function tiebreakPlacesLabel(group) {
 // with joint 3rd places on), named once for the banner and the circle notice.
 const LEAGUE_TIE_PLACES = "at 1st or 2nd place (and at 3rd place when joint 3rd places are off)";
 
-function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password, drawHidden }) {
+function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password, drawHidden, onRefreshCompetition }) {
   const isLeague = c && c.format === "league";
   // A KEY, re-resolved from the live poolMatches every render, never a captured
   // object. A match has ONE result and every surface asking for it shows the
@@ -1082,7 +1082,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // Swap competitors on Pools (preview) of a pools + knockout draw (bc-drev
   // FR10): with the mode on, a tap on a name picks it and no tap opens a score
   // sheet.
-  const swapMode = useSwapCompetitors({ c, tab: 'pools', pools, poolMatches, bracket: null, password, drawHidden });
+  const swapMode = useSwapCompetitors({ c, tab: 'pools', pools, poolMatches, bracket: null, password, drawHidden, onRefreshCompetition });
 
   // Modal rendered alongside the PoolsViewer.
   const scoreModal = scoreOpenMatch ? (

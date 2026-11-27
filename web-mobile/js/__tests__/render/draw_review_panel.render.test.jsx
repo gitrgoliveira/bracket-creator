@@ -171,6 +171,26 @@ describe('the Draw review card', () => {
     expect(item.textContent).toContain('No dojo meets earlier.');
   });
 
+  it('names the pair on each improvement of a dojo with several pairs, keyed by the pair', async () => {
+    const second = { dojo: 'Team Omega', a: { id: 'p5', name: 'Ann Lee', number: 'IMS5' }, b: { id: 'p6', name: 'Bo Chen', number: 'IMS6' }, samePool: 'Pool B' };
+    const after = { earliest: { matchId: 'r1-m0', round: 1, rounds: 3 } };
+    window.API.fetchDojoSeparation = vi.fn().mockResolvedValue([...meetings, second]);
+    window.API.fetchSwapSuggestions = vi.fn().mockResolvedValue({
+      suggestions: [{ ...suggestion, improves: [
+        { dojo: 'Team Omega', before: meetings[0], after: { ...meetings[0], samePool: '', ...after } },
+        { dojo: 'Team Omega', before: second, after: { ...second, samePool: '', ...after } },
+      ] }],
+    });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await mount();
+    const lines = within(screen.getByTestId('swap-suggestion')).getAllByText(/^Team Omega \(/).map((n) => n.textContent);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('(Arthur Dick and Xu Lin)');
+    expect(lines[1]).toContain('(Ann Lee and Bo Chen)');
+    expect(errors.mock.calls.flat().join(' ')).not.toMatch(/same key/);
+    errors.mockRestore();
+  });
+
   it('opens the check for a suggestion with the places the server gave', async () => {
     await mount();
     await keyboardClick(within(screen.getByTestId('swap-suggestion')).getByRole('button'));

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -26,7 +27,23 @@ const (
 	SwapVerdictBetter = "better"
 	// SwapVerdictSame: every dojo's meetings are what they are now.
 	SwapVerdictSame = "same"
+	// SwapVerdictRefused: the swap would be refused, because the knockout
+	// cannot be rebuilt with it (the draw's own builder answers a
+	// ValidationError, e.g. fill-bracket's "seed more pools", or a
+	// CourtFloorPastMidnightError). It carries no dojos; swapping the two
+	// answers the refusal.
+	SwapVerdictRefused = "refused"
 )
+
+// swapRebuildRefused reports whether err is a refusal the real swap answers
+// to the organiser (respondEngineError: *ValidationError 400,
+// *state.CourtFloorPastMidnightError 409) rather than a fault, which still
+// fails the whole answer.
+func swapRebuildRefused(err error) bool {
+	var validation *ValidationError
+	var pastMidnight *state.CourtFloorPastMidnightError
+	return errors.As(err, &validation) || errors.As(err, &pastMidnight)
+}
 
 // SwapCandidate is one competitor the pick could swap with: their
 // participant id, the place they hold now (the shape the swap request
@@ -131,6 +148,9 @@ func (s *swapSuggester) candidateVerdict(snap swapSnapshot, summary []DojoMeetin
 		}
 		plan := exchangePlaces(snap, req.A.ID, req.B.ID, source)
 		if err := plan.seededSwap(snap, req, source); err != nil {
+			if swapRebuildRefused(err) {
+				return SwapVerdictRefused, nil, nil
+			}
 			return "", nil, fmt.Errorf("judging the swap of %s and %s: %w", req.A.ID, req.B.ID, err)
 		}
 		if plan.answer.BracketRebuilt {

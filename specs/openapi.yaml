@@ -2868,7 +2868,9 @@ paths:
         - `better`: no dojo is worse off and at least one is better off;
         - `same`: every dojo's meetings are the ones it has now, so two
           competitors of one dojo trading places is `same`. A move to another
-          match of the same round is not earlier.
+          match of the same round is not earlier;
+        - `refused`: the swap would be refused (the knockout cannot be rebuilt
+          with it); swapping them answers the refusal. It carries no `dojos`.
 
         Seeded competitors are candidates too: a swap that moves a seed out of
         their pool rebuilds the knockout, and its verdict is judged on the
@@ -9494,8 +9496,8 @@ components:
                 $ref: '#/components/schemas/DrawPlace'
               verdict:
                 type: string
-                enum: [better, worse, same]
-                description: What swapping this competitor with the pick does to the dojo separation.
+                enum: [better, worse, same, refused]
+                description: What swapping this competitor with the pick does to the dojo separation, or `refused` when the swap would be refused.
               dojos:
                 type: array
                 items:

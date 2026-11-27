@@ -261,7 +261,7 @@ export function swapPickLine(picked, bracket) {
 // prop for the viewer, null while the mode is off), `active`, and `controls`
 // (the button or banner, and the check panel) for the host to draw above the
 // viewer. `beforeTurnOn` may refuse (an editor holding unsaved entries).
-export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, password, drawHidden, beforeTurnOn, onTurnOn }) {
+export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, password, drawHidden, beforeTurnOn, onTurnOn, onRefreshCompetition }) {
   // Taken once, as the tab mounts: on when the Draw review card's button
   // opened the tab to swap competitors.
   const [on, setOn] = useState(() => takeSwapMode(c && c.id));
@@ -324,16 +324,30 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
     if (picked.id === entrant.id) { setPickedId(null); return; }
     setChecking({ a: picked, b: entrant });
   };
+  // After a swap, or a draw that moved under the page, the page reads the
+  // competition again itself, as the Draw review card does, rather than
+  // waiting for the event stream (which may be down). The panel's close
+  // returns focus to the second pick's row, which the re-read takes away:
+  // focus goes to the banner's line instead, after the panel's own move.
+  const [focusLine, setFocusLine] = useState(0);
+  const lineRef = useRef(null);
+  useEffect(() => {
+    if (focusLine && lineRef.current) lineRef.current.focus({ preventScroll: true });
+  }, [focusLine]);
   const onSwapped = (answer) => {
     const pair = checking;
     setChecking(null);
     setPickedId(null);
     setNote({ text: swapDoneToast(answer, pair && pair.a, pair && pair.b) });
+    setFocusLine((n) => n + 1);
+    if (onRefreshCompetition) onRefreshCompetition();
   };
   const onDrawChanged = (message) => {
     setChecking(null);
     setPickedId(null);
     setNote({ text: message || 'The draw has changed. Pick the two competitors again.', error: true });
+    setFocusLine((n) => n + 1);
+    if (onRefreshCompetition) onRefreshCompetition();
   };
 
   // The marks belong to the first pick alone: none while nothing is picked or
@@ -389,7 +403,7 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
             )}
             {/* Always drawn, so the pick line and a note are announced as
                 they are written. */}
-            <p className="swap-mode__line" aria-live="polite" data-testid="swap-mode-line">
+            <p className="swap-mode__line" aria-live="polite" data-testid="swap-mode-line" ref={lineRef} tabIndex={-1}>
               {picked ? swapPickLine(picked, bracket) : note ? (
                 <span className={note.error ? 'swap-mode__note swap-mode__note--error' : 'swap-mode__note'}>{note.text}</span>
               ) : null}
@@ -417,7 +431,7 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
   return { swap, active, controls };
 }
 
-function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password, drawHidden, hostUnsavedRef = null }) {
+function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password, drawHidden, hostUnsavedRef = null, onRefreshCompetition }) {
   const [selected, setSelected] = useState(null);
   // The panel's editor publishes its unsaved entries here: choosing another
   // match puts it in the editor's place (keyed by match id), so over unsaved
@@ -477,6 +491,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     c, tab: 'bracket', pools: null, poolMatches: null, bracket, password, drawHidden,
     beforeTurnOn: () => confirmLeave(editorUnsavedRef),
     onTurnOn: () => setSelected(null),
+    onRefreshCompetition,
   });
   const matchMeta = (matchId) => {
     if (!matchId || !bracket?.rounds) return { matchNum: null, roundName: null };

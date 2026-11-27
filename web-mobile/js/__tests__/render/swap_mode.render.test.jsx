@@ -79,10 +79,10 @@ const dryRun = {
   separation: { before: [], after: [] },
 };
 
-async function mountPools({ c = mixed, matches = poolMatches, onEditScore = vi.fn() } = {}) {
+async function mountPools({ c = mixed, matches = poolMatches, onEditScore = vi.fn(), onRefreshCompetition } = {}) {
   await act(async () => {
     render(<AdminPools c={c} pools={pools} poolMatches={matches} standings={{}} tweaks={{ showDojo: true }}
-      onEditScore={onEditScore} password="pw" />);
+      onEditScore={onEditScore} password="pw" onRefreshCompetition={onRefreshCompetition} />);
   });
 }
 
@@ -278,6 +278,39 @@ describe('Swap competitors on Pools (preview)', () => {
     await pointerTap(screen.getByTestId('swap-mode-done'));
     expect(screen.queryByTestId('swap-mode')).toBeNull();
     expect(targets()).toHaveLength(0);
+  });
+
+  async function pickBoth() {
+    await mountPools({ onRefreshCompetition: refresh });
+    await turnOn();
+    await pointerTap(targetNamed('Elijah Everdeen'));
+    later();
+    await pointerTap(targetNamed('Lena Park'));
+    later();
+  }
+  const refresh = vi.fn();
+
+  it('reads the competition again after a swap, and puts focus on the banner line', async () => {
+    refresh.mockClear();
+    window.API.swapDrawPlaces = vi.fn()
+      .mockResolvedValueOnce(dryRun)
+      .mockResolvedValueOnce({ ...dryRun, applied: true, dryRun: undefined });
+    await pickBoth();
+    await keyboardClick(screen.getByTestId('swap-them'));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(screen.getByTestId('swap-mode-line'));
+  });
+
+  it('reads the competition again when the draw moved under the page, and puts focus on the banner line', async () => {
+    refresh.mockClear();
+    window.API.swapDrawPlaces = vi.fn()
+      .mockResolvedValueOnce(dryRun)
+      .mockRejectedValueOnce(Object.assign(new Error('The draw has changed.'), { code: 'draw_changed' }));
+    await pickBoth();
+    await keyboardClick(screen.getByTestId('swap-them'));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('swap-mode-line').textContent).toBe('The draw has changed.');
+    expect(document.activeElement).toBe(screen.getByTestId('swap-mode-line'));
   });
 
   it('the bounce of the tap that turns it on does not land on Done', async () => {

@@ -23,7 +23,9 @@ import { OPERATOR_DEVICE, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
 import { createTournament } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
-import { generateDraw, pasteRoster, publishDraw } from '../fixtures/competition.mjs';
+import {
+  DRAW_VISIBILITY, drawVisibilityHint, generateDraw, pasteRoster, publishDraw,
+} from '../fixtures/competition.mjs';
 import { bracketSlots, poolMembers, toastText } from '../fixtures/roster.mjs';
 import { competitionTab, openViewer } from '../fixtures/public.mjs';
 import { dwell, settled } from '../fixtures/pace.mjs';
@@ -180,13 +182,16 @@ test.describe('two competitors swap places in a draw before the start', () => {
     await expect(card(op).getByTestId('draw-review-verdict')).toContainText('They share Pool');
 
     let swapThem;
+    let pair; // "<name> and <name>", from the suggestion's Swap button
     await test.step('the card suggests a swap, and its check says the pair could meet later', async () => {
       await expect(card(op).getByTestId('draw-review-conclusion')).toHaveText(/swaps? would keep dojo-mates apart longer/);
       const suggestion = card(op).getByTestId('swap-suggestion').first();
       await expect(suggestion).toBeVisible();
       await shot(op, 'review-clash');
-      await settled(suggestion.getByRole('button', { name: /^Swap / }));
-      await suggestion.getByRole('button', { name: /^Swap / }).tap();
+      const swapBtn = suggestion.getByRole('button', { name: /^Swap / });
+      pair = (await swapBtn.getAttribute('aria-label')).replace(/^Swap /, '');
+      await settled(swapBtn);
+      await swapBtn.tap();
       swapThem = await checkAnswered(op);
       await expect(check(op).getByTestId('swap-verdict')).toHaveText(/^Dojo-mates from Fudo could meet later\./);
       await expect(swapThem).toHaveText('Swap them');
@@ -195,7 +200,7 @@ test.describe('two competitors swap places in a draw before the start', () => {
 
     await test.step('Swap them: a toast names the pair, and focus lands on the conclusion line', async () => {
       await swapThem.tap();
-      expect(await toastText(op, /^Swapped /)).toMatch(/^Swapped .+ and .+\.$/);
+      expect(await toastText(op, /^Swapped /)).toBe(`Swapped ${pair}.`);
       await expect(check(op)).toHaveCount(0);
       await expect(card(op).getByTestId('draw-review-conclusion')).toBeFocused();
       await expect(card(op).getByTestId('draw-review-verdict')).not.toContainText('They share Pool');
@@ -216,7 +221,8 @@ test.describe('two competitors swap places in a draw before the start', () => {
     let before;
     await test.step('the draw puts the Fudo pair in different first-round matches', async () => {
       await op.goto(`/admin/competition/${koId}/bracket`);
-      before = await bracketSlots(op, (s) => firstRound(s).length === 4);
+      await expect(drawVisibilityHint(op)).toHaveText(DRAW_VISIBILITY.hiddenHint);
+      before =await bracketSlots(op, (s) => firstRound(s).length === 4);
       expect(firstRound(before)).toHaveLength(4);
       expect(matchOf(before, KO_FUDO[0])).not.toBe(matchOf(before, KO_FUDO[1]));
     });

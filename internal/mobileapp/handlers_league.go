@@ -30,6 +30,8 @@ func RegisterPublicLeagueHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 // competitor whose own link the caller holds keeps theirs), and a team keeps
 // its name. The answer stays a bare array of rows, so it carries no
 // namesHidden marker: a masked row reads as a number, never as a name to save.
+// A draft whose draw is hidden from the caller (maskView.drawHidden, bc-drpb)
+// is answered as the same competition in setup: no standings.
 func registerPublicLeagueHandlers(r *gin.RouterGroup, eng *engine.Engine, names *publicNames) {
 	r.GET("/competitions/:id/league/standings", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -40,7 +42,13 @@ func registerPublicLeagueHandlers(r *gin.RouterGroup, eng *engine.Engine, names 
 		if !ok {
 			return
 		}
-		standings, err := eng.LeagueStandings(id)
+		// A hidden draw is answered as setup: a league before its draw has no
+		// standings (engine.LeagueStandingsBeforeDraw).
+		standingsOf := eng.LeagueStandings
+		if v.drawHidden {
+			standingsOf = eng.LeagueStandingsBeforeDraw
+		}
+		standings, err := standingsOf(id)
 		if err != nil {
 			respondEngineError(c, err)
 			return

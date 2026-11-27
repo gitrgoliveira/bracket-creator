@@ -978,6 +978,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// A new competition's list was never shuffled, whatever the body says:
 		// only a roster PUT records a shuffle (markRosterShuffled).
 		comp.RosterShuffled = false
+		// Whether a draft is public is the draw routes' to say; a new
+		// competition has no draw, whatever the body says.
+		comp.DrawHidden = false
 
 		comp.Name = strings.TrimSpace(comp.Name)
 		// Trim NumberPrefix too so untrimmed input from the SETTINGS edit
@@ -2976,6 +2979,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		hub.Broadcast(EventDrawDiscarded, gin.H{"competitionId": id})
 		c.Status(http.StatusNoContent)
 	})
+
+	// Publish draw and Unpublish (bc-drpb): organiser-only in self-run too
+	// (isSelfRunMainGatedConfigRoute), where they answer 409.
+	registerDrawVisibilityHandlers(r, store, eng, hub)
 
 	// Organiser-only in self-run (isSelfRunMainGatedConfigRoute), like DELETE
 	// /draw above: it discards recorded results. It does NOT delete the

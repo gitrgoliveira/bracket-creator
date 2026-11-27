@@ -20,6 +20,7 @@ import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN, tournamentShowsEveryName } from './competition_shape.jsx';
 import { pushToast } from './toast_queue.jsx';
 import { queueMoveCourts, sharesCourtDay, sharesDay } from './court_queue.jsx';
+import { isWithheldMatchEvent } from './draw_visibility.jsx';
 import { useCourtPaceLookup, PACE_TICK_MS } from './court_pace.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 // bc-hnam: which credential the page reads with, keyed by the route.
@@ -158,6 +159,7 @@ function parsePath(path) {
       if (parts[1] === "score-editor") return { mode: "admin", admin: { kind: "scoreEditor" } };
       if (parts[1] === "import") return { mode: "admin", admin: { kind: "import" } };
       if (parts[1] === "backup") return { mode: "admin", admin: { kind: "backup" } };
+      if (parts[1] === "posters") return { mode: "admin", admin: { kind: "posters" } };
       if (parts[1] === "edit-tournament") return { mode: "admin", admin: { kind: "editTournament" } };
       if (parts[1] === "create-competition") return { mode: "admin", admin: { kind: "createComp" } };
       if (parts[1] === "shiaijo" && parts[2]) {
@@ -237,6 +239,7 @@ function pathFromState(m, vs, vcid, av, vt) {
       if (av.kind === "scoreEditor") return "/admin/score-editor";
       if (av.kind === "import") return "/admin/import";
       if (av.kind === "backup") return "/admin/backup";
+      if (av.kind === "posters") return "/admin/posters";
       if (av.kind === "editTournament") return "/admin/edit-tournament";
       if (av.kind === "createComp") return "/admin/create-competition";
       if (av.kind === "shiaijo") return av.court ? `/admin/shiaijo/${encodeURIComponent(av.court)}` : "/admin";
@@ -1601,6 +1604,14 @@ function App() {
             // the same venue LAN.
             if (mode === "display") {
                 refetchList();
+            } else if (isWithheldMatchEvent(event)) {
+                // bc-drpb: a hidden draft's match moved (its court, time or
+                // status), sent with no data. Its matches still take their
+                // places on a shared court, so the open competition's queue
+                // positions may have moved: refetch it (the detail gate sends
+                // one per burst, bc-sseq FR4). The home screen's list refetch
+                // below covers a page with no competition open.
+                refetchDetail();
             } else if (viewerCompId === event.data?.competitionId) {
                 // Apply partial update immediately (match_updated only: 
                 // competition_completed has no per-match payload)
@@ -1652,6 +1663,15 @@ function App() {
                 refetchDetail();
             } else if (viewerCompId && event.data?.competitionId !== viewerCompId) {
                 refetchIfSharesDay(event);
+            }
+            refetchList();
+        } else if (event.type === "draw_visibility_changed") {
+            // bc-drpb: a draft's draw was published or hidden again. Refetch
+            // that competition when it is open (its tabs come or go) and the
+            // list (the status badges). Visibility moves no match, so no other
+            // competition sharing the day is refetched.
+            if (viewerCompId && viewerCompId === event.data?.competitionId) {
+                refetchDetail();
             }
             refetchList();
         } else if (event.type === "swiss_round_generated") {

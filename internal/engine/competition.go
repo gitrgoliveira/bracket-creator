@@ -928,7 +928,9 @@ func (e *Engine) StartCompetition(id string) error {
 		// Draw already exists; only flip status.
 		return e.transitionDrawToRunning(id)
 	}
-	// One-click path: generate draw then transition.
+	// One-click path: generate draw then transition. The draft is stored as
+	// hidden like any other, so a transition that fails leaves no public
+	// draft; the transition clears the flag.
 	if err := e.runDrawPipeline(id); err != nil {
 		return err
 	}
@@ -1031,6 +1033,7 @@ func (e *Engine) DiscardDraw(id string) error {
 		}
 		current.Status = state.CompStatusSetup
 		current.SwissCurrentRound = 0 // reset so a fresh GenerateDraw can re-initialise it
+		current.DrawHidden = false    // the next GenerateDraw hides its own draft
 		return current, nil
 	})
 	return err
@@ -1068,6 +1071,7 @@ func (e *Engine) transitionDrawToRunning(id string) error {
 			return nil, validationErrorf("competition %s not in draw-ready state (status: %s); concurrent modification?", id, current.Status)
 		}
 		current.Status = runningStatusFor(current.Format)
+		current.DrawHidden = false // a started competition is public
 		return current, nil
 	})
 	return err
@@ -1089,6 +1093,7 @@ func (e *Engine) startIfDrawReady(id string) (bool, error) {
 			return nil, nil
 		}
 		current.Status = runningStatusFor(current.Format)
+		current.DrawHidden = false // a started competition is public
 		return current, nil
 	})
 }
@@ -1263,7 +1268,12 @@ func applyLeagueSinglePool(c *state.Competition, n int) {
 }
 
 // runDrawPipeline runs the full draw-generation pipeline for a Setup
-// competition and commits CompStatusDrawReady.
+// competition and commits CompStatusDrawReady. The commit stores the
+// competition's DrawHidden as true: every new draft is kept off the public
+// pages until it is published, in every tournament mode
+// (state.Competition.DrawHiddenIn judges self-run at read time); the
+// one-click start's status transition clears the flag, so a failed start
+// never leaves a public draft.
 //
 // Pipeline limitations (pre-existing):
 //   - Pool/bracket generation (writes pools.csv / bracket.json) runs
@@ -1836,6 +1846,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// nobody changed underneath us. It is a no-op when courts were stored.
 		current.Courts = comp.Courts
 		current.Status = comp.Status
+		current.DrawHidden = true
 		if comp.Format == state.CompFormatSwiss {
 			current.SwissCurrentRound = comp.SwissCurrentRound
 		}

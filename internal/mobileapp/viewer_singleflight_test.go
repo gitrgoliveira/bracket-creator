@@ -15,6 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // TestViewerSingleFlight_CollatesConcurrentBuilds is the acceptance test for
@@ -462,4 +464,99 @@ func TestServeSingleFlightJSON_ErrorAnswerCarriesVary(t *testing.T) {
 	serveSingleFlightJSON(c, sfResult{}, errors.New("build failed"))
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assert.Equal(t, []string{"X-Tournament-Password", "Accept-Encoding"}, varyTokens(w.Header()))
+}
+
+// The list and the court feeds key their builds on the config write token
+// (viewerFlightKeyAt): one audience keeps one key while no config.md is
+// written, and a config write gives the next request a key of its own.
+func TestViewerFlightKeyAt_MovesWithTheConfigWriteToken(t *testing.T) {
+	at1 := viewerFlightKeyAt("competitions", 1, audience{})
+	if viewerFlightKeyAt("competitions", 1, audience{}) != at1 {
+		t.Fatal("one audience at one token must keep one key")
+	}
+	if viewerFlightKeyAt("competitions", 2, audience{}) == at1 {
+		t.Fatal("a config write must give the next request a key of its own")
+	}
+	if viewerFlightKeyAt("competitions", 1, organiserAudience()) == at1 {
+		t.Fatal("the organiser must not share the public's build")
+	}
+	if viewerFlightKeyAt("court-matches:A", 1, audience{}) == at1 {
+		t.Fatal("the court feed and the list must not share a build")
+	}
+}
+
+// A public read of the list or a court feed made straight after a draw is
+// published or hidden again (bc-drpb) never joins a build begun before it:
+// the first build is held after it has read the competition, the draw's
+// visibility is flipped, and the second request is answered the new state
+// while the first is still held.
+func TestViewerFlights_ARequestAfterAPublishOrUnpublishNeverJoinsAnEarlierBuild(t *testing.T) {
+	routes := []struct {
+		name  string
+		entry func(drawHiddenWorld, *testing.T) map[string]any
+	}{
+		{"list", func(w drawHiddenWorld, t *testing.T) map[string]any { return w.listEntry(t, dhComp, dhPublic) }},
+		{"court feed", func(w drawHiddenWorld, t *testing.T) map[string]any { return w.courtFeedEntry(t, dhComp, dhPublic) }},
+	}
+	for _, route := range routes {
+		for _, hideAfter := range []bool{false, true} {
+			name := fmt.Sprintf("%s, hidden %v then %v", route.name, !hideAfter, hideAfter)
+			t.Run(name, func(t *testing.T) {
+				w := newDrawHiddenWorld(t, state.CompFormatMixed)
+				require.NoError(t, w.eng.GenerateDraw(dhComp))
+				if hideAfter {
+					w.setHidden(t, false)
+				}
+
+				loaded, release := make(chan struct{}), make(chan struct{})
+				// Only the first load is held; a sync.Once would hold every
+				// later caller until the first returned.
+				var held atomic.Bool
+				orig := viewerLoadCompetition
+				t.Cleanup(func() { viewerLoadCompetition = orig })
+				viewerLoadCompetition = func(store *state.Store, compID string) (*state.Competition, error) {
+					comp, err := orig(store, compID)
+					if held.CompareAndSwap(false, true) {
+						close(loaded)
+						<-release
+					}
+					return comp, err
+				}
+
+				earlier := make(chan map[string]any, 1)
+				go func() { earlier <- route.entry(w, t) }()
+				<-loaded
+				w.setHidden(t, hideAfter)
+
+				later := make(chan map[string]any, 1)
+				go func() { later <- route.entry(w, t) }()
+				select {
+				case got := <-later:
+					assertAnswersVisibility(t, route.name, got, hideAfter)
+				case <-time.After(10 * time.Second):
+					close(release)
+					t.Fatal("the request after the write joined the build begun before it")
+				}
+				close(release)
+				assertAnswersVisibility(t, route.name, <-earlier, !hideAfter)
+			})
+		}
+	}
+}
+
+// assertAnswersVisibility checks a public answer of the draft: hidden, the list
+// holds it with no draw and the court feed leaves it out; published, both
+// hold its draw.
+func assertAnswersVisibility(t *testing.T, route string, entry map[string]any, hidden bool) {
+	t.Helper()
+	switch {
+	case !hidden:
+		require.NotNil(t, entry, "%s: the published draft is answered", route)
+		assert.True(t, hasDraw(entry), "%s: the published draft shows its draw", route)
+	case route == "court feed":
+		assert.Nil(t, entry, "the court feed leaves the hidden draft out")
+	default:
+		require.NotNil(t, entry, "the list holds the hidden draft")
+		assert.False(t, hasDraw(entry), "the list shows no draw of the hidden draft")
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -44,6 +45,35 @@ func setupEligibilityTestRouter(t *testing.T) (*gin.Engine, *state.Store, string
 	RegisterEligibilityHandlers(admin, store, &stubEligibilityEngine{}, hub)
 
 	return r, store, dir
+}
+
+// TestPublicEligibilityGET_AnswersInCompetitorIDOrder pins the order of the
+// public answer: the store returns the statuses as a map, and the answer must
+// not follow its iteration order.
+func TestPublicEligibilityGET_AnswersInCompetitorIDOrder(t *testing.T) {
+	r, store, _ := setupEligibilityTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+	want := []string{"p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"}
+	for i := len(want) - 1; i >= 0; i-- {
+		require.NoError(t, store.SetCompetitorStatus("c1", domain.CompetitorStatus{
+			PlayerID: want[i], Eligible: false, Reason: "kiken-voluntary: withdrew",
+		}))
+	}
+	for range 20 {
+		req := httptest.NewRequest(http.MethodGet, "/api/competitions/c1/competitor-status", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp struct {
+			Statuses []domain.CompetitorStatus `json:"statuses"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		got := make([]string, 0, len(resp.Statuses))
+		for _, st := range resp.Statuses {
+			got = append(got, st.PlayerID)
+		}
+		require.True(t, slices.Equal(want, got), "statuses came back as %v", got)
+	}
 }
 
 // TestPublicEligibilityGET_NoAuthRequired is the primary regression test for

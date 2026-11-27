@@ -758,6 +758,30 @@ describe('AdminCompOverview next steps under a court block (spec 007 R9)', () =>
   });
 });
 
+// bc-drpb audit A2: the draw-ready guidance names Publish draw while the draw
+// is hidden, and says nothing of it once the draw is public or in self-run,
+// where there is no Publish draw button.
+describe('AdminCompOverview draw-ready guidance names Publish draw (bc-drpb)', () => {
+  const guidance = (container) => container.textContent;
+
+  it('mentions Publish draw while the draw is hidden', async () => {
+    const comp = makeCompetition({ status: 'draw-ready', courts: ['A', 'B'], drawHidden: true });
+    const { container } = await mountSection('overview', { comp, tournament: { mode: 'officiated', courts: ['A', 'B'] } });
+    expect(guidance(container)).toContain('is hidden from the public. Preview it below, then use Publish draw in the header to show it to the public');
+    expect(guidance(container)).toContain('it also publishes the draw. To show the draw first, use Publish draw.');
+  });
+
+  it('leaves Publish draw out once the draw is public, and in self-run', async () => {
+    for (const [drawHidden, mode] of [[false, 'officiated'], [true, 'self-run']]) {
+      const comp = makeCompetition({ status: 'draw-ready', courts: ['A', 'B'], drawHidden });
+      const { container, unmount } = await mountSection('overview', { comp, tournament: { mode, courts: ['A', 'B'] } });
+      expect(guidance(container)).toContain('The draw has been generated. Preview it below, then use the Start competition button in the header to begin.');
+      expect(guidance(container)).not.toContain('To show the draw first');
+      if (unmount) unmount();
+    }
+  });
+});
+
 // The draw's seed-placement warnings (spec 007 R2/D7). The seeding rules never
 // refuse a draw: a constraint the configuration cannot satisfy gives way and
 // the operator is TOLD what was relaxed. The banner is therefore an advisory

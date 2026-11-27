@@ -14,6 +14,7 @@ import { whenConfirmed } from './unsaved_entries.jsx';
 import { downloadBlob } from './blob_download.jsx';
 import { Icon } from './icon.jsx';
 import { andList } from './list_phrase.jsx';
+import { confirmStartHiddenDraw, drawHiddenFromPublic, drawVisibilityCardLine, drawVisibilityIcon, PUBLISH_DRAW_LABEL, UNPUBLISH_DRAW_LABEL } from './draw_visibility.jsx';
 
 const { useState, useMemo, useEffect, useRef, useLayoutEffect } = React;
 
@@ -33,7 +34,7 @@ const Modal = window.Modal;
 // Hoisted into ui.jsx when the public watchlist share sheet needed the same
 // "take this link" sheet: a public surface cannot import the admin shell, and
 // a second copy of a QR-plus-copy modal is the drift this repo keeps paying
-// for. qr.js is no longer imported here because ShareLinkModal owns the QR.
+// for. qr.jsx is no longer imported here because ShareLinkModal owns the QR.
 const ShareLinkModal = window.ShareLinkModal;
 
 // Maximum running-match chips rendered in the topbar status strip before the
@@ -423,7 +424,7 @@ function AllWinnersModal({ comps, onClose }) {
   );
 }
 
-function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenCalendar, onOpenScoreEditor, onOpenImport, onOpenBackup, onOpenShiaijo, onOpenRegistration, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
+function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenCalendar, onOpenScoreEditor, onOpenImport, onOpenBackup, onOpenPosters, onOpenShiaijo, onOpenRegistration, onStartAll, onStartCompetition, onSetDrawVisibility, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
   const t = tournament;
   const comps = t.competitions || NO_COMPETITIONS;
   // Whether "Start all" has anything to offer, answered by the same helper the
@@ -570,6 +571,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
               <button type="button" className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
               <button type="button" className="btn" onClick={onOpenImport}>Import from folder</button>
               <button type="button" className="btn" onClick={onOpenBackup}>Backup and restore</button>
+              {onOpenPosters && <button type="button" className="btn" onClick={onOpenPosters}>Posters</button>}
             </div>
           </div>
         ) : (<>
@@ -632,7 +634,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
 
         <div className="section-title">All competitions</div>
         <div className="tlist">
-          {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, initialSectionFor(c.status))} onStart={() => onStartCompetition(c.id)} tournament={t} showToast={showToast} />)}
+          {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, initialSectionFor(c.status))} onStart={() => onStartCompetition(c.id)} onSetDrawVisibility={(publish) => onSetDrawVisibility(c.id, publish)} tournament={t} showToast={showToast} />)}
           {/* This section only renders when competitions exist (the empty-tournament
               case is handled by the first-run empty state above), so the dashed
               tile stays a quiet "add another", not the promoted first-run CTA. */}
@@ -651,6 +653,13 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div style={{ fontWeight: 600, marginTop: 4 }}>Backup and restore</div>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>Save or restore tournament data</div>
           </button>
+          {onOpenPosters && (
+            <button type="button" className="tcard tcard--add" onClick={onOpenPosters}>
+              <div style={{ color: "var(--ink-3)" }}><Icon name="printer" size={28} /></div>
+              <div style={{ fontWeight: 600, marginTop: 4 }}>Posters</div>
+              <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>QR codes to print for the venue</div>
+            </button>
+          )}
         </div>
         </>)}
         {window.VersionFooter && <window.VersionFooter />}
@@ -817,7 +826,7 @@ function ExportPdfModal({ tournament, password, comps, onClose, showToast }) {
   );
 }
 
-function CompCard({ c, onOpen, onStart, tournament, showToast }) {
+function CompCard({ c, onOpen, onStart, onSetDrawVisibility, tournament, showToast }) {
   const { running: runningCount } = compMatchStats(c);
   const playerCount = (c.players || []).length;
   const courts = c.courts || [];
@@ -848,6 +857,34 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
     && c.kind !== "team"
     && (!c.status || c.status === "setup");
 
+  // Who can see a draft's draw (bc-drpb): a draw-ready card says it under its
+  // details, the crossed-out eye and "Hidden from the public" or the open eye
+  // and "Public". Not in a self-run tournament, whose draws are public as soon
+  // as they are made. draw_visibility.jsx owns the rule and the words.
+  const showDrawVisibility = c.status === "draw-ready" && !(tournament && tournament.mode === "self-run");
+  const drawHidden = drawHiddenFromPublic(tournament, c);
+
+  // Start on a hidden draft asks first (the same confirm as the draw preview
+  // header's, confirmStartHiddenDraw); Cancel leaves it hidden and not
+  // started. Any other start goes at once, in the same tap.
+  const start = () => {
+    if (!drawHidden) { onStart(); return; }
+    confirmStartHiddenDraw(tournament, c).then((ok) => { if (ok) onStart(); });
+  };
+
+  // Publish draw / Unpublish from the card (bc-drpb), a quiet action under
+  // Start, so six hidden draws need no six page visits. The host makes the
+  // write and the toast, as the draw preview header's button does; the card
+  // only keeps the button busy until the refetch brings the new state. Busy
+  // is aria-disabled, never disabled: a disabled button drops the keyboard
+  // focus it holds to the page body.
+  const [settingVisibility, setSettingVisibility] = useState(false);
+  const toggleVisibility = () => {
+    if (settingVisibility) return;
+    setSettingVisibility(true);
+    onSetDrawVisibility(drawHidden).finally(() => setSettingVisibility(false));
+  };
+
   return (
     <>
       <div
@@ -875,6 +912,14 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
                 courts.length > 0 ? `Shiaijo ${andList(courts)}` : "",
               ].filter(Boolean).join(", ")}
             </div>
+            {showDrawVisibility && (
+              <div
+                className={`draw-visibility-line ${drawHidden ? "draw-visibility-line--hidden" : "draw-visibility-line--public"}`}
+                data-testid="card-draw-visibility"
+              >
+                <Icon name={drawVisibilityIcon(tournament, c)} size={12} />{drawVisibilityCardLine(tournament, c)}
+              </div>
+            )}
           </div>
           <StatusBadge status={c.status} format={c.format} />
         </div>
@@ -893,9 +938,21 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
             <button
               type="button"
               className="btn btn--primary btn--sm btn--full"
-              onClick={(e) => { e.stopPropagation(); onStart(); }}
+              onClick={(e) => { e.stopPropagation(); start(); }}
               disabled={!!startBlocker}
             >Start competition</button>
+          )}
+          {showDrawVisibility && (
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm btn--full"
+              onClick={(e) => { e.stopPropagation(); toggleVisibility(); }}
+              aria-disabled={settingVisibility ? "true" : undefined}
+              data-testid="card-draw-visibility-toggle"
+            >
+              {settingVisibility ? <span className="spinner" /> : <Icon name={drawHidden ? "eye" : "eye-off"} size={14} />}
+              {settingVisibility ? (drawHidden ? "Publishing…" : "Hiding…") : (drawHidden ? PUBLISH_DRAW_LABEL : UNPUBLISH_DRAW_LABEL)}
+            </button>
           )}
           {/* The reason, not just a dead button: the operator has to know
               which screen fixes it. Kept on the card rather than in a tooltip

@@ -331,6 +331,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 "match_updated", "schedule_updated", "competition_started",
                 "competition_completed", "draw_generated", "draw_discarded",
                 "swiss_round_generated", "competitor_status_updated", "participants_updated",
+                // bc-drpb: a draft published or hidden again moves no match,
+                // but the call-to-court warning reads whether its draw is
+                // hidden, so the feed is refetched. Unlike draw_generated and
+                // draw_discarded, it does not forget this tab's own queued
+                // status moves (api_client_events.jsx).
+                "draw_visibility_changed",
                 // resync_required: server signalled the SSE replay was unsatisfiable
                 // (ring eviction / restart): treat as a refresh so this court's queue
                 // doesn't stay stale until the next ordinary event happens to arrive.

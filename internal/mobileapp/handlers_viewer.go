@@ -190,8 +190,9 @@ var viewerLoadCompetition = func(store *state.Store, compID string) (*state.Comp
 //
 // Each competition's payload goes through its mask view for aud (names.view),
 // so a competition that hides names answers numbers to the public, its own
-// names to a caller holding its links. names nil masks nothing; the
-// organiser's audience reads every name.
+// names to a caller holding its links, and a hidden draft (bc-drpb) answers
+// the public as the same competition in setup. names nil masks nothing; the
+// organiser's audience reads every name and every draw.
 func buildViewerCompetitionPayloads(store *state.Store, courtFilter string, names *publicNames, aud audience) ([]any, error) {
 	ids, err := store.ListCompetitions()
 	if err != nil {
@@ -206,7 +207,7 @@ func buildViewerCompetitionPayloads(store *state.Store, courtFilter string, name
 		safeGo(&wg, &panicRef, func() {
 			// A nil load (comp failed to load, or is in setup on the court
 			// feed) stays a nil pointer, which both passes below skip.
-			loaded[idx] = loadViewerCompetition(store, compID, courtFilter)
+			loaded[idx] = loadViewerCompetition(store, compID, courtFilter, names, aud)
 		})
 	}
 	wg.Wait()
@@ -246,7 +247,7 @@ func buildViewerCompetitionPayloads(store *state.Store, courtFilter string, name
 	comps := make([]any, 0, len(ids))
 	for _, l := range loaded {
 		if l != nil && l.inFeed {
-			comps = append(comps, l.payload(tournament, viewerMaskView(names, l.comp, aud)))
+			comps = append(comps, l.payload(tournament))
 		}
 	}
 	return comps, nil
@@ -270,6 +271,12 @@ type viewerCompetition struct {
 	pmErr      error
 	brErr      error
 	squads     map[string][]domain.TeamMember
+	// view is what the request's audience may read of the competition,
+	// judged once, as the competition loaded (zero for one the court feed
+	// leaves out, which no payload is built for): its names and whether its
+	// draw is hidden (maskView.drawHidden), which decides what is read below
+	// as well as what payload answers.
+	view maskView
 	// queuePositions are this competition's slice of the one court-wide
 	// queue the aggregate numbered (pool matches first, then the bracket in
 	// draw order); nil for a setup competition, which has no matches.
@@ -287,7 +294,20 @@ type viewerCompetition struct {
 // physically on that court (matchesPresentOnCourt). The gate runs off the same
 // poolMatches/bracket this function already loads, no second read. The
 // aggregate passes "" (no filter).
-func loadViewerCompetition(store *state.Store, compID, courtFilter string) *viewerCompetition {
+//
+// names and aud give the request's mask view of the competition once it has
+// loaded (viewerMaskView). Whether the draw is hidden from aud
+// (publicNames.readsAsSetup, bc-drpb) is judged first, because the court feed
+// needs it to drop a competition; the names part of the view is built only
+// for a competition that stays in the feed, since a mask build is not free and
+// a court feed polls every competition. A hidden draft (maskView.drawHidden)
+// reads as the same competition in setup:
+// the court feed leaves it out, and the list reads no pools.csv and puts no
+// draw numbers on its roster. Its matches and bracket are still read, because
+// they take their places on the court-wide queue whoever is asking (the
+// court's real order, operator ruling bc-drpb-plan-1 Q1); payload answers
+// none of them.
+func loadViewerCompetition(store *state.Store, compID, courtFilter string, names *publicNames, aud audience) *viewerCompetition {
 	// Per-comp read faults degrade to skipping (or thinning) the comp rather
 	// than failing the whole viewer payload — the availability trade for the
 	// public list surfaces — but every failed load below is logged so a
@@ -306,6 +326,7 @@ func loadViewerCompetition(store *state.Store, compID, courtFilter string) *view
 	if courtFilter != "" && comp.Status == state.CompStatusSetup {
 		return nil
 	}
+	drawHidden := names != nil && names.readsAsSetup(comp, aud)
 
 	// bc-pnum: "make a team member's label available to the public
 	// surfaces". Same gate as the detail endpoint above (isTeamComp,
@@ -333,13 +354,16 @@ func loadViewerCompetition(store *state.Store, compID, courtFilter string) *view
 
 	// Court feed: drop comps with no real match on the requested court. Checked
 	// on the RAW bracket (before the preview strip below) so a preview bracket
-	// never qualifies a comp for a court.
-	if courtFilter != "" && !matchesPresentOnCourt(poolMatches, bracket, courtFilter) {
+	// never qualifies a comp for a court. A hidden draft is dropped as a setup
+	// competition is, whatever its matches.
+	if courtFilter != "" && (drawHidden || !matchesPresentOnCourt(poolMatches, bracket, courtFilter)) {
 		// Left out of this feed but still on the queue: stamp what the queue
 		// reads and load nothing else.
 		bracket = stampViewerEligibility(store, compID, poolMatches, bracket)
 		return &viewerCompetition{comp: comp, poolMatches: poolMatches, bracket: bracket}
 	}
+
+	v := viewerMaskViewWithDraw(names, comp, aud, drawHidden)
 
 	// WithSeeds: true, matching the single-competition detail endpoint below.
 	// The admin SPA renders AdminCompetition off THIS aggregate object until
@@ -373,7 +397,7 @@ func loadViewerCompetition(store *state.Store, compID, courtFilter string) *view
 		pools    []helper.Pool
 		poolsErr error
 	)
-	if drawInPoolsFile(comp) {
+	if drawInPoolsFile(comp) && !v.drawHidden {
 		pools, poolsErr = store.LoadPools(compID)
 		if poolsErr != nil {
 			// Reported, not merged: an unreadable pools.csv must show as
@@ -393,8 +417,11 @@ func loadViewerCompetition(store *state.Store, compID, courtFilter string) *view
 	// pooled format, the bracket's DrawOrder for a standalone knockout.
 	// bracket is already loaded above for the court-feed check, so a
 	// knockout-format competition's number never re-reads (and, on a corrupt
-	// file, never re-reports) bracket.json.
-	applyDrawNumbers(comp, players, pools, bracket)
+	// file, never re-reports) bracket.json. A hidden draft's numbers are its
+	// draw, so its roster carries none, as before the draw.
+	if !v.drawHidden {
+		applyDrawNumbers(comp, players, pools, bracket)
+	}
 
 	// Squads (bc-pnum, continued from the isTeamComp gate above): a
 	// SEQUENTIAL read, matching every other load in this function --
@@ -429,6 +456,7 @@ func loadViewerCompetition(store *state.Store, compID, courtFilter string) *view
 		comp: comp, poolMatches: poolMatches, bracket: bracket, inFeed: true,
 		isTeamComp: isTeamComp, players: players, plErr: plErr,
 		pools: pools, poolsErr: poolsErr, pmErr: pmErr, brErr: brErr, squads: squads,
+		view: v,
 	}
 }
 
@@ -490,18 +518,27 @@ func stampSlotMinutes(payload gin.H, comp *state.Competition, tournament *state.
 
 // payload numbers the competition's matches on the court-wide queue, redacts
 // operator-only audit fields and builds the public per-competition viewer
-// payload ({config, poolMatches, bracket}), masked through v: the roster, the
-// fighting-spirit awards, the matches, the bracket, the team members and the
-// dataIssues details of a competition that hides names (bc-hnam). The zero
-// view masks nothing.
-func (l *viewerCompetition) payload(tournament *state.Tournament, v maskView) gin.H {
+// payload ({config, poolMatches, bracket}), masked through the competition's
+// view: the roster, the fighting-spirit awards, the matches, the bracket, the
+// team members and the dataIssues details of a competition that hides names
+// (bc-hnam). The zero view masks nothing. A hidden draft's view (bc-drpb)
+// answers the same competition in setup: no matches, no bracket and no data
+// issues from the draw's files, beside the drawHidden marker every answer
+// carries (stampDrawHidden).
+func (l *viewerCompetition) payload(tournament *state.Tournament) gin.H {
+	v := l.view
 	comp, poolMatches, bracket := l.comp, l.poolMatches, l.bracket
 	isTeamComp, squads := l.isTeamComp, l.squads
 	players, plErr := l.players, l.plErr
 	pools, poolsErr, pmErr, brErr := l.pools, l.poolsErr, l.pmErr, l.brErr
 
-	// Court-wide queuePosition across every competition on that court on the same day.
-	if l.queuePositions != nil {
+	if v.drawHidden {
+		// What a setup competition's files read as (setupDrawFiles), and so
+		// nothing of them to number on the queue or to report.
+		_, poolMatches, _, bracket = setupDrawFiles()
+		pmErr, brErr = nil, nil
+	} else if l.queuePositions != nil {
+		// Court-wide queuePosition across every competition on that court on the same day.
 		applyQueuePositions(poolMatches, bracket, l.queuePositions)
 	}
 
@@ -575,7 +612,29 @@ func (l *viewerCompetition) payload(tournament *state.Tournament, v maskView) gi
 	}
 	stampSlotMinutes(payload, comp, tournament)
 	stampNamesHidden(payload, v)
+	stampDrawHidden(comp, tournament)
 	return payload
+}
+
+// setupDrawFiles is what a competition's draw files read as in setup, when
+// none of them exists: the pools and the pool matches as empty lists, the
+// standings as no pools and the bracket as one with no rounds (the store's
+// loaders for a missing file). A hidden draft is answered with them (bc-drpb),
+// so its answer is the one it gave before its draw.
+func setupDrawFiles() ([]helper.Pool, []state.MatchResult, map[string][]state.PlayerStanding, *state.Bracket) {
+	return []helper.Pool{}, []state.MatchResult{}, map[string][]state.PlayerStanding{}, &state.Bracket{Rounds: [][]state.BracketMatch{}}
+}
+
+// stampDrawHidden sets the drawHidden marker on a viewer answer's copy of the
+// competition (bc-drpb): on the viewer routes it says whether the public may
+// not see the draw right now (Competition.DrawHiddenIn), for every audience,
+// so the organiser's console reads the same marker the public pages do. The
+// stored value says only that a draft was hidden; a started competition or a
+// self-run tournament shows its draw whatever is stored.
+func stampDrawHidden(comp *state.Competition, tournament *state.Tournament) {
+	if comp != nil {
+		comp.DrawHidden = comp.DrawHiddenIn(tournament)
+	}
 }
 
 // viewerMaskView is names' mask view of comp for aud, the zero view (nothing
@@ -585,7 +644,17 @@ func viewerMaskView(names *publicNames, comp *state.Competition, aud audience) m
 	if names == nil {
 		return maskView{}
 	}
-	v, err := names.view(comp, aud)
+	return viewerMaskViewWithDraw(names, comp, aud, names.readsAsSetup(comp, aud))
+}
+
+// viewerMaskViewWithDraw is viewerMaskView for a caller that already judged
+// whether aud reads comp as a competition in setup (readsAsSetup), so a read
+// that judges it first builds the names part only when it needs it.
+func viewerMaskViewWithDraw(names *publicNames, comp *state.Competition, aud audience, drawHidden bool) maskView {
+	if names == nil {
+		return maskView{}
+	}
+	v, err := names.viewWithDraw(comp, aud, drawHidden)
 	if err != nil {
 		log.Printf("mobileapp: viewer payload %s: name mask: %v", comp.ID, err)
 	}
@@ -923,10 +992,12 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		}
 		// P2 (mp-9afd): collapse concurrent builds to O(1) per in-flight
 		// window. Every caller of one audience wants the same payload, so
-		// the key is the audience's (viewerFlightKey).
+		// the key is the audience's, at the config write token the request
+		// found (viewerFlightKeyAt): a request after a draw is published or
+		// hidden again never joins a build begun before it (bc-drpb).
 		// On panic inside the elected build, sf.Do returns an error and
 		// all waiters receive it; we map that to 500 below.
-		res, err := sf.Do(viewerFlightKey("competitions", aud), acceptsGzip(c.Request), func() ([]byte, error) {
+		res, err := sf.Do(viewerFlightKeyAt("competitions", store.ConfigWritesToken(), aud), acceptsGzip(c.Request), func() ([]byte, error) {
 			comps, err := buildViewerCompetitionPayloads(store, "", names, aud)
 			if err != nil {
 				return nil, err
@@ -969,7 +1040,10 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				return nil, errNotFound
 			}
 			// What this audience may read of the competition's names
-			// (bc-hnam), applied below once every real row is in hand.
+			// (bc-hnam), applied below once every real row is in hand, and
+			// whether it may see the draw (bc-drpb): a hidden draft is read
+			// and answered as the same competition in setup, so none of the
+			// draw's files is read for it.
 			v := viewerMaskView(names, comp, aud)
 
 			// bc-pnum: "make a team member's label available to the public
@@ -1006,18 +1080,22 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				}
 				playersErr = e
 			})
-			safeGo(&wg, &panicRef, func() {
-				pools, poolsErr = store.LoadPools(id)
-			})
-			safeGo(&wg, &panicRef, func() {
-				poolMatches, poolMatchesErr = store.LoadPoolMatches(id)
-			})
-			safeGo(&wg, &panicRef, func() {
-				standings, standingsErr = eng.CalculatePoolStandings(id)
-			})
-			safeGo(&wg, &panicRef, func() {
-				bracket, bracketErr = store.LoadBracket(id)
-			})
+			if v.drawHidden {
+				pools, poolMatches, standings, bracket = setupDrawFiles()
+			} else {
+				safeGo(&wg, &panicRef, func() {
+					pools, poolsErr = store.LoadPools(id)
+				})
+				safeGo(&wg, &panicRef, func() {
+					poolMatches, poolMatchesErr = store.LoadPoolMatches(id)
+				})
+				safeGo(&wg, &panicRef, func() {
+					standings, standingsErr = eng.CalculatePoolStandings(id)
+				})
+				safeGo(&wg, &panicRef, func() {
+					bracket, bracketErr = store.LoadBracket(id)
+				})
+			}
 			wg.Wait()
 
 			if p := panicRef.Load(); p != nil {
@@ -1177,8 +1255,11 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// re-read pools.csv/bracket.json a second time. A read error
 			// degrades (above) rather than aborting, so `pools`/`bracket` may
 			// be empty/nil here; applyDrawNumbers is a no-op over either,
-			// matching the aggregate's own tolerance for the same fault.
-			applyDrawNumbers(comp, comp.Players, pools, bracket)
+			// matching the aggregate's own tolerance for the same fault. A
+			// hidden draft's numbers are its draw, so its roster carries none.
+			if !v.drawHidden {
+				applyDrawNumbers(comp, comp.Players, pools, bracket)
+			}
 
 			// Redact operator-only audit fields before this PUBLIC payload.
 			stripMatchesAudit(poolMatches)
@@ -1253,8 +1334,10 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			if len(issues) > 0 {
 				payload["dataIssues"] = maskDataIssues(v, issues)
 			}
-			stampSlotMinutes(payload, comp, loadTournamentForSlots(store))
+			tournament := loadTournamentForSlots(store)
+			stampSlotMinutes(payload, comp, tournament)
 			stampNamesHidden(payload, v)
+			stampDrawHidden(comp, tournament)
 			return json.Marshal(payload)
 		}
 

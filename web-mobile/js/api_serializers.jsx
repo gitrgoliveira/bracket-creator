@@ -554,6 +554,10 @@ function normalizeCompetitionDetail(data) {
         // again: the public competition page is rendered off config, and its
         // note ("Names are hidden in this competition") reads it there.
         if (hidden) config.namesHidden = true;
+        // bc-drpb: `drawHidden` rides on the config itself (the server stamps
+        // its copy of the competition), so the spread above carries it as it
+        // is, absent for a published or started draw. Read it only through
+        // drawHiddenFromPublic (draw_visibility.jsx).
         result.config = config;
     }
 

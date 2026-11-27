@@ -96,7 +96,8 @@ func RegisterPublicSwissHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 // no-store) and answers for that audience. A Swiss competition cannot hide
 // names, but the route answers for any competition id, so one that does
 // (bc-hnam) gives the public each competitor's number where the name is,
-// exactly as the league standings read does.
+// exactly as the league standings read does. A draft whose draw is hidden from
+// the caller is answered as before its draw (engine.SwissStandingsBeforeDraw).
 func registerPublicSwissHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, names *publicNames) {
 	// GET /competitions/:id/swiss/standings
 	//
@@ -112,7 +113,14 @@ func registerPublicSwissHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		standings, err := eng.SwissStandings(id)
+		// A draft whose draw is hidden from the caller (maskView.drawHidden,
+		// bc-drpb) is answered as the same competition in setup: one zero row
+		// per entrant, with no round-1 bye counted.
+		standingsOf := eng.SwissStandings
+		if v.drawHidden {
+			standingsOf = eng.SwissStandingsBeforeDraw
+		}
+		standings, err := standingsOf(id)
 		if err != nil {
 			respondEngineError(c, err)
 			return

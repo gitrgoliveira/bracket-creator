@@ -47,9 +47,10 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 // registerDisplayHandlers wires the court-scoped reads. Each judges its caller
 // first (names.judge; a password sent but wrong is 401) and answers for that
 // audience: a court board or overlay, which never sends the password, shows
-// the numbers of a competition that hides names (bc-hnam), and the court
-// console, which sends it, the real names. The court feed names the hub's
-// event seq its read began at (X-Event-Seq, event_seq.go).
+// the numbers of a competition that hides names (bc-hnam) and nothing of a
+// hidden draft's matches (bc-drpb), and the court console, which sends it,
+// the real names and every match. The court feed names the hub's event seq
+// its read began at (X-Event-Seq, event_seq.go).
 func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publicNames, hub *Hub) {
 	// P2 (mp-9afd style): singleflight group for the court-scoped match feed,
 	// mirroring the sf in RegisterViewerHandlers for GET /competitions.
@@ -100,6 +101,14 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 			if comp == nil {
 				continue
 			}
+			// A competition this audience reads as in setup (a draft hidden
+			// from it, bc-drpb, or one still in setup) has no match to run, so
+			// none of its draw is read. Only that is asked here: the
+			// names' mask view is built once a running match is found, since
+			// this feed is polled every second or two.
+			if names.readsAsSetup(comp, aud) {
+				continue
+			}
 
 			poolMatches, err := store.LoadPoolMatches(compID)
 			if err != nil {
@@ -112,9 +121,9 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 				// No bracket loaded yet on this branch (it is loaded further
 				// below, only once the pool scan comes up empty), so numbering
 				// falls back to its own pools.csv read for a pooled competition.
+				v := viewerMaskView(names, comp, aud)
 				players := currentMatchPlayers(store, comp, nil)
 				zek := comp.EffectiveWithZekkenName()
-				v := viewerMaskView(names, comp, aud)
 				// Pool daihyosen/tiebreaker rep bouts carry team names in
 				// sideA/sideB; the representative fighter for each side lives in
 				// RepPlayerA/B. Empty for every regular match (mp-62vr).
@@ -152,9 +161,9 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 					// bracket is already loaded (below the pool scan above), so
 					// pass it through rather than letting numbersFromDrawWithBracket
 					// read bracket.json a second time.
+					v := viewerMaskView(names, comp, aud)
 					players := currentMatchPlayers(store, comp, bracket)
 					zek := comp.EffectiveWithZekkenName()
-					v := viewerMaskView(names, comp, aud)
 					// bc-brid: BracketMatch carries a per-side id when its own
 					// row is stamped; bracketCurrentSide prefers it and, for an
 					// audience that sees names, falls back to the pre-bc-brid
@@ -176,9 +185,9 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 				bm.Status == state.MatchStatusRunning {
 				// bracket is already loaded (above, this branch's own bm comes
 				// from it), so pass it through rather than a second read.
+				v := viewerMaskView(names, comp, aud)
 				players := currentMatchPlayers(store, comp, bracket)
 				zek := comp.EffectiveWithZekkenName()
-				v := viewerMaskView(names, comp, aud)
 				ipponsA, hansokuA := bm.IpponsA, bm.HansokuA
 				ipponsB, hansokuB := bm.IpponsB, bm.HansokuB
 				// phaseFromMatchID(bm.ID) would return "m" for the bronze
@@ -234,10 +243,12 @@ func registerDisplayHandlers(r *gin.RouterGroup, store *state.Store, names *publ
 
 		// P2 (mp-9afd style): collapse concurrent builds for the SAME court
 		// and the same audience to O(1) per in-flight window (court-scoped
-		// key: see the sf declaration comment; the audience through
-		// viewerFlightKey). On panic inside the elected build, sf.Do returns
-		// an error and all waiters receive it; mapped to 500.
-		res, err := sf.Do(viewerFlightKey("court-matches:"+court, aud), acceptsGzip(c.Request), func() ([]byte, error) {
+		// key: see the sf declaration comment; the audience and the config
+		// write token through viewerFlightKeyAt, so a request after a draw is
+		// published or hidden again never joins an earlier build, bc-drpb).
+		// On panic inside the elected build, sf.Do returns an error and all
+		// waiters receive it; mapped to 500.
+		res, err := sf.Do(viewerFlightKeyAt("court-matches:"+court, store.ConfigWritesToken(), aud), acceptsGzip(c.Request), func() ([]byte, error) {
 			// Propagate a failing competition list so serveSingleFlightJSON
 			// maps it to a 500 (matching GET /competitions): swallowing it
 			// here would serve an empty-but-200 board to every collapsed

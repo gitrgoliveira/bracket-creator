@@ -83,6 +83,16 @@ Refer to [QR codes on competitor tags](#qr-codes-on-competitor-tags): if you hav
 
 If someone is entered in more than one competition, they have a separate number in each one, and the filter lists them once per competition. Searching either number finds them, and each result tells you which competition it belongs to.
 
+### When the draw is being prepared
+
+The organiser makes the draw and checks it before anyone else sees it. Until they publish it or start the competition, the competition reads **Preparing draw** on the home list. Its page shows only the Overview (and the Standings, for a Swiss competition, with nobody scored yet), with a **Draw being prepared** card that says when it starts, if a start time is set, and how many competitors or teams are entered. There are no pools, bracket, matches or competitor numbers to see yet, and the court displays show none of its matches.
+
+![A competition page on a phone while the draw is being prepared: the name, the start time and the number of competitors, with no pools or bracket.](../../screenshots/draw-preparing-public.png)
+
+A watched competitor or dojo in that competition shows "Draw being prepared" beside the competition's name on your watchlist, alongside whatever their other competitions show.
+
+Once the draw is published, the page fills in by itself, with no reload: its **Pools**, **League** or **Bracket** tab appears, and its matches show on the schedule and the court displays. If the organiser hides the draw again, for example to correct it, the page goes back to **Draw being prepared** and any tab that was open returns to the Overview. What you read before that may change, so check the page again once the draw is back.
+
 ### When the organiser hides names
 
 An organiser can choose to show competitor numbers instead of names on the public pages. In that competition every competitor reads as their number, such as K12, on the schedule, the standings, the bracket, the court displays and the live updates. Dojo names and team names stay visible, and the members of a team read as a label built from the team's number. The competitor-number search above is then the way to find someone: type the number, prefix included, as printed on their tag. A name typed into the search finds nobody in that competition, though a dojo still matches.
@@ -137,6 +147,10 @@ Scores entered by the operator appear on the viewer immediately, across every co
   </video>
   <figcaption>A scorer's result appearing on the viewer in real time, with no refresh. Press play to watch.</figcaption>
 </figure>
+
+## QR codes on venue posters
+
+The organiser may put posters on the walls of the venue. The poster at the entrance carries a QR code that opens this public viewer home, so you can follow the whole day from your phone. A poster at a shiai-jo shows the court's letter in large type, and its code opens that court's scoreboard display with the bout in progress, the queue and the latest results. Point your phone's camera at the code and tap the link it offers. The address is printed under each code, so you can type it if scanning does not work. A poster's code opens the same page for everyone: it never shows a name the organiser has chosen to hide. Refer to [Print QR-code posters](../organisers/posters.md) for how the organiser makes them.
 
 ## QR codes on competitor tags
 

@@ -35,6 +35,7 @@ import (
 // three endpoints actually call.
 type LeagueTiebreakEngine interface {
 	LeagueTiebreakCandidates(compID string) ([]engine.TiedGroup, error)
+	LeagueTiebreakCandidatesBeforeDraw(compID string) ([]engine.TiedGroup, error)
 	GenerateLeagueTiebreakMatches(compID string, tiedTeamIDs []string) ([]state.MatchResult, error)
 }
 
@@ -222,7 +223,9 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 // (engine.LeagueTiebreakCandidates answers none for any other competition), and
 // a team keeps its name, id and dojo when names are hidden, so the mask changes
 // no candidate today; it is applied so a candidate that is ever a person reads
-// as their number.
+// as their number. A draft whose draw is hidden from the caller
+// (maskView.drawHidden, bc-drpb) is answered as the same competition in setup:
+// no candidates.
 func registerPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine, store LeagueTiebreakStore, names *publicNames) {
 	// GET /competitions/:id/league-tiebreak/candidates
 	// Returns the consequential tied groups for this team-league competition.
@@ -237,8 +240,12 @@ func registerPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 		if !ok {
 			return
 		}
-
-		candidates, err := eng.LeagueTiebreakCandidates(id)
+		// A hidden draw is answered as setup, which has no tie to break.
+		candidatesOf := eng.LeagueTiebreakCandidates
+		if v.drawHidden {
+			candidatesOf = eng.LeagueTiebreakCandidatesBeforeDraw
+		}
+		candidates, err := candidatesOf(id)
 		if err != nil {
 			// LeagueTiebreakCandidates calls CalculatePoolStandings, which reads
 			// overrides.json (computeStandingsFrom). A corrupt file is an

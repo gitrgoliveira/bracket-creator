@@ -45,6 +45,7 @@ type tournamentVersionPayload struct {
 	InfoNotes                string                 `json:"infoNotes"`
 	Contacts                 []TournamentContact    `json:"contacts"`
 	Theme                    tournamentVersionTheme `json:"theme"`
+	Posters                  *Posters               `json:"posters,omitempty"` // omitempty: a tournament that never saved a poster choice keeps its pre-upgrade version
 }
 
 // TournamentVersion computes a content-hash version of the tournament
@@ -94,6 +95,7 @@ func TournamentVersion(t *Tournament) string {
 		InfoNotes:                cp.InfoNotes,
 		Contacts:                 versionList(cp.Contacts),
 		Theme:                    theme,
+		Posters:                  NormalizePosters(cp.Posters),
 	}
 	return versionHash(p)
 }

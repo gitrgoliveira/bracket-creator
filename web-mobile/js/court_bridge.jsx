@@ -36,6 +36,7 @@
 
 import { applyPatchToCompetitions as _applyPatchToCompetitions, matchInComp as _matchInComp } from './patch.jsx';
 import { competitionHidesNames, isTeamCompetition, tournamentShowsEveryName } from './competition_shape.jsx';
+import { drawHiddenFromPublic, withoutHiddenDrafts } from './draw_visibility.jsx';
 import { squadMemberLabel } from './squad_member_label.jsx';
 
 // freshnessMs: the amber->red dot threshold.
@@ -278,6 +279,10 @@ export function getLastBroadcastAt() {
 // way the server does (see maskTeamNode). A competition that shows names, or
 // any competition of a self-run tournament, passes through untouched. A match
 // PATCH is masked the same way before it is published (maskPatchForBridge).
+// A draft whose draw the public may not see yet (drawHiddenFromPublic,
+// bc-drpb) is left out of the slice altogether, as the server's public court
+// feeds leave its matches out, and no patch of its matches is published
+// (maskOutgoingPatch).
 //
 // Pure and exported so vitest can pin it.
 // -----------------------------------------------------------------------
@@ -501,6 +506,7 @@ function maskAwards(comp, ctx, team) {
 // does. Without it the tournament is read as an officiated one.
 export function maskSnapshotForBridge(comps, tournament = null) {
     if (!Array.isArray(comps)) return comps;
+    comps = withoutHiddenDrafts(comps, tournament);
     const hides = (comp) => !!comp && typeof comp === 'object' && competitionHidesNames(tournament, comp);
     // The slice itself comes back when no competition in it hides its names.
     if (!comps.some(hides)) return comps;
@@ -578,14 +584,16 @@ let _snapshotCompetitions = null;
 // the competition is looked up among every competition the tab holds: one that
 // shows its names sends the patch as it is, and one the tab does not hold (yet)
 // gives null: the patch is not sent, since it could carry names, and the
-// display takes the server's copy at its next refresh.
+// display takes the server's copy at its next refresh. A draft the public may
+// not see yet (drawHiddenFromPublic) gives null too: its matches are on no
+// public screen.
 function maskOutgoingPatch(payload, compId) {
     if (!_snapshotProvider || !payload) return payload;
     const tournament = _snapshotTournament ? _snapshotTournament() : null;
     if (tournamentShowsEveryName(tournament)) return payload;
     const comps = _snapshotCompetitions ? _snapshotCompetitions() : null;
     const comp = (Array.isArray(comps) ? comps : []).find((c) => resolveCompId(c) === compId);
-    if (!comp) return null;
+    if (!comp || drawHiddenFromPublic(tournament, comp)) return null;
     return maskPatchForBridge(payload, comp, tournament);
 }
 

@@ -44,6 +44,17 @@ func viewerFlightKeyFor(base, compID string, aud audience) string {
 	return base + "#" + aud.keyFor(compID)
 }
 
+// viewerFlightKeyAt is viewerFlightKey for a read of every competition (the
+// viewer list, a court feed): the base carries the store's count of config.md
+// writes as the request found it (state.Store.ConfigWritesToken), so a request
+// made after a draw is published or hidden again (bc-drpb), or after any other
+// config write, never joins a build begun before it and answered from the old
+// state. Live scoring writes no config.md, so the builds the TV walls poll are
+// still shared between score taps.
+func viewerFlightKeyAt(base string, configWrites uint64, aud audience) string {
+	return viewerFlightKey(fmt.Sprintf("%s@%d", base, configWrites), aud)
+}
+
 // viewerSingleFlight collapses concurrent identical builds of the expensive
 // polled viewer endpoints (GET /api/viewer/competitions, its /:id variant, and
 // the court feed GET /api/viewer/court/:court/matches) to a single in-flight
@@ -58,7 +69,11 @@ func viewerFlightKeyFor(base, compID string, aud audience) string {
 // write that fired the event and receive pre-write data — stale by at most
 // that one in-flight build, corrected on the next request. Such an answer
 // names the seq its build read before the write's event (X-Event-Seq), so a
-// page that skips covered events still refetches for that one.
+// page that skips covered events still refetches for that one. The writes a
+// key carries a token for are the exception: the detail's competition write
+// token (viewerFlightKeyFor's base) and the list's and court feeds' config
+// write token (viewerFlightKeyAt), after which no request joins an earlier
+// build.
 //
 // Scalability goal (P2, mp-9afd): 1000 concurrent GET /api/viewer/competitions
 // arriving within the same 500ms SSE fan-out window collapse to O(1) builds

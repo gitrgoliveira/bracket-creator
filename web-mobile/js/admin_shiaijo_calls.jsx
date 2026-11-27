@@ -20,6 +20,7 @@ import { numberOf } from './competitor_identity.jsx';
 // A new call is a write: a tab that does not run the shiaijo makes none (bc-sseq
 // FR9). Taking this console's earlier calls down is not gated (withdrawCall).
 import { refusedNotHeld } from './admin_shiaijo_control.jsx';
+import { drawHiddenFromPublic, callHiddenDrawMessage, CALL_ANYWAY_LABEL } from './draw_visibility.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -117,10 +118,28 @@ export function useCourtCalls({
         if (!acceptTap(callTapRef, ev, matchKey(m))) return;
         if (!window.API || typeof window.API.sendAnnouncement !== "function") return;
         if (refusedNotHeld(controlRef)) return;
+        const comp = (courtCompetitions || []).find((c) => c.id === m.compId);
+        // A hidden draft's competitors are not on the public pages yet, and the
+        // call puts them on every public screen, so the console asks first
+        // (bc-drpb): Call anyway sends it, Cancel (or Escape, or the backdrop)
+        // sends nothing. A warning, never a refusal; a published or started
+        // competition calls at once. The question is confirmDialog's (ui.jsx),
+        // which takes the bounce of this tap, moves focus in and back and sits
+        // on the dialog layer.
+        if (drawHiddenFromPublic(tournament, comp)) {
+            const ok = await window.confirmDialog({
+                title: "Call to court?",
+                message: callHiddenDrawMessage(comp.name),
+                confirmLabel: CALL_ANYWAY_LABEL,
+                cancelLabel: "Cancel",
+            });
+            // The shiaijo may have been taken while the question was open.
+            if (!ok || !mountedRef.current || refusedNotHeld(controlRef)) return;
+        }
         // A competition whose public pages hide names is called by number (the
         // side colour when a side has none yet): the announcement reaches every
         // public screen as typed, so a name here would undo the setting.
-        const hides = competitionCallsByNumber(tournament, (courtCompetitions || []).find((c) => c.id === m.compId));
+        const hides = competitionCallsByNumber(tournament, comp);
         const callLabel = (side, colour) => (hides ? numberOf(side) : (side && side.name)) || colour;
         const a = callLabel(m.sideA, "Aka");
         const b = callLabel(m.sideB, "Shiro");

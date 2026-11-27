@@ -35,7 +35,8 @@ import { sideWord, sideFillClass } from './side_cell.jsx';
 import { competitorMatchesQuery } from './competitor_search.jsx';
 import { buildWatchlistLink } from './watchlist_link.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
-import { dojoKey, rosterDojos, sameDojo } from './viewer_watchlist_core.jsx';
+import { dojoKey, rosterDojos, sameDojo, preparingDrawsFor } from './viewer_watchlist_core.jsx';
+import { PUBLIC_DRAW_PREPARING } from './draw_visibility.jsx';
 
 // The one line the picker and the hero-empty state show while a competition's
 // participants failed to load (rosterAvailable:false on the aggregate, see
@@ -425,7 +426,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick, paceL
 // briefly a second copy of that sheet, which is the duplication this repo
 // keeps paying for, so it was folded back.
 //
-// Whether the link is short enough to be a QR is NOT decided here: qr.js owns
+// Whether the link is short enough to be a QR is NOT decided here: qr.jsx owns
 // that, and ShareLinkModal asks it. A watchlist still carrying ids (nobody has
 // a number until the draw runs) can exceed what a QR holds, but that is a fact
 // about the encoder rather than about this surface.
@@ -504,6 +505,10 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
   // Dojos present in the roster, with current member counts, one entry per
   // dojoKey (rosterDojos, D25).
   const dojos = useMemo(() => rosterDojos(roster), [roster]);
+  // The drafts the hero entry is in whose draw the public may not see yet
+  // (bc-drpb): one "Draw being prepared" line each, beside whatever the
+  // entry's other competitions show.
+  const heroPreparing = useMemo(() => (heroEntry ? preparingDrawsFor(heroEntry, roster) : []), [heroEntry, roster]);
   // The same list by dojoKey, so a dojo chip finds its dojo without a scan.
   const dojoByKey = useMemo(() => new Map(dojos.map((d) => [dojoKey(d.name), d])), [dojos]);
 
@@ -771,7 +776,9 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
           paceLookup={paceLookup}
         />
       )}
-      {heroEntry && !heroNextMatch && (
+      {/* "No upcoming matches" shows only when nothing else does: an entry in
+          a hidden draft shows its "Draw being prepared" line instead. */}
+      {heroEntry && !heroNextMatch && (heroUnresolved || heroPreparing.length === 0 || (!rosterLoaded && heroEntry.type === "dojo")) && (
         <div className={`hint--md ${heroUnresolved ? "watchlist-primary-unresolved" : "watchlist-primary-done"}`}
           data-testid={heroUnresolved ? "watchlist-unresolved" : "watchlist-primary-done"}>
           {/* A dojo gets its own wording. "Remove the entry and add them again"
@@ -788,6 +795,17 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
             : (!rosterLoaded && heroEntry.type === "dojo")
               ? ROSTER_NOT_LOADED
               : (heroLabel ? `No upcoming matches for ${heroLabel}.` : "No upcoming matches.")}
+        </div>
+      )}
+      {heroEntry && heroPreparing.length > 0 && (
+        <div data-testid="watchlist-draw-preparing">
+          {heroPreparing.map((d) => (
+            <div key={d.id}>
+              <span className="draw-preparing-line">
+                <Icon name="eye-off" />{PUBLIC_DRAW_PREPARING}: {d.name}
+              </span>
+            </div>
+          ))}
         </div>
       )}
 

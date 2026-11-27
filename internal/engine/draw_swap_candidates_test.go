@@ -117,29 +117,48 @@ func browserVerdict(sep SwapSeparation) string {
 }
 
 // checkCandidatesAgainstTheDryRun is the oracle: for every pick of the draw,
-// the candidates are every other drawn competitor in draw order, and each
-// verdict is what the REAL swap's dry run (SwapDrawPlaces, dryRun) says about
-// the separation before and after. It answers how many verdicts of each kind
-// it saw, and how many of the dry runs rebuilt the knockout.
-func checkCandidatesAgainstTheDryRun(t *testing.T, eng *Engine, comp *state.Competition, picks int) (verdicts map[string]int, rebuilt int) {
+// a seeded pick is refused SwapSeeded, as its swap's dry run is; for an
+// unseeded pick the candidates are every other unseeded drawn competitor in
+// draw order, and each verdict is what the REAL swap's dry run
+// (SwapDrawPlaces, dryRun) says about the separation before and after. It
+// answers how many verdicts of each kind it saw.
+func checkCandidatesAgainstTheDryRun(t *testing.T, eng *Engine, comp *state.Competition, picks int) (verdicts map[string]int) {
 	t.Helper()
 	snap := candidatesSnapshot(t, eng, comp.ID)
 	s := newSwapSuggester(comp, snap.pools, snap.bracket, snap.roster, DojoSeparation(comp, snap.pools, snap.bracket, snap.roster))
 	require.NotNil(t, s)
+	var unseeded []int
+	for y, ey := range s.entrants {
+		if ey.seed == 0 {
+			unseeded = append(unseeded, y)
+		}
+	}
 	verdicts = map[string]int{}
 	for x, ex := range s.entrants {
 		if x >= picks {
 			break
 		}
 		got, err := eng.SwapCandidatesFor(comp.ID, ex.c.side.ID)
+		if ex.seed > 0 {
+			requireSwapRefused(t, err, SwapSeeded)
+			ey := s.entrants[unseeded[0]]
+			_, err = eng.SwapDrawPlaces(comp.ID, SwapRequest{
+				A:      SwapSide{ID: ex.c.side.ID, Place: clonePlace(ex.place)},
+				B:      SwapSide{ID: ey.c.side.ID, Place: clonePlace(ey.place)},
+				DryRun: true,
+			})
+			requireSwapRefused(t, err, SwapSeeded)
+			continue
+		}
 		require.NoError(t, err)
 		assert.Equal(t, SwapSide{ID: ex.c.side.ID, Place: ex.place}, got.Pick)
-		require.Len(t, got.Candidates, len(s.entrants)-1)
+		require.Len(t, got.Candidates, len(unseeded)-1, "every other unseeded competitor")
 		k := 0
-		for y, ey := range s.entrants {
+		for _, y := range unseeded {
 			if y == x {
 				continue
 			}
+			ey := s.entrants[y]
 			cand := got.Candidates[k]
 			k++
 			require.Equal(t, ey.c.side.ID, cand.ID, "draw order")
@@ -150,14 +169,11 @@ func checkCandidatesAgainstTheDryRun(t *testing.T, eng *Engine, comp *state.Comp
 				DryRun: true,
 			})
 			require.NoError(t, err)
-			if res.BracketRebuilt {
-				rebuilt++
-			}
 			assert.Equal(t, browserVerdict(res.Separation), cand.Verdict, "swap %s and %s", ex.c.side.ID, ey.c.side.ID)
 			verdicts[cand.Verdict]++
 		}
 	}
-	return verdicts, rebuilt
+	return verdicts
 }
 
 // candidatesSnapshot reads the draw as the candidates' transaction does.
@@ -180,12 +196,11 @@ func TestSwapCandidates_AgreeWithTheSwapDryRun(t *testing.T) {
 
 	t.Run("pools and knockout, seeded", func(t *testing.T) {
 		eng, store, _ := setupTestEngine(t)
-		// Omega's first and Kappa's first are seeded, so their swaps rebuild
-		// the knockout and are judged on the dry run itself.
+		// Omega's first and Kappa's first are seeded, so they are refused as
+		// picks and offered as no candidate.
 		order := append([]string{"Omega", "Kappa", "Omega", "Omega", "Kappa", "Pi", "Pi", "Pi", "Rho", "Rho"}, uniqueDojos(6)...)
 		comp := drawCandidatesComp(t, eng, store, "cand-mixed", state.CompFormatMixed, 3, order, 2, func(c *state.Competition) { c.NumberPrefix = "K" })
-		verdicts, rebuilt := checkCandidatesAgainstTheDryRun(t, eng, comp, len(order))
-		assert.Positive(t, rebuilt, "a seeded swap rebuilds the knockout")
+		verdicts := checkCandidatesAgainstTheDryRun(t, eng, comp, len(order))
 		assert.Positive(t, verdicts[SwapVerdictWorse], "%v", verdicts)
 		assert.Positive(t, verdicts[SwapVerdictSame], "%v", verdicts)
 	})
@@ -194,8 +209,7 @@ func TestSwapCandidates_AgreeWithTheSwapDryRun(t *testing.T) {
 		eng, store, _ := setupTestEngine(t)
 		comp := drawCandidatesComp(t, eng, store, "cand-ko", state.CompFormatKnockout, 3, dojos[:13], 2, func(c *state.Competition) { c.NumberPrefix = "K" })
 		require.NotEmpty(t, byeHolders(loadBracket(t, store, comp.ID)), "fixture must hold a bye")
-		verdicts, rebuilt := checkCandidatesAgainstTheDryRun(t, eng, comp, 13)
-		assert.Zero(t, rebuilt, "a knockout-only swap rebuilds nothing")
+		verdicts := checkCandidatesAgainstTheDryRun(t, eng, comp, 13)
 		assert.Positive(t, verdicts[SwapVerdictWorse], "%v", verdicts)
 		assert.Positive(t, verdicts[SwapVerdictSame], "%v", verdicts)
 	})
@@ -204,7 +218,7 @@ func TestSwapCandidates_AgreeWithTheSwapDryRun(t *testing.T) {
 		eng, store, _ := setupTestEngine(t)
 		comp := drawCandidatesComp(t, eng, store, "cand-team", state.CompFormatMixed, 3, dojos[:12], 1, swapTeamComp)
 		require.True(t, comp.IsTeam())
-		verdicts, _ := checkCandidatesAgainstTheDryRun(t, eng, comp, 12)
+		verdicts := checkCandidatesAgainstTheDryRun(t, eng, comp, 12)
 		assert.Positive(t, verdicts[SwapVerdictWorse]+verdicts[SwapVerdictBetter], "%v", verdicts)
 	})
 }
@@ -242,9 +256,8 @@ func fourPoolDraw(dojos [4][2]string) ([]helper.Pool, *state.Bracket) {
 }
 
 // verdictOf is the swap candidates' verdict for swapping a and b, checked
-// against the verdict the swap's own dry run separation gives by the
-// whole-separation path (separationVerdict, the one a rebuilt bracket takes)
-// and by the browser's reading of it, so the three agree.
+// against the browser's reading of the swap's own dry run separation, so the
+// two agree.
 func verdictOf(t *testing.T, snap swapSnapshot, a, b string) string {
 	t.Helper()
 	got, err := swapCandidates(snap, a)
@@ -260,9 +273,11 @@ func verdictOf(t *testing.T, snap swapSnapshot, a, b string) string {
 	require.NotEmpty(t, verdict, "%s is a candidate", b)
 	plan, err := planSwap(snap, SwapRequest{A: got.Pick, B: SwapSide{ID: b, Place: place}, DryRun: true})
 	require.NoError(t, err)
-	whole, wholeDojos := separationVerdict(plan.answer.Separation)
-	assert.Equal(t, verdict, whole, "the whole separation judges it alike")
-	assert.Equal(t, wholeDojos, dojos, "the whole separation names the same dojos")
+	if verdict == SwapVerdictSame {
+		assert.Empty(t, dojos, "the same names no dojo")
+	} else {
+		assert.NotEmpty(t, dojos, "a better or worse mark names its dojos")
+	}
 	assert.Equal(t, verdict, browserVerdict(plan.answer.Separation), "the browser reads it alike")
 	return verdict
 }
@@ -399,7 +414,7 @@ func TestSwapCandidates_SamePoolPick(t *testing.T) {
 			assert.Equal(t, SwapVerdictBetter, byID[pl.ID].Verdict, "%s takes the pick out of the shared pool", pl.ID)
 		}
 	}
-	verdicts, _ := checkCandidatesAgainstTheDryRun(t, eng, comp, len(byID)+1)
+	verdicts := checkCandidatesAgainstTheDryRun(t, eng, comp, len(byID)+1)
 	assert.Positive(t, verdicts[SwapVerdictBetter])
 }
 
@@ -498,13 +513,32 @@ func TestSwapCandidates_Refusals(t *testing.T) {
 	})
 }
 
-// A seeded pick in a 256-competitor pools + knockout draw judges every
-// candidate on the dry run, each a knockout rebuild; it must stay usable.
-// About 1.2 s measured locally, so the budget catches an order of magnitude
-// lost. It is not asserted under the race detector, which made the same pick
-// take 23 s on a CI runner: there the timings are only logged.
+// A seed keeps their place (operator ruling 2026-11-27): a seeded pick is
+// refused, and no seed is offered as a candidate for an unseeded pick.
+func TestSwapCandidates_SeedsAreLocked(t *testing.T) {
+	roster := koRoster("Omega", "Omega", "D2", "D3", "D4", "D5", "D6", "D7")
+	roster[2].Seed, roster[5].Seed = 1, 2
+	snap := swapSnapshot{comp: drawReady(state.CompFormatKnockout), bracket: koDraw(roster), roster: roster}
+
+	_, err := swapCandidates(snap, "s2")
+	requireSwapRefused(t, err, SwapSeeded)
+	assert.Contains(t, err.Error(), roster[2].Name+" is seed 1")
+
+	got, err := swapCandidates(snap, "s1")
+	require.NoError(t, err)
+	var ids []string
+	for _, c := range got.Candidates {
+		ids = append(ids, c.ID)
+	}
+	assert.Equal(t, []string{"s0", "s3", "s4", "s6", "s7"}, ids, "every unseeded competitor but the pick, in draw order")
+}
+
+// An unseeded pick in a 256-competitor draw judges every candidate on the two
+// competitors' own pairs; it must stay usable. The budget catches an order of
+// magnitude lost. It is not asserted under the race detector, where the
+// timings are only logged.
 func TestSwapCandidates_TimingFor256(t *testing.T) {
-	const budget = 20 * time.Second
+	const budget = 5 * time.Second
 	dojos := make([]string, 256)
 	for i := range dojos {
 		dojos[i] = fmt.Sprintf("Dojo %02d", i%16)
@@ -515,26 +549,22 @@ func TestSwapCandidates_TimingFor256(t *testing.T) {
 			comp := drawCandidatesComp(t, eng, store, "cand-256-"+format, format, 4, dojos, 4)
 			snap := candidatesSnapshot(t, eng, comp.ID)
 			s := newSwapSuggester(comp, snap.pools, snap.bracket, snap.roster, DojoSeparation(comp, snap.pools, snap.bracket, snap.roster))
-			var seeded, unseeded string
+			var unseeded string
 			for _, e := range s.entrants {
-				if e.seed > 0 && seeded == "" {
-					seeded = e.c.side.ID
-				}
-				if e.seed == 0 && unseeded == "" {
+				if e.seed == 0 {
 					unseeded = e.c.side.ID
+					break
 				}
 			}
-			require.NotEmpty(t, seeded)
-			for name, pick := range map[string]string{"seeded": seeded, "unseeded": unseeded} {
-				start := time.Now()
-				got, err := eng.SwapCandidatesFor(comp.ID, pick)
-				require.NoError(t, err)
-				took := time.Since(start)
-				t.Logf("%s, %s pick: %v", format, name, took)
-				assert.Len(t, got.Candidates, 255)
-				if !raceEnabled {
-					assert.Less(t, took, budget)
-				}
+			require.NotEmpty(t, unseeded)
+			start := time.Now()
+			got, err := eng.SwapCandidatesFor(comp.ID, unseeded)
+			require.NoError(t, err)
+			took := time.Since(start)
+			t.Logf("%s, unseeded pick: %v", format, took)
+			assert.Len(t, got.Candidates, 255-4, "the four seeds are no candidates")
+			if !raceEnabled {
+				assert.Less(t, took, budget)
 			}
 		})
 	}

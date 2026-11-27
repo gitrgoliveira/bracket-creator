@@ -221,7 +221,7 @@ Three fields in these diagrams need a word:
   participant row or of the app's JSON: it is read from the `Position` column of `pools.csv`
   and used to order the pool and the workbook. A swap of two competitors made before the
   competition starts changes who holds a place, never the place: the two rows trade the
-  competitor (id, name, display name, dojo and seed) and each keeps its `Position` and its
+  competitor (id, name, display name and dojo; a seeded competitor is never swapped) and each keeps its `Position` and its
   `Number`, because a competitor number belongs to the place.
 * `Overrides.PoolRanks` maps each pool to the ranks set by hand, keyed by the competitor's
   participant id.
@@ -937,11 +937,8 @@ land together or not at all. A swap is allowed only while the competition is dra
 nothing has been fought; the first recorded result starts the competition and fixes the draw.
 Every side, winner and bracket slot naming either competitor takes the other's id and name in
 one pass, while courts, times, match ids and the qualifier labels a pools draw writes into
-the bracket stay as they were. When a seeded competitor leaves their pool in a pools plus
-knockout draw, the knockout preview is rebuilt from the new pools by the draw's own builder,
-in the same transaction. Its matches keep their stored courts and times. The exception is a
-rebuild that turns a bye into a match to play or a match into a bye: then the whole new
-schedule is taken, never a mix, which could put two matches on one court at once. A swap
+the bracket stay as they were. A seeded competitor is never swapped, so a swap never changes
+what the knockout is built from and nothing is rebuilt or scheduled again. A swap
 writes no match history, since nothing was fought. The eligibility records and check-ins are
 keyed by participant id, so they stay with the competitor. A swap sent again after it landed
 finds each competitor at the other's place and changes nothing.

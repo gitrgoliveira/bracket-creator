@@ -2853,7 +2853,7 @@ paths:
       summary: What swapping one competitor with each other would do to dojo separation
       description: |
         For the competitor picked first in the swap mode (`id`), every other
-        competitor of the draw, in draw order, with the place they hold (the
+        unseeded competitor of the draw, in draw order, with the place they hold (the
         shape the swap request takes) and a `verdict` for swapping the two,
         judged on the dojo separation before and after, the same rows the swap
         answers in `separation`.
@@ -2868,13 +2868,10 @@ paths:
         - `better`: no dojo is worse off and at least one is better off;
         - `same`: every dojo's meetings are the ones it has now, so two
           competitors of one dojo trading places is `same`. A move to another
-          match of the same round is not earlier;
-        - `refused`: the swap would be refused (the knockout cannot be rebuilt
-          with it); swapping them answers the refusal. It carries no `dojos`.
+          match of the same round is not earlier.
 
-        Seeded competitors are candidates too: a swap that moves a seed out of
-        their pool rebuilds the knockout, and its verdict is judged on the
-        rebuilt bracket.
+        A seeded competitor keeps their place in the draw: a seeded pick is
+        refused with 409 `seeded_competitor`, and no seed is a candidate.
 
         Recomputed from the stored draw on every request and never stored.
         Organiser only, in self-run mode too. Refusals carry `error` (the code)
@@ -2891,7 +2888,7 @@ paths:
             type: string
       responses:
         '200':
-          description: The pick and every other drawn competitor.
+          description: The pick and every other unseeded drawn competitor.
           content:
             application/json:
               schema:
@@ -2910,6 +2907,8 @@ paths:
           description: |
             `not_in_draw`: the draw does not hold the picked competitor (it
             has changed since the page read it).
+            `seeded_competitor`: the picked competitor is seeded, and seeds
+            keep their places in the draw.
             `no_draw`: the competition has no draw.
             `draw_started`: the competition has started, or a match of the
             draw already holds something fought.
@@ -2935,13 +2934,10 @@ paths:
         belongs to its place, so the two trade numbers (`numbers`). In a team
         competition the lineups each team saved for a match move with it
         (`lineupsMoved`); a lineup that can no longer apply is removed
-        (`lineupsRemoved`). Swapping a seeded competitor is allowed:
-        `seededWarning` names them. In a pools and knockout draw the knockout
-        preview is then rebuilt from the new pools (`bracketRebuilt`). Its
-        matches keep their stored courts and times, unless the rebuild turns
-        a bye into a match to play or a match into a bye; then the whole new
-        schedule is taken (`timesRescheduled`). `separation` holds the dojo separation rows of
-        the dojos the swap touches, before and after.
+        (`lineupsRemoved`). A seeded competitor keeps their place: a swap
+        naming one is refused with 409 `seeded_competitor`, so no swap moves a
+        seed and the knockout is never rebuilt. `separation` holds the dojo
+        separation rows of the dojos the swap touches, before and after.
 
         With `dryRun: true` the answer is computed and nothing is saved: it
         carries `applied: false` and `dryRun: true`. A resend of a swap that
@@ -2996,6 +2992,9 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: |
+            `seeded_competitor`: a competitor named is seeded, and seeds keep
+            their places in the draw; the message names each seed. A dry run
+            is refused alike.
             `no_draw`: the competition has no draw to change.
             `draw_started`: the competition has started, or a match of the
             draw already holds something fought.
@@ -9484,7 +9483,7 @@ components:
           $ref: '#/components/schemas/SwapSide'
         candidates:
           type: array
-          description: Every other drawn competitor, in draw order.
+          description: Every other unseeded drawn competitor, in draw order.
           items:
             type: object
             required: [id, place, verdict]
@@ -9496,8 +9495,8 @@ components:
                 $ref: '#/components/schemas/DrawPlace'
               verdict:
                 type: string
-                enum: [better, worse, same, refused]
-                description: What swapping this competitor with the pick does to the dojo separation, or `refused` when the swap would be refused.
+                enum: [better, worse, same]
+                description: What swapping this competitor with the pick does to the dojo separation.
               dojos:
                 type: array
                 items:
@@ -9540,7 +9539,7 @@ components:
 
     SwapResult:
       type: object
-      required: [applied, places, moves, bracketRebuilt, timesRescheduled, lineupsMoved, lineupsRemoved, separation]
+      required: [applied, places, moves, lineupsMoved, lineupsRemoved, separation]
       properties:
         applied:
           type: boolean
@@ -9587,25 +9586,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SwapBye'
-        bracketRebuilt:
-          type: boolean
-        timesRescheduled:
-          type: boolean
-        seededWarning:
-          type: array
-          description: The seeded competitors the swap moves, with their seed and where they go.
-          items:
-            type: object
-            required: [id, name, seed, to]
-            properties:
-              id:
-                type: string
-              name:
-                type: string
-              seed:
-                type: integer
-              to:
-                $ref: '#/components/schemas/DrawPlace'
         lineupsMoved:
           type: integer
         lineupsRemoved:
@@ -9629,7 +9609,7 @@ components:
       properties:
         error:
           type: string
-          enum: [invalid, same_competitor, not_in_draw, no_draw, draw_started, swap_not_supported, draw_changed]
+          enum: [invalid, same_competitor, not_in_draw, seeded_competitor, no_draw, draw_started, swap_not_supported, draw_changed]
         message:
           type: string
           description: The sentence to show the organiser.

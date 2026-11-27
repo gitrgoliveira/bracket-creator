@@ -982,6 +982,8 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
 
                   const [pMember1, pMember2] = isEngi && window.engiPairParts ? window.engiPairParts(p.name) : [p.name, ""];
                   const entrant = swap && p.id ? swap.entrantOf(p.id) : null;
+                  // A seed keeps their place: drawn grey, not a button.
+                  const isLocked = !!entrant && !!swap.lockedOf && swap.lockedOf(entrant.id);
                   const isPicked = !!entrant && swap.pickedId === entrant.id;
                   // In the swap mode a candidate's mark (better, worse) is a colour and
                   // a line naming the dojos it is about, under the dojo (or under the
@@ -1016,7 +1018,9 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                         {drawPos}
                       </td>
                       <td>
-                        {entrant ? (
+                        {isLocked ? (
+                          <div className="swap-pick swap-pick--locked" data-testid="swap-locked">{nameCell}</div>
+                        ) : entrant ? (
                           <button type="button" className={`swap-pick${isPicked ? " swap-pick--picked" : ""}${mark ? ` swap-pick--${mark}` : ""}`}
                             aria-pressed={isPicked} data-testid="swap-target" onClick={(ev) => swap.onPick(entrant, ev)}>
                             {nameCell}

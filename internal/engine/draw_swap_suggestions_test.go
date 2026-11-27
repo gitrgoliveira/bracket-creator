@@ -117,7 +117,6 @@ func checkAgainstTheSummary(t *testing.T, comp *state.Competition, pools []helpe
 				DryRun: true,
 			})
 			require.NoError(t, err)
-			require.False(t, plan.answer.BracketRebuilt, "an unseeded swap rebuilds nothing")
 			after := rowsByPair(DojoSeparation(comp, plan.pools, plan.bracket, roster))
 			require.Len(t, after, len(before), "a swap keeps every pair")
 

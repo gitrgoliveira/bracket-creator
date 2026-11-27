@@ -10,9 +10,9 @@
 // with what it does to each dojo as a whole (swapVerdict); "Swap them" ("Swap
 // anyway", in the warning colour, when a dojo would be worse off) sends the same two places
 // without dryRun. The server judges
-// everything (refusals, where each goes, the numbers, the seed warning, the
-// lineups, the byes, the separation before and after); this module only words
-// its answer.
+// everything (refusals, a seed among them, since seeds keep their places,
+// where each goes, the numbers, the lineups, the byes, the separation before
+// and after); this module only words its answer.
 //
 // The layer is opened by a tap, so it takes that tap's bounce
 // (useOpenedTapGuard, a confirm: every click in the layer for TAP_BOUNCE_MS)
@@ -334,15 +334,10 @@ export function numbersSentence(numbers) {
 }
 
 // swapDetailLines: everything else the answer says, one sentence each: the
-// seed warning (FR5), the rebuilt bracket and its new times, the lineups that
-// move or go (FR6), and the byes the swap hands over.
-export function swapDetailLines(answer, bracket) {
+// lineups that move or go (FR6), and the byes the swap hands over. No swap
+// moves a seed, so none rebuilds the knockout.
+export function swapDetailLines(answer) {
   const lines = [];
-  for (const w of answer.seededWarning || []) {
-    lines.push({ kind: 'warn', text: `${w.name} is seed ${w.seed} and moves to ${drawPlaceLabel(w.to, bracket)}.` });
-  }
-  if (answer.bracketRebuilt) lines.push({ kind: 'warn', text: 'The knockout bracket is rebuilt from the new pools.' });
-  if (answer.timesRescheduled) lines.push({ kind: 'warn', text: 'The knockout matches are scheduled again, so their times and shiaijo can change.' });
   if (answer.lineupsMoved > 0) {
     lines.push({ kind: 'info', text: `${answer.lineupsMoved} saved ${plural(answer.lineupsMoved, 'lineup moves', 'lineups move')} with ${plural(answer.lineupsMoved, 'its team', 'their teams')}.` });
   }
@@ -460,7 +455,7 @@ export function DrawSwapCheck({ comp, bracket, a, b, password, drawHidden, onClo
   const separation = check ? separationSentences(check.separation) : [];
   const verdict = check ? swapVerdict(check.separation) : null;
   const numbers = check ? numbersSentence(check.numbers) : '';
-  const details = check ? swapDetailLines(check, bracket) : [];
+  const details = check ? swapDetailLines(check) : [];
 
   return (
     <div className="modal-backdrop" ref={openedRef} onClickCapture={onClickCapture} onClick={() => { if (!sending) onClose(); }}>

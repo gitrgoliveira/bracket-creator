@@ -446,8 +446,9 @@ function teamIVPWScore(m) {
 // card passes one (bronzeSlotLabels), so every other card is unchanged. A
 // normalized empty side is {id: "", name: ""}, truthy, so the test is the name.
 // `pick` is set only in the admin Swap competitors mode (swapPickFor below):
-// the side is then its own button, {picked, mark, word, onPick}; without it the side is
-// drawn exactly as before.
+// the side is then its own button, {picked, mark, word, onPick}, or, for a seed
+// (locked, who keeps their place), a grey side that is no button; without it
+// the side is drawn exactly as before.
 const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD, isEngi, slotLabel, feederId, barred, emptyLabel, pick }) => {
   if (!player || isTBD || (emptyLabel && !player.name)) {
     return (
@@ -470,14 +471,17 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
   // so the side is carried by the leading colour bar and tint alone (DESIGN.md
   // §4): the card names no side in text, and the number sits before the name
   // on both sides (operator ruling 2026-09-14, bc-dnst).
-  const Side = pick ? "button" : "div";
+  const tappable = !!pick && !pick.locked;
+  const Side = tappable ? "button" : "div";
+  const pickClass = !pick ? "" : pick.locked ? " swap-pick swap-pick--locked"
+    : ` swap-pick${pick.picked ? " swap-pick--picked" : ""}${pick.mark ? ` swap-pick--${pick.mark}` : ""}`;
   return (
     <Side
-      className={`bc-side bc-side--${side} ${isWinner ? "bc-side--winner" : ""}${pick ? ` swap-pick${pick.picked ? " swap-pick--picked" : ""}${pick.mark ? ` swap-pick--${pick.mark}` : ""}` : ""}`}
-      type={pick ? "button" : undefined}
-      aria-pressed={pick ? pick.picked : undefined}
-      data-testid={pick ? "swap-target" : undefined}
-      onClick={pick ? pick.onPick : undefined}
+      className={`bc-side bc-side--${side} ${isWinner ? "bc-side--winner" : ""}${pickClass}`}
+      type={tappable ? "button" : undefined}
+      aria-pressed={tappable ? pick.picked : undefined}
+      data-testid={!pick ? undefined : tappable ? "swap-target" : "swap-locked"}
+      onClick={tappable ? pick.onPick : undefined}
     >
       <div className="bc-name-wrap">
         <span className="bc-name">
@@ -517,6 +521,7 @@ function swapPickFor(swap, side) {
   if (!entrant) return null;
   return {
     picked: swap.pickedId === entrant.id,
+    locked: swap.lockedOf ? swap.lockedOf(entrant.id) : false,
     mark: swap.markOf ? swap.markOf(entrant.id) : null,
     word: swap.verdictWord ? swap.verdictWord(entrant.id) : null,
     onPick: (ev) => swap.onPick(entrant, ev),

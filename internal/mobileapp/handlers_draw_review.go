@@ -12,7 +12,7 @@ import (
 )
 
 // The draw review (bc-drev): what an organiser reads and changes between
-// generating a draw and starting the competition. Three routes, all in the
+// generating a draw and starting the competition. Four routes, all in the
 // admin group:
 //
 //   - GET .../dojo-separation: every pair of dojo-mates in the draw and the
@@ -29,9 +29,10 @@ import (
 // The reads are recomputed from the stored draw on every call, as
 // draw-warnings is; nothing is stored for them. All four routes are
 // organiser only in self-run too (isSelfRunMainGatedConfigRoute), as their
-// OpenAPI entries say; the candidates also take the competition's lock and
-// can rebuild the knockout once per competitor. They are plain requests, not
-// outbox doors: the page needs the answer before it shows anything.
+// OpenAPI entries say; the candidates also take the competition's lock. A
+// seeded competitor is never swapped (seeded_competitor). They are plain
+// requests, not outbox doors: the page needs the answer before it shows
+// anything.
 func RegisterDrawReviewHandlers(r *gin.RouterGroup, comps CompetitionLoader, eng DrawReviewEngine, hub Broadcaster) {
 	// GET /competitions/:id/dojo-separation: 200 {meetings: [...]}, an empty
 	// list for a competition with no draw, a league or a Swiss competition;
@@ -76,12 +77,14 @@ func RegisterDrawReviewHandlers(r *gin.RouterGroup, comps CompetitionLoader, eng
 
 	// GET /competitions/:id/draw/swap-candidates?id=<participant id>: 200
 	// {pick: {id, place}, candidates: [{id, place, verdict}]}, verdict
-	// "better", "worse" or "same", every other drawn competitor in draw order.
+	// "better", "worse" or "same", every other unseeded drawn competitor in
+	// draw order (a seed keeps its place, so none is a candidate).
 	// 400 invalid without an id; 404 for an unknown competition; 409 no_draw,
-	// draw_started or swap_not_supported as the swap answers them, and 409
-	// not_in_draw for an id the draw does not hold (the page took the id from
-	// the draw it shows, so the draw has changed since; the swap answers the
-	// same code 400, since its body is the request).
+	// draw_started, swap_not_supported or seeded_competitor (a seeded pick) as
+	// the swap answers them, and 409 not_in_draw for an id the draw does not
+	// hold (the page took the id from the draw it shows, so the draw has
+	// changed since; the swap answers the same code 400, since its body is the
+	// request).
 	r.GET("/competitions/:id/draw/swap-candidates", func(c *gin.Context) {
 		comp, ok := drawReviewCompetition(c, comps)
 		if !ok {

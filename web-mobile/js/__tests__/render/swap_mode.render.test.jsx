@@ -75,7 +75,7 @@ const dryRun = {
     { id: 'p1', name: 'Elijah Everdeen', to: { pool: 'Pool B', position: 1 } },
     { id: 'p3', name: 'Lena Park', to: { pool: 'Pool A', position: 1 } },
   ],
-  numbers: [], seededWarning: [], bracketRebuilt: false, lineupsMoved: 0, lineupsRemoved: 0,
+  numbers: [], lineupsMoved: 0, lineupsRemoved: 0,
   separation: { before: [], after: [] },
 };
 
@@ -100,7 +100,7 @@ describe('Swap competitors on Pools (preview)', () => {
     expect(targets()).toHaveLength(0);
     await turnOn();
     expect(screen.getByTestId('swap-mode').textContent).toContain(
-      'Swap competitors: tap two competitors to swap them. While this is on, a tap picks a competitor instead of opening a score sheet.');
+      'Swap competitors: tap two unseeded competitors to swap them. While this is on, a tap picks a competitor instead of opening a score sheet.');
     // Before the first pick: the instruction and Done, on one row, Done the one primary.
     const head = screen.getByTestId('swap-mode').querySelector('.swap-mode__head');
     expect(head.querySelector('.swap-mode__lead')).not.toBeNull();
@@ -227,6 +227,34 @@ describe('Swap competitors on Pools (preview)', () => {
     await pointerTap(targetNamed('Elijah Everdeen'));
     expect(targetNamed('Elijah Everdeen')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('swap-mode-line').textContent).toBe('');
+  });
+
+  it('draws a seed grey, as no button, with its line saying it stays, and a tap on it picks nothing', async () => {
+    // Seeds keep their places (operator ruling 2026-11-27).
+    const seededPools = [{ poolName: 'Pool A', players: [{ ...elijah, seed: 1 }, arthur] }, pools[1]];
+    await act(async () => {
+      render(<AdminPools c={mixed} pools={seededPools} poolMatches={poolMatches} standings={{}} tweaks={{ showDojo: true }}
+        onEditScore={vi.fn()} password="pw" />);
+    });
+    await turnOn();
+    expect(targets().map((el) => el.textContent), 'the seed is no tap target').toEqual([
+      expect.stringContaining('Arthur Dick'), expect.stringContaining('Lena Park'), expect.stringContaining('Omar Sy'),
+    ]);
+    const locked = screen.getByTestId('swap-locked');
+    expect(locked.tagName).toBe('DIV');
+    expect(locked).toHaveClass('swap-pick', 'swap-pick--locked');
+    expect(locked).not.toHaveAttribute('tabindex');
+    expect(locked).not.toHaveAttribute('aria-pressed');
+    expect(locked.textContent).toContain('Elijah Everdeen');
+    expect(within(locked).getByTestId('swap-verdict-word').textContent).toBe('Seed 1, stays in place');
+    await pointerTap(locked);
+    expect(screen.getByTestId('swap-mode-line').textContent, 'nothing is picked').toBe('');
+    later();
+    await pointerTap(targetNamed('Arthur Dick'));
+    later();
+    await pointerTap(locked);
+    expect(screen.queryByTestId('draw-swap-check'), 'a seed never opens the check').toBeNull();
+    expect(targetNamed('Arthur Dick')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('a tap on another competitor opens the check with both places', async () => {
@@ -378,6 +406,20 @@ describe('Swap competitors on Bracket (preview)', () => {
     expect(window.API.swapDrawPlaces).toHaveBeenCalledWith('c1', {
       a: { id: 'p1', place: { slot: 0 } }, b: { id: 'p4', place: { slot: 3 } }, dryRun: true,
     }, 'pw');
+  });
+
+  it('draws a seed of the roster grey on its card, as no button, and a tap on it picks nothing', async () => {
+    await mountBracket({ c: { ...knockout, players: [{ id: 'p4', seed: 2 }] } });
+    await turnOn();
+    expect(targets()).toHaveLength(3);
+    const locked = screen.getByTestId('swap-locked');
+    expect(locked.tagName).toBe('DIV');
+    expect(locked).toHaveClass('bc-side', 'swap-pick--locked');
+    expect(locked).not.toHaveAttribute('aria-pressed');
+    expect(locked.textContent).toContain('Omar Sy');
+    expect(within(locked).getByTestId('swap-verdict-word').textContent).toBe('Seed 2, stays in place');
+    await pointerTap(locked);
+    expect(screen.getByTestId('swap-mode-line').textContent).toBe('');
   });
 
   it('reaches the effective-round renderer too (a bracket with display metadata)', async () => {

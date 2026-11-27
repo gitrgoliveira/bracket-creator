@@ -265,6 +265,9 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   result finished offline and refused because
                                   another phone finished first; a result kept
                                   offline and sent on return; who may register.
+                                  Competitions are seeded from a second
+                                  operator context; every result is entered on
+                                  a phone
       draw-visibility.public      a draft draw kept off a spectator's phone and
                                   the TV board until Publish draw; Unpublish
                                   takes it away again; starting a hidden draw
@@ -275,9 +278,6 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   open phone follows; the Draw review card's
                                   suggested swap undoing it; a hidden knockout
                                   draw swapped on the Bracket.
-                                  Competitions are seeded from a second
-                                  operator context; every result is entered on
-                                  a phone
     output/                 screenshots, audit.json and traces (below);
                             gitignored
 

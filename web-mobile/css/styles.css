@@ -13270,6 +13270,29 @@ button.bc-side.swap-pick.swap-pick--worse {
 .bc-side .swap-verdict {
   white-space: normal;
 }
+/* A seed keeps their place (operator ruling 2026-11-27): drawn grey and not a
+   button, a solid edge where a pick has a dashed one, at a pick's size so the
+   rows do not move. Its name, dojo and "Seed N, stays in place" line are
+   --ink-3 on --surface-2 (4.97:1). */
+.swap-pick--locked,
+.swap-pick--locked :is(.bc-name, .bc-dojo, .pool__player-name, .pool__dojo-name),
+.swap-verdict--locked {
+  color: var(--ink-3);
+}
+.swap-pick--locked {
+  cursor: default;
+}
+.pool__table .swap-pick--locked {
+  min-height: max(36px, var(--tap-floor));
+  padding: 4px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+}
+.bc-side.swap-pick--locked {
+  min-height: max(38px, var(--tap-floor));
+  background: var(--surface-2);
+}
 /* The key line under the pick line: every sentence it can say stacked in one
    grid cell, only the current one visible, so it holds the height of the
    longest from the pick on. */

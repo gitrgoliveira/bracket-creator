@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -91,6 +92,62 @@ func TestDrawReview_SwapCandidates(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		refused(t, g.send(http.MethodGet, "/api/competitions/started/draw/swap-candidates?id="+sa, nil), http.StatusConflict, engine.SwapDrawStarted)
 	})
+}
+
+// A seed keeps their place (operator ruling 2026-11-27): a seeded pick of the
+// swap candidates and a swap naming a seed, its dry run included, are 409
+// seeded_competitor, and no seed is offered as a candidate.
+func TestDrawReview_SeededCompetitorIsRefused(t *testing.T) {
+	g := newDrawReviewRig(t)
+	g.create("seeded", map[string]any{
+		"name": "Seeded", "kind": "individual", "format": state.CompFormatKnockout, "courts": []string{"A", "B"},
+		"players": []map[string]any{
+			{"name": "Arthur Dick", "dojo": "Omega"},
+			{"name": "Lena Park", "dojo": "Omega"},
+			{"name": "Mika Sato", "dojo": "Kappa"},
+			{"name": "Noor Haddad", "dojo": "Pi"},
+		},
+	}, false)
+	require.NoError(t, g.store.SaveSeeds("seeded", []domain.SeedAssignment{{Name: "Mika Sato", Dojo: "Kappa", SeedRank: 1}}))
+	w := g.send(http.MethodPost, "/api/competitions/seeded/generate-draw", nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	roster, err := g.store.LoadParticipants("seeded", false)
+	require.NoError(t, err)
+	var seed string
+	for _, p := range roster {
+		if p.Seed == 1 {
+			seed = p.ID
+		}
+	}
+	require.NotEmpty(t, seed)
+	slots := g.slotsOf("seeded")
+	var other string
+	for id := range slots {
+		if id != seed {
+			other = id
+		}
+	}
+
+	refusedSeeded := func(w *httptest.ResponseRecorder) {
+		t.Helper()
+		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		got := decodeBody(t, w)
+		assert.Equal(t, engine.SwapSeeded, got["error"])
+		assert.Equal(t, "Mika Sato is seed 1, and seeds keep their places in the draw.", got["message"])
+	}
+	refusedSeeded(g.send(http.MethodGet, "/api/competitions/seeded/draw/swap-candidates?id="+seed, nil))
+	for _, dry := range []bool{true, false} {
+		refusedSeeded(g.send(http.MethodPost, "/api/competitions/seeded/draw/swap", swapBody(seed, slots[seed], other, slots[other], dry)))
+		refusedSeeded(g.send(http.MethodPost, "/api/competitions/seeded/draw/swap", swapBody(other, slots[other], seed, slots[seed], dry)))
+	}
+
+	w = g.send(http.MethodGet, "/api/competitions/seeded/draw/swap-candidates?id="+other, nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	candidates := decodeBody(t, w)["candidates"].([]any)
+	assert.Len(t, candidates, len(slots)-2, "every other unseeded competitor")
+	for _, c := range candidates {
+		assert.NotEqual(t, seed, c.(map[string]any)["id"], "a seed is no candidate")
+	}
 }
 
 // In self-run the swap candidates stay the organiser's: an anonymous caller

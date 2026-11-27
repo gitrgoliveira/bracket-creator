@@ -2,7 +2,7 @@
 // candidate; these helpers only read its answer (better, worse, same) into
 // marks and word what the marks mean on the banner's second line.
 import { describe, it, expect } from 'vitest';
-import { candidateVerdicts, candidateMarks, markText, marksKey, MARK_KEYS } from '../admin_swap_candidates.jsx';
+import { candidateVerdicts, candidateMarks, markText, marksKey, MARK_KEYS, swapLocked, lockedText } from '../admin_swap_candidates.jsx';
 import { swapPickLine } from '../admin_competition_bracket.jsx';
 
 const answer = (pickId, candidates) => ({ pick: { id: pickId, place: { pool: 'Pool A', position: 1 } }, candidates });
@@ -43,6 +43,17 @@ describe('the marks of one pick', () => {
     expect(markText('better', ['Kenyu'])).toBe('Better for Kenyu');
     expect(markText('same', ['Fudo'])).toBe('');
     expect(markText(null)).toBe('');
+  });
+});
+
+describe('a seed keeps their place', () => {
+  it('locks a seeded entrant and no other, and says so on its line', () => {
+    expect(swapLocked({ id: 'p1', seed: 1 })).toBe(true);
+    expect(swapLocked({ id: 'p2', seed: 0 })).toBe(false);
+    expect(swapLocked({ id: 'p3' })).toBe(false);
+    expect(swapLocked({ id: 'p4', seed: null })).toBe(false);
+    expect(swapLocked(null)).toBe(false);
+    expect(lockedText(3)).toBe('Seed 3, stays in place');
   });
 });
 

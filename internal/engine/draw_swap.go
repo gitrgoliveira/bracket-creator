@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"time"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -24,6 +24,7 @@ const (
 	SwapInvalid          = "invalid"
 	SwapSameCompetitor   = "same_competitor"
 	SwapNotInDraw        = "not_in_draw"
+	SwapSeeded           = "seeded_competitor"
 	SwapNoDraw           = "no_draw"
 	SwapDrawStarted      = "draw_started"
 	SwapNotSupported     = "swap_not_supported"
@@ -98,15 +99,6 @@ type SwapBye struct {
 	Bye  bool   `json:"bye"`
 }
 
-// SwapSeedWarning says a seeded competitor leaves their pool (or their
-// knockout place): their seed and where they go. Filled by the seeded swap.
-type SwapSeedWarning struct {
-	ID   string    `json:"id"`
-	Name string    `json:"name"`
-	Seed int       `json:"seed"`
-	To   DrawPlace `json:"to"`
-}
-
 // SwapSeparation is the dojo separation summary's rows for the dojos the swap
 // touches, before and after: the two competitors' dojos and any other dojo
 // whose meetings change.
@@ -117,23 +109,19 @@ type SwapSeparation struct {
 
 // SwapResult is the answer of a swap or of its dry run. Applied says this
 // request changed the draw (false for a dry run and for a resend, whose
-// Reason is SwapAlreadySwapped). BracketRebuilt, TimesRescheduled and
-// SeededWarning belong to a seeded swap, LineupsMoved and LineupsRemoved to a
+// Reason is SwapAlreadySwapped). LineupsMoved and LineupsRemoved belong to a
 // team swap.
 type SwapResult struct {
-	Applied          bool              `json:"applied"`
-	DryRun           bool              `json:"dryRun,omitempty"`
-	Reason           string            `json:"reason,omitempty"`
-	Places           SwapPlaces        `json:"places"`
-	Moves            []SwapMove        `json:"moves"`
-	Numbers          []SwapNumber      `json:"numbers,omitempty"`
-	Byes             []SwapBye         `json:"byes,omitempty"`
-	BracketRebuilt   bool              `json:"bracketRebuilt"`
-	TimesRescheduled bool              `json:"timesRescheduled"`
-	SeededWarning    []SwapSeedWarning `json:"seededWarning,omitempty"`
-	LineupsMoved     int               `json:"lineupsMoved"`
-	LineupsRemoved   int               `json:"lineupsRemoved"`
-	Separation       SwapSeparation    `json:"separation"`
+	Applied        bool           `json:"applied"`
+	DryRun         bool           `json:"dryRun,omitempty"`
+	Reason         string         `json:"reason,omitempty"`
+	Places         SwapPlaces     `json:"places"`
+	Moves          []SwapMove     `json:"moves"`
+	Numbers        []SwapNumber   `json:"numbers,omitempty"`
+	Byes           []SwapBye      `json:"byes,omitempty"`
+	LineupsMoved   int            `json:"lineupsMoved"`
+	LineupsRemoved int            `json:"lineupsRemoved"`
+	Separation     SwapSeparation `json:"separation"`
 }
 
 // swapSnapshot is what the swap's transaction read: the competition, its draw
@@ -141,8 +129,7 @@ type SwapResult struct {
 // something fought (bout rows, a score, a history or a score-log file), or ""
 // when none does. lineups is a team competition's stored lineups, the
 // records of lineups taken away included (nil for an individual one), which
-// move with a swapped team (moveLineups). rebuild builds a pools + knockout competition's knockout
-// preview for a seeded swap; it is nil for every other format.
+// move with a swapped team (moveLineups).
 type swapSnapshot struct {
 	comp        *state.Competition
 	pools       []helper.Pool
@@ -151,13 +138,7 @@ type swapSnapshot struct {
 	roster      []domain.Player
 	lineups     map[string]domain.TeamLineup
 	fought      string
-	rebuild     previewBuilder
 }
-
-// previewBuilder builds a pools + knockout competition's knockout preview from
-// its pools and pool matches (buildPoolPreviewBracket), on the tournament and
-// court floor read before the swap's transaction took the lock.
-type previewBuilder func(comp *state.Competition, pools []helper.Pool, poolMatches []state.MatchResult) (*state.Bracket, error)
 
 // swapPlan is a swap worked out on copies of the snapshot's draw: the new
 // pools, pool matches and bracket, which of them changed, the lineups that
@@ -184,14 +165,12 @@ type swapPlan struct {
 // nothing was fought, and the competitor-status records and check-ins are
 // keyed by participant id, so they stay with the competitor.
 func (e *Engine) SwapDrawPlaces(compID string, req SwapRequest) (*SwapResult, error) {
-	rebuild := e.swapPreviewBuilder(compID)
 	var answer SwapResult
 	err := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
 		snap, err := loadSwapSnapshot(tx, compID)
 		if err != nil {
 			return err
 		}
-		snap.rebuild = rebuild
 		plan, err := planSwap(snap, req)
 		if err != nil {
 			return err
@@ -209,34 +188,6 @@ func (e *Engine) SwapDrawPlaces(compID string, req SwapRequest) (*SwapResult, er
 		return nil, err
 	}
 	return &answer, nil
-}
-
-// swapPreviewBuilder reads what a seeded swap's knockout rebuild needs beyond
-// the competition's own files, before the swap's transaction takes the lock,
-// as the draw reads them: the tournament (its schedule) and the court floor
-// the other same-day competitions leave (courtFloorFor). A read that fails
-// refuses only a swap that rebuilds the knockout; an unseeded swap never asks.
-// nil for a competition that is not pools + knockout, which has no knockout
-// preview to rebuild.
-func (e *Engine) swapPreviewBuilder(compID string) previewBuilder {
-	comp, err := e.store.LoadCompetition(compID)
-	if err == nil && (comp == nil || comp.EffectiveFormat() != state.CompFormatMixed) {
-		return nil
-	}
-	var tournament *state.Tournament
-	var floor map[string]time.Time
-	if err == nil {
-		tournament, err = e.store.LoadTournament()
-	}
-	if err == nil {
-		floor, err = e.courtFloorFor(comp, tournament)
-	}
-	return func(c *state.Competition, pools []helper.Pool, poolMatches []state.MatchResult) (*state.Bracket, error) {
-		if err != nil {
-			return nil, err
-		}
-		return e.buildPoolPreviewBracket(c, pools, poolMatches, floor, tournament)
-	}
 }
 
 // loadSwapSnapshot reads what planSwap judges, under the transaction's lock.
@@ -331,7 +282,8 @@ func foughtMatch(tx state.StoreTx, compID string, snap swapSnapshot) (string, er
 // transaction saves what it returns, the dry run only answers it. Refusals,
 // in order: SwapNotSupported, SwapNoDraw, SwapDrawStarted, SwapInvalid (a
 // place that is not exactly one shape), SwapSameCompetitor, SwapInvalid again
-// (two sides naming one place), SwapNotInDraw, SwapDrawChanged.
+// (two sides naming one place), SwapNotInDraw, SwapSeeded (seeds keep their
+// places), SwapDrawChanged.
 func planSwap(snap swapSnapshot, req SwapRequest) (swapPlan, error) {
 	source, err := swappableDraw(snap)
 	if err != nil {
@@ -365,15 +317,15 @@ func planSwap(snap swapSnapshot, req SwapRequest) (swapPlan, error) {
 			return swapPlan{}, notInDrawRefusal(snap.roster, c.id)
 		}
 	}
+	if err := seededRefusal(snap, req.A.ID, req.B.ID); err != nil {
+		return swapPlan{}, err
+	}
 
 	after := SwapPlaces{A: req.B.Place, B: req.A.Place}
 	plan := swapPlan{}
 	switch {
 	case samePlace(atA, req.A.Place) && samePlace(atB, req.B.Place):
 		plan = exchangePlaces(snap, req.A.ID, req.B.ID, source)
-		if err := plan.seededSwap(snap, req, source); err != nil {
-			return swapPlan{}, err
-		}
 		plan.moveLineups(snap, req.A.ID, req.B.ID)
 		plan.answer.Applied = true
 	case samePlace(atA, req.B.Place) && samePlace(atB, req.A.Place):
@@ -440,6 +392,24 @@ func checkSwapPlace(side SwapSide, source DrawSource) error {
 		return swapRefused(SwapInvalid, "A bracket slot is a number from 0.")
 	}
 	return nil
+}
+
+// seededRefusal refuses a swap naming a seeded competitor (operator ruling
+// 2026-11-27: seeds are locked from the swap), naming each seed of the two.
+// A seed is read where the draw keeps it (swapCompetitor): the pools.csv row
+// of a pools draw, the roster of a knockout-only draw. Since no seed ever
+// moves, a swap never changes what the knockout is built from.
+func seededRefusal(snap swapSnapshot, ids ...string) *SwapRefusedError {
+	var seeds []string
+	for _, id := range ids {
+		if c := swapCompetitor(snap, id); c.Seed > 0 {
+			seeds = append(seeds, fmt.Sprintf("%s is seed %d", c.Name, c.Seed))
+		}
+	}
+	if len(seeds) == 0 {
+		return nil
+	}
+	return swapRefused(SwapSeeded, "%s, and seeds keep their places in the draw.", strings.Join(seeds, " and "))
 }
 
 // notInDrawRefusal names a competitor the draw does not hold and why: not in
@@ -573,89 +543,6 @@ func exchangePlaces(snap swapSnapshot, a, b string, source DrawSource) swapPlan 
 		}
 	}
 	return plan
-}
-
-// seededSwap fills a seeded swap's part of the plan (FR5): a warning for each
-// seeded competitor the swap moves out of their pool (or out of their
-// knockout place), and, in a pools + knockout draw, the knockout preview
-// rebuilt from the swapped pools with the draw's own builder, since a pool's
-// seed decides where its qualifiers sit in the bracket. A swap inside one
-// pool moves nobody out of it, and a swap of two unseeded competitors leaves
-// every seed where it was, so neither rebuilds anything. A knockout-only draw
-// is never rebuilt: its first round holds the competitors themselves, which
-// exchangePlaces has already traded.
-func (p *swapPlan) seededSwap(snap swapSnapshot, req SwapRequest, source DrawSource) error {
-	if source == DrawInPools && req.A.Place.Pool == req.B.Place.Pool {
-		return nil
-	}
-	for _, mv := range []struct {
-		id string
-		to DrawPlace
-	}{{req.A.ID, req.B.Place}, {req.B.ID, req.A.Place}} {
-		if c := swapCompetitor(snap, mv.id); c.Seed > 0 {
-			p.answer.SeededWarning = append(p.answer.SeededWarning, SwapSeedWarning{ID: c.ID, Name: c.Name, Seed: c.Seed, To: clonePlace(mv.to)})
-		}
-	}
-	if len(p.answer.SeededWarning) == 0 || source != DrawInPools ||
-		snap.comp.EffectiveFormat() != state.CompFormatMixed || snap.bracket == nil {
-		return nil
-	}
-	if snap.rebuild == nil {
-		return fmt.Errorf("competition %s: no builder for its knockout preview", snap.comp.ID)
-	}
-	rebuilt, err := snap.rebuild(snap.comp, p.pools, p.poolMatches)
-	if err != nil {
-		return err
-	}
-	if rebuilt == nil {
-		return fmt.Errorf("competition %s: the swapped pools build no knockout", snap.comp.ID)
-	}
-	p.answer.TimesRescheduled = keepBracketSchedule(snap.bracket, rebuilt)
-	p.bracket, p.bracketChanged = rebuilt, true
-	p.answer.BracketRebuilt = true
-	return nil
-}
-
-// keepBracketSchedule carries the stored bracket's schedule onto the rebuilt
-// one, by match id, and reports whether it could not (rescheduled true).
-//
-// A swap never changes a pool's size, so the rebuilt tree has the stored
-// tree's match ids, but a seed changing pool can move which of them is a bye.
-// When every match id is a match to play (or a bye) both before and after,
-// each match keeps its stored court, time and queue place, so an organiser's
-// court and time moves stand. When any id is a bye on one side and a match on
-// the other, or an id is new or gone, the builder's whole new schedule is
-// taken: never a mix, which could put two matches on one court at one time.
-// Either way a match keeps its stored change stamps, which only grow.
-func keepBracketSchedule(stored, rebuilt *state.Bracket) (rescheduled bool) {
-	before := map[string]*state.BracketMatch{}
-	for _, m := range state.BracketMatchesInDrawOrder(stored) {
-		before[m.ID] = m
-	}
-	after := state.BracketMatchesInDrawOrder(rebuilt)
-	same := len(after) == len(before)
-	for _, m := range after {
-		if old, ok := before[m.ID]; !ok || toPlay(old) != toPlay(m) {
-			same = false
-		}
-	}
-	for _, m := range after {
-		old, ok := before[m.ID]
-		if !ok {
-			continue
-		}
-		m.ModifiedAt, m.GroupStamps = old.ModifiedAt, maps.Clone(old.GroupStamps)
-		if same {
-			m.Court, m.ScheduledAt, m.QueuePosition = old.Court, old.ScheduledAt, old.QueuePosition
-		}
-	}
-	return !same
-}
-
-// toPlay says a draw-ready bracket match is one to fight rather than a bye or
-// a dead slot, which the build marks completed.
-func toPlay(m *state.BracketMatch) bool {
-	return m.Status == state.MatchStatusScheduled
 }
 
 // describe fills the answer's account of what the plan does: where each

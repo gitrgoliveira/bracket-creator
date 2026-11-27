@@ -526,11 +526,13 @@ func respondIfCourtMoveRefused(c *gin.Context, err error) bool {
 
 // swapRefusalStatus is the HTTP status of each draw-swap refusal
 // (engine.SwapRefusedError.Code): the request itself is wrong (400), or the
-// draw is not one this swap can change now (409).
+// draw is not one this swap can change now, or a competitor named is a seed,
+// who keeps their place (409).
 var swapRefusalStatus = map[string]int{
 	engine.SwapInvalid:        http.StatusBadRequest,
 	engine.SwapSameCompetitor: http.StatusBadRequest,
 	engine.SwapNotInDraw:      http.StatusBadRequest,
+	engine.SwapSeeded:         http.StatusConflict,
 	engine.SwapNoDraw:         http.StatusConflict,
 	engine.SwapDrawStarted:    http.StatusConflict,
 	engine.SwapNotSupported:   http.StatusConflict,

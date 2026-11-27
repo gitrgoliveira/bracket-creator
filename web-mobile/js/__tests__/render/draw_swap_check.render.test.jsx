@@ -34,8 +34,7 @@ const dryRun = {
     { id: 'b', name: 'Lena Park', from: b.place, to: { pool: 'Pool B', position: 2 } },
   ],
   numbers: [{ id: 'a', name: 'Arthur Dick', from: 'IMS4', to: 'IMS8' }, { id: 'b', name: 'Lena Park', from: 'IMS8', to: 'IMS4' }],
-  seededWarning: [{ id: 'a', name: 'Arthur Dick', seed: 2, to: { pool: 'Pool C', position: 1 } }],
-  bracketRebuilt: true, timesRescheduled: false, lineupsMoved: 0, lineupsRemoved: 0,
+  lineupsMoved: 0, lineupsRemoved: 0,
   separation: {
     before: [{ dojo: 'Team Omega', a: { id: 'a', name: 'Arthur Dick' }, b: { id: 'x', name: 'Xu' }, samePool: 'Pool B' }],
     after: [{ dojo: 'Team Omega', a: { id: 'a', name: 'Arthur Dick' }, b: { id: 'x', name: 'Xu' }, earliest: { matchId: 'r1-m0', round: 1, rounds: 3 } }],
@@ -67,8 +66,9 @@ describe('If you swap them', () => {
     expect(screen.getByTestId('swap-separation').textContent).toContain('Team Omega: shared Pool B; now not before the Semifinals.');
     expect(screen.getByTestId('swap-numbers').textContent)
       .toBe('Numbers stay with the place: Arthur Dick takes IMS8, Lena Park takes IMS4. Swap their tags.');
-    expect(screen.getByText('Arthur Dick is seed 2 and moves to Pool C.')).toBeInTheDocument();
-    expect(screen.getByText('The knockout bracket is rebuilt from the new pools.')).toBeInTheDocument();
+    // Seeds keep their places: no line says a seed moves or the knockout is
+    // rebuilt.
+    expect(screen.getByRole('dialog').textContent).not.toMatch(/seed|rebuilt|scheduled again/i);
     expect(screen.getByText('The public pages update at once.').className, 'said in the body ink, not muted').toBe('draw-swap-check__line');
     expect(screen.getByTestId('swap-them')).not.toBeDisabled();
     expect(screen.getByTestId('swap-them').textContent).toBe('Swap them');
@@ -155,6 +155,15 @@ describe('If you swap them', () => {
     window.API.swapDrawPlaces = vi.fn().mockRejectedValue(refusal('not_in_draw', 'Lena Park is not in the draw.'));
     const h = await open();
     expect(screen.getByRole('alert').textContent).toBe('Lena Park is not in the draw.');
+    expect(screen.getByTestId('swap-them')).toBeDisabled();
+    expect(h.onDrawChanged).not.toHaveBeenCalled();
+  });
+
+  it('keeps a seed refusal in the panel, with its sentence', async () => {
+    const sentence = 'Arthur Dick is seed 1, and seeds keep their places in the draw.';
+    window.API.swapDrawPlaces = vi.fn().mockRejectedValue(refusal('seeded_competitor', sentence));
+    const h = await open();
+    expect(screen.getByRole('alert').textContent).toBe(sentence);
     expect(screen.getByTestId('swap-them')).toBeDisabled();
     expect(h.onDrawChanged).not.toHaveBeenCalled();
   });

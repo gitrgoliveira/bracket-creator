@@ -134,7 +134,6 @@ func TestSwapDrawPlaces_PoolsTradeTheCompetitorAndKeepThePlace(t *testing.T) {
 	assert.True(t, got.Applied)
 	assert.Empty(t, got.Reason)
 	assert.False(t, got.DryRun)
-	assert.False(t, got.BracketRebuilt, "an unseeded swap leaves the knockout as it is")
 	assert.Equal(t, SwapPlaces{A: b.Place, B: a.Place}, got.Places)
 	require.Len(t, got.Moves, 2)
 	assert.Equal(t, SwapMove{ID: a.ID, Name: rowA.Name, DisplayName: rowA.DisplayName, From: a.Place, To: b.Place}, got.Moves[0])
@@ -175,11 +174,6 @@ func TestSwapDrawPlaces_WithinOnePoolFlipsTheMatchHoldingBoth(t *testing.T) {
 	const compID = "swap-within"
 	drawDojoComp(t, eng, store, compID, state.CompFormatMixed, 3, uniqueDojos(6))
 	pools := loadSwapPools(t, store, compID)
-	// A seed travels with the competitor, never with the place.
-	pools[0].Players[0].Seed = 1
-	require.NoError(t, store.SavePools(compID, pools))
-	pools = loadSwapPools(t, store, compID)
-	require.Equal(t, 1, pools[0].Players[0].Seed)
 	matchesBefore := loadSwapMatches(t, store, compID)
 	a, b := poolSwapSide(pools, 0, 0), poolSwapSide(pools, 0, 2)
 
@@ -194,13 +188,10 @@ func TestSwapDrawPlaces_WithinOnePoolFlipsTheMatchHoldingBoth(t *testing.T) {
 	got, err := eng.SwapDrawPlaces(compID, SwapRequest{A: a, B: b})
 	require.NoError(t, err)
 	assert.True(t, got.Applied)
-	assert.False(t, got.BracketRebuilt, "a swap inside one pool never rebuilds the bracket")
 
 	after := loadSwapPools(t, store, compID)
 	assert.Equal(t, b.ID, after[0].Players[0].ID)
 	assert.Equal(t, a.ID, after[0].Players[2].ID)
-	assert.Equal(t, 1, after[0].Players[2].Seed, "the seed went with the competitor")
-	assert.Zero(t, after[0].Players[0].Seed)
 
 	matchesAfter := loadSwapMatches(t, store, compID)
 	assertPoolMatchesExchanged(t, matchesBefore, matchesAfter, after, a.ID, b.ID)

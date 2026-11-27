@@ -1,6 +1,6 @@
 // admin_swap_candidates.jsx: the marks of the Swap competitors mode (bc-drev
 // K4). Once the organiser picks a first competitor on Pools (preview) or
-// Bracket (preview), every other drawn competitor is marked by what swapping
+// Bracket (preview), every other unseeded competitor is marked by what swapping
 // the two would do to dojo-mates, each dojo judged as a whole: green
 // "better" keeps a dojo apart for longer and leaves none worse off, amber
 // "worse" leaves a dojo worse off (earlier, or into one pool), and a plain
@@ -52,8 +52,8 @@ export function candidateVerdicts(answer, pickId) {
 }
 
 // markText: a mark in words, naming the dojos it is about: "Worse for Fudo,
-// Hizen", "Better for Kenyu" ("Worse" alone when the answer names none), or
-// '' for no mark.
+// Hizen", "Better for Kenyu", or '' for no mark. The server names at least
+// one dojo for every better or worse mark (judgeDojos).
 export function markText(mark, dojos) {
   const word = VERDICT_WORDS[mark];
   if (!word) return '';
@@ -140,6 +140,28 @@ export function useSwapCandidates({ compId, pickId, drawKey = null, password, on
   }, [compId, pickId, drawKey, password, changedRef]);
   const current = pickId && state.pickId === pickId && state.drawKey === drawKey;
   return current ? { marks: state.marks, dojos: state.dojos, failed: state.failed } : { marks: null, dojos: null, failed: false };
+}
+
+// swapLocked: is this entrant of the swap mode a seed, who keeps their place
+// in the draw (operator ruling 2026-11-27)? A seed is drawn grey and is not a
+// button; the server refuses a swap naming one (seeded_competitor) and never
+// offers one as a candidate.
+export function swapLocked(entrant) {
+  return !!entrant && entrant.seed > 0;
+}
+
+// lockedText: a seed's line in the mark's place: "Seed 1, stays in place".
+export function lockedText(seed) {
+  return `Seed ${seed}, stays in place`;
+}
+
+// SwapLockedWord: a seed's line, in the place SwapVerdictWord holds on every
+// other competitor, so the seed reads as deliberately left out and the rows
+// keep one height.
+export function SwapLockedWord({ seed }) {
+  return (
+    <span className="swap-verdict swap-verdict--locked" data-testid="swap-verdict-word">{lockedText(seed)}</span>
+  );
 }
 
 // SwapVerdictWord: a candidate's mark in words (markText), on a line of its

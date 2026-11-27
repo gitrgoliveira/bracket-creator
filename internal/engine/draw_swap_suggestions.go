@@ -17,11 +17,11 @@ import (
 //
 // A suggestion never trades one dojo's pairing for another's: it is made only
 // when no dojo is worse off after it and at least one is better off, each
-// dojo judged as a whole (judgeDojos). Seeded competitors are never suggested, since moving a seed
-// rebuilds a pools + knockout bracket, which a suggestion must never do on its
-// own. Without a rebuild the bracket keeps its shape, so a swap changes only
-// the meetings of the pairs that hold one of the two competitors, and each
-// candidate is scored on those pairs alone.
+// dojo judged as a whole (judgeDojos). Seeded competitors are never suggested:
+// seeds keep their places in the draw (SwapSeeded). With every seed in place
+// the bracket keeps its shape, so a swap changes only the meetings of the
+// pairs that hold one of the two competitors, and each candidate is scored on
+// those pairs alone.
 
 // maxSwapSuggestions is how many suggestions an answer holds at most.
 const maxSwapSuggestions = 5
@@ -431,10 +431,9 @@ type laterPair struct {
 // first meeting of every pair of dojo-mates that holds x or y before and
 // after the swap of the two (no other pair's meeting can change): verdict is
 // the swap's, gained lists the pairs that meet later from the dojos better
-// off, and dojos names the dojos the verdict is about (judgeDojos). Only
-// valid for a swap that rebuilds nothing (no seed leaves a pools + knockout
-// pool), where the bracket keeps its shape. Any two entrants, seeded or not,
-// in one group or two.
+// off, and dojos names the dojos the verdict is about (judgeDojos). Valid
+// because a swap moves no seed, so the bracket keeps its shape; any two
+// unseeded entrants, in one group or two.
 func (s *swapSuggester) pairShifts(x, y int) (gained []laterPair, verdict string, dojos []string) {
 	ex, ey := s.entrants[x], s.entrants[y]
 	type pair struct {

@@ -9,7 +9,7 @@ import { confirmLeave } from './unsaved_entries.jsx';
 import { competitionHasRecordedResult } from './recorded_result.jsx';
 import { reviewsDraw } from './admin_draw_review.jsx';
 import { DrawSwapCheck, effectiveFormat, drawEntrants, drawPlaceLabel, competitorLabel, swapDoneToast } from './admin_draw_swap_check.jsx';
-import { useSwapCandidates, marksKey, SwapMarksKey, SwapVerdictWord } from './admin_swap_candidates.jsx';
+import { useSwapCandidates, marksKey, SwapMarksKey, SwapVerdictWord, SwapLockedWord, swapLocked } from './admin_swap_candidates.jsx';
 import { acceptTap } from './tap_guard.jsx';
 import { useEscapeToClose } from './ui.jsx';
 import { publishHeight } from './published_height.jsx';
@@ -318,7 +318,7 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
     if (onTurnOn) onTurnOn();
   });
   const onPick = (entrant, ev) => {
-    if (!acceptTap(tapRef, ev)) return;
+    if (swapLocked(entrant) || !acceptTap(tapRef, ev)) return;
     setNote(null);
     if (!picked) { setPickedId(entrant.id); return; }
     if (picked.id === entrant.id) { setPickedId(null); return; }
@@ -370,10 +370,16 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
     pickedId: picked ? picked.id : null,
     onPick,
     markOf,
+    // A seed keeps their place (operator ruling 2026-11-27): drawn grey and
+    // not a button, never picked and never a candidate.
+    lockedOf: (id) => swapLocked(entrants.get(id)),
     // The mark's line under the dojo ("Worse for Fudo, Hizen"), drawn blank
     // on every pick while the mode is on, so a mark that appears moves
-    // nothing.
-    verdictWord: (id) => <SwapVerdictWord mark={markOf(id)} dojos={dojosOf(id)} />,
+    // nothing; a seed's says it stays in place.
+    verdictWord: (id) => {
+      const e = entrants.get(id);
+      return swapLocked(e) ? <SwapLockedWord seed={e.seed} /> : <SwapVerdictWord mark={markOf(id)} dojos={dojosOf(id)} />;
+    },
   } : null;
 
   let controls = null;
@@ -398,7 +404,7 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
           <div className="swap-mode__text">
             {!picked && (
               <p className="swap-mode__lead">
-                <strong>Swap competitors:</strong> tap two competitors to swap them. While this is on, a tap picks a competitor instead of opening a score sheet.
+                <strong>Swap competitors:</strong> tap two unseeded competitors to swap them. While this is on, a tap picks a competitor instead of opening a score sheet.
               </p>
             )}
             {/* Always drawn, so the pick line and a note are announced as

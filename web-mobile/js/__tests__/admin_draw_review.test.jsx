@@ -1,5 +1,5 @@
 // bc-drev: the words of the draw review. The server decides every meeting,
-// move, number, seed warning and lineup; these helpers only word its answers,
+// move, number, refusal and lineup; these helpers only word its answers,
 // so each one is pinned against an answer of the shape the routes give.
 import { describe, it, expect } from 'vitest';
 import {
@@ -373,22 +373,22 @@ describe('If you swap them: the numbers, the details and the request', () => {
     expect(numbersSentence(undefined)).toBe('');
   });
 
-  it('warns about a seed, a rebuilt bracket and its new times, and words lineups and byes', () => {
+  it('words lineups and byes, and never a seed moving or the bracket rebuilt', () => {
+    // Seeds keep their places (operator ruling 2026-11-27): no swap moves
+    // one, so an answer carrying the old seeded fields says nothing of them.
     const lines = swapDetailLines({
       seededWarning: [{ id: 'a', name: 'Arthur', seed: 1, to: { pool: 'Pool C', position: 1 } }],
       bracketRebuilt: true, timesRescheduled: true, lineupsMoved: 2, lineupsRemoved: 1,
       byes: [{ id: 'a', name: 'Arthur', bye: true }, { id: 'b', name: 'Lena', bye: false }],
-    }, null).map((l) => l.text);
+    }).map((l) => l.text);
+    expect(lines.some((t) => /seed|rebuilt|scheduled again/i.test(t))).toBe(false);
     expect(lines).toEqual([
-      'Arthur is seed 1 and moves to Pool C.',
-      'The knockout bracket is rebuilt from the new pools.',
-      'The knockout matches are scheduled again, so their times and shiaijo can change.',
       '2 saved lineups move with their teams.',
       '1 saved lineup has no match at the new place and is removed.',
       'Arthur now has a bye in the first round.',
       'Lena no longer has a bye in the first round.',
     ]);
-    expect(swapDetailLines({ lineupsMoved: 0, lineupsRemoved: 0 }, null)).toEqual([]);
+    expect(swapDetailLines({ lineupsMoved: 0, lineupsRemoved: 0 })).toEqual([]);
   });
 
   it('sends the two places it was given, with dryRun only for the check', () => {

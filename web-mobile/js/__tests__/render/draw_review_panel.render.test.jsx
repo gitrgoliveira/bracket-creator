@@ -227,6 +227,23 @@ describe('the Draw review card', () => {
     expect(window.API.fetchSwapSuggestions).toHaveBeenCalledTimes(2);
   });
 
+  it('after a swap made from a suggestion, focus goes to the conclusion line, since the re-read takes the suggestion away', async () => {
+    window.API.swapDrawPlaces = vi.fn().mockResolvedValueOnce(dryRun).mockResolvedValueOnce({ ...dryRun, dryRun: undefined, applied: true });
+    window.API.fetchSwapSuggestions = vi.fn().mockResolvedValueOnce({ suggestions: [suggestion] }).mockResolvedValue({ suggestions: [] });
+    await mount();
+    const opener = within(screen.getByTestId('swap-suggestion')).getByRole('button');
+    opener.focus();
+    await keyboardClick(opener);
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await keyboardClick(screen.getByTestId('swap-them'));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(screen.queryByTestId('swap-suggestion'), 'the re-read took the suggestion away').toBeNull();
+    const conclusion = screen.getByTestId('draw-review-conclusion');
+    expect(document.activeElement).toBe(conclusion);
+    expect(conclusion.getAttribute('tabindex'), 'focusable for this alone').toBe('-1');
+    expect(conclusion.textContent).toBe('No swap can do better.');
+  });
+
   it('on draw_changed closes the check, says why and reads everything again', async () => {
     window.API.swapDrawPlaces = vi.fn().mockResolvedValueOnce(dryRun)
       .mockRejectedValueOnce(Object.assign(new Error('The draw has changed since you opened it.'), { code: 'draw_changed' }));

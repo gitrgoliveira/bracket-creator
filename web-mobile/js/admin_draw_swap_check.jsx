@@ -374,6 +374,20 @@ export function swapBody(a, b, dryRun) {
   return body;
 }
 
+// useDrawGenerated: a count that moves each time a draw_generated event names
+// compId (another device's swap, or the draw made again), for a reader of the
+// draw to read it again on. Nothing is subscribed while `enabled` is false.
+export function useDrawGenerated(compId, enabled = true) {
+  const [gen, setGen] = useState(0);
+  useEffect(() => {
+    if (!enabled || !window.API || typeof window.API.subscribeToEvents !== 'function') return undefined;
+    return window.API.subscribeToEvents((event) => {
+      if (event && event.type === 'draw_generated' && event.data && event.data.competitionId === compId) setGen((g) => g + 1);
+    });
+  }, [compId, enabled]);
+  return gen;
+}
+
 /**
  * DrawSwapCheck: the "If you swap them" panel.
  *   comp      the competition ({id, ...})
@@ -383,6 +397,14 @@ export function swapBody(a, b, dryRun) {
  *   onSwapped(answer)           the swap is in (applied, or already_swapped)
  *   onDrawChanged(message)      the draw moved under the page (draw_changed,
  *                               draw_started, no_draw): the host reads it again
+ * While it is open, a draw_generated event for the competition (another
+ * device changed the draw) works the swap out again, so the answer on screen
+ * is never one for a draw that is gone; a pick that moved is refused by that
+ * read and goes to onDrawChanged. Not while this panel's own swap is out: its
+ * answer closes the panel.
+ * The answer is said in ONE live region drawn from the first render, which
+ * holds "Working out what the swap does…" and then the answer, and describes
+ * the dialog, so a screen reader announces it as it changes.
  */
 export function DrawSwapCheck({ comp, bracket, a, b, password, drawHidden, onClose, onSwapped, onDrawChanged }) {
   const [check, setCheck] = useState(null);
@@ -401,26 +423,35 @@ export function DrawSwapCheck({ comp, bracket, a, b, password, drawHidden, onClo
   };
 
   const refusedRef = useLatestRef(refused);
-  // The two competitors and their places name the check; a new pair is a new one.
+  const sendingRef = useRef(false);
+  const drawGen = useDrawGenerated(comp.id);
+  // The two competitors and their places name the check; a new pair is a new
+  // one, and so is a draw changed on another device (drawGen).
   const dryRunKey = JSON.stringify(swapBody(a, b, true));
   useEffect(() => {
+    if (sendingRef.current) return undefined;
+    let live = true;
     setCheck(null);
     setError(null);
     window.API.swapDrawPlaces(comp.id, JSON.parse(dryRunKey), password)
-      .then((answer) => { if (aliveRef.current) setCheck(answer); })
-      .catch((e) => { if (aliveRef.current) refusedRef.current(e); });
-  }, [comp.id, dryRunKey, password, refusedRef]);
+      .then((answer) => { if (live && aliveRef.current) setCheck(answer); })
+      .catch((e) => { if (live && aliveRef.current) refusedRef.current(e); });
+    return () => { live = false; };
+  }, [comp.id, dryRunKey, password, refusedRef, drawGen]);
 
   const swapNow = async () => {
+    sendingRef.current = true;
     setSending(true);
     setError(null);
     try {
       const answer = await window.API.swapDrawPlaces(comp.id, swapBody(a, b, false), password);
       if (!aliveRef.current) return;
+      sendingRef.current = false;
       setSending(false);
       onSwapped(answer);
     } catch (e) {
       if (!aliveRef.current) return;
+      sendingRef.current = false;
       setSending(false);
       refused(e);
     }
@@ -434,14 +465,18 @@ export function DrawSwapCheck({ comp, bracket, a, b, password, drawHidden, onClo
   return (
     <div className="modal-backdrop" ref={openedRef} onClickCapture={onClickCapture} onClick={() => { if (!sending) onClose(); }}>
       <div className="shiaijo-move-confirm draw-swap-check" role="dialog" aria-modal="true" ref={boxRef}
-        aria-labelledby="draw-swap-check-title" data-testid="draw-swap-check" onClick={(e) => e.stopPropagation()}>
+        aria-labelledby="draw-swap-check-title" aria-describedby="draw-swap-check-answer" data-testid="draw-swap-check" onClick={(e) => e.stopPropagation()}>
         <h3 id="draw-swap-check-title" className="shiaijo-move-confirm__title">If you swap them</h3>
         <p className="shiaijo-move-confirm__body">
           {competitorLabel(a)} and {competitorLabel(b)} trade places in the draw.
         </p>
-        {!check && !error && <p className="shiaijo-move-confirm__body" role="status">Working out what the swap does…</p>}
-        {check && (
-          <div className="draw-swap-check__answer" aria-live="polite">
+        {/* Drawn from the first render so a screen reader announces what it
+            is given; it carries the answer's spacing only once it holds one. */}
+        <div id="draw-swap-check-answer" className={check ? 'draw-swap-check__answer' : undefined} aria-live="polite"
+          data-testid="draw-swap-check-answer">
+          {!check && !error && <p className="shiaijo-move-confirm__body">Working out what the swap does…</p>}
+          {check && (
+          <>
             <p className={`draw-swap-check__line${verdict.worse ? ' draw-swap-check__line--warn' : ''}`} data-testid="swap-verdict">{verdict.text}</p>
             <p className="draw-swap-check__line" data-testid="swap-moves">{movesSentence(check.moves, bracket, [a, b])}</p>
             {separation.length > 0 && (
@@ -456,8 +491,9 @@ export function DrawSwapCheck({ comp, bracket, a, b, password, drawHidden, onClo
               <p key={l.text} className={`draw-swap-check__line${l.kind === 'warn' ? ' draw-swap-check__line--warn' : ''}`}>{l.text}</p>
             ))}
             {!drawHidden && <p className="draw-swap-check__line">The public pages update at once.</p>}
-          </div>
-        )}
+          </>
+          )}
+        </div>
         {error && <div className="alert alert--error" role="alert">{error}</div>}
         <div className="shiaijo-move-confirm__actions">
           <button type="button" className="btn" onClick={onClose} disabled={sending}>Cancel</button>

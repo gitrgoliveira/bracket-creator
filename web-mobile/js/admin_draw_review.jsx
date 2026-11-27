@@ -24,11 +24,11 @@
 import { competitionHasRecordedResult } from './recorded_result.jsx';
 import {
   DrawSwapCheck, effectiveFormat, drawPlaceLabel, poolLabel, competitorLabel, meetingRoundName, meetingChange, swapDoneToast,
-  bothWinRound, meetingLateness,
+  bothWinRound, meetingLateness, useDrawGenerated,
 } from './admin_draw_swap_check.jsx';
 import { askSwapMode } from './swap_mode_request.jsx';
 
-const { useState, useEffect } = React;
+const { useState, useEffect, useRef } = React;
 
 // reviewsDraw: the formats whose draw the card reviews, the ones with a bracket.
 export function reviewsDraw(comp) {
@@ -131,14 +131,7 @@ export function improvementSentence(imp) {
 function useDrawReviewReads(compId, password, generation, enabled) {
   const [separation, setSeparation] = useState({ id: null, meetings: null, error: null });
   const [suggestions, setSuggestions] = useState({ id: null, answer: null, error: null });
-  const [eventGen, setEventGen] = useState(0);
-
-  useEffect(() => {
-    if (!enabled || !window.API || typeof window.API.subscribeToEvents !== 'function') return undefined;
-    return window.API.subscribeToEvents((event) => {
-      if (event && event.type === 'draw_generated' && event.data && event.data.competitionId === compId) setEventGen((g) => g + 1);
-    });
-  }, [compId, enabled]);
+  const eventGen = useDrawGenerated(compId, enabled);
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -243,6 +236,16 @@ export function DrawReviewPanel({ c, poolMatches, bracket, password, drawHidden,
   const [checking, setChecking] = useState(null);
   const shown = reviewsDraw(c) && c.status === 'draw-ready';
   const { separation, suggestions } = useDrawReviewReads(c.id, password, generation, shown);
+  // After a swap made from a suggestion the check gives focus back to that
+  // suggestion's Swap button, which the re-read takes away with the
+  // suggestion; focus goes to the conclusion line instead, which then says
+  // what the new draw leaves. It runs after the check has gone, so its own
+  // move back is overruled. Without scrolling, as every focus move here.
+  const conclusionRef = useRef(null);
+  const [focusConclusion, setFocusConclusion] = useState(0);
+  useEffect(() => {
+    if (focusConclusion && conclusionRef.current) conclusionRef.current.focus({ preventScroll: true });
+  }, [focusConclusion]);
 
   if (!shown) return null;
 
@@ -259,6 +262,7 @@ export function DrawReviewPanel({ c, poolMatches, bracket, password, drawHidden,
     const pair = checking;
     setChecking(null);
     if (showToast) showToast(swapDoneToast(answer, pair && pair.a, pair && pair.b));
+    setFocusConclusion((n) => n + 1);
     readAgain();
   };
   const onDrawChanged = (message) => {
@@ -280,7 +284,7 @@ export function DrawReviewPanel({ c, poolMatches, bracket, password, drawHidden,
           {!recorded && (
             // Drawn from the start a line high, so the suggestions arriving
             // move nothing where the sentence fits on one line.
-            <p className="draw-review__conclusion" aria-live="polite" data-testid="draw-review-conclusion">
+            <p className="draw-review__conclusion" aria-live="polite" data-testid="draw-review-conclusion" ref={conclusionRef} tabIndex={-1}>
               {conclusion || '\u00a0'}
             </p>
           )}

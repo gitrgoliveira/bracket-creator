@@ -278,13 +278,16 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
   // The page first goes to its top: the Overview's scroll is kept on a tab
   // switch, so the banner may already be pinned there, which scrollIntoView
   // takes as in view. Once, and only for that entry: a plain tab switch keeps
-  // the page where it is.
+  // the page where it is. The card's button went with the Overview, so focus
+  // goes to the banner (focusable for this alone), whose instruction is the
+  // next thing to read; without scrolling, since the page was just placed.
   const askedRef = useRef(on);
   useEffect(() => {
     if (!active || !askedRef.current || !bannerRef.current) return;
     askedRef.current = false;
     window.scrollTo(0, 0);
     bannerRef.current.scrollIntoView({ block: 'start' });
+    bannerRef.current.focus({ preventScroll: true });
   }, [active]);
   // The pinned banner's height, for the competitors' scroll margin, published
   // while the banner is drawn.
@@ -372,7 +375,7 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
     // panel's backdrop under the bar too.
     controls = (
       <>
-      <div className="swap-mode swap-mode--pinned" role="region" aria-label="Swap competitors" data-testid="swap-mode" ref={bannerRef}>
+      <div className="swap-mode swap-mode--pinned" role="region" aria-label="Swap competitors" data-testid="swap-mode" ref={bannerRef} tabIndex={-1}>
         {/* One layout on every screen (operator decision C7): the text, then
             the buttons on the right of the same row. Before the first pick
             the text is the instruction; from the pick on it is the pick line

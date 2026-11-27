@@ -146,6 +146,34 @@ describe('Swap competitors on Pools (preview)', () => {
     }
   });
 
+  it('moves focus to the banner, without scrolling, when the Draw review card opened it, and only then', async () => {
+    // The card's button left the page with the Overview, so focus would fall
+    // to the page itself.
+    const focusCalls = [];
+    const realFocus = HTMLElement.prototype.focus;
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function focusSpy(opts) {
+      focusCalls.push([this, opts]);
+      return realFocus.call(this, opts);
+    });
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    try {
+      askSwapMode('c1');
+      await mountPools();
+      const banner = screen.getByTestId('swap-mode');
+      expect(document.activeElement, 'focus is on the banner').toBe(banner);
+      expect(banner.getAttribute('tabindex'), 'focusable for this alone, never in the Tab order').toBe('-1');
+      expect(focusCalls.filter(([el]) => el === banner)).toEqual([[banner, { preventScroll: true }]]);
+      cleanup();
+      focusCalls.length = 0;
+      await mountPools();
+      await turnOn();
+      expect(focusCalls.filter(([el]) => el === screen.getByTestId('swap-mode')), 'turned on from the tab: focus stays on the page').toEqual([]);
+    } finally {
+      focus.mockRestore();
+      scrollTo.mockRestore();
+    }
+  });
+
   it('pins its banner while on, publishes its height, and opens the check beside it, not inside it', async () => {
     window.API.swapDrawPlaces = vi.fn().mockResolvedValue(dryRun);
     await mountPools();

@@ -6,7 +6,7 @@
 // in to Cancel, which is the safe answer to Enter.
 import React from 'react';
 import { render, act, screen, cleanup, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { pointerTap, keyboardClick } from '../helpers/tap_events.js';
 
@@ -175,6 +175,84 @@ describe('If you swap them', () => {
     await pointerTap(screen.getByTestId('swap-them'));
     expect(h.onSwapped).not.toHaveBeenCalled();
     expect(window.API.swapDrawPlaces).toHaveBeenCalledTimes(1);
+  });
+
+  it('says the answer in one live region drawn from the first render, which describes the dialog', async () => {
+    let answer;
+    window.API.swapDrawPlaces = vi.fn(() => new Promise((res) => { answer = res; }));
+    await open();
+    const region = screen.getByTestId('draw-swap-check-answer');
+    expect(region).toHaveAttribute('aria-live', 'polite');
+    expect(screen.getByTestId('draw-swap-check')).toHaveAttribute('aria-describedby', region.id);
+    expect(region.textContent).toBe('Working out what the swap does…');
+    expect(document.querySelectorAll('[aria-live], [role="status"]'), 'one live region, not a second one for the wait').toHaveLength(1);
+    await act(async () => { answer(dryRun); });
+    expect(screen.getByTestId('draw-swap-check-answer'), 'the same node, so its new text is announced').toBe(region);
+    expect(region.textContent).toContain('Dojo-mates from Team Omega could meet later.');
+    expect(region.textContent).not.toContain('Working out');
+  });
+
+  describe('while another device changes the draw', () => {
+    let listeners;
+    const emit = (event) => act(async () => { listeners.forEach((l) => l(event)); });
+    beforeEach(() => {
+      listeners = [];
+      window.API.subscribeToEvents = vi.fn((cb) => { listeners.push(cb); return () => { listeners = listeners.filter((l) => l !== cb); }; });
+    });
+    afterEach(() => { delete window.API.subscribeToEvents; });
+
+    const worse = {
+      ...dryRun,
+      separation: {
+        before: [{ dojo: 'Team Omega', a: { id: 'a', name: 'Arthur Dick' }, b: { id: 'x', name: 'Xu' }, earliest: { matchId: 'r1-m0', round: 1, rounds: 3 } }],
+        after: [{ dojo: 'Team Omega', a: { id: 'a', name: 'Arthur Dick' }, b: { id: 'x', name: 'Xu' }, samePool: 'Pool C' }],
+      },
+    };
+
+    it('works the swap out again on a draw_generated for its competition, and shows the new answer', async () => {
+      let second;
+      window.API.swapDrawPlaces = vi.fn().mockResolvedValueOnce(dryRun).mockImplementationOnce(() => new Promise((res) => { second = res; }));
+      await open();
+      expect(screen.getByTestId('swap-verdict').textContent).toBe('Dojo-mates from Team Omega could meet later.');
+      await emit({ type: 'draw_generated', data: { competitionId: 'c1' } });
+      expect(window.API.swapDrawPlaces).toHaveBeenCalledTimes(2);
+      expect(window.API.swapDrawPlaces).toHaveBeenLastCalledWith('c1',
+        { a: { id: 'a', place: a.place }, b: { id: 'b', place: b.place }, dryRun: true }, 'pw');
+      expect(screen.getByTestId('draw-swap-check-answer').textContent, 'the old answer goes while it is read again').toBe('Working out what the swap does…');
+      expect(screen.getByTestId('swap-them')).toBeDisabled();
+      await act(async () => { second(worse); });
+      expect(screen.getByTestId('swap-verdict').textContent).toBe('Dojo-mates from Team Omega would share a pool.');
+      expect(screen.getByTestId('swap-them').textContent).toBe('Swap anyway');
+    });
+
+    it('reads nothing again for another competition, or for another kind of event', async () => {
+      window.API.swapDrawPlaces = vi.fn().mockResolvedValue(dryRun);
+      await open();
+      await emit({ type: 'draw_generated', data: { competitionId: 'other' } });
+      await emit({ type: 'match_updated', data: { competitionId: 'c1' } });
+      expect(window.API.swapDrawPlaces).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('swap-verdict').textContent).toBe('Dojo-mates from Team Omega could meet later.');
+    });
+
+    it('hands a pick that moved to the host, through the refusal of the new read', async () => {
+      window.API.swapDrawPlaces = vi.fn().mockResolvedValueOnce(dryRun)
+        .mockRejectedValueOnce(refusal('draw_changed', 'Lena Park has moved.'));
+      const h = await open();
+      await emit({ type: 'draw_generated', data: { competitionId: 'c1' } });
+      expect(h.onDrawChanged).toHaveBeenCalledWith('Lena Park has moved.');
+    });
+
+    it('does not read again on the broadcast of its own swap, whose answer closes it', async () => {
+      let swapped;
+      window.API.swapDrawPlaces = vi.fn().mockResolvedValueOnce(dryRun).mockImplementationOnce(() => new Promise((res) => { swapped = res; }));
+      const h = await open();
+      await keyboardClick(screen.getByTestId('swap-them'));
+      await emit({ type: 'draw_generated', data: { competitionId: 'c1' } });
+      expect(window.API.swapDrawPlaces, 'the dry run and the swap, nothing more').toHaveBeenCalledTimes(2);
+      await act(async () => { swapped({ ...dryRun, applied: true, dryRun: undefined }); });
+      expect(h.onSwapped).toHaveBeenCalledTimes(1);
+      expect(h.onDrawChanged).not.toHaveBeenCalled();
+    });
   });
 
   it('moves focus in to Cancel as it opens', async () => {

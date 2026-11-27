@@ -341,7 +341,7 @@ Click **Swap them** to make the swap, or **Cancel** to leave the draw as it is. 
 
 What moves with a competitor: their name, dojo, seed, check-in, any withdrawal, and, for a team, the lineups saved for single matches, which move to the match the team now plays in the same order. What stays with the place: the number, and every match's shiai-jo and time, unless a seed's move has the knockout matches scheduled again. A swap inside one pool is always allowed; it only changes the order of the pool's bouts.
 
-If the draw changed on another device while the panel was open, the swap is not made: the draw is read again and you pick the two competitors again.
+If the draw changes on another device while the panel is open, the panel works the swap out again, so what it shows is always for the draw as it is now. If either of the two competitors was moved, or the draw was started or discarded, the swap is not made: the draw is read again and you pick the two competitors again.
 
 #### Swap competitors on the preview tabs
 

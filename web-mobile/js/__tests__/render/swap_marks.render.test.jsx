@@ -95,7 +95,10 @@ const shownWord = (el) => {
 };
 const markOf = (el) => (el.className.match(/swap-pick--(better|worse)/) || [])[1] || null;
 const tap = async (el) => { await pointerTap(el); later(); };
-const keyLines = () => [...screen.getByTestId('swap-marks-key').children];
+const keyLines = () => [...screen.getByTestId('swap-marks-key').querySelectorAll('[data-key]')];
+// What a screen reader is told: the stacked lines are for the eye alone, and
+// one live node always drawn holds the current sentence.
+const saidKey = () => screen.getByTestId('swap-marks-key-said').textContent;
 const shownKey = () => {
   const shown = keyLines().filter((l) => l.classList.contains('is-shown'));
   return shown.length ? shown.map((l) => l.textContent).join('|') : null;
@@ -121,6 +124,11 @@ for (const [tab, mount] of Object.entries(tabs)) {
       // nothing below it.
       expect(keyLines().map((l) => l.dataset.key)).toEqual(['loading', 'both', 'better', 'worse', 'same', 'failed']);
       expect(shownKey()).toBe('Marking the swaps…');
+      expect(keyLines().every((l) => l.getAttribute('aria-hidden') === 'true'), 'every stacked line hidden from a screen reader').toBe(true);
+      expect(screen.getByTestId('swap-marks-key')).not.toHaveAttribute('aria-live');
+      expect(screen.getByTestId('swap-marks-key-said')).toHaveAttribute('aria-live', 'polite');
+      expect(screen.getByTestId('swap-marks-key-said')).toHaveClass('sr-only');
+      expect(saidKey()).toBe('Marking the swaps…');
       const lineBefore = screen.getByTestId('swap-mode-line').textContent;
       // While the read is out, every pick keeps its plain edge.
       expect(['Arthur Dick', 'Lena Park', 'Omar Sy'].map((n) => markOf(target(n)))).toEqual([null, null, null]);
@@ -140,6 +148,8 @@ for (const [tab, mount] of Object.entries(tabs)) {
       expect(keyLines().filter((l) => l.classList.contains('is-shown'))).toHaveLength(1);
       expect(screen.getByTestId('swap-mode-line').textContent).toBe('Swap IMS2 Elijah Everdeen (' + (tab.startsWith('Pools') ? 'Pool A' : 'M1') + ') with…');
       expect(shownKey()).toBe('Green keeps dojo-mates apart longer, amber brings some closer.');
+      expect(saidKey(), 'the same live node now says the answer').toBe('Green keeps dojo-mates apart longer, amber brings some closer.');
+      expect(keyLines().every((l) => l.getAttribute('aria-hidden') === 'true')).toBe(true);
       expect(screen.getByTestId('swap-mode-cancel')).toBeInTheDocument();
     });
 
@@ -182,6 +192,7 @@ for (const [tab, mount] of Object.entries(tabs)) {
       await tap(target('Elijah Everdeen'));
       expect(target('Elijah Everdeen')).toHaveAttribute('aria-pressed', 'true');
       expect(shownKey()).toBe('The swaps could not be marked.');
+      expect(saidKey()).toBe('The swaps could not be marked.');
       expect(keyLines()).toHaveLength(6);
       expect(screen.getByTestId('swap-mode-line').textContent).toContain('Elijah Everdeen');
       expect(screen.getByTestId('swap-mode-line').textContent).toMatch(/with…$/);

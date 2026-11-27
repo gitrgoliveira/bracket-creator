@@ -93,15 +93,21 @@ export function marksKey({ marks, failed }) {
 // on and nothing below it moves when the read answers, fails, or finds no
 // swap that changes anything. Every sentence fits two lines at 375 px
 // (operator decision C7), so the line never holds more than two.
+// The stacked sentences are for the eye alone, all hidden from a screen
+// reader, since a sentence shown by visibility is not announced: a visually
+// hidden live node, always drawn, holds the current sentence's text and
+// nothing else, so each change of it is announced.
 export function SwapMarksKey({ current }) {
+  const said = (current && MARK_KEYS[current]) ? MARK_KEYS[current].text : '';
   return (
-    <div className="swap-mode__key" aria-live="polite" data-testid="swap-marks-key">
+    <div className="swap-mode__key" data-testid="swap-marks-key">
       {Object.entries(MARK_KEYS).map(([key, line]) => (
-        <span key={key} data-key={key} aria-hidden={key === current ? undefined : 'true'}
+        <span key={key} data-key={key} aria-hidden="true"
           className={`swap-mode__key-line${line.quiet ? ' swap-mode__key-line--quiet' : ''}${key === current ? ' is-shown' : ''}`}>
           {line.text}
         </span>
       ))}
+      <span className="sr-only" aria-live="polite" data-testid="swap-marks-key-said">{said}</span>
     </div>
   );
 }

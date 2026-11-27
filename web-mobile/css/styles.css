@@ -13064,7 +13064,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .draw-swap-check {
   max-width: 480px;
   width: calc(100% + 8px);
-  max-height: calc(100vh - 32px);
+  /* The backdrop's 20px padding on each side; dvh tracks mobile browser
+     chrome, vh is the fallback. */
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
   overflow-y: auto;
 }
 .draw-swap-check__answer {

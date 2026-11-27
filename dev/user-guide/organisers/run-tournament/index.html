@@ -997,6 +997,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Draw preview">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#keep-the-draw-from-the-public-until-it-is-ready" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Keep the draw from the public until it is ready
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -2938,6 +2955,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Draw preview">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#keep-the-draw-from-the-public-until-it-is-ready" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Keep the draw from the public until it is ready
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -3235,7 +3269,7 @@
 </div>
 <h2 id="the-admin-console">The admin console</h2>
 <p>Click <strong>Admin</strong> in the navigation bar and enter the admin password. The rules for who can access which features depend on your tournament's operating mode. Refer to <a href="../operating-modes/">Operating modes</a> for the full access-control rules.</p>
-<p>Some organiser actions are sent directly and are not held for later: uploading files, adding a walk-up competitor, editing a participant or a seed, saving a competition's settings, changing the admin password, deleting a competition (which asks you to type the admin password to confirm), and generating a draw, starting or completing a competition. If the connection is down when you tap one of these, the app says "No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.", so check the participant list, seed or settings you changed once the connection is back, and repeat the action only if the change is missing. Scores, lineups, check-in, announcements and court calls, tournament settings and fighting-spirit awards are held on the device and sent when the connection returns instead. A password change waits for tournament settings saves still held on this device; <strong>Change the password now</strong> asks you to confirm first.</p>
+<p>Some organiser actions are sent directly and are not held for later: uploading files, adding a walk-up competitor, editing a participant or a seed, saving a competition's settings, changing the admin password, deleting a competition (which asks you to type the admin password to confirm), and generating, publishing, hiding or discarding a draw, starting or completing a competition. If the connection is down when you tap one of these, the app says "No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.", so check the participant list, seed or settings you changed once the connection is back, and repeat the action only if the change is missing. Scores, lineups, check-in, announcements and court calls, tournament settings and fighting-spirit awards are held on the device and sent when the connection returns instead. A password change waits for tournament settings saves still held on this device; <strong>Change the password now</strong> asks you to confirm first.</p>
 <h2 id="dashboard">Dashboard</h2>
 <p>The dashboard lists all competitions for the tournament. Each card shows the competition type, participant count, bracket format, and current status. Click a card to manage that competition.</p>
 <p><img alt="Admin dashboard" src="../../../screenshots/mobile-dashboard.png" /></p>
@@ -3280,7 +3314,7 @@
 <p>A competition moves through three phases:</p>
 <ol>
 <li><strong>Setup</strong>: configure participants, seeding, and optional check-in.</li>
-<li><strong>Draw preview</strong> (<code>draw-ready</code>): review the generated pools, bracket, or first Swiss round. The roster is locked during this phase.</li>
+<li><strong>Draw preview</strong> (<code>draw-ready</code>): review the generated pools, bracket, or first Swiss round. The roster is locked during this phase, and the draw stays hidden from the public until you publish it or start the competition. Refer to <a href="#keep-the-draw-from-the-public-until-it-is-ready">Keep the draw from the public until it is ready</a>.</li>
 <li><strong>Match play</strong>: Pools + Knockout, League, and Swiss competitions all start in <code>pools</code> status, which is the shared name for the phase their matches run in rather than a claim that each one has pools. Knockout-only competitions start in <code>knockout</code>.</li>
 </ol>
 <p><img alt="Competition setup overview" src="../../../screenshots/mobile-participants.png" /></p>
@@ -3382,6 +3416,26 @@ Switching back to the original format keeps them.</p>
 <p>You can still toggle individual check-in status during <code>draw-ready</code>, but roster edits (add, remove, reorder) are locked.</p>
 <p>When the preview looks correct, click <strong>Start competition</strong> to move to match play. To make roster changes instead, click <strong>Discard draw</strong> to delete the draft and return to setup.</p>
 <p>A draw-ready competition is already listed on the shiai-jo operator views, since its matches exist. Scoring one of those matches starts the competition on the spot, exactly as <strong>Start competition</strong> would, so a court that begins play never has to wait for the desk.</p>
+<h4 id="keep-the-draw-from-the-public-until-it-is-ready">Keep the draw from the public until it is ready</h4>
+<p>A new draw starts hidden from the public. Spectators, court displays and the stream overlay see the competition as if it were still in setup: its name, its competitors and the line <strong>Draw being prepared</strong>, but no pools, bracket, matches or competitor numbers. Your own screens show the draw as usual, and so does the court console. Refer to <a href="../../spectators/following/#when-the-draw-is-being-prepared">Follow the tournament</a> for what spectators see.</p>
+<p>The preview header holds three buttons, in this order: <strong>Discard draw</strong>, <strong>Publish draw</strong> and <strong>Start competition</strong>. Beside the <strong>Draw ready</strong> badge next to the competition's name, a crossed-out eye and "Hidden from the public", or an open eye and "Public", say at a glance who can see the draw. A line below the buttons says it in full, and ends with <strong>Open the public page</strong>, which opens the competition's public page in a new tab so you can check what spectators see before and after you publish.</p>
+<p><img alt="The draw preview header of a hidden draw: Discard draw, Publish draw and Start competition, with &quot;Hidden from the public&quot; beside the badge and in the line below them." src="../../../screenshots/draw-hidden-header.png" /></p>
+<p><img alt="The same header once the draw is published: Discard draw, Unpublish and Start competition, with &quot;Public&quot; beside the badge and the line &quot;Published&quot; below them." src="../../../screenshots/draw-published-header.png" /></p>
+<p>The line below the buttons reads:</p>
+<ul>
+<li>While it is hidden: "Hidden from the public. Publish draw or Start competition makes it public."</li>
+<li>Once it is published: "Published. The public can see this draw. Changes you make show on public pages at once."</li>
+</ul>
+<p>The dashboard card of a draw-ready competition shows the same thing at a glance: a crossed-out eye and "Hidden from the public", or an open eye and "Public". Under <strong>Start competition</strong>, the card has its own <strong>Publish draw</strong> (<strong>Unpublish</strong> once public), which works as the header's does, so you can publish several draws from the dashboard without opening each competition.</p>
+<p><img alt="A dashboard card of a draw-ready competition with a crossed-out eye and the words Hidden from the public, Start competition, and Publish draw under it." src="../../../screenshots/draw-hidden-card.png" /></p>
+<ul>
+<li><strong>Publish draw</strong> shows the draw on the public pages at once, without waiting for the start. It asks nothing first. Once published, the button reads <strong>Unpublish</strong>.</li>
+<li><strong>Unpublish</strong> hides the draw again, for example when you published it by mistake or spotted an error after publishing. The app says "Hidden again. Anyone who looked still has what they saw.": a spectator who already read the draw, took a screenshot or printed it keeps that copy, so tell people when a published draw changes.</li>
+<li><strong>Start competition</strong> makes the draw public whether or not you published it. On a hidden draw it asks first, under the title "Start <name>?": "The draw for "<name>" is still hidden from the public. Starting the competition makes it public at once." Choose <strong>Start competition</strong> to go ahead, or <strong>Cancel</strong>. <strong>Start</strong> on the dashboard card asks the same, and <strong>Start all</strong> starts every competition in setup and every competition whose draw is already made, and before you confirm it names the hidden draws it would make visible: "Starting makes these draws visible to the public: <names>."</li>
+<li><strong>Discard draw</strong> asks first, under the title "Discard the draw for <name>?". On a published draw it warns you that the public has already seen it, and that the new draw you generate starts hidden again. On a hidden draw it asks only whether to remove the pools and bracket so you can edit participants and settings.</li>
+</ul>
+<p>Scoring a match of a draw-ready competition starts it, so that also makes its draw public. A court operator who taps <strong>Call to court</strong> for a match of a hidden draw is asked first: "The draw for <competition> is still hidden from the public. Calling this match shows its competitors on the public screens." <strong>Call anyway</strong> makes the call, and <strong>Cancel</strong> (or Escape) leaves the match uncalled. Publish the draw first if you do not want the call to be the first thing spectators see.</p>
+<p>A self-run tournament has no <strong>Publish draw</strong> button: its draw is public as soon as it is made, because the competitors run their matches from the public pages.</p>
 <!-- The build rewrites a raw-HTML src as relative to THIS Markdown file
      (docs/user-guide/organisers/run-tournament.md), the same as a Markdown
      image path: two levels up to docs/, not three. -->

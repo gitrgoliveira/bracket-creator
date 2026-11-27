@@ -112,14 +112,16 @@ type courtControlRegistry struct {
 // courtReleaseGrace is how long a shiaijo a court console tab gave back
 // (closed or reloaded) stays with its tablet, so that a reload gets it back
 // before any other console can claim it. A reload over a weak venue network
-// can take many seconds (a slow page load, a lost request resent), so the
-// grace is long; any console can still Take control at once, and every
-// console claims the shiaijo as soon as the grace ends. The server keeps the
+// can take several seconds (a slow page load, a lost request resent), so the
+// grace is 10 seconds: long enough for that, short enough that a tablet that
+// is really gone does not hold up the court (operator ruling 2026-11-27).
+// Any console can still Take control at once, and every console claims the
+// shiaijo as soon as the grace ends. The server keeps the
 // grace, not the waiting consoles, because their clocks and the events they
 // are sent are not to be trusted on such a network (operator ruling: "there
 // needs to be a grace period. remember you are dealing with struggling
 // network conditions").
-const courtReleaseGrace = 30 * time.Second
+const courtReleaseGrace = 10 * time.Second
 
 // courtGraceTimer is a grace's timer: Stop it when the grace ends early.
 type courtGraceTimer interface{ Stop() bool }

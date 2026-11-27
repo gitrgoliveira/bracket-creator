@@ -2120,7 +2120,7 @@ paths:
           for), and ends at once the grace of any other this tab gave back.
           `keep` never lets a tab take or hold a shiaijo it did not already
           hold.
-        - During the 30-second grace after the holder's tab gave the shiaijo
+        - During the 10-second grace after the holder's tab gave the shiaijo
           back (DELETE), a claim from that tab (a reload: same `tabId`, new
           `pageId`) or from another tab of its tablet takes it back at once,
           with its standing start as it was. A claim from another tablet is
@@ -2220,7 +2220,7 @@ paths:
         shiaijo back only when this tab runs it and `pageId` names the current
         page load; anything else changes nothing and answers the control as
         it stands. A shiaijo given back is kept for this tablet for a grace of
-        30 seconds (see the PUT), so a reload over a slow network claims it
+        10 seconds (see the PUT), so a reload over a slow network claims it
         back before any other console: nothing is announced until the grace
         ends, and then `court_control_updated` announces it free and every
         open console claims it. The answer to the release is the shiaijo as
@@ -10128,7 +10128,7 @@ components:
           type: integer
           format: int64
           description: >
-            When the holder's tab gave the shiaijo back, while the 30-second
+            When the holder's tab gave the shiaijo back, while the 10-second
             grace still keeps it for its tablet; 0 when the shiaijo is held
             or free. The holder fields then describe the hold given back.
 

@@ -151,7 +151,7 @@ export function courtControlBar(view, court, { now = serverNowMs(), checked = tr
             const dev = devicePhrase(view.holderDevice);
             const noun = dev ? dev.replace(/^an? /, '') : 'device';
             return offline(bar('view', 'eye', 'View only',
-                `Shiaijo ${c} was closed on ${dev || 'another device'} just now. This console takes it within about half a minute unless that ${noun} comes back.`,
+                `Shiaijo ${c} was closed on ${dev || 'another device'} just now. This console takes it within about 10 seconds unless that ${noun} comes back.`,
                 { take: true, ask }));
         }
         return offline(bar('view', 'eye', 'View only', `${cap(holderPhrase(view))} runs shiaijo ${c}.`, {

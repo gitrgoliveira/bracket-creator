@@ -82,7 +82,7 @@ flowchart TB
   the court control calls on `/api/courts/{court}/control` (`GET`, a `PUT` that claims the
   shiai-jo, takes it with **Take control**, or renews the claim every 30 s while the console is shown, and a
   `DELETE` that gives it back), since taking control means nothing offline. A shiai-jo given
-  back stays with its tablet for 30 s on the server, so a reload over a slow network claims it
+  back stays with its tablet for 10 s on the server, so a reload over a slow network claims it
   back before any other console; the server, not the waiting consoles, keeps that grace, because
   their clocks and the events they are sent cannot be trusted on such a network. Auth is
   handled through the `X-Tournament-Password` header (two modes, §5; self-run mode allows
@@ -94,7 +94,7 @@ flowchart TB
   `tournament_updated`, `schedule_updated`, `lineup_updated`, `draw_generated`, `draw_discarded`,
   `swiss_round_generated`, `announcement`, `password_reset`, `bracket_quarantined` and
   `court_control_updated` (sent to organiser streams only, when a shiai-jo passes to another tab
-  or tablet or is freed, which for a shiai-jo given back is once its 30 s grace ends; a heartbeat
+  or tablet or is freed, which for a shiai-jo given back is once its 10 s grace ends; a heartbeat
   announces nothing), plus the
   resilience control events `resync_required` and `heartbeat`. Every real event is stamped with a
   monotonic `seq` written as the SSE `id:` line, so the browser's `Last-Event-ID` advances

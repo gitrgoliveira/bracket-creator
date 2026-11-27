@@ -275,7 +275,7 @@ describe('telling the operator what view only means', () => {
       : { body: answer({ holderKey: 'bbbb', device: 'mac', lastActiveAt: Date.now() - 3000, releasedAt: Date.now() - 2000 }) });
     const c = await mount();
     try {
-      expect(barText(c)).toBe('View only Shiaijo A was closed on a Mac just now. This console takes it within about half a minute unless that Mac comes back.');
+      expect(barText(c)).toBe('View only Shiaijo A was closed on a Mac just now. This console takes it within about 10 seconds unless that Mac comes back.');
       expect(bar(c).className).toContain('shiaijo-control--view');
       expect(queueScope(c).disabled).toBe(true);
       await act(async () => { takeButton(c).click(); });
@@ -287,7 +287,7 @@ describe('telling the operator what view only means', () => {
   it('a grace with no device word says "another device"', () => {
     const view = { state: 'other', holderDevice: 'device', holderLastActiveAt: 0, releasedAt: 5, sameDevice: false, youWereDisplaced: false };
     expect(courtControlBar(view, 'C').text)
-      .toBe('Shiaijo C was closed on another device just now. This console takes it within about half a minute unless that device comes back.');
+      .toBe('Shiaijo C was closed on another device just now. This console takes it within about 10 seconds unless that device comes back.');
   });
 
   it('losing the shiaijo to another device while open: a one-time static note, announced, that Dismiss takes away', async () => {

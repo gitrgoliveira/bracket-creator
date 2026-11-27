@@ -805,6 +805,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // The match the feed shows running on this shiaijo, as Take control's
     // confirm names it ("Open individual, Match 1 of 4").
     const runningLabel = running[0] ? `${running[0].compName || "a match"}${shiaijoMatchNo(running[0])}` : "";
+    // The match the inline editor holds, named the same way, for the band
+    // that says its unsaved entries were not saved when control goes.
+    const editorLabel = selectedMatch ? `${selectedMatch.compName || "a match"}${shiaijoMatchNo(selectedMatch)}` : "";
     // The idle panel's words while this console is view only (null: it may write).
     const idleViewOnly = canWrite ? null : courtControlIdle(control.view, court);
     // The pre-start lineup panel saves a lineup: opened only while this tab runs
@@ -1039,7 +1042,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             <AdminTopbar onLogout={leaving(onLogout)} onViewerMode={leaving(onViewerMode)} beforeLeave={leaveEditorConfirmed} tournament={tournament} hideRunningStrip />
             {/* Who runs this shiaijo, stuck under the top bar so it is on
                 screen however far the operator scrolls (bc-sseq FR9). */}
-            {courtKnown && <ShiaijoControlBar court={court} control={control} showToast={showToast} running={runningLabel} />}
+            {courtKnown && (
+                <ShiaijoControlBar court={court} control={control} showToast={showToast} running={runningLabel}
+                    runningMatch={running[0] || null} courtMatches={sorted}
+                    editorUnsavedRef={editorUnsavedRef} editorLabel={editorLabel} />
+            )}
             <div className="page page--wide">
                 <Breadcrumbs items={[{ label: "Dashboard", onClick: leaving(onBack) }, { label: `Shiaijo ${court}` }]} />
                 <div className="page-head page-head--oneline">

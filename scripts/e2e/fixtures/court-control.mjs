@@ -56,11 +56,17 @@ export const SAME_TABLET_TEXT = (court) => new RegExp(`^View only Another tab on
 // The slate "View only" bar a console on another tablet shows: the device runs
 // it, or (within the server's release grace) closed it just now.
 export const OTHER_DEVICE_TEXT = (court) => new RegExp(`^View only (?:(?:An? [A-Za-z ]+|Another device) runs shiaijo ${court}\\.|Shiaijo ${court} was closed on )`);
-// The amber "Control lost" bar of a tablet another tablet took the shiaijo from.
-export const LOST_TEXT = (court) => new RegExp(`^Control lost (?:An? [A-Za-z ]+|Another device) took shiaijo ${court} from this device\\.$`);
+// The amber "Control lost" bar of a tablet another tablet took the shiaijo from:
+// who has it NOW (the device that took it may have lost it to a third since),
+// or, within the server's release grace, that it was closed on that device just
+// now. A console that lost it while open goes on with the one-time account of
+// the loss in the same sentence (LOST_NOTE), so the pattern is not anchored at its end.
+export const LOST_TEXT = (court) => new RegExp(`^Control lost (?:(?:An? [A-Za-z ]+|Another device) runs shiaijo ${court} now\\.|Shiaijo ${court} was closed on (?:an? [A-Za-z ]+|another device) just now\\.)`);
 // The green bar of the tab that runs it.
-export const HOLDS_TEXT = (court) => `Running This device runs shiaijo ${court}.`;
-// The one-time note a console shows when it stops running its shiaijo while open.
+export const HOLDS_TEXT = (court) => `In control This device runs shiaijo ${court}.`;
+// The one-time account a console shows, inside its amber bar, when it stops
+// running its shiaijo while open: who took it when that is not who has it now,
+// then what became of what it entered.
 export const LOST_NOTE = '[data-testid="court-control-lost"]';
 // The confirm's statement when another tablet runs the shiaijo.
 export const TAKE_STATEMENT = /^(?:An? [A-Za-z ]+|Another device) runs it\b.*\. That device becomes view only; results it already saved are kept\.$/;

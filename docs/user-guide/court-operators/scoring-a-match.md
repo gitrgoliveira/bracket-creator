@@ -10,19 +10,27 @@ Each shiai-jo is run by one device (a tablet or a laptop) at a time. Of the cour
 
 | The bar | What it means | What you can do |
 |---|---|---|
-| Green, a tick: "**Running** This device runs shiaijo A." | This tab runs the shiai-jo. | Everything, as usual. |
+| Green, a tick: "**In control** This device runs shiaijo A." | This tab runs the shiai-jo. | Everything, as usual. |
 | Dark grey, an eye: "**View only** An iPad runs shiaijo A. Last active 2 min ago." and **Take control** | Another tablet or laptop runs it. | Watch the matches only. Starting, scoring, finishing, decisions, **Correct**, the queue order, court moves, **Send back to queue**, the lineups and new court calls are greyed out, and a line above each greyed-out part says why, for example "View only: an iPad runs shiaijo A." |
 | Dark grey, an eye: "**View only** Another tab on this device runs shiaijo A. Last active 2 min ago. Results queued on this device still count." and **Take control** | This device runs it, from another tab: one left open, one that crashed, or a new one the home screen icon opened. | Watch only, until you tap **Take control**. |
 | Dark grey, an eye: "**View only** Shiaijo A was closed on a Mac just now. This console takes it within about 10 seconds unless that Mac comes back." and **Take control** | The device that ran it closed or reloaded its console, and the shiai-jo is kept for it for about 10 seconds. | Wait, and the bar turns green by itself once the 10 seconds are over, or tap **Take control** to take it at once. |
-| Amber, a warning sign: "**Control lost** An iPad took shiaijo A from this device." and **Take control** | Another device took the shiai-jo from this device. | Watch only. An open score sheet keeps what is on it but cannot save. |
+| Amber, a warning sign: "**Control lost** An iPad runs shiaijo A now." and **Take control** | Another device took the shiai-jo from this device. The bar names the device that runs it now, which is not always the one that took it. | Watch only. An open score sheet keeps what is on it but cannot save. |
+| Amber, a warning sign: "**Control lost** Shiaijo A was closed on a Mac just now." and **Take control** | Another device took the shiai-jo from this device, then closed or reloaded its console, and the shiai-jo is kept for that device for about 10 seconds. | Watch only, until you tap **Take control**. This console does not take it back by itself. |
 | Amber, a warning sign: "**Control lost** Nobody runs shiaijo A now; this device lost it earlier." and **Take control** | The shiai-jo is free, and this device lost it to another device earlier, so it does not take it back by itself. | Watch only, until you tap **Take control**. |
 | Amber, a warning sign: "**Control lost** Nobody runs shiaijo A now; another tab on this device ran it last." and **Take control** | The shiai-jo is free, and this tab lost it to another tab on this device earlier, so it does not take it back by itself. | Watch only, until you tap **Take control**. |
 | Light grey, an hourglass: "**Checking** Finding out who runs shiaijo A…" | The console has just opened and is asking the server. | Score as usual. |
-| Light grey, a crossed-out signal: "**Not connected** Scoring here still works. This device runs shiaijo A once it connects, unless another device already does." | The console opened with no connection. | Score as usual. Once connected the bar turns green, or dark grey if another device runs the shiai-jo. |
+| Light grey, a circular arrow: "**Can't reach court control** Retrying; scoring here still works. This device runs shiaijo A once it gets an answer, unless another device already does." | The page is connected (the top bar says "Connected"), but the server has not answered the question of who runs the shiai-jo. The console keeps asking. | Score as usual. Once it gets an answer the bar turns green, or dark grey if another device runs the shiai-jo. |
+| Light grey, a crossed-out signal: "**Reconnecting** Scoring here still works. This device runs shiaijo A once it connects, unless another device already does." | The page has no connection, as the top bar's "Reconnecting…" says. | Score as usual. Once connected the bar turns green, or dark grey if another device runs the shiai-jo. |
 
 On a phone the bar leaves out the second sentence (when the other device was last active, and what still counts), so it stays one row high.
 
-If this console loses the shiai-jo while you are using it, because another device or another tab on this device took it, a note appears once under the bar, for example "Shiaijo A was taken by an iPad. This screen is now view only; entries you had not saved stay on screen." It stays until you tap **Dismiss** or take the shiai-jo back. Without a connection, **Take control** is greyed out and the bar adds "Taking control needs a connection."
+If this console loses the shiai-jo while you are using it, because another device or another tab on this device took it, the bar turns amber and says once, in the same bar, what became of what you entered:
+
+- "Nothing you entered is waiting to be sent." Every entry you made on this console has left it: the server has answered it, or you discarded it.
+- "2 entries for Open individual, Match 1 of 4 are still waiting to be sent from this device. Tell the Mac's operator." This device still sends them when it can, but they now count like any other device's entries, not the court's, and taking the shiai-jo back does not change that. Tell the operator who runs the shiai-jo now, so they can check the match. The match is named only when all of the waiting entries are for the match running on the shiai-jo.
+- "Your entries for Open individual, Match 1 of 4 were not saved. Take control to save them, or tell the Mac's operator." The score sheet held entries it sends only when you finish the match, such as a tie or a judges' decision. They stay on screen: take the shiai-jo back and finish the match to save them.
+
+When the device that took the shiai-jo is not the one that runs it now, the bar also says who took it, for example "An iPhone took it from this device." The account stays until you tap **Dismiss** or take the shiai-jo back. Without a connection, **Take control** is greyed out and the bar adds "Taking control needs a connection."
 
 ![The court console of Shiaijo A on a tablet that does not run it: a dark grey bar under the top reads "View only An iPad runs shiaijo A." with a Take control button, and the queue's Start match buttons are greyed out under the line "View only: an iPad runs shiaijo A."](../../screenshots/console-run-from-another-device.png)
 
@@ -44,7 +52,7 @@ The **Scores** tab and page, the pools, the bracket and the public page take no 
 If the court console's tab crashed, was left open in the background, or the home screen icon opened the console in a new tab, the console you are looking at shows the dark grey bar: "View only Another tab on this device runs shiaijo A. Results queued on this device still count." Nothing is lost:
 
 1. Tap **Take control**, then confirm. The confirmation reads "Another tab on this device runs it. That tab becomes view only; results queued on this device still count."
-2. The bar turns green and you carry on scoring. If the other tab is still open, it turns dark grey and shows the note that the shiai-jo was taken by another tab on this device.
+2. The bar turns green and you carry on scoring. If the other tab is still open, its bar turns amber and says that another tab on this device runs the shiai-jo, and what became of what was entered there.
 
 Results this tablet still holds, from either tab, keep counting as the court's after the take: the tablet runs the shiai-jo, and the tab only shows it. If the tablet itself is broken or lost, open the court console on another tablet and tap **Take control** there. From then on that tablet runs the shiai-jo, and any results the old tablet still holds count like any other device's when they finally arrive.
 

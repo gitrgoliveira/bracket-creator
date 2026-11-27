@@ -580,7 +580,7 @@ test.describe('concurrent taps from two devices', () => {
       expect(asked, 'the confirm states who runs it and what the take does').toMatch(TAKE_STATEMENT);
       await expect.poll(() => controlState(d1), { message: 'device 1 learns it no longer runs shiaijo A' }).toBe('other');
       expect(await controlText(d1), 'device 1 shows the amber bar').toMatch(LOST_TEXT('A'));
-      await expect(d1.locator(LOST_NOTE), 'device 1 is told once that the shiaijo was taken').toContainText('Shiaijo A was taken by');
+      await expect(d1.locator(LOST_NOTE), 'device 1 is told once that the shiaijo was taken').toContainText(/Nothing you entered is waiting to be sent\.|still waiting to be sent from this device\.|were not saved\./);
       await expect(ipponButton(d1, 'shiro', 'M'), 'device 1 can no longer score').toBeDisabled();
       await expect(ipponButton(d3, 'shiro', 'M'), 'the console that took control can').toBeEnabled();
       await shot(d1, 'h-device-1-lost-control');

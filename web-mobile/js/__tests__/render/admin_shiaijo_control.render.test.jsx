@@ -4,7 +4,7 @@
 import { act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { setupShiaijoConsole, mountCourt, courtMatch, probe } from '../helpers/shiaijo_console.js';
-import { courtControlBar, lastActivePhrase, refusedNotHeld } from '../../admin_shiaijo_control.jsx';
+import { courtControlBar, courtControlReason, courtControlIdle, courtControlEntriesNote, courtControlLossNote, lastActivePhrase, refusedNotHeld } from '../../admin_shiaijo_control.jsx';
 import { CLAIM_DEADLINE_MS } from '../../court_control.jsx';
 
 setupShiaijoConsole();
@@ -49,12 +49,12 @@ const mount = async () => {
 };
 
 describe('the mark under the top bar', () => {
-  it('holds: a green bar opening with a check and "Running", saying this device runs the shiaijo, and the queue can act', async () => {
+  it('holds: a green bar opening with a check and "In control", saying this device runs the shiaijo, and the queue can act', async () => {
     const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
     await settle(200);
     try {
-      expect(barText(c)).toBe('Running This device runs shiaijo A.');
-      expect(bar(c).querySelector('.shiaijo-control__lead').textContent).toBe('Running');
+      expect(barText(c)).toBe('In control This device runs shiaijo A.');
+      expect(bar(c).querySelector('.shiaijo-control__lead').textContent).toBe('In control');
       expect(glyph(c)).toBe('circle-check');
       expect(bar(c).className).toContain('shiaijo-control--holds');
       expect(c.utils.queryByTestId('view-only-reason')).toBeNull();
@@ -118,7 +118,7 @@ describe('the mark under the top bar', () => {
       await act(async () => { within(ask).getByRole('button', { name: 'Take control' }).click(); });
       await settle();
       expect(takes()).toHaveLength(1);
-      expect(barText(c)).toBe('Running This device runs shiaijo A.');
+      expect(barText(c)).toBe('In control This device runs shiaijo A.');
       expect(c.utils.queryByTestId('take-control-ask')).toBeNull();
       expect(queueScope(c).disabled).toBe(false);
       // Taking it is not losing it: no loss note.
@@ -156,7 +156,8 @@ describe('the mark under the top bar', () => {
     reply = () => ({ body: answer({ holderKey: 'bbbb', device: 'ipad', youWereDisplaced: true }) });
     const c = await mount();
     try {
-      expect(barText(c)).toBe('Control lost An iPad took shiaijo A from this device.');
+      // Only who has it now: whoever took it may have lost it to a third since.
+      expect(barText(c)).toBe('Control lost An iPad runs shiaijo A now.');
       expect(bar(c).className).toContain('shiaijo-control--lost');
       expect(glyph(c)).toBe('triangle-alert');
       expect(takeButton(c).className).toContain('btn--primary');
@@ -180,7 +181,7 @@ describe('the mark under the top bar', () => {
       await settle();
       expect(c.utils.queryByTestId('take-control-ask')).toBeNull();
       expect(takes()).toHaveLength(1);
-      expect(barText(c)).toBe('Running This device runs shiaijo A.');
+      expect(barText(c)).toBe('In control This device runs shiaijo A.');
     } finally { c.restore(); c.utils.unmount(); }
   });
 
@@ -196,7 +197,7 @@ describe('the mark under the top bar', () => {
       await settle();
       expect(c.utils.queryByTestId('take-control-ask')).toBeNull();
       expect(takes()).toHaveLength(1);
-      expect(barText(c)).toBe('Running This device runs shiaijo A.');
+      expect(barText(c)).toBe('In control This device runs shiaijo A.');
     } finally { c.restore(); c.utils.unmount(); }
   });
 
@@ -241,7 +242,7 @@ describe('the mark under the top bar', () => {
     } finally { c.restore(); c.utils.unmount(); }
   });
 
-  it('no connection: "Checking" at first, then the neutral "Not connected" line, and the console still acts', async () => {
+  it('no answer while the page is connected: "Checking" at first, then "Can\'t reach court control", never "Not connected", and the console still acts', async () => {
     reply = () => new TypeError('Failed to fetch');
     // The last test's console gives the shiaijo back first (its release runs
     // on a 0 ms timer), so this one opens with nothing known.
@@ -252,12 +253,41 @@ describe('the mark under the top bar', () => {
       expect(glyph(c)).toBe('hourglass');
       expect(bar(c).className).toContain('shiaijo-control--pending');
       await act(async () => { await new Promise((r) => setTimeout(r, 1600)); });
-      expect(barText(c)).toBe('Not connected Scoring here still works. This device runs shiaijo A once it connects, unless another device already does.');
-      expect(glyph(c)).toBe('wifi-off');
+      expect(barText(c)).toBe("Can't reach court control Retrying; scoring here still works. This device runs shiaijo A once it gets an answer, unless another device already does.");
+      expect(barText(c)).not.toContain('Not connected');
+      expect(glyph(c)).toBe('refresh');
       // The same neutral treatment as Checking: an unconnected console still scores.
       expect(bar(c).className).toContain('shiaijo-control--pending');
       expect(queueScope(c).disabled).toBe(false);
     } finally { c.restore(); c.utils.unmount(); }
+  });
+});
+
+describe('the bar agrees with the top bar about the connection', () => {
+  it('the page offline and no answer: "Reconnecting", as the top bar\'s pill says', async () => {
+    reply = () => new TypeError('Failed to fetch');
+    await settle(10);
+    const statuses = [];
+    const c = await mountCourt([courtMatch('m1', 'scheduled'), courtMatch('m2', 'scheduled')], {
+      subscribeToEvents: (_cb, onStatus) => { statuses.push(onStatus); return () => {}; },
+    });
+    await settle(200);
+    try {
+      await act(async () => { for (const fn of statuses) if (typeof fn === 'function') fn('error'); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 1600)); });
+      expect(barText(c)).toBe('Reconnecting Scoring here still works. This device runs shiaijo A once it connects, unless another device already does.');
+      expect(glyph(c)).toBe('wifi-off');
+      expect(bar(c).className).toContain('shiaijo-control--pending');
+      expect(queueScope(c).disabled).toBe(false);
+    } finally { c.restore(); c.utils.unmount(); }
+  });
+
+  it('words each case of no answer', () => {
+    const view = { state: 'unknown', connected: false, refusedStatus: 0 };
+    expect(courtControlBar(view, 'A', { checked: false, online: true }).lead).toBe('Checking');
+    expect(courtControlBar(view, 'A', { checked: true, online: true, linkUp: true }).lead).toBe("Can't reach court control");
+    expect(courtControlBar(view, 'A', { checked: true, online: true, linkUp: false }).lead).toBe('Reconnecting');
+    expect(courtControlBar(view, 'A', { checked: true, online: false, linkUp: true }).lead).toBe('Reconnecting');
   });
 });
 
@@ -278,6 +308,11 @@ describe('telling the operator what view only means', () => {
       expect(barText(c)).toBe('View only Shiaijo A was closed on a Mac just now. This console takes it within about 10 seconds unless that Mac comes back.');
       expect(bar(c).className).toContain('shiaijo-control--view');
       expect(queueScope(c).disabled).toBe(true);
+      // The reason lines and the idle panel follow the bar's grace, never "a Mac runs shiaijo A".
+      for (const r of c.utils.getAllByTestId('view-only-reason')) {
+        expect(r.textContent).toBe('View only: shiaijo A was closed on a Mac just now.');
+      }
+      expect(c.utils.container.querySelector('.shiaijo__placeholder p').textContent).toBe('Shiaijo A was closed on a Mac just now.');
       await act(async () => { takeButton(c).click(); });
       expect(c.utils.getByTestId('take-control-ask').querySelector('.shiaijo-move-confirm__body').textContent)
         .toBe('A Mac closed it just now and may come back. Taking it now makes that device view only; results it already saved are kept.');
@@ -290,39 +325,116 @@ describe('telling the operator what view only means', () => {
       .toBe('Shiaijo C was closed on another device just now. This console takes it within about 10 seconds unless that device comes back.');
   });
 
-  it('losing the shiaijo to another device while open: a one-time static note, announced, that Dismiss takes away', async () => {
+  it('losing the shiaijo to another device while open: ONE amber band, announced once, that says what was entered and that Dismiss takes away', async () => {
     const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
     await settle(200);
     try {
-      expect(barText(c)).toBe('Running This device runs shiaijo A.');
+      expect(barText(c)).toBe('In control This device runs shiaijo A.');
       await takenWith(answer({ holderKey: 'bbbb', device: 'ipad', youWereDisplaced: true }));
       const note = c.utils.getByTestId('court-control-lost');
-      expect(note.getAttribute('role')).toBe('alert');
-      expect(note.textContent).toContain('Shiaijo A was taken by an iPad. This screen is now view only; entries you had not saved stay on screen.');
-      // Inside the sticky bar, so it is on screen wherever the operator works.
-      expect(bar(c).contains(note)).toBe(true);
-      expect(barText(c)).toBe('Control lost An iPad took shiaijo A from this device.');
-      await act(async () => { within(note).getByRole('button', { name: 'Dismiss' }).click(); });
+      // Inside the bar's own sentence: one band, one live region, no second alert.
+      expect(bar(c).querySelector('.shiaijo-control__text').contains(note)).toBe(true);
+      expect(bar(c).querySelectorAll('[role="status"], [role="alert"], [aria-live]')).toHaveLength(1);
+      expect(c.utils.container.querySelector('[role="alert"]')).toBeNull();
+      // The taker is who has it now, so the bar says it once.
+      expect(barText(c)).toBe('Control lost An iPad runs shiaijo A now. Nothing you entered is waiting to be sent.');
+      expect(bar(c).className).toContain('shiaijo-control--lost');
+      expect(takeButton(c).className).toContain('btn--primary');
+      await act(async () => { within(bar(c)).getByRole('button', { name: 'Dismiss' }).click(); });
       expect(c.utils.queryByTestId('court-control-lost')).toBeNull();
+      expect(within(bar(c)).queryByRole('button', { name: 'Dismiss' })).toBeNull();
+      expect(barText(c)).toBe('Control lost An iPad runs shiaijo A now.');
       // Told once: another answer saying the same does not bring it back.
       await takenWith(answer({ holderKey: 'bbbb', device: 'ipad', youWereDisplaced: true }));
       expect(c.utils.queryByTestId('court-control-lost')).toBeNull();
     } finally { c.restore(); c.utils.unmount(); }
   });
 
-  it('losing it to another tab on this device: the same note, though the bar stays "View only"', async () => {
+  it('a second handover: the bar names who runs it now, the account keeps who took it from this device', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
+    await settle(200);
+    try {
+      await takenWith(answer({ holderKey: 'bbbb', device: 'iphone', youWereDisplaced: true }));
+      expect(barText(c)).toBe('Control lost An iPhone runs shiaijo A now. Nothing you entered is waiting to be sent.');
+      // A Mac takes it from the iPhone: never "A Mac took shiaijo A from this device".
+      await takenWith(answer({ holderKey: 'dddd', device: 'mac', youWereDisplaced: true }));
+      expect(barText(c)).toBe('Control lost A Mac runs shiaijo A now. An iPhone took it from this device. Nothing you entered is waiting to be sent.');
+      expect(barText(c)).not.toContain('A Mac took');
+      // The Mac closes its console: the server's grace keeps it for the Mac.
+      await takenWith(answer({ holderKey: 'dddd', device: 'mac', youWereDisplaced: true, releasedAt: Date.now() - 1000 }));
+      expect(barText(c)).toBe('Control lost Shiaijo A was closed on a Mac just now. An iPhone took it from this device. Nothing you entered is waiting to be sent.');
+      // The reason lines say the same as the bar, not "a Mac runs shiaijo A".
+      for (const r of c.utils.getAllByTestId('view-only-reason')) {
+        expect(r.textContent).toBe('View only: shiaijo A was closed on a Mac just now.');
+      }
+    } finally { c.restore(); c.utils.unmount(); }
+  });
+
+  it('entries still queued for the running match: the band counts them, names the match, and drops the count once they land', async () => {
+    const prevQueued = window.API.queuedWritesOfMatches;
+    const prevSub = window.subscribeUnsentWrites;
+    let queued = 2;
+    const listeners = new Set();
+    window.API.queuedWritesOfMatches = vi.fn(() => queued);
+    window.subscribeUnsentWrites = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
+    const c = await mountCourt([courtMatch('m1', 'running', { poolPosition: 1, poolCount: 3 }), courtMatch('m2', 'scheduled')]);
+    await settle(200);
+    try {
+      await takenWith(answer({ holderKey: 'bbbb', device: 'mac', youWereDisplaced: true }));
+      expect(barText(c)).toBe("Control lost A Mac runs shiaijo A now. 2 entries for Cup, Match 1 of 3 are still waiting to be sent from this device. Tell the Mac's operator.");
+      // Counted over the shiaijo's matches, the running one included.
+      const asked = window.API.queuedWritesOfMatches.mock.calls.map(([ms]) => ms.map((m) => m.id));
+      expect(asked).toContainEqual(expect.arrayContaining(['m1', 'm2']));
+      queued = 0;
+      await act(async () => { for (const fn of listeners) fn(0); });
+      expect(barText(c)).toBe('Control lost A Mac runs shiaijo A now. Nothing you entered is waiting to be sent.');
+    } finally {
+      window.API.queuedWritesOfMatches = prevQueued;
+      window.subscribeUnsentWrites = prevSub;
+      c.restore(); c.utils.unmount();
+    }
+  });
+
+  it('entries still queued with no running match: the count, with no match named', async () => {
+    const prevQueued = window.API.queuedWritesOfMatches;
+    window.API.queuedWritesOfMatches = vi.fn(() => 1);
+    const c = await mount();
+    try {
+      await takenWith(answer({ holderKey: 'bbbb', device: 'ipad', youWereDisplaced: true }));
+      expect(barText(c)).toBe("Control lost An iPad runs shiaijo A now. 1 entry is still waiting to be sent from this device. Tell the iPad's operator.");
+    } finally {
+      window.API.queuedWritesOfMatches = prevQueued;
+      c.restore(); c.utils.unmount();
+    }
+  });
+
+  it('entries the editor never sent: the band names the match and that a take back saves them', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { poolPosition: 1, poolCount: 3 }), courtMatch('m2', 'scheduled')]);
+    await settle(200);
+    try {
+      // The inline editor holds an entry it sends only on Finish (a Tie toggle, a hantei pick).
+      probe.props.hostUnsavedRef.current = () => true;
+      await takenWith(answer({ holderKey: 'bbbb', device: 'ipad', youWereDisplaced: true }));
+      expect(barText(c)).toBe("Control lost An iPad runs shiaijo A now. Your entries for Cup, Match 1 of 3 were not saved. Take control to save them, or tell the iPad's operator.");
+    } finally {
+      if (probe.props && probe.props.hostUnsavedRef) probe.props.hostUnsavedRef.current = null;
+      c.restore(); c.utils.unmount();
+    }
+  });
+
+  it('losing it to another tab on this device: the same one band, and a take back clears it', async () => {
     const c = await mount();
     try {
       await takenWith(answer({ holderKey: 'cccc', device: 'ipad', sameDevice: true }));
-      expect(bar(c).className).toContain('shiaijo-control--view');
-      expect(c.utils.getByTestId('court-control-lost').textContent)
-        .toContain('Shiaijo A was taken by another tab on this device. This screen is now view only; entries you had not saved stay on screen.');
-      // Taking it back clears the note.
+      expect(bar(c).className).toContain('shiaijo-control--lost');
+      expect(barText(c)).toBe('Control lost Another tab on this device runs shiaijo A. Results queued on this device still count. Nothing you entered is waiting to be sent.');
+      expect(c.utils.queryByTestId('court-control-lost')).toBeTruthy();
+      // Taking it back clears the account.
       reply = () => ({ body: HOLDS });
       await act(async () => { takeButton(c).click(); });
       await act(async () => { within(c.utils.getByTestId('take-control-ask')).getByRole('button', { name: 'Take control' }).click(); });
       await settle();
-      expect(barText(c)).toBe('Running This device runs shiaijo A.');
+      expect(barText(c)).toBe('In control This device runs shiaijo A.');
       expect(c.utils.queryByTestId('court-control-lost')).toBeNull();
     } finally { c.restore(); c.utils.unmount(); }
   });
@@ -394,7 +506,7 @@ describe('a console handler checks the control when it acts', () => {
     const c = await mountCourt([running, courtMatch('m2', 'scheduled')]);
     await settle(200);
     try {
-      expect(barText(c)).toBe('Running This device runs shiaijo A.');
+      expect(barText(c)).toBe('In control This device runs shiaijo A.');
       await act(async () => { c.utils.getByRole('button', { name: 'Send back to queue' }).click(); });
       const dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
       expect(dialog).toBeTruthy();
@@ -470,6 +582,37 @@ describe('the words and the check', () => {
     const barView = courtControlBar(view, 'A');
     expect(barView.tone).toBe('view');
     expect(barView.text).toBe('An iPad runs shiaijo A.');
+  });
+
+  it('the reason lines and the idle panel share the bar\'s grace wording', () => {
+    const grace = { state: 'other', holderDevice: 'mac', sameDevice: false, youWereDisplaced: true, releasedAt: 5 };
+    const runs = { ...grace, releasedAt: 0 };
+    expect(courtControlReason(grace, 'A')).toBe('shiaijo A was closed on a Mac just now.');
+    expect(courtControlReason(runs, 'A')).toBe('a Mac runs shiaijo A.');
+    expect(courtControlIdle(grace, 'A')).toEqual({ title: 'View only', body: 'Shiaijo A was closed on a Mac just now.' });
+    expect(courtControlIdle(runs, 'A')).toEqual({ title: 'View only', body: 'A Mac runs shiaijo A. The match it starts shows here.' });
+    // Another tab of this device takes a shiaijo it gave back at once: no grace wording.
+    expect(courtControlReason({ ...grace, sameDevice: true }, 'A')).toBe('another tab on this device runs shiaijo A.');
+  });
+
+  it('words what became of the entries', () => {
+    const mac = { state: 'other', holderDevice: 'mac', sameDevice: false };
+    const loss = { taker: 'an iPhone', match: { compId: 'c1', id: 'm1', label: 'Cup, Match 1 of 3' }, draft: null };
+    expect(courtControlEntriesNote(loss, mac, 0, false)).toBe('Nothing you entered is waiting to be sent.');
+    expect(courtControlEntriesNote(loss, mac, 1, true)).toBe("1 entry for Cup, Match 1 of 3 is still waiting to be sent from this device. Tell the Mac's operator.");
+    // Some of them for another match of the shiaijo: no match named.
+    expect(courtControlEntriesNote(loss, mac, 3, false)).toBe("3 entries are still waiting to be sent from this device. Tell the Mac's operator.");
+    expect(courtControlEntriesNote({ ...loss, draft: 'Cup, Match 1 of 3' }, mac, 2, true))
+      .toBe("Your entries for Cup, Match 1 of 3 were not saved. Take control to save them, or tell the Mac's operator. 2 entries for Cup, Match 1 of 3 are still waiting to be sent from this device.");
+    expect(courtControlEntriesNote({ ...loss, draft: '' }, { state: 'free-displaced' }, 0, false))
+      .toBe('Your entries on screen were not saved. Take control to save them.');
+    expect(courtControlEntriesNote(loss, { state: 'other', holderDevice: 'device', sameDevice: false }, 1, false))
+      .toBe("1 entry is still waiting to be sent from this device. Tell the other device's operator.");
+    // The taker is named only when it is not who has it now.
+    expect(courtControlLossNote(loss, mac, 0, false)).toBe('An iPhone took it from this device. Nothing you entered is waiting to be sent.');
+    expect(courtControlLossNote({ ...loss, taker: 'a Mac' }, mac, 0, false)).toBe('Nothing you entered is waiting to be sent.');
+    expect(courtControlLossNote({ ...loss, taker: 'another tab on this device' }, mac, 0, false))
+      .toBe('Another tab on this device took it. Nothing you entered is waiting to be sent.');
   });
 
   it('refusedNotHeld refuses only a tab that may not write, quietly when asked', () => {

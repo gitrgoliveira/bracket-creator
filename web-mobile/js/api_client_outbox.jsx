@@ -60,6 +60,27 @@ export function queuedWritesOf(compID, kinds) {
     return n;
 }
 
+// bc-sseq FR9: how many entries this tab's outbox still holds for any of
+// `matches` (the console's match shape, `{compId, id}`), whatever their kind:
+// a tap, a result, a decision, a lineup save. An entry leaves the outbox only
+// once the server has answered it (applied, kept in the match's history, or
+// refused and told on its own) or an operator discards it, so what this
+// counts is not saved yet; the outbox keeps sending it. Pure, like queuedWritesOf: re-read
+// it on subscribeUnsentWrites. The court console's band asks it when the
+// console loses its shiaijo (admin_shiaijo_control.jsx).
+export function queuedWritesOfMatches(matches) {
+    const keys = new Set();
+    for (const m of Array.isArray(matches) ? matches : []) {
+        if (m && m.compId && m.id) keys.add(_revKey(m.compId, m.id));
+    }
+    if (keys.size === 0) return 0;
+    let n = 0;
+    for (const d of _writeQueue.values()) {
+        if (d && d.compID && d.matchID && keys.has(_revKey(d.compID, d.matchID))) n++;
+    }
+    return n;
+}
+
 // heldWriteState: both answers the editors' banner reads, from ONE read
 // of the queue (stage 3 review 5, H2: the two asked apart scanned and
 // sorted it at every step of the walk): `keepsFailing`, whether a write
@@ -98,6 +119,7 @@ function heldWriteBlocker(compID, matchID) {
 
 export const outboxApi = {
     queuedWritesOf,
+    queuedWritesOfMatches,
     // bc-obox C1: what this device's queued check-ins for `compID` found on
     // their rows, per participant id: the `was` of the EARLIEST queued entry
     // naming the id, what the row showed before this device touched it (the

@@ -10666,8 +10666,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
                 this console is view only.
      --lost     saturated amber (--warn-fill): this device lost it; view only
                 until it takes it back (Take control is the primary button).
-     --pending  neutral: no answer yet (Checking, Not connected); the console
-                still scores.
+                When it lost it while open, this band also carries the
+                one-time account of the loss and its Dismiss.
+     --pending  neutral: no answer yet (Checking, Can't reach court control,
+                Reconnecting); the console still scores.
      --error    red tint: a sign-in or check this console must fix.
    The two saturated fills hold 3:1 or more against the white top bar and the
    --bg page, with --ink-1 on them (4.5:1 or more). */
@@ -10736,23 +10738,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   outline: 2px solid var(--ink-1);
   outline-offset: 2px;
 }
-/* The one-time note when this console stops running the shiaijo while it is
-   open: amber like the loss it tells, static, until Dismiss or a take back. */
-.shiaijo-control__lost {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 16px;
-  min-height: 52px;
-  border-top: 1px solid var(--warn-border);
-  background: var(--warn-soft);
-  color: var(--warn-ink);
-  font-size: 14px;
-}
-.shiaijo-control__lost .shiaijo-control__glyph { color: var(--warn); margin-top: 0; }
-.shiaijo-control__lost-text { flex: 1 1 auto; min-width: 0; margin: 0; line-height: 20px; font-weight: 500; }
-.shiaijo-control__dismiss { flex: none; min-height: 44px; font-size: 14px; color: var(--warn-ink); }
-.shiaijo-control__dismiss:focus-visible { outline: 2px solid var(--warn-ink); outline-offset: 2px; }
+/* The one-time account when this console stops running the shiaijo while it
+   is open: part of the amber band's own sentence (one live region), shown on
+   a phone too, with its Dismiss beside Take control. */
+.shiaijo-control__lost { font-weight: 600; }
+.shiaijo-control__dismiss { flex: none; min-height: 44px; font-size: 14px; color: var(--ink-1); }
+.shiaijo-control__dismiss:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 2px; }
 /* Why a disabled group of the console's write controls is greyed out, set
    just above it, so a tap on one is never unexplained. */
 .shiaijo-control-reason {
@@ -10798,7 +10789,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   .shiaijo-control__row { padding: 4px 12px; gap: 8px; }
   .shiaijo-control__more { display: none; }
   .shiaijo-control__take { padding: 0 12px; }
-  .shiaijo-control__lost { padding: 4px 12px; }
+  .shiaijo-control__dismiss { padding: 0 8px; }
 }
 
 .shiaijo {

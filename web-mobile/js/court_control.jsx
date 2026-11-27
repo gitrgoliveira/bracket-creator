@@ -581,7 +581,7 @@ export function retryRefusedCourtControl(court) {
 /**
  * The court console's view of `court`: { holds, state, holderDevice,
  * sameDevice, youWereDisplaced, tabWasDisplaced, holderLastActiveAt,
- * holderSince, releasedAt, connected, refusedStatus, take }. `state` is courtControlState's,
+ * holderSince, releasedAt, connected, refusedStatus, answerSeq, take }. `state` is courtControlState's,
  * or 'not-listed' when the tournament no longer lists the shiaijo; `take()` is
  * takeCourtControl.
  */
@@ -624,6 +624,10 @@ export function courtControlView(court, take = () => takeCourtControl(court)) {
         releasedAt: (a && Number(a.releasedAt)) || 0,
         connected: !!(r && r.connected),
         refusedStatus: (r && r.refusedStatus) || 0,
+        // Grows with every answer (or failed check) for the shiaijo, so the
+        // console tells an answer that came while it is open from one it
+        // remembered (the sessionStorage copy a reload starts from).
+        answerSeq: (r && r.settledSeq) || 0,
         take,
     };
 }

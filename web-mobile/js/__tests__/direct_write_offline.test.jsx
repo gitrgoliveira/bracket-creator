@@ -31,6 +31,8 @@ const DIRECT_WRITES = {
   generateDraw: () => API.generateDraw('c1', PW),
   discardDraw: () => API.discardDraw('c1', PW),
   swapDrawPlaces: () => API.swapDrawPlaces('c1', { a: { id: 'a', place: { pool: 'Pool A', position: 1 } }, b: { id: 'b', place: { pool: 'Pool B', position: 1 } } }, PW),
+  publishDraw: () => API.publishDraw('c1', PW),
+  unpublishDraw: () => API.unpublishDraw('c1', PW),
   quarantineBracket: () => API.quarantineBracket('c1', PW),
   completeCompetition: () => API.completeCompetition('c1', PW),
   importCompetitions: () => API.importCompetitions(new FormData(), PW),
@@ -173,7 +175,8 @@ describe('a direct write that cannot be sent says one sentence', () => {
       const near = src.slice(i, i + 4).join(' ');
       // _backupRequest sends a GET bare and any other method through _directFetch.
       // _downloadWorkbook is a GET sent through _directFetch for the methods that call it.
-      if (method && (line.includes('_directFetch(') || line.includes('_downloadWorkbook(') || (line.includes('_backupRequest(') && /method:\s*'(POST|PUT|PATCH|DELETE)'/.test(near)))) sends.add(method);
+      // _drawVisibilityWrite is the POST that publishDraw and unpublishDraw send through _directFetch.
+      if (method && (line.includes('_directFetch(') || line.includes('_downloadWorkbook(') || line.includes('_drawVisibilityWrite(') || (line.includes('_backupRequest(') && /method:\s*'(POST|PUT|PATCH|DELETE)'/.test(near)))) sends.add(method);
     }
     // The scan read every piece: it found each member of API, and nothing else.
     expect([...members].sort()).toEqual(Object.keys(API).sort());

@@ -44,7 +44,7 @@ Two environment variables tune the API rate limiter for large events:
 
 Click **Admin** in the navigation bar and enter the admin password. The rules for who can access which features depend on your tournament's operating mode. Refer to [Operating modes](operating-modes.md) for the full access-control rules.
 
-Some organiser actions are sent directly and are not held for later: uploading files, adding a walk-up competitor, editing a participant or a seed, saving a competition's settings, changing the admin password, deleting a competition (which asks you to type the admin password to confirm), and generating a draw, starting or completing a competition. If the connection is down when you tap one of these, the app says "No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.", so check the participant list, seed or settings you changed once the connection is back, and repeat the action only if the change is missing. Scores, lineups, check-in, announcements and court calls, tournament settings and fighting-spirit awards are held on the device and sent when the connection returns instead. A password change waits for tournament settings saves still held on this device; **Change the password now** asks you to confirm first.
+Some organiser actions are sent directly and are not held for later: uploading files, adding a walk-up competitor, editing a participant or a seed, saving a competition's settings, changing the admin password, deleting a competition (which asks you to type the admin password to confirm), and generating, publishing, hiding or discarding a draw, starting or completing a competition. If the connection is down when you tap one of these, the app says "No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing.", so check the participant list, seed or settings you changed once the connection is back, and repeat the action only if the change is missing. Scores, lineups, check-in, announcements and court calls, tournament settings and fighting-spirit awards are held on the device and sent when the connection returns instead. A password change waits for tournament settings saves still held on this device; **Change the password now** asks you to confirm first.
 
 ## Dashboard
 
@@ -86,6 +86,10 @@ The same **Edit details** page also has branding and sponsor fields, below tourn
 - **Accent colours**: set a primary accent colour and, if you want one, a soft background tint; the viewer and display screens adopt them across the whole site. Leave the tint alone and it is derived from the primary, so one colour choice re-tints every surface, including the running-match rings and focus halos.
 - **Sponsors**: upload full-width images that appear on the public viewer page only. Sponsor images do not appear on the TV lobby boards or scoring displays.
 
+## QR-code posters
+
+Click **Posters** on the dashboard to print a poster for the viewer home and one for each shiai-jo, each with a QR code that opens the right page on a spectator's phone. Refer to [Print QR-code posters](posters.md) for the choices, saving and printing. The codes open the **Public URL** set above. When it is not set and the page is open at an address phones may not reach, such as `localhost`, the poster page warns you.
+
 ## Announcements
 
 Click **Announce** from the dashboard to broadcast a short message to every viewer. Choose a duration of 5, 10, 15, or 30 minutes; the message clears itself automatically when the time expires. It appears as an overlay on the viewer and display screens. Spectators who allow browser notifications can receive it in the background.
@@ -107,7 +111,7 @@ Open **Registration desk** from the dashboard to access the check-in surface for
 A competition moves through three phases:
 
 1. **Setup**: configure participants, seeding, and optional check-in.
-2. **Draw preview** (`draw-ready`): review the generated pools, bracket, or first Swiss round. The roster is locked during this phase.
+2. **Draw preview** (`draw-ready`): review the generated pools, bracket, or first Swiss round. The roster is locked during this phase, and the draw stays hidden from the public until you publish it or start the competition. Refer to [Keep the draw from the public until it is ready](#keep-the-draw-from-the-public-until-it-is-ready).
 3. **Match play**: Pools + Knockout, League, and Swiss competitions all start in `pools` status, which is the shared name for the phase their matches run in rather than a claim that each one has pools. Knockout-only competitions start in `knockout`.
 
 ![Competition setup overview](../../screenshots/mobile-participants.png)
@@ -255,6 +259,34 @@ When the preview looks correct, click **Start competition** to move to match pla
 
 A draw-ready competition is already listed on the shiai-jo operator views, since its matches exist. Scoring one of those matches starts the competition on the spot, exactly as **Start competition** would, so a court that begins play never has to wait for the desk. Because that first result fixes the draw, the app asks first; refer to [Before the first result](#before-the-first-result).
 
+#### Keep the draw from the public until it is ready
+
+A new draw starts hidden from the public. Spectators, court displays and the stream overlay see the competition as if it were still in setup: its name, its competitors and the line **Draw being prepared**, but no pools, bracket, matches or competitor numbers. Your own screens show the draw as usual, and so does the court console. Refer to [Follow the tournament](../spectators/following.md#when-the-draw-is-being-prepared) for what spectators see.
+
+The preview header holds three buttons, in this order: **Discard draw**, **Publish draw** and **Start competition**. Beside the **Draw ready** badge next to the competition's name, a crossed-out eye and "Hidden from the public", or an open eye and "Public", say at a glance who can see the draw. A line below the buttons says it in full, and ends with **Open the public page**, which opens the competition's public page in a new tab so you can check what spectators see before and after you publish.
+
+![The draw preview header of a hidden draw: Discard draw, Publish draw and Start competition, with "Hidden from the public" beside the badge and in the line below them.](../../screenshots/draw-hidden-header.png)
+
+![The same header once the draw is published: Discard draw, Unpublish and Start competition, with "Public" beside the badge and the line "Published" below them.](../../screenshots/draw-published-header.png)
+
+The line below the buttons reads:
+
+- While it is hidden: "Hidden from the public. Publish draw or Start competition makes it public."
+- Once it is published: "Published. The public can see this draw. Changes you make show on public pages at once."
+
+The dashboard card of a draw-ready competition shows the same thing at a glance: a crossed-out eye and "Hidden from the public", or an open eye and "Public". Under **Start competition**, the card has its own **Publish draw** (**Unpublish** once public), which works as the header's does, so you can publish several draws from the dashboard without opening each competition.
+
+![A dashboard card of a draw-ready competition with a crossed-out eye and the words Hidden from the public, Start competition, and Publish draw under it.](../../screenshots/draw-hidden-card.png)
+
+- **Publish draw** shows the draw on the public pages at once, without waiting for the start. It asks nothing first. Once published, the button reads **Unpublish**.
+- **Unpublish** hides the draw again, for example when you published it by mistake or spotted an error after publishing. The app says "Hidden again. Anyone who looked still has what they saw.": a spectator who already read the draw, took a screenshot or printed it keeps that copy, so tell people when a published draw changes.
+- **Start competition** makes the draw public whether or not you published it. On a hidden draw it asks first, under the title "Start <name>?": "The draw for "<name>" is still hidden from the public. Starting the competition makes it public at once." Choose **Start competition** to go ahead, or **Cancel**. **Start** on the dashboard card asks the same, and **Start all** starts every competition in setup and every competition whose draw is already made, and before you confirm it names the hidden draws it would make visible: "Starting makes these draws visible to the public: <names>."
+- **Discard draw** asks first, under the title "Discard the draw for <name>?". On a published draw it warns you that the public has already seen it, and that the new draw you generate starts hidden again. On a hidden draw it asks only whether to remove the pools and bracket so you can edit participants and settings.
+
+Scoring a match of a draw-ready competition starts it, so that also makes its draw public. A court operator who taps **Call to court** for a match of a hidden draw is asked first: "The draw for <competition> is still hidden from the public. Calling this match shows its competitors on the public screens." **Call anyway** makes the call, and **Cancel** (or Escape) leaves the match uncalled. Publish the draw first if you do not want the call to be the first thing spectators see.
+
+A self-run tournament has no **Publish draw** button: its draw is public as soon as it is made, because the competitors run their matches from the public pages.
+
 <!-- The build rewrites a raw-HTML src as relative to THIS Markdown file
      (docs/user-guide/organisers/run-tournament.md), the same as a Markdown
      image path: two levels up to docs/, not three. -->
@@ -267,7 +299,7 @@ A draw-ready competition is already listed on the shiai-jo operator views, since
 
 ### Review the draw
 
-A **Pools + Knockout** or **Knockout only** competition whose draw is ready shows a **Draw review** card on its **Overview**, under the card that opens the preview. It shows when two competitors from the same dojo can first meet. If a pairing is wrong, you can swap two competitors there and then, without discarding the draw. The line under the competition's **Start competition** and **Discard draw** buttons says what to do next, so the Overview has no separate status card for these formats. League and Swiss competitions have no Draw review card; their Overview keeps a **Draw ready** card and a **To start** card instead.
+A **Pools + Knockout** or **Knockout only** competition whose draw is ready shows a **Draw review** card on its **Overview**, under the card that opens the preview. It shows when two competitors from the same dojo can first meet. If a pairing is wrong, you can swap two competitors there and then, without discarding the draw. The Draw review card takes the place of the Overview's status cards for these formats. League and Swiss competitions have no Draw review card; their Overview keeps a **Draw ready** card and a **To start** card instead.
 
 Under its title, the card gives the facts in one line, counted from the pairs below, for example "12 pairs from 4 dojos. None share a pool; the earliest any can meet is the Quarterfinals (4 pairs)." When some pairs share a pool it says how many, and when no pair can meet before the final it says "They can meet only in the Final."
 

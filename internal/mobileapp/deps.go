@@ -298,6 +298,10 @@ type LineupEngine interface {
 	LineupInForce(compID, teamID, matchID string) (engine.InForceLineup, error)
 	KachinukiRoster(compID, matchID string) (engine.KachinukiRoster, error)
 	KachinukiFieldedPlaces(compID, teamID, matchID string, form domain.TeamLineup) (map[domain.Position]string, error)
+	// The two reads as a draft whose draw is hidden from the caller answers
+	// them (bc-drpb): the same competition in setup, where no match is held.
+	KachinukiRosterBeforeDraw(compID, matchID string) (engine.KachinukiRoster, error)
+	KachinukiFieldedPlacesBeforeDraw(compID string, form domain.TeamLineup) (map[domain.Position]string, error)
 }
 
 // SquadStore is the consumer-boundary view of state.Store used by

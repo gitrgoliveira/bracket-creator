@@ -91,7 +91,14 @@ export function client(base, headers = {}) {
     participants: (id, players) =>
       call('POST', `/api/competitions/${id}/participants`, { players }),
 
+    // A generated draw starts hidden from the public pages: a recipe that
+    // photographs a draw-ready competition's public pages publishes it first
+    // (the draw preview header's Publish draw), and unpublishDraw hides it
+    // again (Unpublish). Both are organiser writes the client makes as they
+    // are, and answer 200 when the draw is already in that state.
     generateDraw: (id) => call('POST', `/api/competitions/${id}/generate-draw`),
+    publishDraw: (id) => call('POST', `/api/competitions/${id}/publish-draw`),
+    unpublishDraw: (id) => call('POST', `/api/competitions/${id}/unpublish-draw`),
     start: (id) => call('POST', `/api/competitions/${id}/start`),
     viewer: (id) => call('GET', `/api/viewer/competitions/${id}`),
 

@@ -1685,3 +1685,56 @@ func TestSelfRun_BackupAndRestoreRoutes_RequireMainPassword(t *testing.T) {
 		})
 	}
 }
+
+// Publish draw and Unpublish are organiser routes (bc-drpb), so in self-run
+// they sit in isSelfRunMainGatedConfigRoute: an anonymous caller (the EMPTY
+// password the public page sends, or none) gets the gate's 401, and the
+// organiser who signs in reaches the handler, which answers 409
+// draw_visibility_self_run, since a self-run draw is public as soon as it is
+// made. Neither changes the stored field.
+func TestSelfRun_DrawVisibilityRoutes_AreOrganiserOnlyAndRefused(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store)
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	const compID = "self-run-draft"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Self Run Draft", Format: state.CompFormatKnockout, Courts: []string{"A"},
+		Status: state.CompStatusDrawReady, DrawHidden: true,
+	}))
+
+	for _, route := range []string{"publish-draw", "unpublish-draw"} {
+		assert.True(t, isSelfRunMainGatedConfigRoute(http.MethodPost, "/api/competitions/:id/"+route),
+			"POST .../%s must be organiser-only in self-run", route)
+		path := "/api/competitions/" + compID + "/" + route
+
+		t.Run("anonymous_401_"+route, func(t *testing.T) {
+			for _, header := range []bool{false, true} {
+				req := httptest.NewRequest(http.MethodPost, path, nil)
+				if header {
+					req.Header.Set("X-Tournament-Password", "")
+				}
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, req)
+				assert.Equalf(t, http.StatusUnauthorized, w.Code, "anonymous %s (header sent: %v): %s", route, header, w.Body.String())
+			}
+		})
+
+		t.Run("organiser_409_"+route, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			req.Header.Set("X-Tournament-Password", "main-pw")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			require.Equalf(t, http.StatusConflict, w.Code, "%s", w.Body.String())
+			var body struct {
+				Code string `json:"code"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+			assert.Equal(t, "draw_visibility_self_run", body.Code)
+		})
+
+		comp, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		assert.True(t, comp.DrawHidden, "neither caller changes the stored field (%s)", route)
+	}
+}

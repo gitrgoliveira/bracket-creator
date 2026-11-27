@@ -21,7 +21,7 @@ import { journeyShots } from '../fixtures/shots.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
 import { createTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
-import { discardDraw, generateDraw, pasteRoster } from '../fixtures/competition.mjs';
+import { discardDraw, generateDraw, pasteRoster, publishDraw } from '../fixtures/competition.mjs';
 import { openShiaijo } from '../fixtures/shiaijo.mjs';
 import { openViewer } from '../fixtures/public.mjs';
 import {
@@ -180,6 +180,8 @@ test.describe('organiser roster', () => {
     });
     await pasteRoster(page, ids.edit, ROSTER_8);
     await generateDraw(page, ids.edit);
+    // A generated draw starts hidden; the phone below reads the public pages.
+    await publishDraw(page, ids.edit);
     await openCompetitionTab(page, ids.edit, 'bracket');
     const before = await bracketSlots(page);
     const slotOf = (slots, n) => Object.keys(slots).find((k) => slots[k].name === n);

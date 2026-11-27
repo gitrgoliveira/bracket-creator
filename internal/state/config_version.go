@@ -6,9 +6,10 @@ package state
 // branch in RegisterCompetitionHandlers).
 //
 // Runtime fields written outside Settings are NEVER included: Status,
-// HasParticipantIDs, RosterShuffled, SwissCurrentRound, FightingSpiritAwards,
-// KachinukiEncounterEnchoCleared, RoundLineupsConverted, RoundLineupsGiven,
-// RoundLineupsLegacy, RevealSecret, Players, RosterVersion, ConfigVersion.
+// HasParticipantIDs, RosterShuffled, DrawHidden, SwissCurrentRound,
+// FightingSpiritAwards, KachinukiEncounterEnchoCleared, RoundLineupsConverted,
+// RoundLineupsGiven, RoundLineupsLegacy, RevealSecret, Players, RosterVersion,
+// ConfigVersion.
 // RevealSecret is server-managed (minted by the server, never on the wire),
 // so it stays out of this set and out of the settings merge alike.
 type configVersionPayload struct {

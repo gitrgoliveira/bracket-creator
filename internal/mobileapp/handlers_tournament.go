@@ -136,7 +136,9 @@ func validateCourtLabels(courts []string) error {
 		// CourtLabel helper produces "A"..."Z" exactly. Multi-character
 		// labels (e.g. "AA") would break downstream Excel layout and
 		// the viewer's "shiaijo" abbreviation.
-		if len([]rune(label)) != 1 {
+		// state.IsCourtLabel is the one rule, shared with the posters'
+		// court keys; the two checks above only word its blank cases.
+		if !state.IsCourtLabel(label) {
 			return fmt.Errorf("courts[%d]: court label %q must be a single character", i, label)
 		}
 		// Reject duplicate labels. The frontend uses court labels as
@@ -753,7 +755,9 @@ func adminTournamentCopy(t *state.Tournament, verifier PasswordVerifier) *state.
 // already is the stored settings is not stale: it is the resend of one that
 // landed while its answer was lost, and refusing it would tell a device its
 // own earlier save was somebody else's change. A body carrying a different
-// password is a change, so it is judged by its version like any other.
+// password is a change, so it is judged by its version like any other. A
+// body that leaves posters out is judged with the stored block, as the save
+// will keep it.
 func staleTournamentSave(current *state.Tournament, body *state.Tournament, from string) bool {
 	if current == nil {
 		return false
@@ -762,8 +766,26 @@ func staleTournamentSave(current *state.Tournament, body *state.Tournament, from
 	if stored == from {
 		return false
 	}
+	kept := *body
+	kept.Posters = keptPosters(current, body.Posters)
 	changesPassword := body.Password != "" && body.Password != current.Password
-	return changesPassword || state.TournamentVersion(body) != stored
+	return changesPassword || state.TournamentVersion(&kept) != stored
+}
+
+// keptPosters is the posters block a tournament save writes: the body's block,
+// normalised, when it sent one (an empty object clears the block), else the
+// stored one. A body that leaves the key out (the setup form's re-POST, a
+// client that never read the block) must never wipe the organiser's poster
+// text, and the block is in the version, so the Edit tournament form, which
+// sends the copy it read, keeps it too.
+func keptPosters(current *state.Tournament, sent *state.Posters) *state.Posters {
+	if sent != nil {
+		return state.NormalizePosters(sent)
+	}
+	if current == nil {
+		return nil
+	}
+	return current.Posters
 }
 
 // respondTournamentChanged answers a PUT /api/tournament made against an
@@ -895,6 +917,14 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 
 		// Validate hex color fields on the optional theme block (mp-scf).
 		if err := state.ValidateTheme(t.Theme); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// The posters block is judged as sent (lengths after trimming); the
+		// transform below keeps the stored block when the body left it out
+		// and writes a sent one normalised.
+		if err := state.ValidatePosters(t.Posters); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -1041,6 +1071,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			if current != nil {
 				desired.Sponsors = current.Sponsors
 			}
+			desired.Posters = keptPosters(current, desired.Posters)
 
 			// Preserve legacy ceremony block strings (json:"-"): the bound
 			// body never carries them. Without this, an Edit tournament save
@@ -1270,6 +1301,13 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
+		// Same posters check as the PUT handler; the block is settled against
+		// the stored one below.
+		if err := state.ValidatePosters(t.Posters); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		// Reject empty Password on POST (initial setup) in file mode.
 		// AuthMiddleware allows POST /api/tournament unauthenticated
 		// when the tournament is uninitialized, this is the bootstrap
@@ -1361,6 +1399,9 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		if existingForPost != nil && t.DefaultPublicNames == "" {
 			t.DefaultPublicNames = existingForPost.DefaultPublicNames
 		}
+		// Likewise a re-bootstrap that leaves `posters` out keeps the stored
+		// poster choices (the create flow never sends them).
+		t.Posters = keptPosters(existingForPost, t.Posters)
 		applyPublicNames, refusal, err := judgePublicNamesDefault(store, existingForPost, &t, confirm.ConfirmPublicNames)
 		if answerPublicNames(c, refusal, err) {
 			return

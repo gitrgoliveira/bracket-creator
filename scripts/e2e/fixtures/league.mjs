@@ -63,7 +63,7 @@ import { completedRowFor, sides, upNextCard } from './shiaijo.mjs';
 import { editorSides, ensureRunning, inlineRunning } from './individual.mjs';
 import { boutIppon, boutRow, ensureTie, finishTeam, teamTotals } from './team.mjs';
 import { createCompetition } from './wizard.mjs';
-import { generateDraw, pasteRoster, startCompetition } from './competition.mjs';
+import { generateDraw, pasteRoster, publishDraw, startCompetition } from './competition.mjs';
 import { chooseBackup, confirmWithPassword, openBackupPage, planRow, restoreButton } from './organiser.mjs';
 import { readZip, writeZip } from './archive.mjs';
 import { escape } from './text.mjs';
@@ -135,10 +135,13 @@ export const pairKey = (a, b) => [a, b].sort().join(' | ');
 // "Name 1 - Name 2" pairs for `engi`, single names for `engi` with `engiSolo`).
 // `twoThirdPlaces` is the wizard's
 // checkbox, set before the draw, which locks it. `draw: false` stops after the
-// roster, `start: false` after the draw.
+// roster, `start: false` after the draw. A generated draw starts hidden from
+// the public, so a league left draw-ready is published (Publish draw) for the
+// journeys that read its public pages; `publish: false` leaves it hidden.
+// Starting a league makes its draw public anyway.
 export async function seedLeague(page, {
   name, kind = 'team', entrants, teamSize = 3, teamMatchType = 'fixed', courts = ['A'], numberPrefix,
-  twoThirdPlaces, engi, engiSolo, draw = true, start = true,
+  twoThirdPlaces, engi, engiSolo, draw = true, start = true, publish = true,
 } = {}) {
   const team = kind === 'team';
   const id = await createCompetition(page, {
@@ -149,6 +152,7 @@ export async function seedLeague(page, {
   if (!draw) return id;
   await generateDraw(page, id);
   if (start) await startCompetition(page, id);
+  else if (publish) await publishDraw(page, id);
   return id;
 }
 

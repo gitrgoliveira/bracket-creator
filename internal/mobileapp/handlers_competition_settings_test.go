@@ -1207,3 +1207,39 @@ func TestCompetitionPutWritesCanonicalSeedIdentity(t *testing.T) {
 	assert.Equal(t, map[string]int{"Van Der Berg": 1}, seeded,
 		"a casing-only retype must not silently orphan the seed")
 }
+
+// Whether a draft's draw is public is the draw routes' to say (bc-drpb): the
+// settings PUT never copies drawHidden from its body, either way, and its
+// answer reports the stored value. A settings page holding a stale copy
+// therefore cannot publish or hide a draw by saving an unrelated edit.
+func TestPUTCompetition_NeverWritesDrawHidden(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	for _, stored := range []bool{true, false} {
+		t.Run(fmt.Sprintf("stored hidden %v", stored), func(t *testing.T) {
+			cid := fmt.Sprintf("draw-hidden-put-%v", stored)
+			require.NoError(t, store.SaveCompetition(&state.Competition{
+				ID: cid, Name: "Draw Hidden Put " + cid, Format: state.CompFormatKnockout, Kind: "individual",
+				Courts: []string{"A"}, Status: state.CompStatusDrawReady, DrawHidden: stored,
+			}))
+			body, _ := json.Marshal(map[string]any{
+				"id": cid, "name": "Renamed " + cid, "format": state.CompFormatKnockout, "kind": "individual",
+				"courts": []string{"A"}, "drawHidden": !stored,
+			})
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			require.Equalf(t, http.StatusOK, w.Code, "a rename of a draft is a settings save: %s", w.Body.String())
+
+			var answer state.Competition
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &answer))
+			assert.Equal(t, stored, answer.DrawHidden, "the answer reports the stored value, not the body's")
+
+			saved, err := store.LoadCompetition(cid)
+			require.NoError(t, err)
+			assert.Equal(t, "Renamed "+cid, saved.Name, "the rest of the save landed")
+			assert.Equal(t, stored, saved.DrawHidden, "the settings PUT must not copy drawHidden")
+		})
+	}
+}

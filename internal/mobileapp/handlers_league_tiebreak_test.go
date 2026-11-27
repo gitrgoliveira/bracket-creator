@@ -106,6 +106,10 @@ func (e *stubLeagueTiebreakEngine) LeagueTiebreakCandidates(string) ([]engine.Ti
 	return e.candidates, e.candidatesErr
 }
 
+func (e *stubLeagueTiebreakEngine) LeagueTiebreakCandidatesBeforeDraw(string) ([]engine.TiedGroup, error) {
+	return nil, nil
+}
+
 func (e *stubLeagueTiebreakEngine) GenerateLeagueTiebreakMatches(compID string, tiedTeamIDs []string) ([]state.MatchResult, error) {
 	e.receivedTeamIDs = tiedTeamIDs
 	return e.generated, e.generateErr

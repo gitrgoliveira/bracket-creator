@@ -270,6 +270,8 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodGet + " /api/competitions/:id/draw/swap-candidates",                     // bc-drev: takes the competition lock and can rebuild the knockout once per competitor
 		http.MethodGet + " /api/competitions/:id/draw/swap-suggestions",                    // bc-drev: the organiser's draw review before the start, as its OpenAPI entry says
 		http.MethodGet + " /api/competitions/:id/dojo-separation",                          // bc-drev: the organiser's draw review before the start, as its OpenAPI entry says
+		http.MethodPost + " /api/competitions/:id/publish-draw",                            // bc-drpb: showing a draft's draw on the public pages, organiser (a self-run caller who signs in gets the route's own 409)
+		http.MethodPost + " /api/competitions/:id/unpublish-draw",                          // bc-drpb: hiding it again, organiser
 		http.MethodPost + " /api/competitions/:id/bracket/quarantine",                      // bc-cmpw: setting aside a damaged bracket file, organiser repair
 		http.MethodDelete + " /api/competitions/:id/overrides",                             // bc-cmpw: resetting manual ranking overrides, organiser correction
 		http.MethodPut + " /api/competitions/:id/awards",                                   // bc-cmpw: fighting-spirit awards, organiser

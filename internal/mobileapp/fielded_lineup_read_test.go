@@ -46,6 +46,7 @@ func newFieldedReadFixture(t *testing.T, selfRun bool, matchType state.TeamMatch
 	}
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: "k1", Name: "Teams", Kind: "team", TeamSize: 5, TeamMatchType: matchType,
+		Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SaveParticipants("k1", []domain.Player{
 		{Name: "Ryu", Dojo: "Ryu Dojo"},

@@ -22,7 +22,6 @@ import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import { inlineEditor, openShiaijo, sides, upNextCard, completedRows, completedRowFor } from '../fixtures/shiaijo.mjs';
 import { EDITOR, clearMarks, nextMatchWrite, nextTapWrite, running, settled, unsentCount, writeLanded } from '../fixtures/scoring.mjs';
-import { openScoreEditor } from '../fixtures/scores.mjs';
 import { openTvBoard, openViewer, tvBoard } from '../fixtures/public.mjs';
 import { doubleTap, hastyConfirm, interrupt, retapWhileSaving, tapNeighbour } from '../fixtures/clumsy.mjs';
 import { dwell, rendered, settled as paceSettled, untilStable } from '../fixtures/pace.mjs';
@@ -1053,21 +1052,34 @@ test.describe('knockout-mixed-team', () => {
           tv: (await tvBoard(tv).innerText()).replace(/\s+/g, ' ').slice(0, 300) });
       });
 
-      await test.step('the head table decides the daihyosen by hantei and finishes; the court sees it', async () => {
-        await openScoreEditor(hp, id, { court: 'E' });
+      await test.step('the court records the judges\' hantei on the daihyosen and finishes; the head table sees it', async () => {
+        // The court scores the match, the head table only corrects mistakes
+        // (operator ruling 2026-11-27): the judges' decision is the court's.
+        await ed.getByTestId('team-daihyosen-hantei-arm').tap();
+        await ed.getByTestId('team-daihyosen-hantei-shiro').tap();
+        await expect(ed.getByTestId('team-daihyosen-ht-shiro')).toBeVisible();
+        await shot(page, 'court-hantei-shiro');
+        await T.finishTeam(ed);
+        await expect(completedRows(page)).toHaveCount(1, { timeout: EXPECT_TIMEOUT_MS });
+        await shot(page, 'court-after-finish');
+        const courtRow = (await completedRows(page).first().innerText()).replace(/\s+/g, ' ');
+        // The head table, a second operator device on the Scores tab, reads
+        // the finished final: Correct is offered, and its editor holds the
+        // court's hantei for Shiro.
+        await hp.goto(`/admin/competition/${id}/scores`);
+        const hrow = hp.locator('.score-edit-row').filter({ hasText: pair.shiro }).filter({ hasText: pair.aka }).first();
+        const correct = hrow.getByRole('button', { name: /^Correct$/ });
+        await expect(correct, 'the head table sees the final finished').toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
+        await correct.tap();
         const hed = hp.locator(EDITOR);
         await expect(T.boutRow(hed, 'DH')).toBeVisible();
-        await hed.getByTestId('team-daihyosen-hantei-arm').tap();
-        await hed.getByTestId('team-daihyosen-hantei-shiro').tap();
-        await expect(hed.getByTestId('team-daihyosen-ht-shiro')).toBeVisible();
-        await shot(hp, 'head-table-hantei-shiro');
-        await T.finishTeam(hed);
-        // The court console, left open, follows the result.
-        await expect(completedRows(page)).toHaveCount(1, { timeout: EXPECT_TIMEOUT_MS });
-        await shot(page, 'court-after-head-table-finish');
-        const courtRow = (await completedRows(page).first().innerText()).replace(/\s+/g, ' ');
-        record({ step: 'finish elsewhere', action: 'head table Finish with hantei Shiro', variant: 'two devices', courtCompletedRow: courtRow,
-          courtShows: (await page.locator('main, body').first().innerText()).replace(/\s+/g, ' ').slice(0, 400) });
+        await expect(hed.getByTestId('team-daihyosen-ht-shiro'), 'the head table sees the court\'s hantei for Shiro').toBeVisible();
+        await shot(hp, 'head-table-sees-court-finish');
+        record({ step: 'finish at the court', action: 'court Finish with hantei Shiro, read at the head table', variant: 'two devices', courtCompletedRow: courtRow,
+          headTableRow: (await hrow.innerText()).replace(/\s+/g, ' ') });
+        // The head table only read it: it leaves the editor without a change.
+        await hed.getByRole('button', { name: /^Close$/ }).tap();
+        await expect(hed).toHaveCount(0);
       });
 
       await test.step('both operators open the correction; the head table moves the verdict; the court adopts it', async () => {

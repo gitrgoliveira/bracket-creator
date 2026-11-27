@@ -1,47 +1,58 @@
-// Concurrent taps: two devices (two OPERATOR_DEVICE contexts, two iPads)
-// score the same running match at the same time (bc-evts).
+// Concurrent taps: two devices (two OPERATOR_DEVICE contexts, two iPads) on
+// the same running match at the same time (bc-evts): the court scores it, and
+// the head table corrects the court's mistakes while the court goes on.
 //
 // Device 1 is the court's tablet: the court console of the match's shiaijo
-// (/admin/shiaijo/:court), which runs that shiaijo. Device 2 scores the same
-// match from the competition's Scores page (/admin/competition/:id/scores),
-// the overlay editor the head table uses. One tab runs each shiaijo (FR9): a
-// court console on a shiaijo another tablet runs is view only for every write,
-// so two court consoles can no longer score one match together, while the
-// Scores page, an admin surface, still writes. The second device of every case
-// is therefore that admin surface, never a second court console. Each device
-// is its own browser context, so its own tablet with its own outbox and event
-// session (pages of one context share storage and would be one tablet).
+// (/admin/shiaijo/:court), which runs that shiaijo and scores the match.
+// Device 2 is the head table, on the competition's Scores page
+// (/admin/competition/:id/scores) and its overlay editor. The admin pages are
+// there to fix mistakes, not to score a competition (operator ruling
+// 2026-11-27), so in cases a to g every tap device 2 makes is a correction of
+// the court's entries: a point the court missed, added (case i, below, is the
+// one where device 2 records a result of its own). One tab runs each shiaijo (FR9): a
+// court console on a shiaijo another tablet runs is view only for every
+// write, while the Scores page, an admin surface, is never gated by that
+// control. The second device of every case is therefore that admin surface,
+// never a second court console. Each device is its own browser context, so
+// its own tablet with its own outbox and event session (pages of one context
+// share storage and would be one tablet).
 //
 // Every scoring tap is an event the device queues in its outbox and sends to
 // POST /matches/:id/score-events; the server appends it to the match's score
 // log and replays the log into the match ordered by each tap's stamp, not by
-// arrival. So two taps made within a moment of each other on two devices both
-// count, a device that was offline sends its taps when it is back, and a mark
-// taken off and put back while the first tap's answer is still out ends as the
-// operator left it. Each case is asserted on both devices' boards, and the
-// first also on the TV board and in the match history.
+// arrival. So a correction made within a moment of the court's own tap counts
+// beside it, a correction made offline is sent when the device is back, and a
+// mark taken off and put back while the first tap's answer is still out ends
+// as the operator left it. Each case is asserted on both devices' boards, and
+// the first also on the TV board and in the match history.
 //
-//   a  individual: device 1 taps Shiro M and device 2 taps Aka K within
-//      300 ms; both editors, the TV board and the History list show both
-//   b  offline: device 2 goes offline, taps, comes back; its tap is sent and
-//      both devices converge
-//   c  remove then retap during the echo: a mark taken off and tapped back
-//      while the removal's batch is held, and the reverse, end with exactly
-//      what the operator did last, on both devices and after a reload
-//   d  engi: +Shiro on one device and +Aka on the other end 1-1 on both
-//   e  team: the two devices tap on different bouts at once; both bouts keep
-//      every tap
-//   f  kachinuki: two strikes for Shiro from two devices at once on the
-//      encounter's first bout, which the server holds no row for yet; both
-//      devices show the lineup's fighters on it, a later edit of the match's
-//      lineup renames it on both, and Record bout records that bout with both
+//   a  individual: the court taps Shiro M and, within 300 ms, the head table
+//      adds the Aka K the court missed; both editors, the TV board and the
+//      History list show both
+//   b  offline: the head table goes offline, adds the Aka D the court missed,
+//      comes back; its correction is sent and both devices converge
+//   c  remove then retap during the echo: at the court, a mark taken off and
+//      tapped back while the removal's batch is held, and the reverse, end
+//      with exactly what the operator did last, on both devices and after a
+//      reload (the court's own taps: the race is one device's, and the head
+//      table only reads the result)
+//   d  engi: the court adds Shiro's flag and, at once, the head table adds the
+//      Aka flag the court missed; 1-1 on both
+//   e  team: the court scores bout 2 while the head table adds to bout 1 the
+//      points the court missed there, each at the same moment as one of the
+//      court's taps; both bouts keep every tap
+//   f  kachinuki: the court strikes for Shiro and, at once, the head table
+//      adds the second Shiro point the court missed, on the encounter's first
+//      bout, which the server holds no row for yet; both devices show the
+//      lineup's fighters on it, a later edit of the match's lineup at the
+//      court renames it on both, and Record bout records that bout with both
 //      points
-//   g  turned away later: device 2's tap is counted, then the court's
-//      finish, made offline on device 1 before that tap and never having seen
-//      it, lands. Device 1 is the court's tablet, so its result is the court's
-//      and counts (FR8); the match was finished before device 2's tap, so
-//      device 2 is told its tap was not applied, the alert naming the match
-//      and the tap
+//   g  turned away later: the head table's correction is counted, then the
+//      court's finish, made offline on device 1 before that correction and
+//      never having seen it, lands. Device 1 is the court's tablet, so its
+//      result is the court's and counts (FR8); the match was finished before
+//      the correction, so device 2 is told its tap was not applied, the alert
+//      naming the match and the tap
 //   h  a second court console: a console on shiaijo A on another tablet
 //      watches (slate View only bar naming another device, the running match's board and
 //      Send back to queue off) until
@@ -57,7 +68,8 @@
 // the other side, is `capped` and changes nothing
 // (internal/engine/score_replay_rules_test.go TestReplay_CappedStrikes). When
 // two devices each add the SECOND point to the same side at once (Shiro holds
-// M; device 1 taps K, device 2 taps D), the server keeps the one stamped
+// M; the court taps K, the head table adds a D it thinks the court missed),
+// the server keeps the one stamped
 // first and caps the other: the side ends with exactly two marks on every
 // device and after a reload, and the capped tap is in the match's history
 // with "the bout was already decided". Which of the two marks survives, and
@@ -164,10 +176,10 @@ test.describe('concurrent taps from two devices', () => {
 
   // Two signed-in operator iPads, each on its own context (its own tablet:
   // its own outbox, its own event session). Device 1 opens the court console
-  // of `court` and runs that shiaijo; device 2 is signed in and opens the
-  // running match of competition `id` from the Scores page with openD2(),
-  // once the match runs (again after a reload: the page does not keep the
-  // editor open).
+  // of `court` and runs that shiaijo; device 2, the head table, is signed in
+  // and opens the running match of competition `id` from the Scores page with
+  // openD2(), once the match runs (again after a reload: the page does not
+  // keep the editor open), to correct what the court enters.
   async function twoDevices(browser, baseURL, court, id) {
     const contexts = [];
     const pages = [];
@@ -188,8 +200,8 @@ test.describe('concurrent taps from two devices', () => {
     return { d1, d2, ctx1: contexts[0], ctx2: contexts[1], openD2, close: () => Promise.all(contexts.map((c) => c.close())) };
   }
 
-  // The two editors: device 1's inline one on the court console, device 2's
-  // overlay on the Scores page.
+  // The two editors: device 1's inline one on the court console, the head
+  // table's overlay on the Scores page.
   const ROOT = { d1: INLINE_EDITOR, d2: EDITOR };
 
   // Tap two controls, on two devices, at once, and return how far apart the
@@ -234,17 +246,19 @@ test.describe('concurrent taps from two devices', () => {
     return (await slots.allInnerTexts()).map((t) => t.trim()).filter((t) => /^[A-Z]+$/.test(t));
   }
 
-  test('a individual: Shiro M on one device and Aka K on the other within 300 ms reach both editors, the TV board and the history', async ({ browser, baseURL }) => {
+  test('a individual: the court\'s Shiro M and the head table\'s Aka K, a point the court missed, within 300 ms reach both editors, the TV board and the history', async ({ browser, baseURL }) => {
     const ops = await twoDevices(browser, baseURL, 'A', ids.individual);
     const tvCtx = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
     try {
       const { d1, d2 } = ops;
       const pair = await startUpNext(d1);
-      // Device 2 finds the match running on the Scores page and opens it.
+      // The head table finds the match running on the Scores page and opens it.
       await ops.openD2();
       await sameMatchOnBoth(d1, d2);
       expect(await editorSides(d2, ROOT.d2)).toEqual(pair);
 
+      // The court taps Shiro's M; at the same moment the head table adds the
+      // K the referees gave Aka, which the court did not enter.
       const gapMs = await tapAtOnce(ipponButton(d1, 'shiro', 'M'), ipponButton(d2, 'aka', 'K', ROOT.d2));
       // Each device's own tap is answered...
       await settled(d1);
@@ -280,7 +294,7 @@ test.describe('concurrent taps from two devices', () => {
     }
   });
 
-  test('b offline: a tap made while one device is offline is sent when it is back, and both devices converge', async ({ browser, baseURL }) => {
+  test('b offline: a correction the head table makes while offline is sent when it is back, and both devices converge', async ({ browser, baseURL }) => {
     const ops = await twoDevices(browser, baseURL, 'A', ids.individual);
     try {
       const { d1, d2, ctx2 } = ops;
@@ -292,8 +306,9 @@ test.describe('concurrent taps from two devices', () => {
       let unsentOffline;
       await ctx2.setOffline(true);
       try {
+        // The head table, offline, adds the D the court missed for Aka.
         await tapOnSide(d2, 'aka', ipponButton(d2, 'aka', 'D', ROOT.d2));
-        // Device 2 shows its own tap at once, and the outbox still holds the point.
+        // Device 2 shows its own correction at once, and the outbox still holds the point.
         await expect.poll(() => marksOf(d2, 'aka', ROOT.d2), { message: 'device 2 shows its offline tap' }).toEqual(['D', 'K']);
         await expect.poll(() => unsentCount(d2)).toBeGreaterThan(0);
         unsentOffline = await unsentCount(d2);
@@ -397,7 +412,7 @@ test.describe('concurrent taps from two devices', () => {
     }
   });
 
-  test('d engi: +Shiro on one device and +Aka on the other at once end 1-1 on both', async ({ browser, baseURL }) => {
+  test('d engi: the court\'s +Shiro and the head table\'s +Aka, a flag the court missed, at once end 1-1 on both', async ({ browser, baseURL }) => {
     const ops = await twoDevices(browser, baseURL, 'B', ids.engi);
     try {
       const { d1, d2 } = ops;
@@ -405,6 +420,8 @@ test.describe('concurrent taps from two devices', () => {
       await ops.openD2();
       await expect(engiEditor(d2, ROOT.d2)).toBeVisible();
       await sameMatchOnBoth(d1, d2);
+      // The court enters Shiro's flag; at the same moment the head table adds
+      // the flag a judge raised for Aka, which the court did not enter.
       const gapMs = await tapAtOnce(flagButton(d1, 'shiro', '+'), flagButton(d2, 'aka', '+', ROOT.d2));
       await engiSettle(d1);
       await engiSettle(d2);
@@ -420,7 +437,7 @@ test.describe('concurrent taps from two devices', () => {
     }
   });
 
-  test('e team: two devices tapping different bouts at once keep every tap on both bouts', async ({ browser, baseURL }) => {
+  test('e team: the court scoring bout 2 while the head table corrects bout 1 at the same moments keeps every tap on both bouts', async ({ browser, baseURL }) => {
     const ops = await twoDevices(browser, baseURL, 'C', ids.team);
     try {
       const { d1, d2 } = ops;
@@ -430,18 +447,25 @@ test.describe('concurrent taps from two devices', () => {
       await running(d2, ed2);
       await expect(T.boutRow(ed2, 2)).toBeVisible();
       await sameMatchOnBoth(d1, d2);
+      // The court scores bout 1 (Shiro's M) and moves on to bout 2.
+      await T.boutIppon(ed1, 1, 'shiro', 'M');
+      await expect(T.rowSlots(T.boutRow(ed2, 1), 'shiro'), 'the head table sees bout 1 as the court left it').toHaveText(['M']);
       const gaps = [];
-      // Round 1: device 1 on bout 1, device 2 on bout 2.
-      gaps.push(await tapAtOnce(T.rowIppon(T.boutRow(ed1, 1), 'shiro', 'M'), T.rowIppon(T.boutRow(ed2, 2), 'aka', 'K')));
-      // Round 2: the other way round.
+      // Round 1: the court taps Shiro's K on bout 2 while the head table adds
+      // the M the court missed for Aka on bout 1.
       gaps.push(await tapAtOnce(T.rowIppon(T.boutRow(ed1, 2), 'shiro', 'K'), T.rowIppon(T.boutRow(ed2, 1), 'aka', 'M')));
+      // Round 2: the court taps Aka's K on bout 2 while the head table adds
+      // the second point it also missed on bout 1, Shiro's K, which decides it.
+      gaps.push(await tapAtOnce(T.rowIppon(T.boutRow(ed1, 2), 'aka', 'K'), T.rowIppon(T.boutRow(ed2, 1), 'shiro', 'K')));
       await settled(d1);
       await settled(d2);
-      const want = { 1: { shiro: ['M'], aka: ['M'] }, 2: { shiro: ['K'], aka: ['K'] } };
+      // Sorted: a side's slots are filled outside to inside, not in tap order.
+      const marks = async (row, side) => (await T.rowSlots(row, side).allInnerTexts()).map((t) => t.trim()).sort();
+      const want = { 1: { shiro: ['K', 'M'], aka: ['M'] }, 2: { shiro: ['K'], aka: ['K'] } };
       for (const [name, ed] of [['device 1', ed1], ['device 2', ed2]]) {
         for (const n of [1, 2]) {
           for (const side of ['shiro', 'aka']) {
-            await expect(T.rowSlots(T.boutRow(ed, n), side), `${name}, bout ${n}, ${side}`).toHaveText(want[n][side]);
+            await expect.poll(() => marks(T.boutRow(ed, n), side), { message: `${name}, bout ${n}, ${side}` }).toEqual(want[n][side]);
           }
         }
       }
@@ -453,7 +477,7 @@ test.describe('concurrent taps from two devices', () => {
     }
   });
 
-  test('f kachinuki: Record bout after two devices strike for Shiro at once records the bout with both points', async ({ browser, baseURL }) => {
+  test('f kachinuki: Record bout after the court and the head table strike for Shiro at once records the bout with both points', async ({ browser, baseURL }) => {
     const ops = await twoDevices(browser, baseURL, 'D', ids.kachinuki);
     try {
       const { d1, d2 } = ops;
@@ -477,6 +501,8 @@ test.describe('concurrent taps from two devices', () => {
         await expect(T.rowSlots(currentBout(d, root), 'shiro'), `${name}: bout 1 starts with no points`).toHaveCount(0);
       }
 
+      // The court taps Shiro's M; at the same moment the head table adds the
+      // K the court missed for Shiro before it.
       const gapMs = await tapAtOnce(boutIpponButton(currentBout(d1), 'shiro', 'M'), boutIpponButton(currentBout(d2, ROOT.d2), 'shiro', 'K'));
       await settled(d1);
       await settled(d2);
@@ -487,8 +513,9 @@ test.describe('concurrent taps from two devices', () => {
         await expect.poll(() => shiroMarks(currentBout(d, root)), { message: `${name} shows both of Shiro's points` }).toEqual(['K', 'M']);
         await expect.poll(() => boutNames(currentBout(d, root)), { message: `${name} shows the lineup's fighters on bout 1` }).toEqual(opener);
       }
-      // A later edit of this match's lineup (Shiro's first fighter typed anew
-      // on bout 1's name box) renames bout 1 on both devices; its points stay.
+      // A later edit of this match's lineup at the court (Shiro's first
+      // fighter typed anew on bout 1's name box) renames bout 1 on both
+      // devices; its points stay.
       const renamed = 'Ishii';
       await T.typeIntoNameBox(T.rowNameBox(currentBout(d1), 'shiro'), renamed);
       opener.shiro = renamed;
@@ -515,7 +542,7 @@ test.describe('concurrent taps from two devices', () => {
     }
   });
 
-  test('g a tap answered as counted that a finish made offline elsewhere turns away is told on its device, naming the match and the tap', async ({ browser, baseURL }) => {
+  test('g a head table correction answered as counted that the court\'s offline finish turns away is told on its device, naming the match and the tap', async ({ browser, baseURL }) => {
     const ops = await twoDevices(browser, baseURL, 'A', ids.individual);
     try {
       const { d1, d2, ctx1 } = ops;
@@ -533,8 +560,8 @@ test.describe('concurrent taps from two devices', () => {
         const armed = await armFinish(d1);
         await armed.tap();
         expect(await controlState(d1), 'device 1 still runs shiaijo A offline').toBe('holds');
-        // Then device 2, online, scores for Aka from the Scores page: the
-        // server counts it, and its own answer says so.
+        // Then the head table, online, adds a D for Aka it believes the court
+        // missed: the server counts it, and its own answer says so.
         await tapOnSide(d2, 'aka', ipponButton(d2, 'aka', 'D', ROOT.d2));
         await settled(d2);
         await expect.poll(() => marksOf(d2, 'aka', ROOT.d2), { message: 'device 2\'s tap is counted at first' }).toEqual(['D', 'K']);
@@ -543,8 +570,8 @@ test.describe('concurrent taps from two devices', () => {
       }
       // Device 1's point and finish land: they are the court's (device 1 runs
       // the shiaijo), Shiro had won the bout first, and the match was finished
-      // before device 2's tap. Device 2 is told, though its tap's own answer
-      // said it counted.
+      // before the head table's correction. Device 2 is told, though its tap's
+      // own answer said it counted.
       const told = await toastText(d2, /^Not applied in .+ \(Aka D added\): /);
       expect(told, 'the alert names the match and the tap').toMatch(/^Not applied in .+ \(Aka D added\): (the bout was already decided|the match is finished)/);
       await shot(d2, 'g-device-2-told');
@@ -614,7 +641,10 @@ test.describe('concurrent taps from two devices', () => {
   });
 
   // FR6.3. The device that finishes offline is device 2, the Scores page, and
-  // the one that finishes online is device 1, the court's tablet. Not the other
+  // the one that finishes online is device 1, the court's tablet. This is the
+  // one case where the head table records a result itself rather than
+  // correcting the court's entries: what it pins is an ordinary device's
+  // result losing to the court's, and the head table is that device. Not the other
   // way round: the court console that runs the shiaijo is the court's
   // authoritative operator, and its result counts over another device's
   // (FR8), so an offline finish made there would be recorded on its return,

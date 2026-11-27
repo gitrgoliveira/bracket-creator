@@ -1,0 +1,25 @@
+{
+  "_comment": "The poster rules the server and the Posters page share. The Go test TestPosterRules_SharedTable pins every value to internal/state/posters.go, and a browser test (posters_model.test.jsx) pins the copy in posters_model.jsx to this table. Lengths are counted in characters (Unicode code points), after trimming with Go's strings.TrimSpace (trimCases: the browser's trimText must agree).",
+  "headingMaxLength": 80,
+  "callToActionMaxLength": 120,
+  "logoValues": ["", "centre", "above"],
+  "sizeValues": ["", "code"],
+  "maxCourtEntries": 32,
+  "defaultHeadings": {
+    "viewer": "Follow the tournament live",
+    "court": "Follow this court live"
+  },
+  "lengthCases": [
+    { "text": "Scan me", "length": 7 },
+    { "text": "Shiaijo B", "length": 9 },
+    { "text": "剣道 live", "length": 7 },
+    { "text": "🥋 Kendo", "length": 7 },
+    { "text": "é", "length": 1 }
+  ],
+  "trimCases": [
+    { "text": "  Scan me\t", "trimmed": "Scan me" },
+    { "text": "\u0085Scan me\u0085", "trimmed": "Scan me" },
+    { "text": "\u00a0\u3000Scan me\u2003", "trimmed": "Scan me" },
+    { "text": "\ufeffScan me", "trimmed": "\ufeffScan me" }
+  ]
+}

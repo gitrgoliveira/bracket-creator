@@ -139,6 +139,51 @@ describe('Modal focus', () => {
     expect(tab(true), 'Shift+Tab from the last control is the browser\'s own').toBe(true);
   }
 
+  // The Posters page's Print all question wraps its Modal in a box of its own that
+  // also takes focus through useDialogFocus: the two layers hear the same Tab, and
+  // focus moves once.
+  it('moves focus once when a Modal sits inside another layer', async () => {
+    const laidOut = vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockImplementation(function parent() { return this.parentElement; });
+    try {
+      const { useDialogFocus } = await import('../../dialog_focus.jsx');
+      function Nested() {
+        const Modal = window.Modal;
+        const [open, setOpen] = React.useState(false);
+        const boxRef = React.useRef(null);
+        useDialogFocus(boxRef, open);
+        return (
+          <div>
+            <button type="button" onClick={() => setOpen(true)}>Open dialog</button>
+            {open && (
+              <div ref={boxRef}>
+                <Modal title="Print all posters?" onClose={() => setOpen(false)}
+                  footer={<button type="button" className="btn" onClick={() => setOpen(false)}>Print all</button>}>
+                  <button type="button" className="btn btn--sm">Set the address</button>
+                </Modal>
+              </div>
+            )}
+          </div>
+        );
+      }
+      let utils;
+      await act(async () => { utils = render(<Nested />); });
+      await openFrom(utils);
+      const close = utils.getByRole('button', { name: 'Close' });
+      const middle = utils.getByRole('button', { name: 'Set the address' });
+      const last = utils.getByRole('button', { name: 'Print all' });
+      expect(document.activeElement).toBe(close);
+      last.focus();
+      fireEvent.keyDown(last, { key: 'Tab' });
+      expect(document.activeElement).toBe(close);
+      fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+      expect(document.activeElement).toBe(last);
+      middle.focus();
+      expect(fireEvent.keyDown(middle, { key: 'Tab' }), 'between the ends the browser moves it').toBe(true);
+    } finally {
+      laidOut.mockRestore();
+    }
+  });
+
   it('leaves Tab alone while focus is outside the dialog (a layer stacked above it)', async () => {
     let utils;
     await act(async () => { utils = render(<Host />); });

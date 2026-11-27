@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import jsQR from 'jsqr';
-import { _buildQR_test as buildQR } from '../qr.jsx';
+import { _buildQR_test as buildQR, qrMatrix, renderQR } from '../qr.jsx';
+import levelMPin from './fixtures/qr_level_m_matrix.json';
 
 // Roundtrip decode test: encode a URL with our QR generator, decode with
 // jsQR (devDependency only; never shipped), assert decoded text matches.
@@ -85,5 +86,80 @@ describe('QR roundtrip decode', () => {
     const result = decodeQR(url);
     expect(result).not.toBeNull();
     expect(result.data).toBe(url);
+  });
+
+  // Every version the encoder can choose, filled to its level-M byte capacity
+  // (ISO 18004 Table 7: 26, 42, 62, 84, 106, 122, 152, 180, 213 for v2 to v10).
+  // v7 and up carry version information blocks and their own block tables.
+  const M_CAPACITY = [26, 42, 62, 84, 106, 122, 152, 180, 213];
+  M_CAPACITY.forEach((len, i) => {
+    const version = i + 2;
+    it(`decodes a full level-M code at version ${version}`, () => {
+      const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789/-.:';
+      let seed = 7 * version;
+      let text = '';
+      while (text.length < len) {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        text += alphabet[seed % alphabet.length];
+      }
+      const { size } = qrMatrix(text);
+      expect(size).toBe(17 + 4 * version);
+      const result = decodeQR(text);
+      expect(result).not.toBeNull();
+      expect(result.data).toBe(text);
+    });
+  });
+});
+
+// The level-M pin. The fixture holds the version 3 and 5 matrices the encoder
+// produced BEFORE level H was added, so these tests prove those two kept level
+// M byte for byte, not merely that the encoder agrees with itself. Level M from
+// version 7 up changes on purpose (block table, version information, alignment
+// order) and is covered by the decode round trips above instead.
+describe('QR level M is unchanged', () => {
+  const toRows = (modules, size) => {
+    const rows = [];
+    for (let r = 0; r < size; r++) {
+      let row = '';
+      for (let c = 0; c < size; c++) row += modules[r * size + c] === 1 ? '1' : '0';
+      rows.push(row);
+    }
+    return rows;
+  };
+
+  levelMPin.cases.forEach(({ text, size, rows }) => {
+    it(`qrMatrix gives the recorded matrix for ${text}`, () => {
+      const m = qrMatrix(text);
+      expect(m.size).toBe(size);
+      expect(toRows(m.modules, m.size)).toEqual(rows);
+    });
+
+    it(`qrMatrix with level "M" is the default for ${text}`, () => {
+      expect(Array.from(qrMatrix(text, { level: 'M' }).modules)).toEqual(Array.from(qrMatrix(text).modules));
+    });
+
+    it(`the canvas path paints the recorded matrix for ${text}`, () => {
+      const dark = [];
+      const ctx = {
+        fillStyle: '',
+        setTransform() {},
+        scale() {},
+        fillRect(x, y, w, h) { if (this.fillStyle === '#000000') dark.push([x, y, w, h]); },
+      };
+      const canvas = { style: {}, getContext: () => ctx };
+      renderQR(canvas, text, { moduleSize: 1, quietZone: 0 });
+      const modules = new Uint8Array(size * size);
+      for (const [x, y, w, h] of dark) {
+        expect([w, h]).toEqual([1, 1]);
+        modules[y * size + x] = 1;
+      }
+      expect(toRows(modules, size)).toEqual(rows);
+    });
+  });
+
+  it('hands back a fresh copy each call', () => {
+    const a = qrMatrix('http://localhost:8080/register/abc');
+    a.modules.fill(0);
+    expect(qrMatrix('http://localhost:8080/register/abc').modules.some((v) => v === 1)).toBe(true);
   });
 });

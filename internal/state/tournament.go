@@ -112,6 +112,7 @@ func (s *Store) copyTournament(t *Tournament) *Tournament {
 		cp.Pauses = make([]Pause, len(t.Pauses))
 		copy(cp.Pauses, t.Pauses)
 	}
+	cp.Posters = t.Posters.Clone()
 	return &cp
 }
 

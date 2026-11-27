@@ -1,0 +1,636 @@
+/* posters.css: the venue poster and its print sheet (bc-qrps).
+ *
+ * One layout for the preview and for paper. Every size inside a poster is in cqw,
+ * a hundredth of the poster's own width (it is a size container), so the preview
+ * at any width and the printed page are the same picture, and a print dialog's
+ * "fit to page" or A3 scale never reflows it. posters_model.jsx owns the sizes
+ * that matter to scanning and passes them in as custom properties:
+ *   --poster-code        the code's side (with its quiet zone)
+ *   --poster-letter      the court letter's height
+ *   --poster-logo-above  the logo's height above the code (viewer home poster)
+ *   --poster-logo-corner the logo's height in a court poster's top corner, and
+ *   --poster-logo-corner-width  its widest
+ *   --poster-ink         the colour of the text set on the white paper, the
+ *                        primary colour darkened until it reads
+ * The paper and the code are fixed white and black, in light and dark mode: the
+ * poster's own colours are named once below and never follow the app's theme. */
+
+.poster {
+  --poster-paper: #fff;
+  --poster-text: #111;
+  --poster-cta-text: #222;
+  --poster-address-text: #333;
+  --poster-rule: #d8d8d8;
+  --poster-warning: #9b1c1c;
+  --poster-warning-text: #7a1212;
+  position: relative;
+  container-type: inline-size;
+  aspect-ratio: 210 / 297;
+  width: 100%;
+  overflow: hidden;
+  background: var(--poster-paper);
+  color: var(--poster-text);
+  color-scheme: light;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15), 0 2px 10px rgba(0, 0, 0, 0.12);
+}
+
+.poster,
+.poster * {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.poster__sheet {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.poster__band {
+  flex: none;
+  padding: 2cqw 5cqw;
+  text-align: center;
+  background: var(--poster-primary);
+  color: var(--poster-band-ink);
+}
+
+.poster__tournament {
+  display: block;
+  font-size: 4.6cqw;
+  font-weight: 700;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+/* The body takes what the band and the sponsor strip leave and keeps its
+ * pieces together as one block in the middle of it, so the words sit right by
+ * the code they explain and the free space is shared above and below. */
+.poster__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6cqw;
+  padding: 0.6cqw 6cqw;
+  text-align: center;
+}
+
+.poster__court {
+  flex: none;
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* A court poster's logo, in the empty top corner beside the letter: level
+ * with the letter's top, held to the left of it by its widest. */
+.poster__logo-corner {
+  position: absolute;
+  top: 6cqw;
+  left: 0;
+  display: block;
+  height: var(--poster-logo-corner);
+  width: auto;
+  max-width: var(--poster-logo-corner-width);
+  object-fit: contain;
+  object-position: left top;
+}
+
+.poster__court-label {
+  font-size: 4.2cqw;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--poster-ink);
+}
+
+/* The viewer poster has room for a wider step between its pieces. */
+.poster--viewer .poster__body {
+  gap: 5cqw;
+}
+
+/* The largest element of a court poster, taller than its code. */
+.poster__court-letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--poster-letter);
+  font-size: calc(var(--poster-letter) * 1.35);
+  font-weight: 800;
+  line-height: 0.74;
+  color: var(--poster-ink);
+}
+
+.poster__titles {
+  flex: none;
+  max-width: 88cqw;
+}
+
+.poster__heading {
+  margin: 0;
+  font-weight: 800;
+  line-height: 1.12;
+  color: var(--poster-ink);
+  overflow-wrap: anywhere;
+}
+
+.poster__cta {
+  margin: 0.8cqw 0 0;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--poster-cta-text);
+  overflow-wrap: anywhere;
+}
+
+/* A long heading or call to action is set smaller, so the longest the server
+ * allows (80 and 120 characters) still fits. */
+.poster--viewer .poster__heading--short { font-size: 6.4cqw; }
+.poster--viewer .poster__heading--medium { font-size: 4.8cqw; }
+.poster--viewer .poster__heading--long { font-size: 3.8cqw; }
+.poster--viewer .poster__cta--short { font-size: 3.8cqw; }
+.poster--viewer .poster__cta--medium { font-size: 3.2cqw; }
+.poster--viewer .poster__cta--long { font-size: 2.8cqw; }
+
+.poster--court .poster__heading--short { font-size: 4.6cqw; }
+.poster--court .poster__heading--medium { font-size: 3.8cqw; }
+.poster--court .poster__heading--long { font-size: 3cqw; }
+.poster--court .poster__cta--short { font-size: 3.2cqw; }
+.poster--court .poster__cta--medium { font-size: 2.8cqw; }
+.poster--court .poster__cta--long { font-size: 2.3cqw; }
+
+.poster__logo-above {
+  flex: none;
+  display: block;
+  height: var(--poster-logo-above);
+  width: auto;
+  max-width: 60cqw;
+  object-fit: contain;
+}
+
+/* The code: a square of the size the model sets. The SVG fills it. */
+.poster__code {
+  position: relative;
+  flex: none;
+  width: var(--poster-code);
+  aspect-ratio: 1;
+  background: var(--poster-paper);
+}
+
+.poster__code-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  shape-rendering: crispEdges;
+}
+
+/* The centre logo, placed in percentages of the code by the layout. */
+.poster__logo-centre {
+  position: absolute;
+  display: block;
+  object-fit: contain;
+}
+
+.poster__code-warning {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 4cqw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0.6cqw dashed var(--poster-warning);
+  font-size: 3cqw;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--poster-warning-text);
+  background: var(--poster-paper);
+}
+
+/* The code and its address stay together, the address just under the code. */
+.poster__code-group {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2cqw;
+}
+
+.poster__address {
+  flex: none;
+  max-width: 84cqw;
+  margin: 0;
+  font-size: 2.2cqw;
+  line-height: 1.2;
+  color: var(--poster-address-text);
+  overflow-wrap: anywhere;
+}
+
+/* The strip: one row of logos of one height, spread evenly; a single sponsor
+ * sits in the middle and is never stretched. The strip takes twice the body's
+ * share of the space the body leaves, and its logos grow to fill it, up to
+ * --poster-sponsor-max (posters_model.jsx, larger for fewer sponsors). With no
+ * space to spare it keeps --poster-sponsor-min. It is a size container so a
+ * logo can read its height (cqh); it spans the poster's width with no side
+ * padding, so a cqw inside it is still a hundredth of the poster's width. Each
+ * logo's width is capped so any count from 1 to 6 fits on the row. */
+.poster__sponsors {
+  flex: 2 0 auto;
+  container-type: size;
+  box-sizing: border-box;
+  min-height: calc(var(--poster-sponsor-min) + 2.9cqw);
+  max-height: calc(var(--poster-sponsor-max) + 2.9cqw);
+  padding: 1.2cqw 0 1.4cqw;
+  border-top: 0.3cqw solid var(--poster-rule);
+}
+
+.poster__sponsors-row {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-evenly;
+  gap: 2cqw;
+  padding: 0 5cqw;
+}
+
+.poster__sponsor {
+  flex: 0 1 auto;
+  display: block;
+  height: 100cqh;
+  width: auto;
+  max-width: calc((90cqw - 2cqw * (var(--poster-sponsors) - 1)) / var(--poster-sponsors));
+  object-fit: contain;
+}
+
+/* ---- the Posters page --------------------------------------------------- */
+
+.posters-picker {
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+/* The chosen poster reads plainly as chosen: the accent under its label. */
+.posters-picker button.is-active {
+  box-shadow: inset 0 -2px 0 var(--accent), var(--shadow-sm);
+  font-weight: 600;
+}
+
+/* A poster with unsaved changes (a dot) or text over a limit (a "!"), so the
+ * organiser can find it from the picker. */
+.posters-mark {
+  display: inline-block;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* The mark's place is kept on every button, so a mark appearing never widens
+ * the button and moves the ones after it. */
+.posters-mark-slot {
+  display: inline-block;
+  width: 22px;
+  text-align: right;
+}
+
+.posters-mark--error {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* The name of the poster the form edits. */
+.posters-editing {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* The choices beside the preview; the preview drops under them on a phone. */
+.posters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.posters-save-row,
+.posters-print-row {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.posters-save-row {
+  align-items: center;
+  gap: 12px;
+  margin: -4px -4px 12px;
+  padding: 4px;
+  /* Save and its status stay in sight while the form scrolls under the topbar. */
+  position: sticky;
+  top: var(--topbar-stack-h, 0px);
+  z-index: 2;
+  background: var(--surface);
+}
+
+/* The poster's name and its Preview button, for a phone only (below). */
+.posters-save-row__phone {
+  display: none;
+}
+
+/* The status ends the line, so nothing moves as it changes and the line has no
+ * hole while it says nothing. */
+.posters-status {
+  order: 1;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.posters-too-long {
+  order: 2;
+}
+
+/* One line is always kept, so the form never moves when a text crosses its
+ * limit. A second line comes only when several posters are over (it pushes the
+ * form once), and a longer list is cut at two lines. */
+.posters-too-long {
+  flex-basis: 100%;
+  min-height: 1.35em;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--red);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.posters-print-row {
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* A field reached by Tab stops with its label clear of the topbar and the
+ * pinned row (--posters-pin-h, published by the page). */
+.posters-page .card__body .input,
+.posters-page .card__body .btn,
+.posters-page .card__body .checkbox input,
+.posters-page .card__body summary {
+  scroll-margin-top: calc(var(--topbar-stack-h, 0px) + var(--posters-pin-h, 0px) + 32px);
+}
+
+/* The URL and its Change button on one line, the button at its end. */
+.posters-address__line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.posters-address__line .posters-address__url {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The printing advice, closed until asked for, at a readable measure. */
+.posters-tips {
+  margin-top: 16px;
+}
+
+.posters-tips summary {
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.posters-tips__list {
+  max-width: 65ch;
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.posters-tips__list li + li {
+  margin-top: 4px;
+}
+
+/* Print all's warning box keeps its distance from the question under it. */
+.posters-print-all-warning {
+  margin-bottom: 12px;
+}
+
+.posters-logo-field {
+  border: 0;
+  padding: 0;
+  margin: 0 0 14px;
+}
+
+/* Copy this court poster's choices to every court poster, with what it did. */
+.posters-apply {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  /* Set apart from the choices it copies. */
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+/* The hint on where the logo and the sponsors come from closes the choices,
+ * spaced like a field from what follows. */
+.posters-branding {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 14px;
+}
+
+/* The address warning keeps its distance from the picker under it. */
+.posters-page > .alert {
+  margin-bottom: 12px;
+}
+
+.posters-address__url {
+  display: block;
+  font-size: 13px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.posters-preview {
+  max-width: 480px;
+  width: 100%;
+}
+
+/* A box over its limit is marked on the box itself, not only by its counter. */
+.posters-page .input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+/* A finger's worth of target on a touch screen (44px), for every control of
+ * the page. */
+@media (pointer: coarse) {
+  .posters-page .seg button,
+  .posters-page .btn,
+  .posters-page .checkbox,
+  .posters-page .input {
+    min-height: 44px;
+  }
+  .posters-page .checkbox input {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/* On a phone the preview comes first, small enough to keep the form in reach. */
+@media (max-width: 640px) {
+  .posters-preview {
+    order: -1;
+    max-width: 240px;
+    margin: 0 auto;
+  }
+  /* The picker sits centred over the poster it chooses. */
+  .posters-picker {
+    display: flex;
+    width: fit-content;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  /* Back stays on the title's line, the subtitle under both. */
+  .posters-head {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 2px 12px;
+  }
+  .posters-head > div:first-child { display: contents; }
+  .posters-head .page-head__sub { grid-column: 1 / -1; grid-row: 2; }
+
+  /* Over the form: one slim line of Save and its status, the poster's name,
+   * Preview and Print, and under it the over-limit line (below). It is opaque
+   * and ruled off, so the name never reads as the label of the field under it.
+   * Print all is at the end of the form. */
+  .posters-save-row {
+    flex-wrap: wrap;
+    gap: 0 4px;
+    min-height: 44px;
+    margin: -4px -4px 12px;
+    padding: 0 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .posters-save-row .btn {
+    flex: none;
+    padding: 6px 8px;
+  }
+  /* Beside Save, its width kept, so nothing moves as it changes. */
+  .posters-status {
+    order: 0;
+    flex: none;
+    width: 4.4em;
+    font-size: 11px;
+    line-height: 1.2;
+  }
+  span.posters-save-row__name {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  button.posters-save-row__phone {
+    display: inline-flex;
+  }
+  /* "Print" on the line; the rest of its name is read out, not shown. */
+  .posters-print-this__rest {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+  /* The over-limit sentence is the pinned row's own second line, full width
+   * under its buttons, its one line always kept: it never covers the poster's
+   * name under the row, and the form moves only when it needs a second line. */
+  .posters-too-long {
+    padding-bottom: 2px;
+  }
+}
+
+/* ---- print -------------------------------------------------------------- */
+
+/* The print roots are built only to print: they never show on the page. The
+ * standby root holds what the browser's own Print (Cmd+P) prints. */
+.poster-print-root,
+.poster-print-standby { display: none; }
+
+/* A named page, so only the print root's pages are A4 with these margins: every
+ * other print from the app keeps the browser's own page. */
+@page poster {
+  size: A4 portrait;
+  margin: 10mm;
+}
+
+@media print {
+  .poster-print-root,
+  .poster-print-standby { page: poster; }
+
+  /* styles.css pins the page to the viewport height and clips the overflow,
+   * which would print a multi-page job as its first page. Only while posters
+   * print, so no other print changes. */
+  html:has(body.printing-posters),
+  body.printing-posters {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Nothing of the app prints but the posters: no topbar, menu, choices or
+   * warnings. */
+  body.printing-posters > *:not(.poster-print-root):not(.poster-print-standby) { display: none !important; }
+  body.printing-posters .poster-print-root,
+  body.printing-posters .poster-print-standby { display: block; }
+
+  /* While a text is over its limit, the browser's own Print says which poster
+   * to shorten instead of printing it. */
+  .poster-print-refusal {
+    margin: 40mm 0 0;
+    font-size: 20pt;
+    font-weight: 700;
+    line-height: 1.3;
+    text-align: center;
+    color: #000;
+  }
+
+  /* A piece of the Posters page that must never reach paper. */
+  .poster-no-print { display: none !important; }
+
+  /* Each poster fills one sheet, sized by the smaller of the page's sides, so a
+   * browser that ignores @page size, or a dialog with larger margins, still fits
+   * it on one page. */
+  .poster-print-root .poster,
+  .poster-print-standby .poster {
+    width: min(100%, calc(100vh * 210 / 297));
+    margin: 0 auto;
+    box-shadow: none;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* One poster per sheet, with no blank sheet after the last. */
+  .poster-print-root .poster + .poster {
+    break-before: page;
+    page-break-before: always;
+  }
+}

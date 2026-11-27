@@ -560,16 +560,16 @@ function ShiaijoCountNotes({ error, hint }) {
 // so the admin can raise its toast and the watchlist can show a persistent
 // line).
 //
-// Whether a QR is possible is NOT one of those: this asks qr.js directly. A
+// Whether a QR is possible is NOT one of those: this asks qr.jsx directly. A
 // long link cannot be encoded, and that is a fact about the encoder rather
 // than about which surface is sharing, so neither caller has to know a QR has
 // a limit. It also fixes the admin sheet, which used to render-and-catch and
 // showed an empty canvas for an over-long registration URL.
 //
-// window.renderQR / window.qrFits rather than imports: ui.jsx is script-tagged
-// BEFORE qr.js (index.html lines 116 and 128), so the globals do not exist at
-// module-eval time here. Reading them at render defers that to a point where
-// every module script has run.
+// window.renderQR / window.qrFits rather than imports: index.html script-tags
+// ui.jsx BEFORE qr.jsx, so the globals do not exist at module-eval time here.
+// Reading them at render defers that to a point where every module script has
+// run.
 //
 // `children` may be a node or a function of showQR. The registration sheet's
 // note says "scan this QR code", which is a lie on the very sheet that drops
@@ -580,10 +580,10 @@ function ShareLinkModal({ title, url, onClose, onCopy, children }) {
   const showQR = React.useMemo(() => window.qrFits(url), [url]);
 
   React.useEffect(() => {
-    // No `window.renderQR` check: index.html script-tags ui.jsx (116) and
-    // qr.js (128) ahead of app.js (183), and module scripts execute in order,
-    // so the global is published before anything renders. The canvas check is
-    // inherited from the admin sheet this replaced and stays.
+    // No `window.renderQR` check: index.html script-tags ui.jsx and qr.jsx
+    // ahead of app.jsx, and module scripts execute in order, so the global is
+    // published before anything renders. The canvas check is inherited from
+    // the admin sheet this replaced and stays.
     if (!showQR || !canvasRef.current) return;
     try {
       window.renderQR(canvasRef.current, url, { moduleSize: 6, quietZone: 4 });

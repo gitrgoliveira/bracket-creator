@@ -10,8 +10,8 @@ import React from 'react';
 import { render, act, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 
-// Well inside the QR budget, and well outside it (QR_MAX_BYTES is a few
-// hundred bytes; 4000 is over any version-40 byte-mode capacity).
+// Well inside the QR budget, and well outside it (qrMaxBytes in qr.jsx is a
+// few hundred bytes; 4000 is over what the encoder can hold).
 const SHORT = 'http://192.168.1.20:8080/register';
 const LONG = 'http://192.168.1.20:8080/register?t=' + 'x'.repeat(4000);
 

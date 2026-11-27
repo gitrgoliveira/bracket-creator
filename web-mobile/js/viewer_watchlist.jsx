@@ -426,7 +426,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick, paceL
 // briefly a second copy of that sheet, which is the duplication this repo
 // keeps paying for, so it was folded back.
 //
-// Whether the link is short enough to be a QR is NOT decided here: qr.js owns
+// Whether the link is short enough to be a QR is NOT decided here: qr.jsx owns
 // that, and ShareLinkModal asks it. A watchlist still carrying ids (nobody has
 // a number until the draw runs) can exceed what a QR holds, but that is a fact
 // about the encoder rather than about this surface.

@@ -22,6 +22,7 @@ import { holdsUnsaved, discardUnsaved } from './unsaved_entries.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { mergeSavedCompetition } from './competition_put_body.jsx';
 import { AdminCalendarPage } from './admin_calendar.jsx';
+import { AdminPostersPage } from './admin_posters.jsx';
 import { useWaitForQueuedWrites, QueuedWritesWait, queuedWritesNounFor } from './queued_writes_wait.jsx';
 import { checkInApplies } from './competition_shape.jsx';
 import { serverHeldCheckIns, NO_CHECK_IN_HELD_SENTENCE } from './qualifier_preview.jsx';
@@ -730,7 +731,22 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // is open then (the typed values stay until its Reload), else the outbox's
   // alert does. A password change is the auth door and stays direct: it waits
   // for the settings saves still queued, then answers as it always did.
-  const updateTournament = async (patch) => {
+  //
+  // `opts`, for a page that saves one part of the settings and says itself how
+  // the save went (the Posters page, bc-qrps); the Edit tournament form passes
+  // none, so its behaviour is the one above:
+  //   quiet       no "Tournament updated", no saved-offline toast and no
+  //               error toast for a save that throws: the page shows its own
+  //               status line;
+  //   onRefusal   the page's claim on a refusal (tournament_changed, a 400),
+  //               asked before the Edit tournament form's, so a refusal made on
+  //               that page reaches it and never the outbox's alert; a page no
+  //               longer shown answers false and the alert tells it;
+  //   onSettled   called with the server's answer once the save lands (its
+  //               tournamentVersion is the version the page sends next), or with
+  //               null when the save was discarded from the held writes.
+  const updateTournament = async (patch, opts = {}) => {
+    const quiet = !!opts.quiet;
     // Treat an unknown (null) authConfig conservatively; same as locked.
     // If the mode hasn't resolved yet, sending the session password in the
     // PUT body would trigger a 400 "password rotation is disabled" on a
@@ -785,7 +801,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // applied on top of the freshest snapshot, with the version the save
         // answered, so the next save is made from the settings just stored.
         onUpdateRef.current({ ...mergeTournamentPatch(tRef.current, stored, password, locked), tournamentVersion: saved.tournamentVersion });
-        showToast("Tournament updated");
+        if (!quiet) showToast("Tournament updated");
+        if (opts.onSettled) opts.onSettled(saved);
         return true;
       }
       // What the form has not closed over yet: the refusal handlers below read
@@ -827,6 +844,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
               askApplyThenResend(e, body);
               return true;
             }
+            // The page that made the save claims it first, when it is still there.
+            // A save the page made is never the Edit tournament form's: when the
+            // page is gone, the outbox's alert tells it.
+            if (opts.onRefusal) return !!opts.onRefusal(e);
             // The form, when open now, says it itself (with what was typed kept);
             // else the outbox's alert does.
             if (!mountedRef.current || viewKindRef.current !== "editTournament") return false;
@@ -841,16 +862,21 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // Kept on this device and sent when the link allows: a save made with no
         // connection says so now, not when it lands (the same line the court-call
         // composer gives).
-        if (isOffline()) showToast(savedOfflineSentence("Tournament settings"), "success", { id: SETTINGS_SAVED_OFFLINE_TOAST });
+        if (isOffline() && !quiet) showToast(savedOfflineSentence("Tournament settings"), "success", { id: SETTINGS_SAVED_OFFLINE_TOAST });
         onDocumentSettled(res.settled, (saved) => {
           // Discarded from the held-writes list (or sent by another tab, whose
           // answer this one does not hold): nothing of it is known here, so the
           // stored settings come back.
-          if (!saved || saved.discarded) { takeCurrentCopy(null); return; }
+          if (!saved || saved.discarded) {
+            takeCurrentCopy(null);
+            if (opts.onSettled) opts.onSettled(null);
+            return;
+          }
           // Only the version: tRef.current already holds the patch, and a later
           // save of the operator's, queued behind this one, must not be undone.
           onUpdateRef.current({ ...tRef.current, tournamentVersion: saved.tournamentVersion });
-          if (mountedRef.current) showToast("Tournament updated");
+          if (mountedRef.current && !quiet) showToast("Tournament updated");
+          if (opts.onSettled) opts.onSettled(saved);
         }, takeCurrentCopy);
       };
       await queueSave(sendBody);
@@ -862,7 +888,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // this copy, so a stale save stays refused until then).
       if (e && e.code === "tournament_changed" && e.tournament) {
         onUpdateRef.current(tournamentFromConflict(tRef.current, e.tournament, password, locked));
-      } else {
+      } else if (!quiet) {
+        // A quiet page shows the failure in its own status line, so the
+        // operator is told once.
         showToast(e.message, "error");
       }
       throw e;
@@ -1057,6 +1085,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         onOpenRegistration={() => setView({ kind: "registrationDesk" })}
         onOpenImport={() => setView({ kind: "import" })}
         onOpenBackup={() => setView({ kind: "backup" })}
+        onOpenPosters={() => setView({ kind: "posters" })}
         onOpenShiaijo={(court) => setView({ kind: "shiaijo", court })}
         onStartAll={startAllCompetitions}
         onStartCompetition={startCompetition}
@@ -1237,6 +1266,17 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onViewerMode={onViewerMode}
       password={password}
       showToast={showToast}
+    />;
+  }
+
+  if (view.kind === "posters") {
+    return <AdminPostersPage
+      tournament={t}
+      onSave={(patch, opts) => updateTournament(patch, { ...opts, quiet: true })}
+      onBack={() => setView({ kind: "dashboard" })}
+      onEditTournament={() => setView({ kind: "editTournament" })}
+      onLogout={onLogout}
+      onViewerMode={onViewerMode}
     />;
   }
 

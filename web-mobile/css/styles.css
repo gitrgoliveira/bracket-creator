@@ -1792,6 +1792,128 @@ a:hover {
   border-color: var(--line);
 }
 
+/* ---------- Draw visibility (bc-drpb) ----------
+   A generated draw starts hidden from the public pages until it is published
+   or the competition starts (draw_visibility.jsx owns the rule and the words).
+   Every class the screens need lives here. */
+
+/* The draw preview header's buttons (Discard draw, Publish draw or
+   Unpublish, Start competition) over the hint line, right-aligned. On a phone
+   they stack full width, Start competition on top, so every label keeps one
+   line and Discard draw sits furthest from the primary button. */
+.draw-ready-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.draw-ready-actions__buttons {
+  display: flex;
+  gap: 8px;
+}
+@media (max-width: 480px) {
+  /* The header's actions box sizes to its content when it wraps under the
+     title, so it is widened too, or the stack stops at the hint's width. */
+  .page-head__actions:has(> .draw-ready-actions) {
+    width: 100%;
+  }
+  .draw-ready-actions {
+    align-items: stretch;
+    width: 100%;
+  }
+  .draw-ready-actions__buttons {
+    flex-direction: column-reverse;
+  }
+  .draw-ready-actions__buttons .btn {
+    justify-content: center;
+  }
+}
+
+/* The public status badge of a hidden draft: "Preparing draw". A dashed
+   hairline marks it as not yet settled; the organiser's badge keeps
+   .badge--draw-ready. */
+.badge--draw-preparing {
+  background: var(--slate-50);
+  color: var(--ink-2);
+  border-color: var(--line);
+  border-style: dashed;
+  /* Never broken over two lines inside its pill: the card's details wrap
+     instead. */
+  white-space: nowrap;
+  flex: none;
+}
+
+/* The draw preview header's hint line under its buttons, with the eye or the
+   crossed-out eye before it. */
+.draw-visibility-hint {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 46ch;
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--ink-3);
+  /* Left-aligned, so a wrapped line keeps the icon beside its first word. */
+  text-align: left;
+}
+.draw-visibility-hint svg {
+  flex: none;
+  margin-top: 1px;
+}
+.draw-visibility-hint--hidden {
+  color: var(--ink-2);
+}
+.draw-visibility-hint--published {
+  color: var(--ok-ink);
+}
+/* "Open the public page" at the end of the hint: underlined, as the app's
+   other links inside a sentence are, and never split over two lines. */
+.draw-visibility-hint a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+.draw-visibility-hint a:hover {
+  text-decoration-color: currentColor;
+}
+
+/* The dashboard card's line: the crossed-out eye and "Hidden from the
+   public", or the open eye and "Public". */
+.draw-visibility-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.draw-visibility-line svg {
+  flex: none;
+}
+.draw-visibility-line--hidden {
+  color: var(--ink-2);
+}
+.draw-visibility-line--public {
+  color: var(--ok-ink);
+}
+
+/* The public competition page's "Draw being prepared" card (an EmptyState
+   with this class), and the watchlist's line for a hidden draft. */
+.draw-preparing-card {
+  max-width: 36rem;
+  margin: 24px auto;
+}
+.draw-preparing-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
 /* Base dot carries a neutral fill so a bare `.dot` is visible. Without it the
    one un-modified use (the dashboard's "Currently running" heading) rendered an
    8px hole. `.dot--running` overrides the colour below. */
@@ -1843,6 +1965,14 @@ a:hover {
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+}
+
+/* The status badge never breaks over two lines inside its pill ("Draw" over
+   "ready" beside a long details line): the details wrap instead, as on the
+   public home list's .badge--draw-preparing. */
+.tcard__head .badge {
+  white-space: nowrap;
+  flex: none;
 }
 
 .tcard__name {
@@ -4675,6 +4805,8 @@ details[open] > summary::before { transform: rotate(90deg); }
   opacity: 0.5;
 }
 
+/* h3 by default; h2 where the page's next heading up is its h1 (titleAs). */
+.empty h2,
 .empty h3 {
   font-weight: 600;
   color: var(--ink-2);
@@ -6061,11 +6193,13 @@ details[open] > summary::before { transform: rotate(90deg); }
 }
 
 /* Coarse-pointer tap floor for the score editors' small buttons (Tie,
-   Fusensho, decision row, Encho): 44px per DESIGN §2.4; scoped to the
-   editors so dense list surfaces keep their density (critique P3). */
+   Fusensho, decision row, Encho) and the dashboard card's actions (Start
+   competition, Publish draw): 44px per DESIGN §2.4; scoped so dense list
+   surfaces keep their density (critique P3). */
 @media (pointer: coarse) {
   .editor-modal .btn--sm,
-  .scoring-panel .btn--sm {
+  .scoring-panel .btn--sm,
+  .tcard__actions .btn--sm {
     min-height: 44px;
   }
 }
@@ -10381,6 +10515,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* ---------- Start-all confirm/progress/result modal ---------- */
 .start-all__lead { margin: 0 0 12px; font-size: 14px; color: var(--ink-2); }
+/* bc-drpb: the hidden-draws note follows the list, which has no margin. */
+.start-all__hidden-note { margin-top: 12px; }
 .start-all__list {
   margin: 0;
   padding-left: 20px;

@@ -266,6 +266,8 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodDelete + " /api/competitions/:id",                                       // bc-cmpw: deleting a competition, organiser, destructive
 		http.MethodPost + " /api/competitions/:id/invalidate",                              // bc-cmpw: invalidating a competition, organiser, irreversible
 		http.MethodDelete + " /api/competitions/:id/draw",                                  // bc-cmpw: discarding a draw, organiser, destructive
+		http.MethodPost + " /api/competitions/:id/publish-draw",                            // bc-drpb: showing a draft's draw on the public pages, organiser (a self-run caller who signs in gets the route's own 409)
+		http.MethodPost + " /api/competitions/:id/unpublish-draw",                          // bc-drpb: hiding it again, organiser
 		http.MethodPost + " /api/competitions/:id/bracket/quarantine",                      // bc-cmpw: setting aside a damaged bracket file, organiser repair
 		http.MethodDelete + " /api/competitions/:id/overrides",                             // bc-cmpw: resetting manual ranking overrides, organiser correction
 		http.MethodPut + " /api/competitions/:id/awards",                                   // bc-cmpw: fighting-spirit awards, organiser

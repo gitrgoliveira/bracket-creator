@@ -500,9 +500,22 @@ describe('partitionStartableCompetitions', () => {
     const { startable, blocked } = partitionStartableCompetitions([
       c('running', { status: 'pools' }),
       c('empty', { players: [] }),
-      c('ready', { status: 'draw-ready' }),
     ], ['A', 'B', 'C']);
     expect(startable).toEqual([]);
+    expect(blocked).toEqual([]);
+  });
+
+  it('offers a competition whose draw is made, hidden or published', () => {
+    // A drawn competition waits to start: Start all opens its scoring. The
+    // court rules judge the draw and it already exists, so even a shiaijo
+    // allocation that would block a setup competition does not hold it back.
+    const { startable, blocked } = partitionStartableCompetitions([
+      c('hidden', { status: 'draw-ready', drawHidden: true }),
+      c('published', { status: 'draw-ready' }),
+      c('drawn-odd-courts', { status: 'draw-ready', courts: ['A', 'B', 'C'] }),
+      c('fresh'),
+    ], ['A', 'B', 'C']);
+    expect(startable.map(x => x.id)).toEqual(['hidden', 'published', 'drawn-odd-courts', 'fresh']);
     expect(blocked).toEqual([]);
   });
 

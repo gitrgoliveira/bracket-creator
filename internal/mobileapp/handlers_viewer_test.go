@@ -298,7 +298,7 @@ func TestViewerAggregator_StripsPreviewBracket(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "p"}))
-	comp := state.Competition{ID: "mixed", Name: "Mixed", Format: state.CompFormatMixed}
+	comp := state.Competition{ID: "mixed", Name: "Mixed", Format: state.CompFormatMixed, Status: state.CompStatusPools}
 	require.NoError(t, store.SaveCompetition(&comp))
 	require.NoError(t, store.SaveParticipants("mixed", nil))
 
@@ -527,8 +527,12 @@ func TestViewerCompetitionDetail_KnockoutNumbersFollowBracketPosition(t *testing
 		assert.False(t, hasNumber, "pre-draw: player %v must carry no number field at all", p["name"])
 	}
 
-	// Generate (not start, so a later DiscardDraw is legal) the real draw.
+	// Generate (not start, so a later DiscardDraw is legal) the real draw,
+	// and publish it: a new draw is hidden from the public, and this read is
+	// the public's (bc-drpb).
 	require.NoError(t, eng.GenerateDraw(cid))
+	_, err := eng.SetDrawHidden(cid, false)
+	require.NoError(t, err)
 
 	bracket, err := store.LoadBracket(cid)
 	require.NoError(t, err)

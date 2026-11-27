@@ -6,7 +6,7 @@ Some events do not want spectators to read every competitor's name on a phone or
 
 Public pages are the spectator view, the court displays, the stream overlay and the live updates behind them. With names hidden:
 
-- Every competitor reads as their number (for example K12). A competitor the draw has not numbered yet reads as "?".
+- Every competitor reads as their number (for example K12). A competitor the draw has not numbered yet reads as "?". So does every competitor of a draw you have not published yet: the numbers come from the draw, and a hidden draw shows none of them. Refer to [Keep the draw from the public until it is ready](run-tournament.md#keep-the-draw-from-the-public-until-it-is-ready).
 - Team names stay visible. The names of the team members are hidden, and each member reads as a label built from the team's number.
 - Dojo names stay visible.
 - Your own screens, the exports and the stored files never change. You see every name while you are signed in.

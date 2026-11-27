@@ -92,6 +92,39 @@ type KachinukiRoster struct {
 	Warning     string              `json:"warning,omitempty"`
 }
 
+// KachinukiRosterBeforeDraw is KachinukiRoster's refusal as the same
+// competition gives it in setup, where no match is held: a competition that is
+// not kachinuki is ErrNotKachinuki, a kachinuki one does not find the match. A
+// public read of a draft whose draw is hidden from its caller answers it
+// (bc-drpb), so the hidden draw shows in no difference.
+func (e *Engine) KachinukiRosterBeforeDraw(compID, matchID string) (KachinukiRoster, error) {
+	if _, err := e.kachinukiRosterCompetition(compID); err != nil {
+		return KachinukiRoster{}, err
+	}
+	return KachinukiRoster{}, kachinukiMatchNotFound(matchID)
+}
+
+// kachinukiRosterCompetition is the competition a roster read is made on: an
+// unknown one is a NotFoundError, one that is not kachinuki ErrNotKachinuki.
+func (e *Engine) kachinukiRosterCompetition(compID string) (*state.Competition, error) {
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return nil, err
+	}
+	if comp == nil {
+		return nil, notFoundErrorf("competition %s not found", compID)
+	}
+	if !comp.IsKachinuki() {
+		return nil, ErrNotKachinuki
+	}
+	return comp, nil
+}
+
+// kachinukiMatchNotFound is the refusal for a match the roster read cannot find.
+func kachinukiMatchNotFound(matchID string) error {
+	return notFoundErrorf("match %s not found", matchID)
+}
+
 // KachinukiRoster answers, for a kachinuki team match, who each side has on
 // the court and who it has left. It is ADVISORY ONLY (operator ruling
 // 2026-09-24): kachinuki is operator-led, team sizes are unregulated, and a
@@ -131,22 +164,16 @@ type KachinukiRoster struct {
 // place is filled by member number, and the answer carries the members
 // Warning. The fighters on are named either way.
 func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error) {
-	comp, err := e.store.LoadCompetition(compID)
+	comp, err := e.kachinukiRosterCompetition(compID)
 	if err != nil {
 		return KachinukiRoster{}, err
-	}
-	if comp == nil {
-		return KachinukiRoster{}, notFoundErrorf("competition %s not found", compID)
-	}
-	if !comp.IsKachinuki() {
-		return KachinukiRoster{}, ErrNotKachinuki
 	}
 	located, err := e.findTeamMatch(compID, matchID)
 	if err != nil {
 		return KachinukiRoster{}, err
 	}
 	if located == nil || located.Result == nil {
-		return KachinukiRoster{}, notFoundErrorf("match %s not found", matchID)
+		return KachinukiRoster{}, kachinukiMatchNotFound(matchID)
 	}
 	parent := located.Result
 	// The queues are built inside the read, and hold their own copies of the

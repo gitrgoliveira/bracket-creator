@@ -31,6 +31,7 @@ import { dismissToastById } from './toast_queue.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
 import { PUBLIC_NAMES_APPLY_CONFIRM, confirmPublicNamesApply } from './public_names_fields.jsx';
 import { useLatestRef } from './latest_ref.jsx';
+import { startAllHiddenDrawsNote, DRAW_PUBLISHED_TOAST, DRAW_UNPUBLISHED_TOAST } from './draw_visibility.jsx';
 
 const { useState, useEffect, useRef } = React;
 
@@ -73,6 +74,12 @@ const REFRESHABLE_EVENTS = new Set([
   "swiss_round_generated",
   // participants_updated fires when a participant is checked in or out.
   "participants_updated",
+  // bc-drpb: draw_visibility_changed fires when a draft's draw is published
+  // or hidden again (from this tab or another). Carries competitionId +
+  // hidden; the open competition refetches so its header's Publish draw /
+  // Unpublish and hint line match what the public sees. The dashboard's card
+  // line follows the list refetch app.jsx makes on the same event.
+  "draw_visibility_changed",
 ]);
 
 // Page components rendered by AdminApp's view switch (produced by sibling
@@ -691,6 +698,24 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     showToast(`${c.name} started`);
   };
 
+  // Publish draw / Unpublish from a dashboard card (bc-drpb): the same writes
+  // and toasts as the draw preview header's, then the refetch brings the card
+  // its new state. A refusal (the draft was started or discarded elsewhere
+  // meanwhile) says the server's sentence and refetches, as the header does.
+  const setDrawVisibility = async (cid, publish) => {
+    const action = publish ? "Publish draw" : "Unpublish";
+    try {
+      if (publish) await window.API.publishDraw(cid, password);
+      else await window.API.unpublishDraw(cid, password);
+    } catch (e) {
+      showToast(e.message, "error");
+      if (e.code) await refreshCompsBestEffort(action);
+      return;
+    }
+    await refreshCompsBestEffort(action);
+    showToast(publish ? DRAW_PUBLISHED_TOAST : DRAW_UNPUBLISHED_TOAST);
+  };
+
   // Re-throws after surfacing the error toast, exactly like updateCompetition
   // and addCompetition above, so the Edit-details form can put the server's
   // reason in its own banner. It used to swallow the rejection into a `false`
@@ -1064,6 +1089,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         onOpenShiaijo={(court) => setView({ kind: "shiaijo", court })}
         onStartAll={startAllCompetitions}
         onStartCompetition={startCompetition}
+        onSetDrawVisibility={setDrawVisibility}
         onLogout={onLogout}
         onViewerMode={onViewerMode}
         onUpdate={onUpdate}
@@ -1077,6 +1103,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       />}
       {startAll && <StartAllModal
         state={startAll}
+        tournament={t}
         onConfirm={() => startAllAfterCheckIns(startAll.comps)}
         onRetry={() => startAllAfterCheckIns(startAll.failed.map(f => f.comp))}
         onClose={() => setStartAll(null)}
@@ -1390,7 +1417,7 @@ function refreshFailureToast(actionLabel, e) {
 // click + Escape); the running phase is NOT. Closing mid-start would orphan
 // in-flight requests with no feedback, so the close affordances are withheld
 // while phase === "running".
-function StartAllModal({ state, onConfirm, onRetry, onClose }) {
+function StartAllModal({ state, tournament, onConfirm, onRetry, onClose }) {
   const dismissable = state.phase !== "running";
   // `blocked` is [{ comp, reason }] for competitions this action must NOT
   // offer: a shiaijo allocation the draw cannot split, or a seeding that is
@@ -1399,6 +1426,7 @@ function StartAllModal({ state, onConfirm, onRetry, onClose }) {
   // button and the competitions on the dashboard still add up for the operator.
   // Each reason arrives with its own remedy attached.
   const { phase, comps = [], failed = [], blocked = [] } = state;
+  const hiddenDrawsNote = phase === "confirm" ? startAllHiddenDrawsNote(tournament, comps) : null;
 
   let title = "Start all competitions";
   if (phase === "running") title = "Starting competitions…";
@@ -1422,11 +1450,18 @@ function StartAllModal({ state, onConfirm, onRetry, onClose }) {
           {comps.length === 0
             ? "Nothing can be started yet."
             : <>This will start {window.pluralize(comps.length, "competition")} now. Once a
-              competition starts, its pools and bracket are generated and scoring opens.</>}
+              competition starts, its pools and bracket are generated (if they are not
+              already) and scoring opens.</>}
         </p>
         <ul className="start-all__list">
           {comps.map(c => <li key={c.id}>{c.name}</li>)}
         </ul>
+        {/* bc-drpb: a start makes a hidden draft's draw visible to the
+            public, so the competitions it would do that to are named under the list
+            (draw_visibility.jsx owns the rule and the words). */}
+        {hiddenDrawsNote && (
+          <p className="start-all__lead start-all__hidden-note" data-testid="start-all-hidden-draws">{hiddenDrawsNote}</p>
+        )}
         {blocked.length > 0 && (
           <div data-testid="start-all-blocked">
             <p className="start-all__lead">

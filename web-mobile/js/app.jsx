@@ -15,6 +15,7 @@ import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN, tournamentShowsEveryName } from './competition_shape.jsx';
 import { pushToast } from './toast_queue.jsx';
 import { queueMoveCourts, sharesCourtDay, sharesDay } from './court_queue.jsx';
+import { isWithheldMatchEvent } from './draw_visibility.jsx';
 import { useCourtPaceLookup, PACE_TICK_MS } from './court_pace.jsx';
 import { useLatestRef } from './latest_ref.jsx';
 // bc-hnam: which credential the page reads with, keyed by the route.
@@ -1272,6 +1273,9 @@ function App() {
     // entries per SSE event for the tab's lifetime.
     const timerPool = createTimerPool();
     const jitteredTimeout = timerPool.schedule;
+    // Whether a refetch for a withheld match change (isWithheldMatchEvent) is
+    // already waiting, so a burst of them is one read (bc-drpb).
+    let withheldRefetchPending = false;
     // The competition page's refetches never put a live score back to an
     // older state (keepNewerDetail, patch.jsx), nor behind a push applied
     // after they were sent (push-wins): a self-run score editor reads this
@@ -1474,6 +1478,20 @@ function App() {
             // the same venue LAN.
             if (mode === "display") {
                 jitteredTimeout(maybeLoad, listJitter);
+            } else if (isWithheldMatchEvent(event)) {
+                // bc-drpb: a hidden draft's match moved (its court, time or
+                // status), sent with no data. Its matches still take their
+                // places on a shared court, so the open competition's queue
+                // positions may have moved: refetch it, once per burst. The
+                // home screen's list refetch below covers a page with no
+                // competition open.
+                if (viewerCompId && !withheldRefetchPending) {
+                    withheldRefetchPending = true;
+                    jitteredTimeout(() => {
+                        withheldRefetchPending = false;
+                        window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail()).catch(err => console.error('SSE refresh failed:', err));
+                    }, detailJitter);
+                }
             } else if (viewerCompId === event.data?.competitionId) {
                 // Apply partial update immediately (match_updated only: 
                 // competition_completed has no per-match payload)
@@ -1525,6 +1543,15 @@ function App() {
                 refetchDetail();
             } else if (viewerCompId && event.data?.competitionId !== viewerCompId) {
                 refetchIfSharesDay(event);
+            }
+            jitteredTimeout(maybeLoad, listJitter);
+        } else if (event.type === "draw_visibility_changed") {
+            // bc-drpb: a draft's draw was published or hidden again. Refetch
+            // that competition when it is open (its tabs come or go) and the
+            // list (the status badges). Visibility moves no match, so no other
+            // competition sharing the day is refetched.
+            if (viewerCompId && viewerCompId === event.data?.competitionId) {
+                refetchDetail();
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "swiss_round_generated") {

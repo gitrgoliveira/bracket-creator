@@ -1,15 +1,24 @@
 // Shared UI primitives used by both admin and viewer modules.
 
 import { useOpenedTapGuard } from './tap_guard.jsx';
+import { keepTabInside, useDialogFocus } from './dialog_focus.jsx';
 import { toastSnapshot, subscribeToast, dismissToast } from './toast_queue.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { Icon } from './icon.jsx';
+import { PUBLIC_DRAW_PREPARING_BADGE } from './draw_visibility.jsx';
 
 // Formats that run their matches through the pool pipeline but are not pools.
 // See the label note inside StatusBadge.
 const POOLS_PHASE_FORMAT_LABEL = { league: "League", swiss: "Swiss" };
 
-function StatusBadge({ status, showRunningDot, format }) {
+// `drawPreparing` (bc-drpb): the public home list passes
+// drawHiddenFromPublic(tournament, c) (draw_visibility.jsx), and a draft the
+// public may not see yet reads "Preparing draw" there. The organiser's
+// badge never passes it, so it keeps "Draw ready".
+function StatusBadge({ status, showRunningDot, format, drawPreparing }) {
+  if (drawPreparing && status === "draw-ready") {
+    return <span className="badge badge--draw-preparing">{PUBLIC_DRAW_PREPARING_BADGE}</span>;
+  }
   const map = {
     setup: ["badge--setup", "Pending"],
     "draw-ready": ["badge--draw-ready", "Draw ready"],
@@ -360,15 +369,7 @@ function DialogHost() {
       // ref guarantees a paired open/close, so this can't get stuck-locked.
       const prevOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
-      const onKeyDown = (e) => {
-        if (e.key !== "Tab") return;
-        const f = [...node.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
-          .filter((el) => !el.disabled && el.offsetParent !== null);
-        if (f.length === 0) { e.preventDefault(); return; }
-        const first = f[0], last = f[f.length - 1], active = document.activeElement;
-        if (e.shiftKey && (active === first || active === node)) { e.preventDefault(); last.focus(); }
-        else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
-      };
+      const onKeyDown = (e) => keepTabInside(node, e);
       document.addEventListener("keydown", onKeyDown, true);
       // Move focus into the dialog on a 0ms timer: focusing synchronously
       // during the commit phase gets reset afterwards, and rAF doesn't fire in
@@ -488,11 +489,13 @@ function DialogHost() {
 
 // EmptyState's `icon` is an Icon name (icon.jsx), drawn at the 32 px the
 // `.empty .icon` slot was sized for.
-function EmptyState({ icon, title, message, cta, ctaNote, className, style, ...attrs }) {
+// `titleAs` is the title's heading element, h3 by default: a page whose next
+// heading up is its h1 passes "h2", so the outline skips no level.
+function EmptyState({ icon, title, titleAs: Title = "h3", message, cta, ctaNote, className, style, ...attrs }) {
   return (
     <div className={`empty${className ? " " + className : ""}`} style={style} {...attrs}>
       {icon && <div className="icon"><Icon name={icon} size={32} /></div>}
-      {title && <h3>{title}</h3>}
+      {title && <Title>{title}</Title>}
       {message && <div>{message}</div>}
       {cta}
       {ctaNote && <div className="hint--sm empty__cta-note">{ctaNote}</div>}
@@ -613,9 +616,14 @@ function Modal({ title, onClose, children, footer, size, dismissable = true, cla
   // bc-cfbd: the bounce of the tap that opened this modal must not reach its
   // backdrop or its buttons.
   const { openedRef, onClickCapture } = useOpenedTapGuard();
+  // Focus goes into the dialog as it opens (its Close button) and back to the
+  // control that opened it as it closes.
+  const boxRef = React.useRef(null);
+  useDialogFocus(boxRef);
   return (
     <div className="modal-backdrop" ref={openedRef} onClick={dismissable ? onClose : undefined} onClickCapture={onClickCapture}>
       <div
+        ref={boxRef}
         className={`modal${size ? ` modal--${size}` : ""}${className ? ` ${className}` : ""}`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"

@@ -58,6 +58,10 @@ const (
 	// swissCurrentRound is in the payload so callers need no separate GET).
 	// FR-050d.
 	EventSwissRoundGenerated EventType = "swiss_round_generated"
+	// EventDrawVisibilityChanged: a draft's draw was published or hidden
+	// again (bc-drpb). Payload: {competitionId, hidden}. The public pages
+	// refetch the competition it names; no match moved.
+	EventDrawVisibilityChanged EventType = "draw_visibility_changed"
 )
 
 // AutoCompleteErrorHeader is set on score/start responses when the
@@ -160,10 +164,16 @@ type historyEntry struct {
 	payload string
 	typ     EventType
 	compID  string
-	// masked is the shared memo of the event's public projection, computed
-	// by the first stream that needs it and reused by every other one, so a
-	// masked event is marshalled once per audience class rather than once per
-	// subscriber. nil for an event that is never masked.
+	// draws is whether the event carries draw content (sseEventSpec.carriesDraw):
+	// judged on the payload, so an event that names no match is not withheld
+	// while its competition's draft is hidden.
+	draws bool
+	// masked is the shared memo of the event's competition judgement and
+	// public projection, computed by the first stream that needs it and
+	// reused by every other one, so a masked event is marshalled once per
+	// audience class rather than once per subscriber, and a draw event's
+	// competition is read once. nil for an event judged on no competition
+	// (sseEventSpec.judgesCompetition).
 	masked *maskedPayload
 	// selfRun is the shared judgement of whether the tournament is self-run,
 	// taken by the first stream not entitled to every name that sends the
@@ -437,16 +447,21 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 		payload: string(payload),
 		typ:     eventType,
 	}
-	if sseEventClassOf(eventType) == sseEventMasked {
+	spec, known := sseEventCatalogue[eventType]
+	entry.draws = spec.carriesDraw(entry.payload)
+	if known && spec.judgesCompetition(entry.draws) {
+		// A masked event is judged on its competition's names, a draw event
+		// on its competition's draw (bc-drpb), so both record the
+		// competition they name.
 		entry.compID = eventCompetitionID(data, payload)
 		entry.masked = &maskedPayload{}
 		if entry.compID == "" {
-			// Every masked event names its competition; one that does not
+			// Every such event names its competition; one that does not
 			// is sent to everyone but the organiser with no data at all.
-			slog.Warn("mobile-app: a masked event names no competition; it is sent without its data", "type", eventType, "seq", seq)
+			slog.Warn("mobile-app: an event judged on its competition names none; it is sent without its data", "type", eventType, "seq", seq)
 		}
 	}
-	if h.names != nil && sseEventClassOf(eventType) != sseEventPasses {
+	if h.names != nil && (!known || spec.class != sseEventPasses || entry.draws) {
 		entry.selfRun = &selfRunJudgement{}
 	}
 	if eventType == EventTournamentUpdated && h.names != nil && !h.closed && h.holdsRevealStreamLocked() {

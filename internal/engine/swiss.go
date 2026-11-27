@@ -719,14 +719,7 @@ func roundOneOrder(keys []string, compID string) []string {
 //
 // FR-050e.
 func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
-		return nil, err
-	}
-	if comp == nil {
-		return nil, notFoundErrorf("competition %s not found", compID)
-	}
-	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
+	comp, participants, err := e.swissStandingsField(compID)
 	if err != nil {
 		return nil, err
 	}
@@ -734,7 +727,42 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 	if err != nil {
 		return nil, err
 	}
+	return e.swissStandingsOf(comp, participants, matches)
+}
 
+// SwissStandingsBeforeDraw is SwissStandings as the same competition answers
+// before its draw: no match is read, so every entrant has one zero row (no
+// round-1 bye counted as a win), ranked by the same rules. A public read of a
+// draft whose draw is hidden from its caller answers it (bc-drpb).
+func (e *Engine) SwissStandingsBeforeDraw(compID string) ([]state.PlayerStanding, error) {
+	comp, participants, err := e.swissStandingsField(compID)
+	if err != nil {
+		return nil, err
+	}
+	return e.swissStandingsOf(comp, participants, nil)
+}
+
+// swissStandingsField reads the competition and its entrants for the Swiss
+// standings, answering an unknown competition with a NotFoundError.
+func (e *Engine) swissStandingsField(compID string) (*state.Competition, []domain.Player, error) {
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if comp == nil {
+		return nil, nil, notFoundErrorf("competition %s not found", compID)
+	}
+	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
+	if err != nil {
+		return nil, nil, err
+	}
+	return comp, participants, nil
+}
+
+// swissStandingsOf is the Swiss standings core: the entrants' cumulative
+// rows over the given matches (none before the draw), ranked as
+// SwissStandings documents.
+func (e *Engine) swissStandingsOf(comp *state.Competition, participants []domain.Player, matches []state.MatchResult) ([]state.PlayerStanding, error) {
 	// Dispatch on competition type at this single seam, mirroring the pool
 	// path (computeStandingsFrom): an engi (flag-scored) competition ranks by
 	// wins then accumulated own-side flags, so it delegates to the engi

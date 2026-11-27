@@ -438,6 +438,20 @@ type Competition struct {
 	// unseeded button recorded nothing, so a shuffled roster cannot be told
 	// from an unshuffled one). The Export tab's wording for a draw says so.
 	RosterShuffled bool `yaml:"roster_shuffled,omitempty" json:"rosterShuffled,omitempty"`
+	// DrawHidden records that the draw of a draw-ready competition is kept
+	// off the public pages until the organiser publishes it. Generate draw
+	// sets it (the commit in engine.runDrawPipeline, in every tournament
+	// mode), Publish clears it and Unpublish sets it (engine.SetDrawHidden),
+	// and Discard draw and every start clear it in the same write that moves
+	// the status. It is server-managed: create zeroes it,
+	// the settings merge never copies it, and ConfigVersion leaves it out.
+	// A public read goes through DrawHiddenIn, which says whether the public
+	// may see the draw now: a stored true on a started competition, or in a
+	// self-run tournament, hides nothing. The organiser's own records carry
+	// the stored flag as it is, so a self-run draft answers true there. No load-time migration: an absent
+	// key reads as published, so a competition drawn before the field
+	// existed stays public by the stored shape itself.
+	DrawHidden bool `yaml:"draw_hidden,omitempty" json:"drawHidden,omitempty"`
 	// PoolMatchDuration / KnockoutMatchDuration are the retired WHOLE-MINUTE
 	// per-phase clock durations. They carry `json:"-"`: they are NOT part of
 	// the API in either direction. The only reason they still exist is that
@@ -782,6 +796,17 @@ func (c *Competition) IsTeam() bool {
 // behaviour. The stored setting is never rewritten.
 func (c *Competition) CheckInApplies(t *Tournament) bool {
 	return c != nil && c.CheckInEnabled && !t.IsSelfRun()
+}
+
+// DrawHiddenIn reports whether the public may NOT see this competition's
+// draw now in tournament t: the competition is draw-ready, its draw is
+// stored as hidden (DrawHidden), and the tournament is officiated. This is
+// the ONE owner of that rule: a started competition is public whatever is stored,
+// and a self-run tournament shows its draw as soon as it is made, judged
+// here at read time with the stored field left alone. It says nothing of
+// who is asking; the organiser's answers never hide the draw.
+func (c *Competition) DrawHiddenIn(t *Tournament) bool {
+	return c != nil && c.Status == CompStatusDrawReady && c.DrawHidden && !t.IsSelfRun()
 }
 
 // IsKachinuki reports whether c is a kachinuki (winner-stays-on) team

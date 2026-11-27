@@ -293,10 +293,12 @@ when the two teams share a pool or meet in the first round, keeps its lineup whe
 lineup whose order has no match at the new place, after a move to a smaller pool, is removed,
 and the swap's answer counts it. The matches listed under the team in `round_lineups_given`
 (described below) move the same way, and the team's carried lineups are worked out again over
-its new matches. The opponents' lineups and the starting lineups stay where they are. A
-lineup save for a team that a match does not hold, when both of the match's sides are known
-competitors, is refused for every caller, the organiser included: a device that loaded the
-match before the swap would otherwise store a lineup for a team that no longer plays there.
+its new matches. The opponents' lineups and the starting lineups stay where they are.
+
+A lineup save for a team that a match does not hold is refused for every caller, the organiser
+included, when both of the match's sides are known competitors. Without that refusal, a device
+that loaded the match before the swap would store a lineup for a team that no longer plays
+there.
 
 A lineup save names the positions it changed, and the server writes only those, under the
 competition's lock, onto the lineup stored for that match or that starting lineup. A save also
@@ -937,18 +939,22 @@ Every side, winner and bracket slot naming either competitor takes the other's i
 one pass, while courts, times, match ids and the qualifier labels a pools draw writes into
 the bracket stay as they were. When a seeded competitor leaves their pool in a pools plus
 knockout draw, the knockout preview is rebuilt from the new pools by the draw's own builder,
-in the same transaction. Its matches keep their stored courts and times, unless the rebuild
-turns a bye into a match to play or a match into a bye, in which case the whole new schedule
-is taken, never a mix, which could put two matches on one court at once. A swap writes no
-match history, since nothing was fought, and the eligibility records and check-ins are keyed
-by participant id, so they stay with the competitor. A swap sent again after it landed finds
-each competitor at the other's place and changes nothing. A start or a result sent by a
-device that loaded a match before the swap names the old pairing, so it is refused as a side
-mismatch, writes nothing and does not start the competition.
+in the same transaction. Its matches keep their stored courts and times. The exception is a
+rebuild that turns a bye into a match to play or a match into a bye: then the whole new
+schedule is taken, never a mix, which could put two matches on one court at once. A swap
+writes no match history, since nothing was fought. The eligibility records and check-ins are
+keyed by participant id, so they stay with the competitor. A swap sent again after it landed
+finds each competitor at the other's place and changes nothing.
+
+A start or a result sent by a device that loaded a match before the swap names the old
+pairing, so it is refused as a side mismatch, writes nothing and does not start the
+competition. A decision names a side by its colour only, so it carries the participant ids
+its writer saw, and ids that differ from the stored pairing are refused the same way.
 
 The dojo separation summary (each pair of competitors of one dojo and the earliest match
-where they can meet) and the swap suggestions are never stored. Both are worked out from the
-stored draw on every read, so neither can go stale against a draw that was changed.
+where they can meet), the swap suggestions and the verdicts offered for a competitor picked
+to swap are never stored. All three are worked out from the stored draw on every read, so
+none can go stale against a draw that was changed.
 
 A staged step can also remove a file, applied in its place among the writes. Moving the team
 members of a competition recorded by version 2.0.0 from `squads.yaml` onto `team-members.yaml`

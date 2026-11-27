@@ -2782,9 +2782,10 @@ paths:
         place they hold, set only when the competition numbers its competitors.
 
         Recomputed from the stored draw on every request and never stored.
-        Organiser only, in self-run mode too. A competition with no draw, or
-        whose competitors all come from different dojos, answers 200 with an
-        empty list.
+        Organiser only, in self-run mode too. A competition with no draw, a
+        league or Swiss competition, and a draw whose competitors all come
+        from different dojos answer 200 with an empty list. A draw that cannot
+        be read is 500, never an empty list.
       security:
         - TournamentPassword: []
       parameters:
@@ -2824,8 +2825,10 @@ paths:
         Seeded competitors are never suggested.
 
         Recomputed from the stored draw on every request and never stored.
-        Organiser only, in self-run mode too. A competition with no draw
-        answers 200 with an empty list.
+        Organiser only, in self-run mode too. Only a `draw-ready` competition
+        has suggestions: one with no draw, one that has started, and a league
+        or Swiss competition answer 200 with an empty list. An empty list for
+        a `draw-ready` draw means no swap improves on it.
       security:
         - TournamentPassword: []
       parameters:
@@ -2853,11 +2856,11 @@ paths:
         competitor of the draw, in draw order, with the place they hold (the
         shape the swap request takes) and a `verdict` for swapping the two,
         judged on the dojo separation before and after, the same rows the swap
-        answers in `separation`:
+        answers in `separation`.
 
-        each dojo judged as a whole: where its pairs of dojo-mates can first
+        Each dojo is judged as a whole: where its pairs of dojo-mates can first
         meet, sorted earliest first, before and after, compared from the
-        earliest, the first difference deciding:
+        earliest. The first difference decides the verdict:
 
         - `worse`: at least one dojo is worse off, its first different meeting
           earlier (sharing a pool is earliest of all), whatever another dojo
@@ -2930,10 +2933,12 @@ paths:
         belongs to its place, so the two trade numbers (`numbers`). In a team
         competition the lineups each team saved for a match move with it
         (`lineupsMoved`); a lineup that can no longer apply is removed
-        (`lineupsRemoved`). Swapping a seeded competitor out of their pool is
-        allowed: `seededWarning` names them, and in a pools and knockout draw
-        the bracket is rebuilt (`bracketRebuilt`) and its times rescheduled
-        (`timesRescheduled`). `separation` holds the dojo separation rows of
+        (`lineupsRemoved`). Swapping a seeded competitor is allowed:
+        `seededWarning` names them. In a pools and knockout draw the knockout
+        preview is then rebuilt from the new pools (`bracketRebuilt`). Its
+        matches keep their stored courts and times, unless the rebuild turns
+        a bye into a match to play or a match into a bye; then the whole new
+        schedule is taken (`timesRescheduled`). `separation` holds the dojo separation rows of
         the dojos the swap touches, before and after.
 
         With `dryRun: true` the answer is computed and nothing is saved: it
@@ -2968,11 +2973,17 @@ paths:
                 $ref: '#/components/schemas/SwapResult'
         '400':
           description: |
-            `invalid`: the body cannot be read, a side has no id, or a place
+            `invalid`: the body cannot be read, a side has no id, a place
             is not the shape this draw uses (a pool place on a knockout-only
-            draw, a slot on a pools draw, both or neither).
+            draw, a slot on a pools draw, both or neither), a position is
+            below 1 or a slot below 0, or two different competitors name the
+            same place.
             `same_competitor`: both sides name the same competitor.
-            `not_in_draw`: a competitor is not in the draw.
+            `not_in_draw`: a competitor is not in the draw; the message says
+            whether they are off the roster or were not drawn.
+            The draw's own 409 refusals (`swap_not_supported`, `no_draw`,
+            `draw_started`) are judged before any of these, so a malformed
+            place on a draw that has started answers 409.
           content:
             application/json:
               schema:
@@ -4720,8 +4731,10 @@ paths:
               introduces no member id never reads the file. Extra fields: `message`, "The
               team members could not be read, so this choice cannot be checked. The
               organiser needs to check team-members.yaml in the tournament data."
-            - `side_mismatch`: the submitted winner does not match either side of the match.
-              Extra fields: `message`.
+            - `side_mismatch`: the write names competitors other than the pairing the
+              match stores, such as a sheet loaded before a draw swap. Nothing is
+              written. Extra fields: `message`, "The submitted competitors don't match
+              this match's pairing. Check the score sheet and try again."
             - `downstream_knockout_played`: the write would change who a
               knockout match that has a result of its own was fought by: a
               knockout correction changing a winner already propagated into
@@ -6222,7 +6235,8 @@ paths:
                     when the draw review has swapped competitors since the
                     writer loaded the match, an id that differs from the stored
                     one is refused 409 `side_mismatch` and nothing is written.
-                    Omitted means no side is judged.
+                    A side is not judged when this field is omitted or when the
+                    stored side carries no id (an unresolved feeder or a bye).
                 sideBId:
                   type: string
                   description: Same as `sideAId`, for side B.
@@ -6324,7 +6338,10 @@ paths:
             `removedCourts`), or one that gives a drawn tie-breaker bout a
             winner while the lots the organiser entered rule it
             (`lots_replaced`, with `matchId` and `message`, until the request
-            carries `confirmLots: true`). Same bodies as PUT .../score.
+            carries `confirmLots: true`), or one whose `sideAId`/`sideBId`
+            differ from the pairing the match stores, such as a sheet loaded
+            before a draw swap (`side_mismatch`, with `message`; nothing is
+            written). Same bodies as PUT .../score.
           content:
             application/json:
               schema:
@@ -6966,8 +6983,8 @@ paths:
         `team_members_unreadable`, whoever sends it.
 
         A save for a team the match does not hold by id is refused with 404
-        `team_not_in_match` for every caller, the organiser included, since
-        a draw swap can move a team out of a match it had a lineup for. The
+        `team_not_in_match` for every caller. The organiser is refused too,
+        because a draw swap can move a team out of a match it had a lineup for. The
         organiser's save is still accepted for a match side that carries no id
         yet (a bye, a "Winner of ..." feeder, a legacy row), and for a match id
         the draw does not hold.

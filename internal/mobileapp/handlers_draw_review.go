@@ -27,10 +27,10 @@ import (
 //     (engine.SwapDrawPlaces), or with dryRun the same answer without saving.
 //
 // The reads are recomputed from the stored draw on every call, as
-// draw-warnings is; nothing is stored for them. The swap and the swap
-// candidates are organiser only in self-run too
-// (isSelfRunMainGatedConfigRoute): the candidates take the competition's lock
-// and can rebuild the knockout once per competitor. They are plain requests, not
+// draw-warnings is; nothing is stored for them. All four routes are
+// organiser only in self-run too (isSelfRunMainGatedConfigRoute), as their
+// OpenAPI entries say; the candidates also take the competition's lock and
+// can rebuild the knockout once per competitor. They are plain requests, not
 // outbox doors: the page needs the answer before it shows anything.
 func RegisterDrawReviewHandlers(r *gin.RouterGroup, comps CompetitionLoader, eng DrawReviewEngine, hub Broadcaster) {
 	// GET /competitions/:id/dojo-separation: 200 {meetings: [...]}, an empty

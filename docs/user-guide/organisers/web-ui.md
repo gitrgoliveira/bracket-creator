@@ -1,7 +1,7 @@
 # Legacy Web UI
 
 !!! note "Legacy"
-    The Legacy Web UI is kept for compatibility. For a new tournament, use the [tournament app](../start-here/first-tournament.md): its **Download blank template (.xlsx)** gives the same Excel bracket for the draw you generated (empty places before the draw), and **Export PDFs** prints it. Refer to [Export and print](run-tournament.md#export-and-print).
+    The Legacy Web UI is kept for compatibility. For a new tournament, use the [tournament app](../start-here/first-tournament.md). Its **Download blank template (.xlsx)** gives the same Excel bracket for the draw you generated (empty places before the draw), and **Export PDFs** prints it. Refer to [Export and print](run-tournament.md#export-and-print).
 
 The Legacy Web UI is a standalone one-shot bracket generator. It turns a roster into a print-ready Excel bracket from your browser, with no CSV editing.
 
@@ -23,7 +23,11 @@ Both formats build a knockout bracket, so the number of courts must be 1, 2, 4, 
 
 ## Participant list
 
-After you upload a CSV, the participant list appears for review before you generate the bracket. A banner under the list reads **Participant list format looks good** and gives the number of participants read. If the list has problems, the banner reads **Participant list needs attention** and lists them. Seeding and creating the tournament both refuse until you fix the rows it names. Warnings alone give **Participant list looks usable, with a few caveats**, and you can carry on.
+After you upload a CSV, the participant list appears for review before you generate the bracket. A banner under the list says how the list reads:
+
+- **Participant list format looks good** gives the number of participants read.
+- **Participant list needs attention** means the list has problems, and the banner lists them. Seeding and creating the tournament both refuse until you fix the rows it names.
+- **Participant list looks usable, with a few caveats** means there are warnings alone, and you can carry on.
 
 ![Participant list](../../screenshots/webui-player-list.png)
 

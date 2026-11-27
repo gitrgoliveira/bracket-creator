@@ -30,6 +30,13 @@ Seven rules are enforced, each of which the public docs must never contain:
   naming a side as winning "by default" without the words "default" and
   "win" next to each other.
 
+A last rule, ``long-sentence``, refuses a sentence over 40 words (house style
+is one idea per sentence), unless the sentence carries an exception comment
+with its reason: ``<!-- long-sentence: the reason -->``. An exception with no
+reason, or with no long sentence to cover, is ``long-sentence-exception``.
+A colon ends a sentence for this count, as a full stop does. Refer to
+``check_sentence_length``.
+
 ``docs/dev-guide/code_of_conduct.md`` is skipped because it is third-party
 text (the Contributor Covenant) that this repo does not control the wording
 of. Lines inside fenced code blocks, HTML comments, and inline code spans are
@@ -223,9 +230,10 @@ def _fence_marker(stripped: str) -> tuple[str | None, int]:
     return ch, run
 
 
-def iter_prose_lines(text: str):
+def iter_prose_lines(text: str, code: str = ""):
     """Yield (lineno, line) for prose text, with fenced code blocks, HTML
-    comments, and inline code spans stripped out.
+    comments, and inline code spans stripped out. ``code`` replaces each
+    inline code span: nothing for the word rules, one word for sentence length.
 
     Fence handling mirrors CommonMark: a line whose stripped form starts with
     three or more backticks or tildes opens a fence, recording the character
@@ -276,7 +284,7 @@ def iter_prose_lines(text: str):
             in_html_comment = False
             line = line[idx + 3 :]
 
-        line = CODE_SPAN_RE.sub("", line)
+        line = CODE_SPAN_RE.sub(code, line)
         line = COMPLETE_COMMENT_RE.sub("", line)
 
         if "<!--" in line:
@@ -353,11 +361,118 @@ def _block_hits(numbered_lines, rules) -> list[tuple[int, str, str]]:
     return [(lineno, rule, line.strip()) for lineno, line in numbered_lines for rule in rules(line)]
 
 
+# --- Sentence length ----------------------------------------------------------
+#
+# House style writes one idea per sentence (operator ruling 2026-11-25). A
+# sentence over MAX_SENTENCE_WORDS words almost always joins two or more, so
+# the gate refuses it. Reviews aim lower, at about 25 words, by reading.
+#
+# The rare sentence that must stay long carries an exception on one of its
+# lines, with the reason after the colon:
+#
+#     ... and the last clause. <!-- long-sentence: a legal notice, quoted whole -->
+#
+# An exception with no reason, or one on a line where no sentence is too long,
+# is a violation too, so an exception cannot outlive the sentence it covers.
+MAX_SENTENCE_WORDS = 40
+EXCEPTION_RE = re.compile(r"<!--\s*long-sentence:(.*?)-->")
+# A Markdown line that is not part of a sentence and ends the one before it:
+# a heading, a table row, an admonition or content-tab marker (Zensical's
+# "!!! note", "??? tip" and '=== "Tab"').
+NOT_A_SENTENCE_RE = re.compile(r"^\s*(#{1,6}\s|\||!!!|\?\?\?|===)")
+# A Markdown line that starts a new list item or definition, ending the
+# sentence before it. The marker itself is not a word.
+ITEM_START_RE = re.compile(r"^\s*([-*+]|\d+\.|:)\s+")
+IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+LINK_RE = re.compile(r"\[([^\]]*)\](?:\([^)]*\)|\[[^\]]*\])")
+ATTR_LIST_RE = re.compile(r"\{\s*[:.#][^}]*\}")
+# A quotation reads as one word, as inline code does: it is the UI's or
+# another source's wording, not a sentence of the page's own. A quotation that
+# ends a sentence of its own ("... the password.") still ends the sentence.
+QUOTATION_RE = re.compile(r'"[^"\n]*"|\u201c[^\u201d\n]*\u201d')
+# A word that can end a sentence, and a word that can start the next one, so
+# "e.g. the" and "v2.6.0" never split a sentence.
+WORD_ENDS_RE = re.compile(r"[.!?][\"')\]\u201d]*$")
+WORD_STARTS_RE = re.compile(r"[A-Z0-9\"'(\[\u201c]")
+# A colon ends a sentence whatever follows it ("two kinds: pools and a
+# knockout" counts as two), since no abbreviation ends in one. A colon inside
+# a word ("10:30", "https://") is not at its end and splits nothing.
+COLON_ENDS_RE = re.compile(r":[\"')\]\u201d]*$")
+
+
+def _one_word(m: re.Match[str]) -> str:
+    """A quotation as one word, keeping the full stop it ends with."""
+    return "Q." if WORD_ENDS_RE.search(m.group(0)) else "Q"
+
+
+def _sentence_words(line: str) -> list[str]:
+    """The words one prose line contributes to its sentence."""
+    line = ITEM_START_RE.sub("", line)
+    line = IMAGE_RE.sub(" ", line)
+    line = LINK_RE.sub(r"\1", line)
+    line = ATTR_LIST_RE.sub(" ", line)
+    line = _paragraph_prose(line)
+    line = QUOTATION_RE.sub(_one_word, line)
+    return line.split()
+
+
+def iter_sentences(numbered_lines, markdown: bool):
+    """Yield each sentence as a list of (lineno, word). A blank line ends a
+    sentence; in Markdown so do a list item, a heading and a table row."""
+    words: list[tuple[int, str]] = []
+    for lineno, line in numbered_lines:
+        skip = not line.strip() or (markdown and NOT_A_SENTENCE_RE.match(line))
+        if words and (skip or (markdown and ITEM_START_RE.match(line))):
+            yield words
+            words = []
+        if skip:
+            continue
+        for word in _sentence_words(line):
+            last = words[-1][1] if words else ""
+            if last and (COLON_ENDS_RE.search(last) or (WORD_ENDS_RE.search(last) and WORD_STARTS_RE.match(word))):
+                yield words
+                words = []
+            words.append((lineno, word))
+    if words:
+        yield words
+
+
+def check_sentence_length(text: str, numbered_lines, markdown: bool = True) -> list[tuple[int, str, str]]:
+    """Return (lineno, rule, excerpt) for every sentence that is too long and
+    carries no exception, and for every exception that has no reason or covers
+    no long sentence. numbered_lines is the prose, with inline code as one word."""
+    # Keyed by line number in file order, so the first match below is the
+    # earliest unused exception inside the sentence.
+    exceptions = {
+        lineno: m.group(1).strip()
+        for lineno, line in enumerate(text.splitlines(), start=1)
+        if (m := EXCEPTION_RE.search(line))
+    }
+    hits, used = [], set()
+    for sentence in iter_sentences(numbered_lines, markdown):
+        if len(sentence) <= MAX_SENTENCE_WORDS:
+            continue
+        start, end = sentence[0][0], sentence[-1][0]
+        covering = next((n for n in exceptions if start <= n <= end and n not in used), None)
+        if covering is not None:
+            used.add(covering)
+            continue
+        excerpt = " ".join(w for _, w in sentence[:8]) + " ..."
+        hits.append((start, "long-sentence", f"{len(sentence)} words, over {MAX_SENTENCE_WORDS}: {excerpt}"))
+    for lineno, reason in exceptions.items():
+        if not reason:
+            hits.append((lineno, "long-sentence-exception", "an exception needs its reason after the colon"))
+        elif lineno not in used:
+            hits.append((lineno, "long-sentence-exception", "no sentence here is over the limit; remove the exception"))
+    return hits
+
+
 def check_markdown(text: str) -> list[tuple[int, str, str]]:
     """Return every (lineno, rule, excerpt) violation in a Markdown source."""
     prose_lines = list(iter_prose_lines(text))
     hits = _block_hits(prose_lines, check_line)
     hits.extend(check_paragraphs(prose_lines))
+    hits.extend(check_sentence_length(text, iter_prose_lines(text, code="X")))
     return hits
 
 
@@ -536,12 +651,16 @@ def check_html(text: str) -> list[tuple[int, str, str]]:
     parser.close()
 
     hits = list(parser.hits)
+    sentence_lines: list[tuple[int, str]] = []
     for start, block in parser.blocks:
         lines = block.split("\n")
         hits.extend(_block_hits(enumerate(lines, start), line_rules))
         # The parser already decoded entities, so an "&lt;mat&gt;" is visible
         # text here and no tag is left to strip.
         hits.extend(_paragraph_hits(start, "\n".join(EMPHASIS_RE.sub("", line) for line in lines)))
+        # A block ends its sentence, as a blank line does in Markdown.
+        sentence_lines += [*enumerate(lines, start), (start + len(lines), "")]
+    hits.extend(check_sentence_length(text, sentence_lines, markdown=False))
     return hits
 
 

@@ -8,7 +8,12 @@ Once the app is running, open `http://localhost:8080` on that computer. Courts a
 
 Docker runs the same app on macOS, Windows and Linux. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine on Linux). The tournament is stored in a `tournament-data` folder that you create once.
 
-On Linux, make that folder writable by the container's user before the first run, or the app cannot save the tournament: create it with `mkdir -p tournament-data`, then run `sudo chown 65534 tournament-data`. Docker Desktop on macOS and Windows handles that for you. [Install](install.md#docker) explains why, and lists the other images.
+On Linux, make that folder writable by the container's user before the first run, or the app cannot save the tournament:
+
+1. Create it with `mkdir -p tournament-data`.
+2. Run `sudo chown 65534 tournament-data`.
+
+Docker Desktop on macOS and Windows handles that for you. [Install](install.md#docker) explains why, and lists the other images.
 
 Then run the tournament app image:
 
@@ -94,6 +99,10 @@ Docker Desktop ([Any computer with Docker](#any-computer-with-docker)) also work
 
 5. When Windows asks whether to allow the app on networks, allow it on private networks, so the courts and phones can reach it.
 
-The release files are not code-signed. If Windows blocks `bracket-creator.exe`, right-click the zip, choose **Properties**, tick **Unblock**, select **OK**, and extract it again.
-
 To start it again on another day, repeat steps 3 and 4 in the same folder: the app finds the tournament where it left it.
+
+The release files are not code-signed. If Windows blocks `bracket-creator.exe`, unblock the zip:
+
+1. Right-click the zip and choose **Properties**.
+2. Tick **Unblock** and select **OK**.
+3. Extract it again.

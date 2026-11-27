@@ -34,13 +34,18 @@ A booklet for competitors and coaches: the pool draw, then each shiai-jo's knock
 
 ### Full bracket
 
-Everything the tables need to run the day on paper: the pool draw, every pool's matches with a results table, every knockout match, and the trees. A4.
+Everything the tables need to run the day on paper. A4. It holds:
+
+- the pool draw
+- every pool's matches with a results table
+- every knockout match
+- the trees
 
 [![A pool matches page: the matches of pools C and D, each followed by its results table and ranking.](../../samples/pools-example-medium/print_full_bracket.png){ width="360" }](../../samples/pools-example-medium/print_full_bracket.pdf)
 
 ## Team competition
 
-12 teams of five in pools of three, the first two of each pool going through to a knockout, on two shiai-jo. Printed from the example workbook [pools-example-medium-teams.xlsx](https://github.com/gitrgoliveira/bracket-creator/blob/main/pools-example-medium-teams.xlsx). There are no competitor tags: tags are printed for individual competitors only (with `print`, a workbook counts as a team one when its name contains `team` or it is named with `--team-file`).
+12 teams of five in pools of three, the first two of each pool going through to a knockout, on two shiai-jo. Printed from the example workbook [pools-example-medium-teams.xlsx](https://github.com/gitrgoliveira/bracket-creator/blob/main/pools-example-medium-teams.xlsx). There are no competitor tags: tags are printed for individual competitors only. With `print`, a workbook counts as a team one when its name contains `team` or it is named with `--team-file`.
 
 ### Registration sheet
 
@@ -62,6 +67,11 @@ The pool draw, then each shiai-jo's knockout tree with its pools beside it. A4.
 
 ### Full bracket
 
-The pool draw, every team match with a numbered row for each of its five bouts, every knockout match, and the trees. A4.
+A4. It holds:
+
+- the pool draw
+- every team match, with a numbered row for each of its five bouts
+- every knockout match
+- the trees
 
 [![A pool matches page for pool B: three team matches, each with five numbered bout rows, then the team results table and the ranking.](../../samples/pools-example-medium-teams/print_full_bracket.png){ width="360" }](../../samples/pools-example-medium-teams/print_full_bracket.pdf)

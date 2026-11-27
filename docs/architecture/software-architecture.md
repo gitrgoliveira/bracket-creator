@@ -38,14 +38,19 @@ flowchart TB
     mobile --> pdfs
 ```
 
-The CLI commands are `create-pools`, `create-knockout` and `print`; the Excel output is the
-formula-linked bracket workbook, and from the tournament app also a results workbook; the PDF
-exports are tags, names and trees; `tournament-data/` holds the live state as Markdown and CSV
-files. Operators are organisers and shiaijo operators on a tablet or desktop; spectators
+The CLI commands are `create-pools`, `create-knockout` and `print`. The Excel output is the
+formula-linked bracket workbook, and from the tournament app also a results workbook. The PDF
+exports are tags, names and trees. `tournament-data/` holds the live state as Markdown and CSV
+files. Operators are organisers and shiaijo operators on a tablet or desktop. Spectators
 include the competitors, on their phones.
 
-The same binary ships the CLI, the legacy one-shot Excel web form (`serve`), and the
-real-time tournament app (`mobile-app`). All web assets are embedded at build time, so there is
+The same binary ships three things:
+
+- the CLI;
+- the legacy one-shot Excel web form (`serve`);
+- the real-time tournament app (`mobile-app`).
+
+All web assets are embedded at build time, so there is
 nothing to install beyond the binary itself. Besides its live state, the tournament app exports
 a competition's results as an Excel workbook and prints PDFs on demand.
 
@@ -71,7 +76,7 @@ flowchart LR
 ```
 
 Most commands (`create-pools`, `create-knockout`, `print`, `serve`, `mobile-app` and its
-`backup` and `restore` subcommands) are an options struct with a `run()` method (`cmd/*.go`);
+`backup` and `restore` subcommands) are an options struct with a `run()` method (`cmd/*.go`).
 `version`, `man` and `hash-password` are plain Cobra commands. `man` generates the manual
 pages and is hidden from the help output. `backup` and `restore` work on the data folder
 directly, with the server stopped. `create-pools` and `create-knockout` share
@@ -106,14 +111,25 @@ flowchart TB
     helper --> domain
 ```
 
-Each arrow is an import. The packages form these layers, top to bottom: entry (`main.go`, `cmd`,
-`resources`), presentation (`mobileapp`), orchestration (`export`, `engine`),
-persistence and output (`state`, `backup`, `excel`, `pdf`), and the core logic and models
-(`helper`, `domain`). Every package except `main.go` and `cmd` lives under `internal/`. The
-diagram shows the main imports; besides these, `cmd` also imports `helper`, `excel`, `pdf` and `resources`,
-`mobileapp` imports `pdf` and `resources`, `export` imports `state` and `helper`, `main.go` imports `helper` and `resources`, `internal/cmd/version` (the build's version stamp)
-is imported by `cmd`, `mobileapp` and `backup`, and every
-package that works with competitors imports `domain`. Every arrow points down a layer:
+Each arrow is an import. The packages form these layers, top to bottom:
+
+1. entry (`main.go`, `cmd`, `resources`);
+2. presentation (`mobileapp`);
+3. orchestration (`export`, `engine`);
+4. persistence and output (`state`, `backup`, `excel`, `pdf`);
+5. the core logic and models (`helper`, `domain`).
+
+Every package except `main.go` and `cmd` lives under `internal/`. The
+diagram shows the main imports. Besides these:
+
+- `cmd` also imports `helper`, `excel`, `pdf` and `resources`;
+- `mobileapp` imports `pdf` and `resources`;
+- `export` imports `state` and `helper`;
+- `main.go` imports `helper` and `resources`;
+- `internal/cmd/version` (the build's version stamp) is imported by `cmd`, `mobileapp` and `backup`;
+- every package that works with competitors imports `domain`.
+
+Every arrow points down a layer.
 `internal/helper` sits below persistence because `state`, `excel` and `pdf` all import it,
 and it imports only `domain`.
 
@@ -189,30 +205,32 @@ The handler files fall into these groups:
 - **Public surfaces:** viewer, display, time, version, auth config.
 - **Tournament and files:** tournament, announcements, backup and restore, export, print, import, branding, sponsors, reset.
 
-Handlers call the engine for anything rule-bound, and also use the store directly: the viewer
+Handlers call the engine for anything rule-bound, and also use the store directly. The viewer
 endpoints read from it, and the score handlers open the transaction themselves ([Write path](#5-write-path-recording-a-score-acid-broadcast)).
-A single match's `match_updated` pushes pass through the broadcast coalescer, which sends a
-running match's at most once every 250 ms and always sends the latest stored match; a finish, a
+A single match's `match_updated` pushes pass through the broadcast coalescer. It sends a
+running match's at most once every 250 ms, and always sends the latest stored match. A finish, a
 decision or any other change to the match is sent at once. Competition-wide refreshes and the
 other events go to the hub directly. The scheduled backup job runs beside the
-handlers: it checks on startup and then every hour, and writes a copy to the data folder's
+handlers. It checks on startup and then every hour. It writes a copy to the data folder's
 `backups/` directory when the newest one is at least a day old and the tournament has changed.
 A clean shutdown takes one more copy when the tournament has changed since the newest one,
 however recent that is.
 
-Server hardening (constants in `cmd/mobile_app.go`): `ReadHeaderTimeout 10s`, `ReadTimeout 30s`,
-`IdleTimeout 120s`, `MaxHeaderBytes 1 MB`, **`WriteTimeout 0`** (SSE streams are infinite;
-per-request cancellation runs through the request context). Graceful shutdown 30s with
-`Hub.Close` wired through `RegisterOnShutdown`. Every handler-spawned goroutine uses `safeGo`
-(Gin Recovery only catches the request goroutine).
+Server hardening (constants in `cmd/mobile_app.go`):
+
+- `ReadHeaderTimeout 10s`, `ReadTimeout 30s` and `IdleTimeout 120s`;
+- `MaxHeaderBytes 1 MB`;
+- **`WriteTimeout 0`** (SSE streams are infinite, so per-request cancellation runs through the request context);
+- graceful shutdown 30s, with `Hub.Close` wired through `RegisterOnShutdown`;
+- `safeGo` for every handler-spawned goroutine (Gin Recovery only catches the request goroutine).
 
 ## 5. Write path: recording a score (ACID + broadcast)
 
 A scoring tap and a finishing write take different doors into the same engine. A tap is an
 event: the browser stores it in its outbox at once, and the outbox sends it to the match's
-score events endpoint. The handler opens one transaction on the store; inside it the engine
-appends the taps to the match's event log, replays the log in the order the taps were made,
-and stages the match the replay produces and a history line. The store then commits all of it
+score events endpoint. The handler opens one transaction on the store. Inside it the engine
+appends the taps to the match's event log and replays the log in the order the taps were made.
+It stages the match the replay produces and a history line. The store then commits all of it
 at once.
 
 ```mermaid
@@ -258,8 +276,8 @@ sequenceDiagram
 
 A finish, a correction and the other whole writes use their own routes, such as the one below
 (a decision and a reopen have theirs, `POST /decision` and `POST /reopen`).
-They are outbox entries too, and they enter the same event log as a baseline, so a tap and a
-whole write are ordered against each other by the time each was made.
+They are outbox entries too, and they enter the same event log as a baseline. A tap and a
+whole write are therefore ordered against each other by the time each was made.
 
 ```mermaid
 %%{init: {"sequence": {"width": 110, "actorMargin": 30}}}%%
@@ -287,7 +305,7 @@ sequenceDiagram
     H-->>B: 200 result
 ```
 
-1. The write is stored in the outbox and answered pending at once; it is sent after the match's earlier entries.
+1. The write is stored in the outbox and answered pending at once. It is sent after the match's earlier entries.
 2. The outbox sends `PUT /api/competitions/:id/matches/:mid/score`.
 3. The auth middleware verifies `X-Tournament-Password` before the handler (`handlers_match_score.go`) runs.
 4. The handler opens `WithTransaction` on the competition.
@@ -308,23 +326,29 @@ fan-out. Scoring is ACID. A legitimate operator change is never dropped.
 
 Every scoring tap and every rule-bound write is stored in the browser's `localStorage` before
 anything is sent, so a score never lives only in the memory of a page. The stored outbox is
-shared by every tab of the app on the device: each tab merges its own entries into it and takes
+shared by every tab of the app on the device. Each tab merges its own entries into it and takes
 up the entries another tab stored. Entries are sent per owner (a match, a team, a competitor, a
-competition, a court call or the tournament settings) strictly in the order they were made, and
-retried until they land; consecutive taps go as one batch.
+competition, a court call or the tournament settings) strictly in the order they were made. They
+are retried until they land, and consecutive taps go as one batch.
 
 The outbox lives in the `api_client_*.jsx` modules, which `api_client.jsx` loads and starts:
-the queue and its storage (`api_client_queue.jsx`), building and committing a write
-(`api_client_enqueue.jsx`), sending it (`api_client_flush.jsx`), the scoring taps
-(`api_client_taps.jsx`), the team members the device made (`api_client_members.jsx`), the stamp
-clock (`api_client_clock.jsx`), what the screen shows before the server answers
-(`api_client_overlays.jsx`) and the held-writes status (`api_client_status.jsx`). The state they
-share lives in one leaf module (`api_client_store.jsx`), which imports no other outbox module
-except the id helper `api_client_ids.jsx`, so the modules do not import one another in a cycle;
-where a lower module must call a higher one, the higher one registers the function there at load.
-When one device has several tabs open, only one tab sends each match's writes at a time: the tab
-holds a lease for that match (a Web Lock, or a short timed note in browser storage in a browser
-that lacks them), so a write goes once and a closed tab hands its writes over. The writes that go through the outbox are:
+
+- the queue and its storage (`api_client_queue.jsx`);
+- building and committing a write (`api_client_enqueue.jsx`);
+- sending it (`api_client_flush.jsx`);
+- the scoring taps (`api_client_taps.jsx`);
+- the team members the device made (`api_client_members.jsx`);
+- the stamp clock (`api_client_clock.jsx`);
+- what the screen shows before the server answers (`api_client_overlays.jsx`);
+- the held-writes status (`api_client_status.jsx`).
+
+The state they share lives in one leaf module (`api_client_store.jsx`). It imports no other
+outbox module except the id helper `api_client_ids.jsx`, so the modules do not import one
+another in a cycle. Where a lower module must call a higher one, the higher one registers the
+function there at load.
+When one device has several tabs open, only one tab sends each match's writes at a time. The tab
+holds a lease for that match: a Web Lock, or a short timed note in browser storage in a browser
+that lacks them. So a write goes once, and a closed tab hands its writes over. The writes that go through the outbox are:
 
 - scoring taps (points, fouls, overtime, flags and the other score events);
 - score writes (start, record bout, finish, correction), decisions, reopen, send back to the queue, queue it and reopen;
@@ -364,16 +388,18 @@ flowchart TB
     store --> out["Excel / PDF export<br/>(on demand)"]
 ```
 
-The draw can be made two ways: `POST /api/competitions/:id/generate-draw` makes it and leaves
-the competition draw-ready for review, and `POST /api/competitions/:id/start` on a competition
-still in setup makes it and starts at once. A start on a draw-ready competition keeps the draw
-it has. Both draws run `runDrawPipeline` (`internal/engine/competition.go`), which picks one
+The draw can be made two ways:
+
+- `POST /api/competitions/:id/generate-draw` makes it and leaves the competition draw-ready for review.
+- `POST /api/competitions/:id/start` on a competition still in setup makes it and starts at once. A start on a draw-ready competition keeps the draw it has.
+
+Both draws run `runDrawPipeline` (`internal/engine/competition.go`), which picks one
 of four paths by format:
 
-- **Knockout:** direct elimination. `generateKnockout` (`internal/engine/bracket.go`) calls three `internal/helper` steps: `StandardSeeding` (`seed.go`) places the competitors, `CreateBalancedTree` (`tree.go`) builds the binary tree and `NewKnockoutDraw` (`draw.go`) cuts it into per-shiaijo regions and pages, aiming for at most `MaxPlayersPerTree` (16) competitors on each tree page.
-- **Mixed (pools + knockout):** tree-aware pool descent (`BuildPoolPhaseTreeAwareWithMode`) places seeds first, then spreads dojos across the bracket's nodes; the fill-bracket sizing uses its own builder. A preview bracket with pool-origin placeholders is written as well (`generatePoolPreviewBracket`), so the elimination stage is visible at draw time.
+- **Knockout:** direct elimination. `generateKnockout` (`internal/engine/bracket.go`) calls three `internal/helper` steps. `StandardSeeding` (`seed.go`) places the competitors, and `CreateBalancedTree` (`tree.go`) builds the binary tree. `NewKnockoutDraw` (`draw.go`) cuts it into per-shiaijo regions and pages, aiming for at most `MaxPlayersPerTree` (16) competitors on each tree page.
+- **Mixed (pools + knockout):** tree-aware pool descent (`BuildPoolPhaseTreeAwareWithMode`) places seeds first, then spreads dojos across the bracket's nodes. The fill-bracket sizing uses its own builder. A preview bracket with pool-origin placeholders is written as well (`generatePoolPreviewBracket`), so the elimination stage is visible at draw time.
 - **League:** a single pool, everyone fights everyone, through the same pool generation.
-- **Swiss:** only round 1 is paired at the draw (`GenerateSwissRound`); later rounds are generated as the event goes on, and there is no tree.
+- **Swiss:** only round 1 is paired at the draw (`GenerateSwissRound`). Later rounds are generated as the event goes on, and there is no tree.
 
 ## 7. Frontend (Preact SPA)
 
@@ -412,22 +438,26 @@ flowchart TB
     binemb ~~~ appc
 ```
 
-`app.jsx` is the root shell: it reads the route and switches between the public viewer, the
+`app.jsx` is the root shell. It reads the route and switches between the public viewer, the
 operator console and the display surface. Every surface talks to the server through
 `api_client.jsx` (the `API` object, which it assembles from the member pieces
 `api_client_tournament.jsx`, `api_client_competitions.jsx`, `api_client_matches.jsx`,
 `api_client_teams.jsx`, `api_client_outbox.jsx` and the two event members in `api_client_events.jsx`).
-Its `api_client_*.jsx` modules make the requests
-(`api_client_requests.jsx`), consume the SSE stream (`api_client_events.jsx`) and hold the outbox
-(refer to [The outbox](#the-outbox)). The root shell and the operator console apply each SSE patch to the
-competition data they hold through `patch.jsx` (`applyPatch`), which also detects a gap in the
+Its `api_client_*.jsx` modules do three jobs:
+
+- make the requests (`api_client_requests.jsx`);
+- consume the SSE stream (`api_client_events.jsx`);
+- hold the outbox (refer to [The outbox](#the-outbox)).
+
+The root shell and the operator console apply each SSE patch to the
+competition data they hold through `patch.jsx` (`applyPatch`). It also detects a gap in the
 event sequence (`checkSeqGap`) and triggers a resync. The modules around the outbox:
 
-- `score_events.jsx`: the score event kinds and the replay that puts a device's pending taps on top of the server's match, the browser twin of the server's fold and replay.
+- `score_events.jsx`: the score event kinds, and the replay that puts a device's pending taps on top of the server's match. It is the browser twin of the server's fold and replay.
 - `write_result.jsx`: decides whether a score write landed, and if not, whether the state on screen can still become true.
 - `draft_taps.jsx` (used by the score editors): turns a draft held in an editor into the taps that would have made it, when another device starts the match.
 - `queued_writes_wait.jsx` (used by the draw and move screens): waits for a competition's queued writes of a kind (check-ins before a draw, a time change before a move) before going on.
-- `landed_taps.jsx`, `told_taps.jsx` and `minted_members.jsx` (used by the outbox modules): what the device knows of its own taps that landed, of the taps it already told the operator were not applied, and of the team member ids it made. `base_sender_lease.jsx` (used by the flush) keeps one tab of the device sending each match's writes at a time, so two open tabs send a write once.
+- `landed_taps.jsx`, `told_taps.jsx` and `minted_members.jsx` (used by the outbox modules): what the device knows of its own taps that landed, and of the taps it already told the operator were not applied. They also hold the team member ids it made. `base_sender_lease.jsx` (used by the flush) keeps one tab of the device sending each match's writes at a time, so two open tabs send a write once.
 
 The operator console is a tablet/desktop surface; the viewer is mobile-first. Refer to
 [Network architecture](network-architecture.md) for the client's **outbox, SSE resume, and

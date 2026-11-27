@@ -37,7 +37,7 @@ The server has two authentication modes for the admin console; viewer routes are
 
 The admin password is stored plaintext in `tournament-data/tournament.md` and compared by exact-string match. Set the password during the in-app **Create tournament** flow, or edit `tournament.md` directly.
 
-- `POST /api/tournament/reset` needs no password but answers only a request from the machine running the server (a loopback address) that is addressed to a loopback name: `localhost`, `127.0.0.1` or `[::1]`. Any other request, from another machine or addressed by another name, gets `403` with the code `reset_local_only`. If you've forgotten the current password, browse to `http://localhost:<port>/reset` on the machine running the server to set a new one. In a Docker container run with `-p`, a browser on the host reaches the server through the container network, not loopback, so the reset is refused there too; edit `tournament.md` in the mounted data folder instead.
+- `POST /api/tournament/reset` needs no password. It answers only a request from the machine running the server (a loopback address) that is addressed to a loopback name: `localhost`, `127.0.0.1` or `[::1]`. Any other request, from another machine or addressed by another name, gets `403` with the code `reset_local_only`. If you've forgotten the current password, browse to `http://localhost:<port>/reset` on the machine running the server to set a new one. In a Docker container run with `-p`, a browser on the host reaches the server through the container network, not loopback. The reset is refused there too, so edit `tournament.md` in the mounted data folder instead.
 - `GET /api/auth-config` returns `{"mode": "file", "resetEnabled": true}`.
 
 ### Locked mode (`--lock-password`)
@@ -66,7 +66,7 @@ Recommended for any deployment reachable over the internet. The plaintext-in-fil
 
 #### Operational caveats
 
-- **`POST /api/tournament/reset` is limited to the machine running the server, judged on the connection's peer address and on the request's `Host`, which must be a loopback name.** `X-Forwarded-For` and similar headers are not consulted. The `Host` rule means a web page whose domain was rebound to `127.0.0.1` in a browser on the server machine is refused. Behind a reverse proxy on the same machine, every request arrives from the proxy's loopback address, so the reset is reachable by whoever the proxy exposes it to; block that path at the proxy or run with `--lock-password` (which 404s `POST /api/tournament/reset`).
+- **`POST /api/tournament/reset` is limited to the machine running the server.** It is judged on the connection's peer address and on the request's `Host`, which must be a loopback name. `X-Forwarded-For` and similar headers are not consulted. The `Host` rule means a web page whose domain was rebound to `127.0.0.1` in a browser on the server machine is refused. Behind a reverse proxy on the same machine, every request arrives from the proxy's loopback address. The reset is then reachable by whoever the proxy exposes it to. Block that path at the proxy, or run with `--lock-password` (which 404s `POST /api/tournament/reset`).
 - **Locked mode has no bcrypt brute-force protection.** The server runs a full bcrypt comparison (`bcrypt.DefaultCost` approx 50-100 ms) on every `X-Tournament-Password` header, but does not throttle repeated failed attempts. For internet-exposed locked-mode deployments, add a reverse proxy that rate-limits authenticated routes (for example, nginx's `limit_req`).
 - **Mode switching preserves the stored password.** Switching from file mode to locked mode does NOT erase `tournament.md`'s `password` field; auth stops consulting it. A later switch back to file mode resurrects the original password. This is a deliberate rollback feature, but anyone with filesystem access can still read the value. To fully retire a file-mode credential before going locked, `POST /api/tournament/reset` it to a one-time throwaway first.
 
@@ -83,7 +83,7 @@ A competition's pool and knockout settings are stored in its `competitions/<id>/
 The `mobile-app` command provides subcommands for offline maintenance and disaster recovery when the web server is stopped.
 
 !!! warning "Stop the server first"
-    Always stop the running `mobile-app` server before invoking `backup` or `restore`. The command-line tool operates directly on tournament files on disk and cannot detect or coordinate with a live server process. If a competition has a pending write in the transaction log (`.wal/`) that cannot be finished, the command refuses: free disk space or fix the data folder's permissions, then run the command again. Restarting the app does not help. If that does not clear it, a folder the change names may have been removed outside the app: restore that folder, or set aside the log the lines the command prints above the refusal name by renaming it so it no longer ends in `.json`, as [Write guarantees](../../architecture/data-model.md#5-write-guarantees) explains.
+    Always stop the running `mobile-app` server before invoking `backup` or `restore`. The command-line tool operates directly on tournament files on disk and cannot detect or coordinate with a live server process. If a competition has a pending write in the transaction log (`.wal/`) that cannot be finished, the command refuses. Free disk space or fix the data folder's permissions, then run the command again. Restarting the app does not help. If that does not clear it, a folder the change names may have been removed outside the app. Restore that folder, or set aside the log named in the lines the command prints above the refusal. Set it aside by renaming it so it no longer ends in `.json`, as [Write guarantees](../../architecture/data-model.md#5-write-guarantees) explains.
 
 ### mobile-app backup
 
@@ -99,7 +99,11 @@ bracket-creator mobile-app backup [flags]
 | `--out` | (none) | (required) | Output backup zip file path |
 | `--competition` | (none) | `""` | Competition ID to back up (leave it out to back up the whole tournament) |
 
-The backup command reads all competition files and tournament settings, strips the admin password from `tournament.md`, and writes the zip archive to `--out`.
+The backup command works in three steps:
+
+1. It reads all competition files and tournament settings.
+2. It strips the admin password from `tournament.md`.
+3. It writes the zip archive to `--out`.
 
 ### mobile-app restore
 
@@ -122,13 +126,29 @@ bracket-creator mobile-app restore FILE [flags]
 | `--lock-password` | (none) | `false` (or `$LOCK_PASSWORD=true`) | Handle the restored password as in locked mode: password comes from `TOURNAMENT_PASSWORD_HASH`, so `--password` is not needed |
 | `--allow-running` | (none) | `false` | Restore even when matches are running in a competition the restore replaces or removes |
 
-In file mode, a whole-tournament restore needs `--password` when the folder has no `tournament.md` yet, or its `tournament.md` has no admin password, so you can sign in to the restored tournament. `--lock-password` waives that requirement: the server you then start with `--lock-password` takes its password from `TOURNAMENT_PASSWORD_HASH`, which the restore command itself never reads. A folder with no `tournament.md` accepts only a whole-tournament archive: a competition archive, or `--only`, is refused until a tournament exists.
+In file mode, a whole-tournament restore needs `--password` in either of these cases:
 
-The command refuses a backup made by a later version of the app than the one running, by one it cannot be compared with, or by one older than it can bring up to date, and changes nothing: a backup is restored only with the version that made it or a later one, safety copies included. Refer to [Which version can restore a backup](../organisers/backup-and-restore.md#which-version-can-restore-a-backup).
+- The folder has no `tournament.md` yet.
+- The folder's `tournament.md` has no admin password.
+
+The password lets you sign in to the restored tournament. `--lock-password` waives that requirement: the server you then start with `--lock-password` takes its password from `TOURNAMENT_PASSWORD_HASH`, which the restore command itself never reads. A folder with no `tournament.md` accepts only a whole-tournament archive: a competition archive, or `--only`, is refused until a tournament exists.
+
+The command refuses a backup in each of these cases, and changes nothing:
+
+- It was made by a later version of the app than the one running.
+- It was made by a version the command cannot be compared with.
+- It was made by a version older than the command can bring up to date.
+
+A backup is restored only with the version that made it or a later one, safety copies included. Refer to [Which version can restore a backup](../organisers/backup-and-restore.md#which-version-can-restore-a-backup).
 
 Each competition ID may appear in only one of `--replace`, `--copy`, `--keep`, and `--remove`. `--undo` cannot be combined with `--only` or with any of those four flags, and it refuses an archive that is not a `before-restore` safety copy.
 
-Before applying changes, the command evaluates a dry run plan. If any competition requires a decision (such as replacing, copying or keeping an existing competition, or keeping or removing a competition missing from the backup), the command refuses and prints the choices for each, for example `mens-individual ("Mens Individual"): choose replace, copy or keep`. A competition only the backup holds needs no flag: it is added unless you pass `--keep` for it. With `--only`, or for a competition archive, `--keep` is not a choice for the competition restored, since keeping it would restore nothing.
+Before applying changes, the command evaluates a dry run plan. A competition may require a decision:
+
+- An existing competition can be replaced, copied or kept.
+- A competition missing from the backup can be kept or removed.
+
+If any competition does, the command refuses and prints the choices for each, for example `mens-individual ("Mens Individual"): choose replace, copy or keep`. A competition only the backup holds needs no flag: it is added unless you pass `--keep` for it. With `--only`, or for a competition archive, `--keep` is not a choice for the competition restored, since keeping it would restore nothing.
 
 After a restore, the command lists what it did with each competition: `Created:`, `Replaced:`, `Copied:`, `Kept:`, `Left out:` (a competition only the backup held, not added) and `Removed:`.
 

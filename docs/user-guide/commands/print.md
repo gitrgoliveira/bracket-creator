@@ -27,8 +27,9 @@ Provide **exactly one**:
       competition on the day, use the live standings view in the tournament
       app instead.
     - A competition with no draw yet and fewer than two places to print (no
-      expected number of participants and fewer than two registered), or
-      whose settings cannot form a draw for the places it would print. The
+      expected number of participants and fewer than two registered). The
+      same applies to a competition with no draw yet whose settings cannot form a draw for
+      the places it would print. The
       warning names the fix, for example setting its expected number of
       participants. A competition with no draw that can be sized prints as
       empty places instead, with no names, seeds or numbers.
@@ -63,7 +64,10 @@ Provide **exactly one**:
 | `--team-file` | | any filename containing `team` | An `.xlsx` basename to treat as a team workbook (excluded from tags). Repeatable. |
 | `--fail-on-skip-all` | | off | Exit with a non-zero status if every competition was skipped, so a scripted run can detect that no booklet was produced. Refer to [Some competitions can be left out of the booklet](#input-modes). |
 
-An output target is always required. For a single `--type`, provide exactly one of `--output` or `--output-dir`. `--type=all` requires `--output-dir` and rejects `--output`.
+An output target is always required:
+
+- For a single `--type`, provide exactly one of `--output` or `--output-dir`.
+- `--type=all` requires `--output-dir` and rejects `--output`.
 
 ## Usage
 
@@ -95,4 +99,9 @@ The tournament app's in-app export needs LibreOffice **in the running server**. 
 
 ## LibreOffice requirement
 
-`print` renders through **LibreOffice** (`soffice`). Install it with your platform's package manager (ensuring `soffice` is on `PATH`), or set `$LIBREOFFICE_PATH` to the `soffice` binary. If LibreOffice is not found, the command exits with installation instructions. The published [`bracket-creator-mobile-pdf`](../install/hosting.md) image bundles it.
+`print` renders through **LibreOffice** (`soffice`). Provide it in one of two ways:
+
+- Install it with your platform's package manager, ensuring `soffice` is on `PATH`.
+- Set `$LIBREOFFICE_PATH` to the `soffice` binary.
+
+If LibreOffice is not found, the command exits with installation instructions. The published [`bracket-creator-mobile-pdf`](../install/hosting.md) image bundles it.

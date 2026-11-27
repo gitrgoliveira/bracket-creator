@@ -83,7 +83,7 @@ Editing these frontend sources and refreshing the browser does **not** pick up c
 
 ### Run the end-to-end journeys
 
-The end-to-end journeys drive the tournament app in a real browser, the way a court operator and a spectator use it: an iPad-sized touch screen for the operator and a phone for the public pages. Run them before you open a pull request that changes `web-mobile/`; the pull request template asks for it.
+The end-to-end journeys drive the tournament app in a real browser, the way a court operator and a spectator use it. The operator gets an iPad-sized touch screen and the public pages get a phone. Run them before you open a pull request that changes `web-mobile/`. The pull request template asks for it.
 
 ```sh
 make e2e                                              # every journey
@@ -92,13 +92,19 @@ make e2e E2E_ARGS='--grep "score on a shiaijo"'       # one test by title
 make e2e E2E_ARGS='journeys/smoke.spec.mjs --headed'  # watch it run
 ```
 
-`make e2e` builds the binary, then runs each journey file against its own server on a free port with an empty data folder. You need Go, `node` with `npm`, and a network connection: the first run installs the harness's packages and its Chromium, and every build downloads the frontend libraries. The journeys are not part of `make go/test` and do not run in CI.
+`make e2e` builds the binary, then runs each journey file against its own server on a free port with an empty data folder. You need Go, `node` with `npm`, and a network connection. The first run installs the harness's packages and its Chromium, and every build downloads the frontend libraries. The journeys are not part of `make go/test` and do not run in CI.
 
-The harness's own guide, [`scripts/e2e/README.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/scripts/e2e/README.md), covers the rest: the devices, the console policy that fails a journey on a browser error, where screenshots and traces are written, how to add a journey, and what to do when a journey finds a bug.
+The harness's own guide, [`scripts/e2e/README.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/scripts/e2e/README.md), covers the rest:
+
+- the devices;
+- the console policy that fails a journey on a browser error;
+- where screenshots and traces are written;
+- how to add a journey;
+- what to do when a journey finds a bug.
 
 ## Regenerate the documentation screenshots
 
-Every screenshot and video under `docs/screenshots/` and `docs/videos/` is captured from the running application by a script, so a picture cannot quietly drift from the product it shows. If your change alters anything a user sees, recapture what it reaches with `make docs/media SINCE=main` before you open the pull request.
+Every screenshot and video under `docs/screenshots/` and `docs/videos/` is captured from the running application by a script. A picture therefore cannot quietly drift from the product it shows. If your change alters anything a user sees, recapture what it reaches with `make docs/media SINCE=main` before you open the pull request.
 
 ```sh
 make docs/screenshots                        # the application screenshots
@@ -110,13 +116,19 @@ make docs/screenshots FAMILY=editors         # one group
 make docs/screenshots SINCE=main             # only the groups your changes reach
 ```
 
-You need `node` and `python3`; the first run installs the rest. A run writes to `scripts/screenshots/out/`, never into `docs/` directly, and ends by listing only the screenshots that differ from the committed ones. Look at those and copy across the ones whose change you meant to make. Anything reported as unchanged needs no review. Videos are never compared, so copy a video only when your change alters what it shows.
+You need `node` and `python3`, and the first run installs the rest. A run writes to `scripts/screenshots/out/`, never into `docs/` directly. It ends by listing only the screenshots that differ from the committed ones. Look at those and copy across the ones whose change you meant to make. Anything reported as unchanged needs no review. Videos are never compared, so copy a video only when your change alters what it shows.
 
-The harness's own guide, [`scripts/screenshots/README.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/scripts/screenshots/README.md), covers the rest: how `SINCE=` decides what to capture, what a changed line tells you, what to do when a capture you did not touch appears in the list, how a capture must be seeded, and how to add one.
+The harness's own guide, [`scripts/screenshots/README.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/scripts/screenshots/README.md), covers the rest:
+
+- how `SINCE=` decides what to capture;
+- what a changed line tells you;
+- what to do when a capture you did not touch appears in the list;
+- how a capture must be seeded;
+- how to add one.
 
 ## How the documentation is published
 
-The site keeps one version of the docs for each minor release, starting with 2.5, and a version picker in the header switches between them. A patch release replaces its minor release's version, so 2.5.1 updates `2.5`. Readers land on `latest`, the newest release, so what they read matches what they downloaded. Every merge to `main` updates the `dev` version, which describes the next release while it is being built, so a docs fix you merge shows in `dev` at once and in `latest` with the next release. A link from before the docs had versions still works: it opens the same page under `latest`.
+The site keeps one version of the docs for each minor release, starting with 2.5. A version picker in the header switches between them. A patch release replaces its minor release's version, so 2.5.1 updates `2.5`. Readers land on `latest`, the newest release, so what they read matches what they downloaded. Every merge to `main` updates the `dev` version, which describes the next release while it is being built. A docs fix you merge therefore shows in `dev` at once and in `latest` with the next release. A link from before the docs had versions still works: it opens the same page under `latest`.
 
 Publishing is automatic. A merge to `main` and a release tag each run `.github/workflows/doc.yaml`, which checks the docs with `make docs/build` and then publishes them with `docs/publish_docs.py`. That script's header lists which version each tag publishes.
 

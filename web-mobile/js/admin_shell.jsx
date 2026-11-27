@@ -867,9 +867,12 @@ function CompCard({ c, onOpen, onStart, onSetDrawVisibility, tournament, showToa
   // Publish draw / Unpublish from the card (bc-drpb), a quiet action under
   // Start, so six hidden draws need no six page visits. The host makes the
   // write and the toast, as the draw preview header's button does; the card
-  // only keeps the button busy until the refetch brings the new state.
+  // only keeps the button busy until the refetch brings the new state. Busy
+  // is aria-disabled, never disabled: a disabled button drops the keyboard
+  // focus it holds to the page body.
   const [settingVisibility, setSettingVisibility] = useState(false);
   const toggleVisibility = () => {
+    if (settingVisibility) return;
     setSettingVisibility(true);
     onSetDrawVisibility(drawHidden).finally(() => setSettingVisibility(false));
   };
@@ -936,7 +939,7 @@ function CompCard({ c, onOpen, onStart, onSetDrawVisibility, tournament, showToa
               type="button"
               className="btn btn--ghost btn--sm btn--full"
               onClick={(e) => { e.stopPropagation(); toggleVisibility(); }}
-              disabled={settingVisibility}
+              aria-disabled={settingVisibility ? "true" : undefined}
               data-testid="card-draw-visibility-toggle"
             >
               {settingVisibility ? <span className="spinner" /> : <Icon name={drawHidden ? "eye" : "eye-off"} size={14} />}

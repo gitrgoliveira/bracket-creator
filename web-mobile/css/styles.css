@@ -4805,6 +4805,8 @@ details[open] > summary::before { transform: rotate(90deg); }
   opacity: 0.5;
 }
 
+/* h3 by default; h2 where the page's next heading up is its h1 (titleAs). */
+.empty h2,
 .empty h3 {
   font-weight: 600;
   color: var(--ink-2);
@@ -6191,11 +6193,13 @@ details[open] > summary::before { transform: rotate(90deg); }
 }
 
 /* Coarse-pointer tap floor for the score editors' small buttons (Tie,
-   Fusensho, decision row, Encho): 44px per DESIGN §2.4; scoped to the
-   editors so dense list surfaces keep their density (critique P3). */
+   Fusensho, decision row, Encho) and the dashboard card's actions (Start
+   competition, Publish draw): 44px per DESIGN §2.4; scoped so dense list
+   surfaces keep their density (critique P3). */
 @media (pointer: coarse) {
   .editor-modal .btn--sm,
-  .scoring-panel .btn--sm {
+  .scoring-panel .btn--sm,
+  .tcard__actions .btn--sm {
     min-height: 44px;
   }
 }

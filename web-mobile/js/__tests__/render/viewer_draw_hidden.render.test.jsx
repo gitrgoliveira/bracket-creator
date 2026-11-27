@@ -115,6 +115,7 @@ describe('ViewerCompetition: a hidden draft reads as setup (bc-drpb)', () => {
     expect(tabNames()).toEqual(['Overview']);
     const card = screen.getByTestId('draw-preparing-card');
     expect(card.textContent).toContain('Draw being prepared');
+    expect(card.querySelector('h2')?.textContent, 'an h2 under the page h1, skipping no level').toBe('Draw being prepared');
     expect(card.textContent).toContain('Starts at 10:30. 3 competitors entered. The draw shows here once it is published.');
     expect(document.querySelector('.viewer__head .badge')).toBeNull();
     expect(screen.queryByText('Draw is ready')).toBeNull();

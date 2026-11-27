@@ -127,15 +127,23 @@ describe('Dashboard card: Publish draw and Unpublish (round critique-2 D4)', () 
     expect(onSetDrawVisibility).toHaveBeenCalledWith(false);
   });
 
-  it('the button stays busy until the host has answered', async () => {
+  // Busy is aria-disabled, never disabled: a disabled button drops the keyboard
+  // focus it holds to the page body (audit of PR #525).
+  it('the button stays busy, and keeps focus, until the host has answered; a second tap sends nothing', async () => {
     let answer;
     const onSetDrawVisibility = vi.fn(() => new Promise((resolve) => { answer = resolve; }));
     const { container } = await mountCard({ c: makeComp({ drawHidden: true }), onSetDrawVisibility });
+    visibilityToggle(container).focus();
     await act(async () => { fireEvent.click(visibilityToggle(container)); });
-    expect(visibilityToggle(container).disabled).toBe(true);
-    expect(visibilityToggle(container).textContent).toBe('Publishing…');
-    await act(async () => { answer(); });
+    expect(visibilityToggle(container).getAttribute('aria-disabled')).toBe('true');
     expect(visibilityToggle(container).disabled).toBe(false);
+    expect(visibilityToggle(container).textContent).toBe('Publishing…');
+    expect(document.activeElement).toBe(visibilityToggle(container));
+    await act(async () => { fireEvent.click(visibilityToggle(container)); });
+    expect(onSetDrawVisibility).toHaveBeenCalledTimes(1);
+    await act(async () => { answer(); });
+    expect(visibilityToggle(container).hasAttribute('aria-disabled')).toBe(false);
+    expect(document.activeElement).toBe(visibilityToggle(container));
   });
 
   it.each(['setup', 'pools', 'knockout', 'completed'])('a competition in %s offers no Publish draw', async (status) => {

@@ -580,6 +580,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
       <EmptyState
         icon="eye-off"
         title={PUBLIC_DRAW_PREPARING}
+        titleAs="h2"
         message={publicDrawPreparingMessage(c)}
         className="draw-preparing-card"
         data-testid="draw-preparing-card"

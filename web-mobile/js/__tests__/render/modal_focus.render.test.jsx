@@ -6,7 +6,9 @@
 // Pinned here: focus goes to the dialog's Close button (a safe Enter) without
 // scrolling the page, Escape gives it back to the control that opened the dialog,
 // and a dialog whose text box takes focus itself (autoFocus, the registration
-// desk's name box) keeps it there, so an iPad does not drop its keyboard.
+// desk's name box) keeps it there, so an iPad does not drop its keyboard. Tab and
+// Shift+Tab stay inside the dialog (keepTabInside), so a keyboard user cannot reach
+// the page behind its backdrop.
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
@@ -107,5 +109,42 @@ describe('Modal focus', () => {
     await openFrom(utils);
 
     expect(document.activeElement).toBe(utils.getByRole('textbox', { name: 'Name' }));
+  });
+
+  // jsdom lays nothing out, so offsetParent, by which keepTabInside skips a hidden
+  // control, is null for every element; this test stands in for a laid-out page.
+  it('keeps Tab and Shift+Tab inside the dialog', async () => {
+    const laidOut = vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockImplementation(function parent() { return this.parentElement; });
+    try {
+      await tabStaysInside();
+    } finally {
+      laidOut.mockRestore();
+    }
+  });
+
+  async function tabStaysInside() {
+    let utils;
+    await act(async () => { utils = render(<Host />); });
+    await openFrom(utils);
+    const close = utils.getByRole('button', { name: 'Close' });
+    const cancel = utils.getByRole('button', { name: 'Cancel' });
+    expect(document.activeElement).toBe(close);
+
+    const tab = (shiftKey) => fireEvent.keyDown(document.activeElement, { key: 'Tab', shiftKey });
+    cancel.focus();
+    expect(tab(false), 'the browser does not move on: the dialog wraps it').toBe(false);
+    expect(document.activeElement, 'Tab from the last control wraps to the first').toBe(close);
+    expect(tab(true)).toBe(false);
+    expect(document.activeElement, 'Shift+Tab from the first wraps to the last').toBe(cancel);
+    expect(tab(true), 'Shift+Tab from the last control is the browser\'s own').toBe(true);
+  }
+
+  it('leaves Tab alone while focus is outside the dialog (a layer stacked above it)', async () => {
+    let utils;
+    await act(async () => { utils = render(<Host />); });
+    const opener = await openFrom(utils);
+    opener.focus();
+    expect(fireEvent.keyDown(opener, { key: 'Tab' })).toBe(true);
+    expect(document.activeElement).toBe(opener);
   });
 });

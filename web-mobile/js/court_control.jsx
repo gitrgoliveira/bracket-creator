@@ -179,7 +179,8 @@ function _tabReady() {
 
 /**
  * The kind of device, read from the browser: one of ipad, android-tablet,
- * iphone, android-phone, mac, windows, other. iPadOS Safari reports a Mac by
+ * iphone, android-phone, mac, windows, device (anything unrecognised). iPadOS
+ * Safari reports a Mac by
  * default, so a "Macintosh" user agent with more than one touch point reads ipad.
  */
 export function deviceWord(nav = (typeof navigator !== 'undefined' ? navigator : {})) {
@@ -190,7 +191,7 @@ export function deviceWord(nav = (typeof navigator !== 'undefined' ? navigator :
     if (/Android/.test(ua)) return /Mobile/.test(ua) ? 'android-phone' : 'android-tablet';
     if (/Macintosh|Mac OS X/.test(ua)) return 'mac';
     if (/Windows/.test(ua)) return 'windows';
-    return 'other';
+    return 'device';
 }
 
 // ---------------------------------------------------------------------------

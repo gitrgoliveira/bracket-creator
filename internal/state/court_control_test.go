@@ -52,12 +52,12 @@ func TestCourtControlKey_IsAOneWayKeyOfSixteenHexCharacters(t *testing.T) {
 	assert.Empty(t, CourtControlKey(""), "an empty id has no key")
 }
 
-func TestCourtDeviceWord_AnythingUnknownReadsOther(t *testing.T) {
-	for _, w := range []string{"ipad", "android-tablet", "iphone", "android-phone", "mac", "windows", "other"} {
+func TestCourtDeviceWord_AnythingUnknownReadsDevice(t *testing.T) {
+	for _, w := range []string{"ipad", "android-tablet", "iphone", "android-phone", "mac", "windows", "device"} {
 		assert.Equal(t, w, CourtDeviceWord(w))
 	}
-	for _, w := range []string{"", "iPad", "Ricardo's tablet", "<script>"} {
-		assert.Equal(t, CourtDeviceOther, CourtDeviceWord(w), w)
+	for _, w := range []string{"", "other", "iPad", "Ricardo's tablet", "<script>"} {
+		assert.Equal(t, CourtDeviceGeneric, CourtDeviceWord(w), w)
 	}
 }
 
@@ -160,7 +160,7 @@ func TestLoadCourtControl_AHandEditedFileIsReadAsTheSaveKeepsIt(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(s.folder, CourtControlFilename), []byte(file), 0o600))
 
 	got := s.LoadCourtControl()
-	assert.Equal(t, CourtDeviceOther, got.Courts["A"].Device, "free text never reaches another screen")
+	assert.Equal(t, CourtDeviceGeneric, got.Courts["A"].Device, "free text never reaches another screen")
 	assert.Equal(t, int64(0), got.Courts["A"].Since)
 	assert.True(t, got.Courts["A"].Held())
 	assert.False(t, got.Courts["B"].Held(), "a holder with a malformed key reads as free")

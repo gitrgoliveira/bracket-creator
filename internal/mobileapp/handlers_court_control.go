@@ -24,7 +24,7 @@ import (
 
 // courtClaimRequest is the PUT's body. The ids are lowercase UUID v4s the
 // console mints; device is one of the device words (anything else reads
-// "other"); takenAt is required with take; keep is an optional list of other
+// "device"); takenAt is required with take; keep is an optional list of other
 // shiaijo this tab must keep holding (at most helper.MaxCourts string entries).
 type courtClaimRequest struct {
 	TabID    string            `json:"tabId"`

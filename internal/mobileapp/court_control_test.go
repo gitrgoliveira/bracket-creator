@@ -486,7 +486,7 @@ func TestCourtControl_AWriteClaimsAFreeShiaijo(t *testing.T) {
 	assert.True(t, rig.standing(t, "A", ccTab1, ccTablet1, 1), "a console opened offline: its write claims the free shiaijo")
 	h := rig.stored(t, "A")
 	assert.Equal(t, state.CourtControlKey(ccTab1), h.HolderKey)
-	assert.Equal(t, state.CourtDeviceOther, h.Device)
+	assert.Equal(t, state.CourtDeviceGeneric, h.Device)
 	assert.Zero(t, h.StandingFrom)
 	require.Len(t, rig.rec.events, 1)
 
@@ -574,7 +574,7 @@ func TestCourtControl_Refusals(t *testing.T) {
 	rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
 	got, err := rig.reg.Claim(CourtClaim{Court: "B", TabID: ccTab2, DeviceID: ccTablet2, PageID: ccPage2, Device: "<b>my tablet</b>"})
 	require.NoError(t, err)
-	assert.Equal(t, state.CourtDeviceOther, got.Device, "no free text reaches another screen")
+	assert.Equal(t, state.CourtDeviceGeneric, got.Device, "no free text reaches another screen")
 }
 
 // --- the routes ------------------------------------------------------------

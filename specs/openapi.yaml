@@ -2173,8 +2173,8 @@ paths:
                     most the server's clock plus 5 seconds.
                 device:
                   type: string
-                  enum: [ipad, android-tablet, iphone, android-phone, mac, windows, other]
-                  description: The kind of device, shown to the other consoles. Anything else reads `other`.
+                  enum: [ipad, android-tablet, iphone, android-phone, mac, windows, device]
+                  description: The kind of device, shown to the other consoles. Anything else reads `device`.
                 keep:
                   type: array
                   maxItems: 16
@@ -10096,7 +10096,7 @@ components:
             while nobody runs the shiaijo. It grants nothing.
         device:
           type: string
-          enum: ['', ipad, android-tablet, iphone, android-phone, mac, windows, other]
+          enum: ['', ipad, android-tablet, iphone, android-phone, mac, windows, device]
           description: The holder's kind of device, empty while nobody runs it.
         youHold:
           type: boolean

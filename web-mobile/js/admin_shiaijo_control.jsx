@@ -53,7 +53,7 @@ const DEVICE_PHRASE = {
     windows: 'a Windows PC',
 };
 
-/** "an iPad", ... or '' for a device the server reads as `other`. */
+/** "an iPad", ... or '' for a device the server reads as `device` (unrecognised). */
 export function devicePhrase(word) {
     return DEVICE_PHRASE[String(word || '')] || '';
 }

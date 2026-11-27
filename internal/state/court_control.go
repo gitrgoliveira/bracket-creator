@@ -28,20 +28,21 @@ const MaxCourtDisplaced = 8
 // characters of the SHA-256 of the raw id.
 const courtControlKeyLen = 16
 
-// CourtDeviceOther is the device word anything unknown reads as, so no free
-// text from a request or a hand-edited file reaches another screen.
-const CourtDeviceOther = "other"
+// CourtDeviceGeneric is the device word anything unrecognised reads as, so no
+// free text from a request or a hand-edited file reaches another screen. The
+// bar says "another device" for it.
+const CourtDeviceGeneric = "device"
 
 // courtDeviceWords are the device words a holder may carry.
-var courtDeviceWords = []string{"ipad", "android-tablet", "iphone", "android-phone", "mac", "windows", CourtDeviceOther}
+var courtDeviceWords = []string{"ipad", "android-tablet", "iphone", "android-phone", "mac", "windows", CourtDeviceGeneric}
 
 // CourtDeviceWord answers word when it is one of the known device words,
-// and CourtDeviceOther for anything else.
+// and CourtDeviceGeneric for anything else.
 func CourtDeviceWord(word string) string {
 	if slices.Contains(courtDeviceWords, word) {
 		return word
 	}
-	return CourtDeviceOther
+	return CourtDeviceGeneric
 }
 
 // CourtControlKey is the one-way key of a tab id or a tablet id: the first

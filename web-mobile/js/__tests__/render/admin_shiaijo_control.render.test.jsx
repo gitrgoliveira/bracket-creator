@@ -285,7 +285,7 @@ describe('telling the operator what view only means', () => {
   });
 
   it('a grace with no device word says "another device"', () => {
-    const view = { state: 'other', holderDevice: 'other', holderLastActiveAt: 0, releasedAt: 5, sameDevice: false, youWereDisplaced: false };
+    const view = { state: 'other', holderDevice: 'device', holderLastActiveAt: 0, releasedAt: 5, sameDevice: false, youWereDisplaced: false };
     expect(courtControlBar(view, 'C').text)
       .toBe('Shiaijo C was closed on another device just now. This console takes it within about half a minute unless that device comes back.');
   });
@@ -461,7 +461,7 @@ describe('the words and the check', () => {
   });
 
   it('names no device for one the server reads as other', () => {
-    const view = { state: 'other', holderDevice: 'other', holderLastActiveAt: 0, sameDevice: false, youWereDisplaced: false, tabWasDisplaced: false };
+    const view = { state: 'other', holderDevice: 'device', holderLastActiveAt: 0, sameDevice: false, youWereDisplaced: false, tabWasDisplaced: false };
     expect(courtControlBar(view, 'B').text).toBe('Another device runs shiaijo B.');
   });
 

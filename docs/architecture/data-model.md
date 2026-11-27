@@ -861,7 +861,7 @@ The file holds one object, `courts`, keyed by the shiai-jo letter. A shiai-jo wi
 
 - `holderKey`: a one-way key (the first 16 hex characters of the SHA-256) of the holding tab's id. The raw id is never stored, so the file grants nothing.
 - `deviceKey`: the same kind of key for the holding tablet's id. A result has the court's standing when it comes from a court console tab of this tablet, so a take between two tabs of one tablet keeps it.
-- `device`: the holder's device word (`ipad`, `android-tablet`, `iphone`, `android-phone`, `mac`, `windows` or `other`), which the bar on the other consoles shows. Anything else reads as `other`.
+- `device`: the holder's device word (`ipad`, `android-tablet`, `iphone`, `android-phone`, `mac`, `windows` or `device`), which the bar on the other consoles shows. Anything else reads as `device`, which the bar calls "another device".
 - `since`: when the holder took the shiai-jo, in unix milliseconds on the server's clock.
 - `standingFrom`: the earliest write stamp of the holding tablet that has the court's standing. It is 0 for a free shiai-jo taken at once, and the take's own stamp when a tablet took it from another tablet (or took back a free shiai-jo it had lost to another tablet), so results the old tablet recorded before the take never gain the standing. A take between two tabs of one tablet leaves it as it was.
 - `pageId`: the holding tab's page load, so a late release from a reloaded page never frees the new page's claim.

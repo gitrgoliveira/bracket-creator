@@ -503,7 +503,7 @@ func (r *courtControlRegistry) WriteStanding(court, tabID, deviceID string, stam
 		}
 		nowMs := r.now().UnixMilli()
 		next := r.copyLocked()
-		next[court] = holdBy(h, tabKey, devKey, state.CourtDeviceOther, "", nowMs, 0)
+		next[court] = holdBy(h, tabKey, devKey, state.CourtDeviceGeneric, "", nowMs, 0)
 		if err := r.saveLocked(next, listed); err != nil {
 			return false, err
 		}

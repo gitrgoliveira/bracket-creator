@@ -78,7 +78,7 @@ describe('the device word', () => {
     expect(deviceWord({ userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-X710) Safari/537.36' })).toBe('android-tablet');
     expect(deviceWord({ userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36' })).toBe('android-phone');
     expect(deviceWord({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })).toBe('windows');
-    expect(deviceWord({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' })).toBe('other');
+    expect(deviceWord({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' })).toBe('device');
   });
 });
 

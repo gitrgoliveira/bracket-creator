@@ -60,7 +60,7 @@ describe('If you swap them', () => {
     expect(window.API.swapDrawPlaces).toHaveBeenCalledWith('c1',
       { a: { id: 'a', place: a.place }, b: { id: 'b', place: b.place }, dryRun: true }, 'pw');
     const verdict = screen.getByTestId('swap-verdict');
-    expect(verdict.textContent).toBe('Team Omega can meet later.');
+    expect(verdict.textContent).toBe('Dojo-mates from Team Omega could meet later.');
     expect(verdict.className, 'no dojo is worse off: the normal style').toBe('draw-swap-check__line');
     expect(verdict.compareDocumentPosition(screen.getByTestId('swap-moves')) & Node.DOCUMENT_POSITION_FOLLOWING, 'the verdict comes first').toBeTruthy();
     expect(screen.getByTestId('swap-moves').textContent).toBe('IMS4 Arthur Dick goes to Pool C, IMS8 Lena Park to Pool B.');
@@ -90,7 +90,7 @@ describe('If you swap them', () => {
     await open();
     await act(async () => { vi.advanceTimersByTime(1); });
     const verdict = screen.getByTestId('swap-verdict');
-    expect(verdict.textContent, 'the dojo is named, judged as a whole').toBe('Fudo would share a pool.');
+    expect(verdict.textContent, 'the dojo is named, judged as a whole').toBe('Dojo-mates from Fudo would share a pool.');
     expect(verdict.className).toBe('draw-swap-check__line draw-swap-check__line--warn');
     const swap = screen.getByTestId('swap-them');
     expect(swap.textContent).toBe('Swap anyway');

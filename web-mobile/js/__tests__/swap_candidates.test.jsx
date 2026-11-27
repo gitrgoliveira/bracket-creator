@@ -2,7 +2,7 @@
 // candidate; these helpers only read its answer (better, worse, same) into
 // marks and word what the marks mean on the banner's second line.
 import { describe, it, expect } from 'vitest';
-import { candidateVerdicts, marksKey, MARK_KEYS } from '../admin_swap_candidates.jsx';
+import { candidateVerdicts, candidateMarks, markText, marksKey, MARK_KEYS } from '../admin_swap_candidates.jsx';
 import { swapPickLine } from '../admin_competition_bracket.jsx';
 
 const answer = (pickId, candidates) => ({ pick: { id: pickId, place: { pool: 'Pool A', position: 1 } }, candidates });
@@ -25,6 +25,25 @@ describe('the marks of one pick', () => {
     expect(candidateVerdicts(null, 'p1').size).toBe(0);
     expect(candidateVerdicts(answer('p1', [{ id: 'p2', verdict: 'worse' }]), null).size).toBe(0);
   });
+
+  it('keeps the dojos each mark is about', () => {
+    const { marks, dojos } = candidateMarks(answer('p1', [
+      { id: 'p2', verdict: 'worse', dojos: ['Fudo', 'Hizen'] },
+      { id: 'p3', verdict: 'better', dojos: ['Kenyu'] },
+      { id: 'p4', verdict: 'same' },
+    ]), 'p1');
+    expect([...marks.keys()]).toEqual(['p2', 'p3']);
+    expect(dojos.get('p2')).toEqual(['Fudo', 'Hizen']);
+    expect(dojos.get('p3')).toEqual(['Kenyu']);
+    expect(dojos.has('p4')).toBe(false);
+  });
+
+  it('names the dojos a mark affects, never reading as the candidate\'s own', () => {
+    expect(markText('worse', ['Fudo', 'Hizen'])).toBe('Worse for Fudo, Hizen');
+    expect(markText('better', ['Kenyu'])).toBe('Better for Kenyu');
+    expect(markText('same', ['Fudo'])).toBe('');
+    expect(markText(null)).toBe('');
+  });
 });
 
 describe('what the banner says of the marks', () => {
@@ -35,6 +54,8 @@ describe('what the banner says of the marks', () => {
     expect(MARK_KEYS.both).toEqual({ text: 'Green keeps dojo-mates apart longer, amber brings some closer.', quiet: false });
     expect(marksKey({ marks: marks('better') })).toBe('better');
     expect(marksKey({ marks: marks('worse') })).toBe('worse');
+    // Amber alone: nothing green to explain, and no swap of this pick helps.
+    expect(MARK_KEYS.worse).toEqual({ text: 'No swap here helps. Amber brings dojo-mates closer.', quiet: false });
   });
 
   it('says quietly when no swap changes anything, or the marks could not be read, and nothing while the read is out', () => {
@@ -46,8 +67,12 @@ describe('what the banner says of the marks', () => {
     expect(MARK_KEYS.loading).toEqual({ text: 'Marking the swaps…', quiet: true });
   });
 
-  it('keeps the pick line the same length whatever the marks say', () => {
+  it('names the pick number first, then the place, the same length whatever the marks say', () => {
     const picked = { name: 'Player 08', number: 'P1', place: { pool: 'Pool A', position: 1 } };
-    expect(swapPickLine(picked, null)).toBe('Swap Player 08 (Pool A, P1) with… tap another competitor.');
+    expect(swapPickLine(picked, null)).toBe('Swap P1 Player 08 (Pool A) with…');
+    const bracket = { rounds: [[{ matchNumber: 1 }, { matchNumber: 2 }, { matchNumber: 3 }]] };
+    expect(swapPickLine({ name: 'Player 01', number: 'K1', place: { slot: 5 } }, bracket)).toBe('Swap K1 Player 01 (M3) with…');
+    expect(swapPickLine({ name: 'Arthur', place: { pool: 'Pool B', position: 2 } }, null), 'no number when the competition does not number')
+      .toBe('Swap Arthur (Pool B) with…');
   });
 });

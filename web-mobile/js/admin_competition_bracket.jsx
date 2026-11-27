@@ -8,7 +8,7 @@ import { writeKeepsEditorOpen } from './write_result.jsx';
 import { confirmLeave } from './unsaved_entries.jsx';
 import { competitionHasRecordedResult } from './recorded_result.jsx';
 import { reviewsDraw } from './admin_draw_review.jsx';
-import { DrawSwapCheck, effectiveFormat, drawEntrants, drawPlaceLabel, swapDoneToast } from './admin_draw_swap_check.jsx';
+import { DrawSwapCheck, effectiveFormat, drawEntrants, drawPlaceLabel, competitorLabel, swapDoneToast } from './admin_draw_swap_check.jsx';
 import { useSwapCandidates, marksKey, SwapMarksKey, SwapVerdictWord } from './admin_swap_candidates.jsx';
 import { acceptTap } from './tap_guard.jsx';
 import { useEscapeToClose } from './ui.jsx';
@@ -247,12 +247,14 @@ export function swapModeAvailable(c, tab, poolMatches, bracket) {
   return !competitionHasRecordedResult(poolMatches, bracket);
 }
 
-// swapPickLine: the line under the banner once one competitor is picked. What
-// the marks mean is said on a key line of its own (SwapMarksKey), so this one
-// never changes length when they arrive.
+// swapPickLine: the banner's line once one competitor is picked, naming them
+// number first and then their place ("Swap P1 Player 08 (Pool A) with…",
+// "Swap K1 Player 01 (M3) with…", operator decision C10). What to do next and
+// what the marks mean are said by the key line (SwapMarksKey) and the marks,
+// so this one never changes length when they arrive.
 export function swapPickLine(picked, bracket) {
-  const where = [drawPlaceLabel(picked.place, bracket), picked.number].filter(Boolean).join(', ');
-  return `Swap ${picked.name}${where ? ` (${where})` : ''} with… tap another competitor.`;
+  const where = drawPlaceLabel(picked.place, bracket);
+  return `Swap ${competitorLabel(picked)}${where ? ` (${where})` : ''} with…`;
 }
 
 // useSwapCompetitors: the mode's state for one host tab. Returns `swap` (the
@@ -270,6 +272,20 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
   const tapRef = useRef(null);
   const available = swapModeAvailable(c, tab, poolMatches, bracket);
   const active = on && available;
+  // Opened from the card's button, the page scrolls to the banner, with the
+  // first competitors under it in view (operator decision S4); on a phone the
+  // tab's menu sits above the banner, so the top of the page would hide it.
+  // The page first goes to its top: the Overview's scroll is kept on a tab
+  // switch, so the banner may already be pinned there, which scrollIntoView
+  // takes as in view. Once, and only for that entry: a plain tab switch keeps
+  // the page where it is.
+  const askedRef = useRef(on);
+  useEffect(() => {
+    if (!active || !askedRef.current || !bannerRef.current) return;
+    askedRef.current = false;
+    window.scrollTo(0, 0);
+    bannerRef.current.scrollIntoView({ block: 'start' });
+  }, [active]);
   // The pinned banner's height, for the competitors' scroll margin, published
   // while the banner is drawn.
   useEffect(() => {
@@ -326,19 +342,21 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
     () => [...entrants.values()].map((e) => `${e.id}@${JSON.stringify(e.place)}`).join('|'),
     [entrants],
   );
-  const { marks, failed } = useSwapCandidates({
+  const { marks, dojos, failed } = useSwapCandidates({
     compId: c && c.id, pickId: picked && !checking ? picked.id : null, drawKey, password, onDrawChanged,
   });
   const markOf = (id) => (marks && marks.get(id)) || null;
+  const dojosOf = (id) => (dojos && dojos.get(id)) || null;
 
   const swap = active ? {
     entrantOf: (id) => entrants.get(id) || null,
     pickedId: picked ? picked.id : null,
     onPick,
     markOf,
-    // The word beside a mark, drawn (hidden) on every pick while the mode is
-    // on, so a mark that appears moves nothing.
-    verdictWord: (id, lead) => <SwapVerdictWord mark={markOf(id)} lead={lead} />,
+    // The mark's line under the dojo ("Worse for Fudo, Hizen"), drawn blank
+    // on every pick while the mode is on, so a mark that appears moves
+    // nothing.
+    verdictWord: (id) => <SwapVerdictWord mark={markOf(id)} dojos={dojosOf(id)} />,
   } : null;
 
   let controls = null;
@@ -355,27 +373,35 @@ export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, passwo
     controls = (
       <>
       <div className="swap-mode swap-mode--pinned" role="region" aria-label="Swap competitors" data-testid="swap-mode" ref={bannerRef}>
+        {/* One layout on every screen (operator decision C7): the text, then
+            the buttons on the right of the same row. Before the first pick
+            the text is the instruction; from the pick on it is the pick line
+            alone, with Cancel beside Done, and the key line goes under. */}
         <div className="swap-mode__head">
-          <p className="swap-mode__lead">
-            <strong>Swap competitors: on.</strong> Tap two competitors to swap them. Taps do not open score sheets now.
-          </p>
-          <button type="button" className="btn btn--sm btn--primary" data-testid="swap-mode-done" onClick={guarded(turnOff)}>Done</button>
-        </div>
-        {/* Always drawn, so a pick that writes its line moves nothing under the
-            finger. */}
-        <div className="swap-mode__line" aria-live="polite" data-testid="swap-mode-line">
-          {picked ? (
-            <>
-              <span>{swapPickLine(picked, bracket)}</span>
+          <div className="swap-mode__text">
+            {!picked && (
+              <p className="swap-mode__lead">
+                <strong>Swap competitors:</strong> tap two competitors to swap them. While this is on, a tap picks a competitor instead of opening a score sheet.
+              </p>
+            )}
+            {/* Always drawn, so the pick line and a note are announced as
+                they are written. */}
+            <p className="swap-mode__line" aria-live="polite" data-testid="swap-mode-line">
+              {picked ? swapPickLine(picked, bracket) : note ? (
+                <span className={note.error ? 'swap-mode__note swap-mode__note--error' : 'swap-mode__note'}>{note.text}</span>
+              ) : null}
+            </p>
+          </div>
+          <div className="swap-mode__actions">
+            {picked && (
               <button type="button" className="btn btn--sm" data-testid="swap-mode-cancel" onClick={guarded(() => setPickedId(null))}>Cancel</button>
-            </>
-          ) : note ? (
-            <span className={note.error ? 'swap-mode__note swap-mode__note--error' : 'swap-mode__note'}>{note.text}</span>
-          ) : null}
+            )}
+            <button type="button" className="btn btn--sm btn--primary" data-testid="swap-mode-done" onClick={guarded(turnOff)}>Done</button>
+          </div>
         </div>
         {/* What the marks mean, on a line of its own drawn from the pick on at
-            the height of its longest sentence, so the marks arriving move
-            nothing. */}
+            the height of its longest sentence (two lines at most on a phone),
+            so the marks arriving move nothing. */}
         {picked && <SwapMarksKey current={checking ? null : marksKey({ marks, failed })} />}
       </div>
       {checking && (

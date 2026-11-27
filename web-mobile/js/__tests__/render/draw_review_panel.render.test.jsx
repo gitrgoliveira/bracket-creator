@@ -196,6 +196,9 @@ describe('the Draw review card', () => {
     const h = await mount();
     const button = screen.getByTestId('draw-review-swap-mode');
     expect(button.textContent).toBe('Swap competitors on Pools');
+    // A normal-size button (44 px on a touch screen through the tap floor), not a small one.
+    expect(button).toHaveClass('btn');
+    expect(button).not.toHaveClass('btn--sm');
     expect(screen.queryByTestId('swap-pick-a'), 'no pickers of its own').toBeNull();
     await keyboardClick(button);
     expect(h.onSection).toHaveBeenCalledWith('pools');

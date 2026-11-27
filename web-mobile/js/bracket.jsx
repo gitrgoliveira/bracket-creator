@@ -491,6 +491,10 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
             a uniform height (mp-7f2w). When showDojo is off, no line is rendered
             anywhere, so cards stay uniformly short. */}
         {showDojo ? <span className="bc-dojo">{player.dojo || <span aria-hidden="true">{"\u00A0"}</span>}</span> : null}
+        {/* A swap candidate's mark names the dojos it is about ("Worse for
+            Fudo, Hizen") on a line of its own under the dojo, wrapping inside
+            the side, so a long list never pushes the name. */}
+        {pick ? pick.word : null}
       </div>
       {/* score is null for a scheduled match (nothing struck yet), so a barred
           side (ineligible_match.jsx) takes that same results-column slot: a
@@ -498,9 +502,6 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
           ellipsis. Mirrors where a completed match's Kiken/Fus./Ht mark rides
           (cardMarks in MatchCard); the two can never both apply to one side. */}
       {score != null ? <span className="bc-score">{score}</span> : barred ? <BarredChip /> : null}
-      {/* A swap candidate's mark carries its word too (better, worse), in the
-          card's right column, so a long name or dojo never cuts it off. */}
-      {pick ? pick.word : null}
     </Side>
   );
 });
@@ -517,7 +518,7 @@ function swapPickFor(swap, side) {
   return {
     picked: swap.pickedId === entrant.id,
     mark: swap.markOf ? swap.markOf(entrant.id) : null,
-    word: swap.verdictWord ? swap.verdictWord(entrant.id, false) : null,
+    word: swap.verdictWord ? swap.verdictWord(entrant.id) : null,
     onPick: (ev) => swap.onPick(entrant, ev),
   };
 }

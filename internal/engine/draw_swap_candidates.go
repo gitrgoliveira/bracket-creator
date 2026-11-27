@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -29,11 +30,15 @@ const (
 
 // SwapCandidate is one competitor the pick could swap with: their
 // participant id, the place they hold now (the shape the swap request
-// takes) and what the swap would do to the dojo separation.
+// takes) and what the swap would do to the dojo separation: Verdict, and
+// Dojos, the dojos it is about, sorted (those worse off for worse, those
+// better off for better, none for the same), so a mark can say whom the swap
+// harms or helps rather than read as the candidate's own dojo.
 type SwapCandidate struct {
 	ID      string    `json:"id"`
 	Place   DrawPlace `json:"place"`
 	Verdict string    `json:"verdict"`
+	Dojos   []string  `json:"dojos,omitempty"`
 }
 
 // SwapCandidates is the answer of GET .../draw/swap-candidates: the pick and
@@ -100,11 +105,11 @@ func swapCandidates(snap swapSnapshot, pickID string) (*SwapCandidates, error) {
 		if y == x {
 			continue
 		}
-		verdict, err := s.candidateVerdict(snap, summary, source, x, y)
+		verdict, dojos, err := s.candidateVerdict(snap, summary, source, x, y)
 		if err != nil {
 			return nil, err
 		}
-		out.Candidates = append(out.Candidates, SwapCandidate{ID: ey.c.side.ID, Place: clonePlace(ey.place), Verdict: verdict})
+		out.Candidates = append(out.Candidates, SwapCandidate{ID: ey.c.side.ID, Place: clonePlace(ey.place), Verdict: verdict, Dojos: dojos})
 	}
 	return out, nil
 }
@@ -115,8 +120,8 @@ func swapCandidates(snap swapSnapshot, pickID string) (*SwapCandidates, error) {
 // meeting can move, so the whole separation after it is compared with
 // summary, the separation now. Every other swap keeps the bracket's shape and
 // is scored on the two competitors' own pairs (pairShifts). Both judge by
-// judgeDojos.
-func (s *swapSuggester) candidateVerdict(snap swapSnapshot, summary []DojoMeeting, source DrawSource, x, y int) (string, error) {
+// judgeDojos, which also names the dojos the verdict is about.
+func (s *swapSuggester) candidateVerdict(snap swapSnapshot, summary []DojoMeeting, source DrawSource, x, y int) (verdict string, dojos []string, err error) {
 	ex, ey := s.entrants[x], s.entrants[y]
 	if ex.seed > 0 || ey.seed > 0 {
 		req := SwapRequest{
@@ -126,23 +131,25 @@ func (s *swapSuggester) candidateVerdict(snap swapSnapshot, summary []DojoMeetin
 		}
 		plan := exchangePlaces(snap, req.A.ID, req.B.ID, source)
 		if err := plan.seededSwap(snap, req, source); err != nil {
-			return "", fmt.Errorf("judging the swap of %s and %s: %w", req.A.ID, req.B.ID, err)
+			return "", nil, fmt.Errorf("judging the swap of %s and %s: %w", req.A.ID, req.B.ID, err)
 		}
 		if plan.answer.BracketRebuilt {
 			after := DojoSeparation(snap.comp, plan.pools, plan.bracket, snap.roster)
-			return separationVerdict(SwapSeparation{Before: summary, After: after}), nil
+			verdict, dojos = separationVerdict(SwapSeparation{Before: summary, After: after})
+			return verdict, dojos, nil
 		}
 	}
-	_, verdict := s.pairShifts(x, y)
-	return verdict, nil
+	_, verdict, dojos = s.pairShifts(x, y)
+	return verdict, dojos, nil
 }
 
 // separationVerdict judges a swap from its separation rows before and after
 // by judgeDojos, each dojo (helper.DojoKey) holding its pairs' meetings, each
 // ranked by rankMeeting on its own bracket's rounds. A pair is matched
 // by its two ids, which a swap never changes, and a row that is in one list
-// only changes nothing: a swap keeps every pair.
-func separationVerdict(sep SwapSeparation) string {
+// only changes nothing: a swap keeps every pair. dojos names the dojos the
+// verdict is about, each as its row spells it (judgeDojos).
+func separationVerdict(sep SwapSeparation) (verdict string, dojos []string) {
 	before := make(map[[2]string]DojoMeeting, len(sep.Before))
 	for _, dm := range sep.Before {
 		before[pairIDs(dm.A.ID, dm.B.ID)] = dm
@@ -153,11 +160,11 @@ func separationVerdict(sep SwapSeparation) string {
 		if !ok {
 			continue
 		}
-		i := tallyIndex(&tallies, helper.DojoKey(was.Dojo))
+		i := tallyIndex(&tallies, helper.DojoKey(was.Dojo), strings.TrimSpace(was.Dojo))
 		t := &tallies[i]
 		t.before = append(t.before, rankMeeting(was))
 		t.after = append(t.after, rankMeeting(dm))
 	}
-	verdict, _ := judgeDojos(tallies)
-	return verdict
+	verdict, _, dojos = judgeDojos(tallies)
+	return verdict, dojos
 }

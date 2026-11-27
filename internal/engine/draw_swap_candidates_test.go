@@ -251,15 +251,18 @@ func verdictOf(t *testing.T, snap swapSnapshot, a, b string) string {
 	require.NoError(t, err)
 	verdict := ""
 	var place DrawPlace
+	var dojos []string
 	for _, c := range got.Candidates {
 		if c.ID == b {
-			verdict, place = c.Verdict, c.Place
+			verdict, place, dojos = c.Verdict, c.Place, c.Dojos
 		}
 	}
 	require.NotEmpty(t, verdict, "%s is a candidate", b)
 	plan, err := planSwap(snap, SwapRequest{A: got.Pick, B: SwapSide{ID: b, Place: place}, DryRun: true})
 	require.NoError(t, err)
-	assert.Equal(t, verdict, separationVerdict(plan.answer.Separation), "the whole separation judges it alike")
+	whole, wholeDojos := separationVerdict(plan.answer.Separation)
+	assert.Equal(t, verdict, whole, "the whole separation judges it alike")
+	assert.Equal(t, wholeDojos, dojos, "the whole separation names the same dojos")
 	assert.Equal(t, verdict, browserVerdict(plan.answer.Separation), "the browser reads it alike")
 	return verdict
 }
@@ -308,6 +311,62 @@ func TestSwapVerdict_EachDojoAsAWhole(t *testing.T) {
 		bracket := koDraw(roster)
 		snap := swapSnapshot{comp: drawReady(state.CompFormatKnockout), bracket: bracket, roster: roster}
 		assert.Equal(t, SwapVerdictWorse, verdictOf(t, snap, "s1", "s4"))
+	})
+}
+
+// candidateOf is the swap candidate b for the pick a.
+func candidateOf(t *testing.T, snap swapSnapshot, a, b string) SwapCandidate {
+	t.Helper()
+	got, err := swapCandidates(snap, a)
+	require.NoError(t, err)
+	for _, c := range got.Candidates {
+		if c.ID == b {
+			return c
+		}
+	}
+	require.Failf(t, "no candidate", "%s is not a candidate for %s", b, a)
+	return SwapCandidate{}
+}
+
+// A candidate names the dojos its verdict is about (operator decision C9):
+// the dojos worse off for worse, even when another is better off; the dojos
+// better off for better; none for the same. Never the candidate's own dojo
+// for being theirs.
+func TestSwapCandidates_NameTheDojosAffected(t *testing.T) {
+	t.Run("worse names only the dojos worse off", func(t *testing.T) {
+		// Swapping s1 and s4 sends Omega to the final (better off) and brings
+		// Kappa to a semi-final (worse off).
+		roster := koRoster("Omega", "Omega", "Kappa", "Solo 3", "Kappa", "Solo 5", "Solo 6", "Solo 7")
+		snap := swapSnapshot{comp: drawReady(state.CompFormatKnockout), bracket: koDraw(roster), roster: roster}
+		c := candidateOf(t, snap, "s1", "s4")
+		assert.Equal(t, SwapVerdictWorse, c.Verdict)
+		assert.Equal(t, []string{"Kappa"}, c.Dojos)
+	})
+	t.Run("better names the dojos better off", func(t *testing.T) {
+		roster := koRoster("Omega", "Omega", "Omega", "D3", "D4", "D5", "Omega", "D7")
+		snap := swapSnapshot{comp: drawReady(state.CompFormatKnockout), bracket: koDraw(roster), roster: roster}
+		c := candidateOf(t, snap, "s0", "s5")
+		assert.Equal(t, SwapVerdictBetter, c.Verdict)
+		assert.Equal(t, []string{"Omega"}, c.Dojos)
+	})
+	t.Run("several dojos worse off are sorted, the same names none", func(t *testing.T) {
+		// Hizen meets only in the final (leaves 0 and 4), Fudo too (2 and 6).
+		// Moving Hizen's s4 to leaf 3 brings Hizen to a semi-final with s0;
+		// Fudo is untouched.
+		roster := koRoster("Hizen", "Solo 1", "Fudo", "Solo 3", "Hizen", "Solo 5", "Fudo", "Solo 7")
+		snap := swapSnapshot{comp: drawReady(state.CompFormatKnockout), bracket: koDraw(roster), roster: roster}
+		c := candidateOf(t, snap, "s4", "s3")
+		assert.Equal(t, SwapVerdictWorse, c.Verdict)
+		assert.Equal(t, []string{"Hizen"}, c.Dojos)
+		// Swapping s4 (Hizen) and s2 (Fudo): s4 goes to leaf 2, beside s0's
+		// half (semi-final with s0), and s2 goes to leaf 4, beside s6's half
+		// (semi-final with s6): both dojos are worse off.
+		c = candidateOf(t, snap, "s4", "s2")
+		assert.Equal(t, SwapVerdictWorse, c.Verdict)
+		assert.Equal(t, []string{"Fudo", "Hizen"}, c.Dojos)
+		same := candidateOf(t, snap, "s1", "s3")
+		assert.Equal(t, SwapVerdictSame, same.Verdict)
+		assert.Empty(t, same.Dojos)
 	})
 }
 

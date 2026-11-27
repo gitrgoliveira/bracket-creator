@@ -11,9 +11,11 @@
 //
 // A mark is advice, never a gate: the swap itself still goes through "If you
 // swap them", so a read that fails shows no marks and the swap works as
-// before. The marks' words are drawn from the moment the mode is on, and the
-// banner's key line from the pick on, each hidden until it shows, so the
-// marks arriving move nothing under the finger.
+// before. A mark's line ("Worse for Fudo, Hizen", operator decision C9: the
+// dojos the swap harms or helps, never the candidate's own) is drawn under
+// the dojo from the moment the mode is on, and the banner's key line from the
+// pick on, each blank until it shows, so the marks arriving move nothing
+// under the finger.
 
 import { DRAW_MOVED_CODES } from './admin_draw_swap_check.jsx';
 import { useLatestRef } from './latest_ref.jsx';
@@ -24,19 +26,38 @@ const { useState, useEffect } = React;
 // for the swap, plus not_in_draw: the draw no longer holds the pick.
 const CANDIDATES_DRAW_MOVED = new Set([...DRAW_MOVED_CODES, 'not_in_draw']);
 
-// The words a mark carries beside its colour. "same" carries none.
-const VERDICT_WORDS = { better: 'better', worse: 'worse' };
+// The word a mark opens with beside its colour. "same" carries none.
+const VERDICT_WORDS = { better: 'Better', worse: 'Worse' };
 
-// candidateVerdicts: the server's answer for one pick as a map from each
-// candidate's id to its mark ("better" or "worse"; "same" and anything else
-// leave the candidate plain). An answer about another pick is no answer.
-export function candidateVerdicts(answer, pickId) {
+// candidateMarks: the server's answer for one pick as two maps from each
+// candidate's id: `marks`, its mark ("better" or "worse"; "same" and anything
+// else leave the candidate plain), and `dojos`, the dojos that mark is about
+// (the answer's `dojos`, worse off for worse, better off for better). An
+// answer about another pick is no answer.
+export function candidateMarks(answer, pickId) {
   const marks = new Map();
-  if (!answer || !pickId || (answer.pick && answer.pick.id && answer.pick.id !== pickId)) return marks;
+  const dojos = new Map();
+  if (!answer || !pickId || (answer.pick && answer.pick.id && answer.pick.id !== pickId)) return { marks, dojos };
   for (const cand of answer.candidates || []) {
-    if (cand && cand.id && cand.id !== pickId && VERDICT_WORDS[cand.verdict]) marks.set(cand.id, cand.verdict);
+    if (!cand || !cand.id || cand.id === pickId || !VERDICT_WORDS[cand.verdict]) continue;
+    marks.set(cand.id, cand.verdict);
+    dojos.set(cand.id, cand.dojos);
   }
-  return marks;
+  return { marks, dojos };
+}
+
+// candidateVerdicts: candidateMarks' marks alone.
+export function candidateVerdicts(answer, pickId) {
+  return candidateMarks(answer, pickId).marks;
+}
+
+// markText: a mark in words, naming the dojos it is about: "Worse for Fudo,
+// Hizen", "Better for Kenyu" ("Worse" alone when the answer names none), or
+// '' for no mark.
+export function markText(mark, dojos) {
+  const word = VERDICT_WORDS[mark];
+  if (!word) return '';
+  return `${word} for ${dojos.join(', ')}`;
 }
 
 // MARK_KEYS: every sentence the banner's key line can say: that the marks
@@ -47,7 +68,7 @@ export const MARK_KEYS = {
   loading: { text: 'Marking the swaps…', quiet: true },
   both: { text: 'Green keeps dojo-mates apart longer, amber brings some closer.', quiet: false },
   better: { text: 'Green keeps dojo-mates apart longer.', quiet: false },
-  worse: { text: 'Amber brings some dojo-mates closer.', quiet: false },
+  worse: { text: 'No swap here helps. Amber brings dojo-mates closer.', quiet: false },
   same: { text: 'No swap changes when dojo-mates can meet.', quiet: true },
   failed: { text: 'The swaps could not be marked.', quiet: true },
 };
@@ -70,7 +91,8 @@ export function marksKey({ marks, failed }) {
 // visible ('loading' while the read is out; none while the swap check is
 // open), so the line holds the height of its longest sentence from the pick
 // on and nothing below it moves when the read answers, fails, or finds no
-// swap that changes anything.
+// swap that changes anything. Every sentence fits two lines at 375 px
+// (operator decision C7), so the line never holds more than two.
 export function SwapMarksKey({ current }) {
   return (
     <div className="swap-mode__key" aria-live="polite" data-testid="swap-marks-key">
@@ -84,7 +106,7 @@ export function SwapMarksKey({ current }) {
   );
 }
 
-const EMPTY = { pickId: null, drawKey: null, marks: null, failed: false };
+const EMPTY = { pickId: null, drawKey: null, marks: null, dojos: null, failed: false };
 
 // useSwapCandidates: the marks for the competitor picked first, read when the
 // pick changes or the draw changes (`drawKey`, where every competitor of the
@@ -102,32 +124,29 @@ export function useSwapCandidates({ compId, pickId, drawKey = null, password, on
     if (!pickId) return undefined;
     let live = true;
     Promise.resolve().then(() => window.API.fetchSwapCandidates(compId, pickId, password))
-      .then((answer) => { if (live) setState({ pickId, drawKey, marks: candidateVerdicts(answer, pickId), failed: false }); })
+      .then((answer) => { if (live) setState({ pickId, drawKey, ...candidateMarks(answer, pickId), failed: false }); })
       .catch((e) => {
         if (!live) return;
         if (e && CANDIDATES_DRAW_MOVED.has(e.code)) { changedRef.current(e.message); return; }
-        setState({ pickId, drawKey, marks: null, failed: true });
+        setState({ pickId, drawKey, marks: null, dojos: null, failed: true });
       });
     return () => { live = false; };
   }, [compId, pickId, drawKey, password, changedRef]);
   const current = pickId && state.pickId === pickId && state.drawKey === drawKey;
-  return current ? { marks: state.marks, failed: state.failed } : { marks: null, failed: false };
+  return current ? { marks: state.marks, dojos: state.dojos, failed: state.failed } : { marks: null, dojos: null, failed: false };
 }
 
-// SwapVerdictWord: the word beside a candidate's colour, ", better" or ",
-// worse" (`lead` false drops the comma, for a line with nothing before it).
-// Both words are always drawn in one grid cell, only the shown one visible,
-// so the space they take is the same before, during and after the marks.
-export function SwapVerdictWord({ mark, lead }) {
-  const comma = lead ? ', ' : '';
+// SwapVerdictWord: a candidate's mark in words (markText), on a line of its
+// own under the dojo, so a long list of dojos never pushes the name. The line
+// is drawn on every pick from the moment the mode is on, blank (a no-break
+// space, hidden from a screen reader) until a mark shows, so the space it
+// takes is the same before, during and after the marks.
+export function SwapVerdictWord({ mark, dojos }) {
+  const text = markText(mark, dojos);
   return (
-    <span className="swap-verdict" data-testid="swap-verdict-word">
-      {Object.keys(VERDICT_WORDS).map((v) => (
-        <span key={v} className={`swap-verdict__word swap-verdict__word--${v}${mark === v ? ' is-shown' : ''}`}
-          aria-hidden={mark === v ? undefined : 'true'}>
-          {comma}{VERDICT_WORDS[v]}
-        </span>
-      ))}
+    <span className={`swap-verdict${text ? ` swap-verdict--${mark}` : ''}`} data-testid="swap-verdict-word"
+      aria-hidden={text ? undefined : 'true'}>
+      {text || '\u00A0'}
     </span>
   );
 }

@@ -48,15 +48,17 @@ export function poolLabel(pool) {
 }
 
 // firstRoundMatchLabel: the first-round match a knockout place belongs to,
-// by the number the bracket prints on its card.
+// as the bracket prints it on its card ("M3", operator decision C10). A
+// bracket saved before match numbers existed falls back to its place in the
+// first round.
 function firstRoundMatchLabel(bracket, matchIndex) {
   const m = bracket && bracket.rounds && bracket.rounds[0] ? bracket.rounds[0][matchIndex] : null;
-  return m && m.matchNumber ? `first-round Match ${m.matchNumber}` : `first-round match ${matchIndex + 1}`;
+  return `M${m && m.matchNumber ? m.matchNumber : matchIndex + 1}`;
 }
 
 // drawPlaceLabel: where a place is, in words: "Pool C" (", place 2" with
 // withPosition, for a swap inside one pool, where only the order changes), or
-// "first-round Match 3" for a knockout place.
+// "M3", its first-round match, for a knockout place.
 export function drawPlaceLabel(place, bracket, { withPosition = false } = {}) {
   if (!place) return '';
   if (place.pool) return withPosition && place.position ? `${poolLabel(place.pool)}, place ${place.position}` : poolLabel(place.pool);
@@ -87,7 +89,7 @@ export function drawEntrants(comp, pools, bracket) {
       [[m && m.sideA, 2 * mi], [m && m.sideB, 2 * mi + 1]].forEach(([side, slot]) => {
         if (side && side.id && side.name) entrants.push({ ...side, seed: seedOf.get(side.id) || 0, place: { slot } });
       });
-      if (entrants.length) groups.push({ label: firstRoundMatchLabel(bracket, mi).replace(/^first-round/, 'First-round'), entrants });
+      if (entrants.length) groups.push({ label: firstRoundMatchLabel(bracket, mi), entrants });
     });
   } else {
     (pools || []).forEach((p) => {
@@ -281,11 +283,14 @@ const plural = (n, one, many) => (n === 1 ? one : many);
 
 // swapVerdict: the one line the check opens with, naming the dojos by what
 // the swap does to each as a whole (separationChanges), as the server judges
-// a swap. Worse when any dojo is worse off: "Fudo would meet earlier.",
-// "Fudo and Kenyu would meet earlier.", "Fudo would share a pool." when the
-// deciding meeting is a shared pool, or both parts. Otherwise what happens to
-// each: "Kenyu can meet later. No change for Fudo.", or "No change for any
-// dojo." `worse` is true when any dojo is worse off, and the check then warns.
+// a swap, and saying it is the dojo-mates who meet (operator decision C8).
+// Worse when any dojo is worse off: "Dojo-mates from Hizen and Mumeishi could
+// meet earlier.", "Dojo-mates from Fudo would share a pool." when the
+// deciding meeting is a shared pool, or both parts ("Dojo-mates from Fudo
+// would share a pool and dojo-mates from Hizen could meet earlier.").
+// Otherwise what happens to each: "Dojo-mates from Kenyu could meet later. No
+// change for Fudo.", or "No change for any dojo." `worse` is true when any
+// dojo is worse off, and the check then warns.
 export function swapVerdict(separation) {
   const dojos = separationChanges(separation);
   const names = (pick) => andList(dojos.filter(pick).map((d) => d.dojo));
@@ -293,14 +298,15 @@ export function swapVerdict(separation) {
   const earlier = names((d) => d.shift < 0 && !d.intoPool);
   if (pool || earlier) {
     const parts = [];
-    if (pool) parts.push(`${pool} would share a pool`);
-    if (earlier) parts.push(`${earlier} would meet earlier`);
-    return { worse: true, text: `${parts.join(' and ')}.` };
+    if (pool) parts.push(`dojo-mates from ${pool} would share a pool`);
+    if (earlier) parts.push(`dojo-mates from ${earlier} could meet earlier`);
+    const text = parts.join(' and ');
+    return { worse: true, text: `${text.charAt(0).toUpperCase()}${text.slice(1)}.` };
   }
   const later = names((d) => d.shift > 0);
   if (!later) return { worse: false, text: 'No change for any dojo.' };
   const same = names((d) => d.shift === 0);
-  return { worse: false, text: `${later} can meet later.${same ? ` No change for ${same}.` : ''}` };
+  return { worse: false, text: `Dojo-mates from ${later} could meet later.${same ? ` No change for ${same}.` : ''}` };
 }
 
 // movesSentence: "IMS4 Arthur Dick goes to Pool C, IMS8 Lena Park to Pool

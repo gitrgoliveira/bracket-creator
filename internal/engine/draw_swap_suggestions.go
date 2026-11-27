@@ -121,20 +121,21 @@ func rankMeeting(dm DojoMeeting) meetingRank {
 
 // dojoTally is one dojo's pairs of dojo-mates in a swap: where each can first
 // meet before it and after it, in any order (one entry per pair in each).
+// name is the dojo as the draw spells it, for the dojos a candidate names.
 type dojoTally struct {
-	key           string
+	key, name     string
 	before, after []meetingRank
 }
 
-// tallyIndex is the index of the dojo key's tally in tallies, added when it
-// holds none.
-func tallyIndex(tallies *[]dojoTally, key string) int {
+// tallyIndex is the index of the dojo key's tally in tallies, added (with the
+// dojo's name) when it holds none.
+func tallyIndex(tallies *[]dojoTally, key, name string) int {
 	for i := range *tallies {
 		if (*tallies)[i].key == key {
 			return i
 		}
 	}
-	*tallies = append(*tallies, dojoTally{key: key})
+	*tallies = append(*tallies, dojoTally{key: key, name: name})
 	return len(*tallies) - 1
 }
 
@@ -160,25 +161,31 @@ func (d *dojoTally) shift() int {
 // (operator decision C1), for the suggestions and the swap candidates alike:
 // worse when any dojo is worse off, even if another is better off; better when
 // none is worse off and at least one is better off; the same otherwise.
-// better says, tally by tally, which dojos are better off.
-func judgeDojos(tallies []dojoTally) (verdict string, better []bool) {
+// better says, tally by tally, which dojos are better off. dojos names, sorted,
+// the dojos the verdict is about: those worse off for worse, those better off
+// for better, none for the same (operator decision C9: a mark names the dojos
+// it affects, never the competitor's own).
+func judgeDojos(tallies []dojoTally) (verdict string, better []bool, dojos []string) {
 	better = make([]bool, len(tallies))
-	worse, gained := false, false
+	var worseOff, betterOff []string
 	for i := range tallies {
 		switch c := tallies[i].shift(); {
 		case c < 0:
-			worse = true
+			worseOff = append(worseOff, tallies[i].name)
 		case c > 0:
-			better[i], gained = true, true
+			better[i] = true
+			betterOff = append(betterOff, tallies[i].name)
 		}
 	}
 	switch {
-	case worse:
-		return SwapVerdictWorse, better
-	case gained:
-		return SwapVerdictBetter, better
+	case len(worseOff) > 0:
+		slices.Sort(worseOff)
+		return SwapVerdictWorse, better, worseOff
+	case len(betterOff) > 0:
+		slices.Sort(betterOff)
+		return SwapVerdictBetter, better, betterOff
 	}
-	return SwapVerdictSame, better
+	return SwapVerdictSame, better, nil
 }
 
 // suggestEntrant is one drawn competitor as the suggestions see them: the
@@ -424,10 +431,11 @@ type laterPair struct {
 // first meeting of every pair of dojo-mates that holds x or y before and
 // after the swap of the two (no other pair's meeting can change): verdict is
 // the swap's, gained lists the pairs that meet later from the dojos better
-// off. Only valid for a swap that rebuilds nothing (no seed leaves a pools +
-// knockout pool), where the bracket keeps its shape. Any two entrants, seeded
-// or not, in one group or two.
-func (s *swapSuggester) pairShifts(x, y int) (gained []laterPair, verdict string) {
+// off, and dojos names the dojos the verdict is about (judgeDojos). Only
+// valid for a swap that rebuilds nothing (no seed leaves a pools + knockout
+// pool), where the bracket keeps its shape. Any two entrants, seeded or not,
+// in one group or two.
+func (s *swapSuggester) pairShifts(x, y int) (gained []laterPair, verdict string, dojos []string) {
 	ex, ey := s.entrants[x], s.entrants[y]
 	type pair struct {
 		i, j  int
@@ -436,7 +444,11 @@ func (s *swapSuggester) pairShifts(x, y int) (gained []laterPair, verdict string
 	var pairs []pair
 	// At most two dojos: x's and y's.
 	tallies := make([]dojoTally, 0, 2)
-	add := func(i, j int, key string) { pairs = append(pairs, pair{i, j, tallyIndex(&tallies, key)}) }
+	// A dojo is named as its first competitor in draw order spells it.
+	add := func(i, j int, key string) {
+		name := strings.TrimSpace(s.entrants[s.byDojo[key][0]].c.dojo)
+		pairs = append(pairs, pair{i, j, tallyIndex(&tallies, key, name)})
+	}
 	for _, m := range s.byDojo[ex.key] {
 		if m != x {
 			add(x, m, ex.key)
@@ -460,13 +472,13 @@ func (s *swapSuggester) pairShifts(x, y int) (gained []laterPair, verdict string
 			movedTally = append(movedTally, p.tally)
 		}
 	}
-	verdict, better := judgeDojos(tallies)
+	verdict, better, dojos := judgeDojos(tallies)
 	for k, g := range moved {
 		if better[movedTally[k]] {
 			gained = append(gained, g)
 		}
 	}
-	return gained, verdict
+	return gained, verdict, dojos
 }
 
 // improvement is a SwapImprovement with the ranks the search sorts by.
@@ -486,7 +498,7 @@ func (s *swapSuggester) evaluate(x, y int) (improves []improvement, ok bool) {
 	if ex.seed > 0 || ey.seed > 0 || ex.group == ey.group {
 		return nil, false
 	}
-	gained, verdict := s.pairShifts(x, y)
+	gained, verdict, _ := s.pairShifts(x, y)
 	if verdict != SwapVerdictBetter || len(gained) == 0 {
 		return nil, false
 	}

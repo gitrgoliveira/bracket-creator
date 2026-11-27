@@ -299,7 +299,7 @@ export function DrawReviewPanel({ c, poolMatches, bracket, password, showToast, 
         <section className="draw-review__section" aria-labelledby="draw-review-change" data-testid="draw-change">
           <h3 id="draw-review-change" className="draw-review__heading">Change the draw (optional)</h3>
           <p className="draw-review__lead">Swap two competitors if a pairing is wrong. Each swap is checked before it is made.</p>
-          <button type="button" className="btn btn--sm draw-review__swap-mode" data-testid="draw-review-swap-mode" onClick={openSwapMode}>
+          <button type="button" className="btn draw-review__swap-mode" data-testid="draw-review-swap-mode" onClick={openSwapMode}>
             {knockoutOnly ? 'Swap competitors on the Bracket' : 'Swap competitors on Pools'}
           </button>
           {suggestions.error && <div className="alert alert--warn" role="alert">{suggestions.error}</div>}

@@ -71,7 +71,7 @@ const knockoutBracket = {
 
 const verdicts = (pickId) => ({
   pick: { id: pickId },
-  candidates: [{ id: 'p2', verdict: 'better' }, { id: 'p3', verdict: 'worse' }, { id: 'p4', verdict: 'same' }],
+  candidates: [{ id: 'p2', verdict: 'better', dojos: ['Kenshi'] }, { id: 'p3', verdict: 'worse', dojos: ['Kenshi', 'Mumei'] }, { id: 'p4', verdict: 'same' }],
 });
 
 const tabs = {
@@ -90,8 +90,8 @@ const tabs = {
 
 const target = (name) => screen.queryAllByTestId('swap-target').find((el) => el.textContent.includes(name));
 const shownWord = (el) => {
-  const w = el.querySelector('.swap-verdict__word.is-shown');
-  return w ? w.textContent.replace(/^, /, '') : null;
+  const w = el.querySelector('.swap-verdict');
+  return w && /swap-verdict--(better|worse)/.test(w.className) ? w.textContent : null;
 };
 const markOf = (el) => (el.className.match(/swap-pick--(better|worse)/) || [])[1] || null;
 const tap = async (el) => { await pointerTap(el); later(); };
@@ -108,8 +108,12 @@ for (const [tab, mount] of Object.entries(tabs)) {
       window.API.fetchSwapCandidates = vi.fn(() => new Promise((res) => { answer = res; }));
       await mount();
       await tap(screen.getByTestId('swap-mode-on'));
-      // The words' space is held from the moment the mode is on.
-      expect(target('Arthur Dick').querySelectorAll('.swap-verdict__word')).toHaveLength(2);
+      // The mark's line is held from the moment the mode is on, blank and
+      // hidden from a screen reader until a mark shows.
+      const held = target('Arthur Dick').querySelectorAll('.swap-verdict');
+      expect(held).toHaveLength(1);
+      expect(held[0]).toHaveAttribute('aria-hidden', 'true');
+      expect(held[0].textContent).toBe('\u00A0');
       await tap(target('Elijah Everdeen'));
       expect(window.API.fetchSwapCandidates).toHaveBeenCalledWith('c1', 'p1', 'pw');
       // The key line is there from the pick on, every sentence it can say
@@ -122,16 +126,19 @@ for (const [tab, mount] of Object.entries(tabs)) {
       expect(['Arthur Dick', 'Lena Park', 'Omar Sy'].map((n) => markOf(target(n)))).toEqual([null, null, null]);
       await act(async () => { answer(verdicts('p1')); });
       expect(markOf(target('Arthur Dick'))).toBe('better');
-      expect(shownWord(target('Arthur Dick'))).toBe('better');
+      // A mark names the dojos it is about, never the candidate's own alone:
+      // Arthur is from Mumei, and the swap is better for Kenshi.
+      expect(shownWord(target('Arthur Dick'))).toBe('Better for Kenshi');
+      expect(target('Arthur Dick').querySelector('.swap-verdict')).not.toHaveAttribute('aria-hidden');
       expect(markOf(target('Lena Park'))).toBe('worse');
-      expect(shownWord(target('Lena Park'))).toBe('worse');
+      expect(shownWord(target('Lena Park'))).toBe('Worse for Kenshi, Mumei');
       expect(markOf(target('Omar Sy'))).toBeNull();
       expect(shownWord(target('Omar Sy'))).toBeNull();
       expect(markOf(target('Elijah Everdeen')), 'the pick itself is not marked').toBeNull();
       expect(screen.getByTestId('swap-mode-line').textContent, 'the pick line does not change').toBe(lineBefore);
       expect(keyLines()).toHaveLength(6);
       expect(keyLines().filter((l) => l.classList.contains('is-shown'))).toHaveLength(1);
-      expect(screen.getByTestId('swap-mode-line').textContent).toContain('with… tap another competitor.');
+      expect(screen.getByTestId('swap-mode-line').textContent).toBe('Swap IMS2 Elijah Everdeen (' + (tab.startsWith('Pools') ? 'Pool A' : 'M1') + ') with…');
       expect(shownKey()).toBe('Green keeps dojo-mates apart longer, amber brings some closer.');
       expect(screen.getByTestId('swap-mode-cancel')).toBeInTheDocument();
     });
@@ -176,7 +183,8 @@ for (const [tab, mount] of Object.entries(tabs)) {
       expect(target('Elijah Everdeen')).toHaveAttribute('aria-pressed', 'true');
       expect(shownKey()).toBe('The swaps could not be marked.');
       expect(keyLines()).toHaveLength(6);
-      expect(screen.getByTestId('swap-mode-line').textContent).toContain('with… tap another competitor.');
+      expect(screen.getByTestId('swap-mode-line').textContent).toContain('Elijah Everdeen');
+      expect(screen.getByTestId('swap-mode-line').textContent).toMatch(/with…$/);
       expect(markOf(target('Arthur Dick'))).toBeNull();
       await tap(target('Lena Park'));
       expect(screen.getByTestId('draw-swap-check')).toBeInTheDocument();
@@ -196,7 +204,7 @@ describe('the read behind the marks', () => {
     await act(async () => {});
     await act(async () => { answers.p1(verdicts('p1')); });
     expect(result.current.marks, 'the older read answered late').toBeNull();
-    await act(async () => { answers.p2({ pick: { id: 'p2' }, candidates: [{ id: 'p3', verdict: 'worse' }] }); });
+    await act(async () => { answers.p2({ pick: { id: 'p2' }, candidates: [{ id: 'p3', verdict: 'worse', dojos: ['Fudo'] }] }); });
     expect([...result.current.marks.entries()]).toEqual([['p3', 'worse']]);
     rerender({ compId: 'c1', pickId: null, password: 'pw', onDrawChanged: vi.fn() });
     expect(result.current.marks, 'no pick, no marks').toBeNull();
@@ -217,7 +225,7 @@ describe('the read behind the marks', () => {
     expect(result.current.marks, 'the old draw\'s marks are dropped at once').toBeNull();
     await act(async () => {});
     expect(window.API.fetchSwapCandidates).toHaveBeenCalledTimes(2);
-    await act(async () => { answers[1]({ pick: { id: 'p1' }, candidates: [{ id: 'p2', verdict: 'worse' }] }); });
+    await act(async () => { answers[1]({ pick: { id: 'p1' }, candidates: [{ id: 'p2', verdict: 'worse', dojos: ['Fudo'] }] }); });
     expect(result.current.marks.get('p2')).toBe('worse');
     // The same draw again reads nothing new.
     rerender(props(after));

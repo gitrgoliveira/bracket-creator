@@ -100,25 +100,50 @@ describe('Swap competitors on Pools (preview)', () => {
     expect(targets()).toHaveLength(0);
     await turnOn();
     expect(screen.getByTestId('swap-mode').textContent).toContain(
-      'Swap competitors: on. Tap two competitors to swap them. Taps do not open score sheets now.');
+      'Swap competitors: tap two competitors to swap them. While this is on, a tap picks a competitor instead of opening a score sheet.');
+    // Before the first pick: the instruction and Done, on one row, Done the one primary.
+    const head = screen.getByTestId('swap-mode').querySelector('.swap-mode__head');
+    expect(head.querySelector('.swap-mode__lead')).not.toBeNull();
+    expect(within(head).getByTestId('swap-mode-done')).toHaveClass('btn--primary');
+    expect(screen.queryByTestId('swap-mode-cancel')).toBeNull();
     expect(targets().map((el) => el.textContent)).toEqual([
       expect.stringContaining('Elijah Everdeen'), expect.stringContaining('Arthur Dick'),
       expect.stringContaining('Lena Park'), expect.stringContaining('Omar Sy'),
     ]);
   });
 
-  it('opens with the mode on when the Draw review card asked for it, once', async () => {
-    askSwapMode('c1');
-    await mountPools();
-    expect(screen.getByTestId('swap-mode')).toBeInTheDocument();
-    expect(screen.queryByTestId('swap-mode-on')).toBeNull();
-    cleanup();
-    await mountPools();
-    expect(screen.getByTestId('swap-mode-on'), 'the next visit starts with the mode off').toBeInTheDocument();
-    cleanup();
-    askSwapMode('another');
-    await mountPools();
-    expect(screen.getByTestId('swap-mode-on'), 'an ask for another competition').toBeInTheDocument();
+  it('opens with the mode on when the Draw review card asked for it, once, scrolled to the banner', async () => {
+    const scrolled = [];
+    const scrollIntoView = vi.fn(function scrollIntoView(opts) { scrolled.push([this, opts]); });
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    const stub = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      askSwapMode('c1');
+      await mountPools();
+      expect(screen.getByTestId('swap-mode')).toBeInTheDocument();
+      expect(screen.queryByTestId('swap-mode-on')).toBeNull();
+      expect(scrollTo, 'from the top of the page, where the banner is not pinned').toHaveBeenCalledWith(0, 0);
+      expect(scrolled, 'the card\'s button brings the banner into view, once').toEqual([[screen.getByTestId('swap-mode'), { block: 'start' }]]);
+      cleanup();
+      scrollIntoView.mockClear();
+      scrollTo.mockClear();
+      await mountPools();
+      expect(screen.getByTestId('swap-mode-on'), 'the next visit starts with the mode off').toBeInTheDocument();
+      expect(scrollIntoView, 'a plain visit keeps the page where it is').not.toHaveBeenCalled();
+      expect(scrollTo).not.toHaveBeenCalled();
+      cleanup();
+      askSwapMode('another');
+      await mountPools();
+      expect(screen.getByTestId('swap-mode-on'), 'an ask for another competition').toBeInTheDocument();
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      // Turning the mode on from the tab itself does not move the page either.
+      await turnOn();
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    } finally {
+      Element.prototype.scrollIntoView = stub;
+      scrollTo.mockRestore();
+    }
   });
 
   it('pins its banner while on, publishes its height, and opens the check beside it, not inside it', async () => {
@@ -157,8 +182,14 @@ describe('Swap competitors on Pools (preview)', () => {
     await turnOn();
     await pointerTap(targetNamed('Elijah Everdeen'));
     expect(targetNamed('Elijah Everdeen')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('swap-mode-line').textContent)
-      .toContain('Swap Elijah Everdeen (Pool A, IMS2) with… tap another competitor.');
+    expect(screen.getByTestId('swap-mode-line').textContent).toBe('Swap IMS2 Elijah Everdeen (Pool A) with…');
+    // After the pick the instruction goes: the pick line, with Cancel beside
+    // Done on the same row, and Done still the one primary.
+    const banner = screen.getByTestId('swap-mode');
+    expect(banner.querySelector('.swap-mode__lead')).toBeNull();
+    const head = banner.querySelector('.swap-mode__head');
+    expect([...head.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Cancel', 'Done']);
+    expect(banner.querySelectorAll('.btn--primary')).toHaveLength(1);
     // The bounce of that tap lands on the same name a moment later.
     now += 30;
     await pointerTap(targetNamed('Elijah Everdeen'));
@@ -280,7 +311,7 @@ describe('Swap competitors on Bracket (preview)', () => {
     expect(targets()).toHaveLength(4);
     await pointerTap(targetNamed('Elijah Everdeen'));
     expect(screen.getByTestId('swap-mode-line').textContent)
-      .toContain('Swap Elijah Everdeen (first-round Match 1, IMS2) with… tap another competitor.');
+      .toBe('Swap IMS2 Elijah Everdeen (M1) with…');
     later();
     await pointerTap(targetNamed('Omar Sy'));
     expect(window.API.swapDrawPlaces).toHaveBeenCalledWith('c1', {

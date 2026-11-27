@@ -312,11 +312,11 @@ export const competitionsApi = {
         return { suggestions: Array.isArray(body.suggestions) ? body.suggestions : [] };
     },
     // fetchSwapCandidates: GET /competitions/:id/draw/swap-candidates?id=,
-    // {pick: {id, place}, candidates: [{id, place, verdict}]}: for the
+    // {pick: {id, place}, candidates: [{id, place, verdict, dojos?}]}: for the
     // competitor picked first in the swap mode, every other drawn competitor
     // in draw order, and whether swapping the two keeps dojo-mates apart for
     // longer ("better"), brings a pair together earlier ("worse") or neither
-    // ("same"). A refusal throws with the server's `code`: not_in_draw (409)
+    // ("same"), with `dojos`, the dojos better or worse off, sorted. A refusal throws with the server's `code`: not_in_draw (409)
     // means the draw no longer holds the pick, so the page reads the draw
     // again; no_draw and draw_started as for the swap.
     async fetchSwapCandidates(id, pickId, password) {

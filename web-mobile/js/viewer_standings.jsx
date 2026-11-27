@@ -984,14 +984,14 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                   const entrant = swap && p.id ? swap.entrantOf(p.id) : null;
                   const isPicked = !!entrant && swap.pickedId === entrant.id;
                   // In the swap mode a candidate's mark (better, worse) is a colour and
-                  // a word: on the dojo line, or on the name line when dojos are hidden.
+                  // a line naming the dojos it is about, under the dojo (or under the
+                  // name when dojos are hidden).
                   const mark = entrant && swap.markOf ? swap.markOf(entrant.id) : null;
-                  const word = (lead) => (entrant && swap.verdictWord ? swap.verdictWord(entrant.id, lead) : null);
+                  const markLine = entrant && swap.verdictWord ? swap.verdictWord(entrant.id) : null;
                   const nameCell = (
                     <>
                       <div className="pool__player-name">
                         <NumberedName name={pMember1} number={p.number} />
-                        {tweaks.showDojo ? null : word(true)}
                         {isTeam && dhWinnerNames.has(p.name) && (
                           <DHBadge />
                         )}
@@ -1006,7 +1006,8 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       </div>
                       {/* Engi pair: member 2 (from the combined name) stacked below member 1; a solo side has no member 2. */}
                       {isEngi && pMember2 ? <div className="pool__player-name">{pMember2}</div> : null}
-                      {tweaks.showDojo ? <div className="pool__dojo-name">{p.dojo}{word(!!p.dojo)}</div> : null}
+                      {tweaks.showDojo ? <div className="pool__dojo-name">{p.dojo}</div> : null}
+                      {markLine}
                     </>
                   );
                   return (

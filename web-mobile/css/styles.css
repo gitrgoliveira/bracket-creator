@@ -12821,12 +12821,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   line-height: 1.5;
   color: var(--ink-2);
 }
-/* The conclusion under the facts, one step larger and in the body ink. It
+/* The conclusion under the facts, larger and semibold in the body ink, with
+   no tint of its own: the sentence says the state (operator decision C6). It
    holds a line from the first render (a no-break space while the suggestions
    load), so their arriving moves nothing below it. */
 .draw-review__conclusion {
   margin: 2px 0 0;
-  font-size: 14px;
+  font-size: 16px;
+  font-weight: 600;
   line-height: 1.5;
   color: var(--ink-1);
 }
@@ -12836,8 +12838,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-weight: 700;
   color: var(--ink-1);
 }
+/* A normal-size button, 44 px tall on a touch screen (DESIGN.md 2.4). */
 .draw-review__swap-mode {
   margin-bottom: 12px;
+  min-height: var(--tap-floor);
 }
 .draw-review__lead {
   margin: 0 0 10px;
@@ -12956,9 +12960,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   min-height: max(36px, var(--tap-floor));
 }
 
-/* Swap competitors: the mode on Pools (preview) and Bracket (preview). The
-   banner's second line is always drawn at the height of its Cancel button, so
-   a pick that writes it moves nothing under the finger. */
+/* Swap competitors: the mode on Pools (preview) and Bracket (preview). One
+   layout on every screen (operator decision C7): one row of text with the
+   buttons on its right (the instruction before the first pick, the pick line
+   with Cancel beside Done after it), and from the pick on the key line under
+   it, two lines at most on a phone. */
 .swap-mode {
   margin-bottom: 12px;
 }
@@ -12980,6 +12986,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .swap-mode.swap-mode--pinned {
   position: sticky;
   top: var(--topbar-stack-h, 0px);
+  /* Scrolled to from the Draw review card's button, it stops under the top bar. */
+  scroll-margin-top: var(--topbar-stack-h, 0px);
   z-index: 25;
   background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface);
 }
@@ -12992,21 +13000,28 @@ button.swap-pick {
 }
 .swap-mode__head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
-.swap-mode__lead {
+.swap-mode__text {
+  flex: 1;
+  min-width: 0;
+}
+.swap-mode__actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+.swap-mode__lead,
+.swap-mode__line {
   margin: 0;
   line-height: 1.5;
+  text-wrap: pretty;
 }
-.swap-mode__line {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  min-height: max(30px, var(--tap-floor));
-  margin-top: 6px;
+/* A note after a swap sits under the instruction. */
+.swap-mode__lead + .swap-mode__line:not(:empty) {
+  margin-top: 4px;
 }
 .swap-mode .btn--sm {
   min-height: max(30px, var(--tap-floor));
@@ -13096,29 +13111,25 @@ button.bc-side.swap-pick.swap-pick--better {
 button.bc-side.swap-pick.swap-pick--worse {
   box-shadow: inset 0 0 0 2px var(--warn);
 }
-/* The mark's word. Both words sit in one grid cell from the moment the mode
-   is on, the shown one visible, so the space is held before any mark. */
+/* The mark's line, under the dojo: "Worse for Fudo, Hizen" (operator
+   decision C9). It is drawn on every pick from the moment the mode is on,
+   a no-break space until a mark shows, so the space is held before any mark,
+   and a long list wraps inside the pick rather than pushing the name. */
 .swap-verdict {
-  display: inline-grid;
-}
-.swap-verdict__word {
-  grid-area: 1 / 1;
-  visibility: hidden;
-  white-space: nowrap;
+  display: block;
+  font-size: 12px;
   font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
-.swap-verdict__word.is-shown {
-  visibility: visible;
-}
-.swap-verdict__word--better {
+.swap-verdict--better {
   color: var(--ok-ink);
 }
-.swap-verdict__word--worse {
+.swap-verdict--worse {
   color: var(--warn-ink);
 }
 .bc-side .swap-verdict {
-  flex: none;
-  font-size: 11px;
+  white-space: normal;
 }
 /* The key line under the pick line: every sentence it can say stacked in one
    grid cell, only the current one visible, so it holds the height of the

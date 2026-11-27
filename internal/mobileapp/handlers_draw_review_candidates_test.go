@@ -35,6 +35,15 @@ func TestDrawReview_SwapCandidates(t *testing.T) {
 		seen[id] = true
 		assert.EqualValues(t, *slots[id].Slot, cand["place"].(map[string]any)["slot"])
 		assert.Contains(t, []any{engine.SwapVerdictBetter, engine.SwapVerdictWorse, engine.SwapVerdictSame}, cand["verdict"])
+		// The dojos the verdict is about: a list for better or worse, absent
+		// for the same.
+		if cand["verdict"] == engine.SwapVerdictSame {
+			assert.NotContains(t, cand, "dojos", id)
+		} else {
+			dojos, ok := cand["dojos"].([]any)
+			require.True(t, ok, "%s names the dojos: %v", id, cand)
+			assert.NotEmpty(t, dojos, id)
+		}
 	}
 	assert.Len(t, seen, len(slots)-1)
 

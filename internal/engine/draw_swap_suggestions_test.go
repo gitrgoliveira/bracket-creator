@@ -131,14 +131,14 @@ func checkAgainstTheSummary(t *testing.T, comp *state.Competition, pools []helpe
 			for k, b := range before {
 				a, has := after[k]
 				require.True(t, has, "pair %v after the swap", k)
-				i := tallyIndex(&tallies, helper.DojoKey(b.Dojo))
+				i := tallyIndex(&tallies, helper.DojoKey(b.Dojo), b.Dojo)
 				tallies[i].before = append(tallies[i].before, rankMeeting(b))
 				tallies[i].after = append(tallies[i].after, rankMeeting(a))
 				if rankMeeting(a).compare(rankMeeting(b)) > 0 {
 					later = append(later, laterRow{i, SwapImprovement{Dojo: b.Dojo, Before: b, After: a}})
 				}
 			}
-			verdict, better := judgeDojos(tallies)
+			verdict, better, _ := judgeDojos(tallies)
 			var want []SwapImprovement
 			for _, l := range later {
 				if better[l.tally] {

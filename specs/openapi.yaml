@@ -9346,6 +9346,14 @@ components:
                 type: string
                 enum: [better, worse, same]
                 description: What swapping this competitor with the pick does to the dojo separation.
+              dojos:
+                type: array
+                items:
+                  type: string
+                description: >-
+                  The dojos the verdict is about, sorted: for `worse` the dojos
+                  whose dojo-mates would meet earlier, for `better` the dojos
+                  whose dojo-mates would meet later. Absent for `same`.
 
     SwapRequest:
       type: object

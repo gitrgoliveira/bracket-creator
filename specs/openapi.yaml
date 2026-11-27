@@ -431,6 +431,13 @@ paths:
           `announcement`: a competitor's eligibility changed, a roster was
           edited, a draw was generated or discarded, a Swiss round was
           generated, or the announcements changed.
+        - `draw_visibility_changed`: a draft's draw was published or hidden
+          again (`POST .../publish-draw`, `POST .../unpublish-draw`).
+          `data: { competitionId, hidden }`. Public pages refetch the named
+          competition. While a draft is hidden, a stream that is not the
+          organiser's is sent `match_updated`, `competitor_status_updated`,
+          `lineup_updated` and `swiss_round_generated` for it with no data,
+          judged when each is sent.
         - `lineup_updated`: a team's lineups or members changed.
           `data: { competitionId, teamId }`, and `matchId` too for a lineup
           saved for a match.
@@ -2784,6 +2791,85 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/publish-draw:
+    post:
+      tags: [competitions]
+      summary: Publish draw
+      description: |
+        Shows the draw of a `draw-ready` competition on the public pages. A
+        generated draw starts hidden in an officiated tournament: every public
+        read answers it as the same competition in setup (no pools, matches,
+        bracket or draw numbers) with `drawHidden: true`, and the public stream
+        sends its draw events with no data. Publishing clears the stored
+        `drawHidden`; the write lands before the answer and broadcasts
+        `draw_visibility_changed` (`{competitionId, hidden: false}`), which the
+        public pages refetch the named competition on. Starting the competition
+        also makes its draw public, whatever is stored.
+
+        No body. A draw that is already public answers 200 with nothing
+        written and nothing broadcast. Organiser only: in a self-run tournament
+        an anonymous caller is refused 401 by the sign-in gate, and the signed-in
+        organiser gets 409 `draw_visibility_self_run`, because a self-run draw
+        is public as soon as it is made.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: |
+            The draw is public. The body is the competition record as stored
+            (`drawHidden` absent).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Competition'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/DrawVisibilityRefused'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/unpublish-draw:
+    post:
+      tags: [competitions]
+      summary: Hide the draw again (Unpublish)
+      description: |
+        Takes the draw of a published `draw-ready` competition off the public
+        pages again, without discarding it. Sets the stored `drawHidden`; the
+        write lands before the answer and broadcasts `draw_visibility_changed`
+        (`{competitionId, hidden: true}`), on which connected public pages drop
+        the draw. Anyone who already looked keeps what they saw. A started
+        competition cannot be hidden.
+
+        No body. A draw that is already hidden answers 200 with nothing written
+        and nothing broadcast. Organiser only, refused in a self-run tournament
+        as `POST .../publish-draw` is.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: |
+            The draw is hidden from the public. The body is the competition
+            record as stored (`drawHidden: true`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Competition'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/DrawVisibilityRefused'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -8013,6 +8099,9 @@ paths:
         Returns all competitions, each with their player list populated. Every
         per-competition entry also carries the request-time `slotMinutes` and
         `knockoutSlotMinutes` described on CompetitionDetail.
+        A draft whose draw the public cannot see yet carries `drawHidden: true`
+        and, for every caller but the organiser, its roster with no draw
+        numbers.
       responses:
         '401':
           $ref: '#/components/responses/InvalidPassword'
@@ -8036,7 +8125,13 @@ paths:
     get:
       tags: [viewer]
       summary: Get full competition state
-      description: Returns config, pools, pool matches, standings, and bracket.
+      description: >
+        Returns config, pools, pool matches, standings, and bracket. A draft
+        whose draw the public cannot see yet (`config.drawHidden: true`) is
+        answered to every caller but the organiser as the same competition in
+        setup: the roster with no draw numbers, and no pools, pool matches,
+        standings, bracket or qualifiers. A reveal key reveals names, never a
+        hidden draw.
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/OptionalTournamentPassword'
@@ -8373,6 +8468,35 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid X-Tournament-Password.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    DrawVisibilityRefused:
+      description: |
+        Publish draw or Unpublish refused; nothing is written and nothing is
+        broadcast. `error` is the sentence the page shows as it is.
+
+        * `draw_not_ready`: the competition is not waiting to start (setup
+          has no draw; a started, completed or invalid competition is public
+          by the rules of a running one). "The draw can be published or
+          hidden only while it waits to start."
+        * `draw_visibility_self_run`: the tournament is self-run, where a
+          draw is public as soon as it is made. "A self-run tournament shows
+          its draw as soon as it is made."
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [code, error]
+            properties:
+              code:
+                type: string
+                enum: [draw_not_ready, draw_visibility_self_run]
+              error:
+                type: string
     NotFound:
       description: Resource not found.
       content:
@@ -10229,6 +10353,23 @@ components:
             endpoint's description). It is not a setting, so it is not part of
             `configVersion`. Once set it stays set, through later roster edits
             and a discarded draw.
+        drawHidden:
+          type: boolean
+          description: >
+            On an organiser route, the stored state: true while a `draw-ready`
+            draft is kept off the public pages, absent once it is published.
+            Generate draw sets it, `POST .../publish-draw` clears it, `POST
+            .../unpublish-draw` sets it, and discarding the draw clears it.
+            Absent reads as published, so a draft made before the field
+            existed stays public. Server-managed: a create never stores it and
+            a settings `PUT /api/competitions/{id}` never copies it, and it is
+            not part of `configVersion`. It decides nothing once the
+            competition starts, and nothing in a self-run tournament. On a
+            public (viewer) route it is the public marker instead: true when
+            the public cannot see this competition's draw right now (a hidden
+            draft of an officiated tournament), for every audience; the public
+            answer then carries the competition as in setup (no pools,
+            matches, bracket or draw numbers) with `status: draw-ready`.
         teamMatchType:
           type: string
           description: Team-match scoring model; `fixed` (regular position-by-position order, shown as "Regular" in the UI) or `kachinuki` (winner stays on).

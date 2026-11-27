@@ -13,6 +13,7 @@ import { blockMinutes, parseClock, formatClock, computePauseRowStatus } from './
 // disagree about what counts as seeded.
 import { seededRanks, deriveTournamentDays } from './admin_helpers.jsx';
 import { checkInApplies } from './competition_shape.jsx';
+import { drawHiddenFromPublic } from './draw_visibility.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { isOffline, savedOfflineSentence } from './write_result.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
@@ -794,7 +795,9 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
             <div style={{ fontSize: 13.5, color: "var(--ink-2)" }}>
               {isSwiss
                 ? <>Participants are set. Use the <strong>Start competition</strong> button in the header to begin the first round.</>
-                : <>The draw has been generated. Preview it below, then use the <strong>Start competition</strong> button in the header to begin.</>}
+                : drawHiddenFromPublic(tournament, c)
+                  ? <>The draw has been generated and is hidden from the public. Preview it below, then use <strong>Publish draw</strong> in the header to show it to the public, or <strong>Start competition</strong> to begin, which also publishes it.</>
+                  : <>The draw has been generated. Preview it below, then use the <strong>Start competition</strong> button in the header to begin.</>}
             </div>
           </div>
           <div className="row">
@@ -815,7 +818,9 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
             <div className="card card--sm" style={{ background: "var(--bg)" }}>
               <div className="card__title" style={{ marginBottom: 4, color: "var(--ink-2)" }}>To start</div>
               <div className="card__sub">
-                Use the <strong>Start competition</strong> button above. To change the draw, use <strong>Discard draw</strong> first.
+                {drawHiddenFromPublic(tournament, c)
+                  ? <>Use the <strong>Start competition</strong> button above; it also publishes the draw. To show the draw first, use <strong>Publish draw</strong>. To change it, use <strong>Discard draw</strong> first.</>
+                  : <>Use the <strong>Start competition</strong> button above. To change the draw, use <strong>Discard draw</strong> first.</>}
               </div>
             </div>
           </div>

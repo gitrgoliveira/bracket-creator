@@ -823,6 +823,14 @@ func (failingLineupEngine) KachinukiFieldedPlaces(string, string, string, domain
 	return nil, errors.New("read lineups.yaml: input/output error")
 }
 
+func (failingLineupEngine) KachinukiRosterBeforeDraw(string, string) (engine.KachinukiRoster, error) {
+	return engine.KachinukiRoster{}, errors.New("disk on fire")
+}
+
+func (failingLineupEngine) KachinukiFieldedPlacesBeforeDraw(string, domain.TeamLineup) (map[domain.Position]string, error) {
+	return nil, errors.New("read config.md: input/output error")
+}
+
 // A read that fails is the server's fault: a 500, not an empty "nothing saved"
 // that would let the sheet show a blank lineup over one it could not read.
 func TestPublicLineupInForceGET_ReadFailureIs500(t *testing.T) {

@@ -18,7 +18,7 @@ import { NOT_SENT_NO_CONNECTION } from './write_result.jsx';
 import { awardsBase } from './document_versions.jsx';
 import {
     normalizeViewerCompItem, parseSkippedCompetitionsHeader, _fetchJson, _directFetch,
-    readHeaders, readFailure,
+    readHeaders, readFailure, publishDraw, unpublishDraw,
 } from './api_client_requests.jsx';
 import { _serverNowMs } from './api_client_clock.jsx';
 import { _poolRanksBase } from './api_client_queue.jsx';
@@ -278,6 +278,8 @@ export const competitionsApi = {
         }
         _forgetShownMatches(id);
     },
+    publishDraw,
+    unpublishDraw,
     // quarantineBracket: POST /competitions/:id/bracket/quarantine. The way out
     // of a bracket.json that will not parse, which otherwise blocks every score
     // write for that competition. Renames the broken file aside (it is NEVER

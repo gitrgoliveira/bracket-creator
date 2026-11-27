@@ -398,6 +398,32 @@ func TestFingerprintDoors(t *testing.T) {
 		h.real(http.MethodPost, participants, map[string]any{"players": rosterBody(grown)})
 	})
 
+	// Publish draw and Unpublish (bc-drpb): a tap on a draft already in that
+	// state writes nothing, and a real flip moves the fingerprint, so the
+	// scheduled backup takes a copy after a publish or an unpublish.
+	t.Run("draw visibility", func(t *testing.T) {
+		h.t = t
+		const compID = "door-visibility"
+		w := populatedServeJSON(t, pt.Router, pt.Password, http.MethodPost, "/api/competitions", map[string]any{
+			"id": compID, "name": "Door Visibility", "kind": "individual", "format": state.CompFormatKnockout,
+			"courts": []string{"A"},
+			"players": []map[string]any{
+				{"name": "Abe Ko", "dojo": "Kobe Dojo"},
+				{"name": "Mori Jun", "dojo": "Sendai Dojo"},
+				{"name": "Ueda Sho", "dojo": "Nara Dojo"},
+				{"name": "Kudo Rin", "dojo": "Akita Dojo"},
+			},
+		})
+		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+		h.send(http.MethodPost, "/api/competitions/"+compID+"/generate-draw", nil)
+
+		base := "/api/competitions/" + compID
+		h.noOp(http.MethodPost, base+"/unpublish-draw", nil)
+		h.real(http.MethodPost, base+"/publish-draw", nil)
+		h.noOp(http.MethodPost, base+"/publish-draw", nil)
+		h.real(http.MethodPost, base+"/unpublish-draw", nil)
+	})
+
 	// Every stamp-table entry and every skipped folder was moved by a measured
 	// no-op above: the table lists only what the doors were seen to churn.
 	t.Run("table matches the evidence", func(t *testing.T) {

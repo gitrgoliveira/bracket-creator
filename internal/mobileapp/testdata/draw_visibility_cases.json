@@ -1,0 +1,14 @@
+{
+  "_about": "Whether the public may not see a competition's draw now. Read by state.Competition.DrawHiddenIn (internal/state/draw_hidden_cases_test.go) and by drawHiddenFromPublic (web-mobile/js/__tests__/draw_visibility.test.jsx): the client twin and the server rule judge the same cases. A case with no drawHidden key is a competition stored before the field existed, which reads as published.",
+  "cases": [
+    { "name": "a hidden draft", "status": "draw-ready", "drawHidden": true, "mode": "officiated", "hidden": true },
+    { "name": "a published draft", "status": "draw-ready", "drawHidden": false, "mode": "officiated", "hidden": false },
+    { "name": "a draft stored before the field existed reads as published", "status": "draw-ready", "mode": "officiated", "hidden": false },
+    { "name": "a tournament with no mode is officiated", "status": "draw-ready", "drawHidden": true, "mode": "", "hidden": true },
+    { "name": "a self-run tournament shows its draft", "status": "draw-ready", "drawHidden": true, "mode": "self-run", "hidden": false },
+    { "name": "a competition in setup has no draw to hide", "status": "setup", "drawHidden": true, "mode": "officiated", "hidden": false },
+    { "name": "a started pools phase is public whatever is stored", "status": "pools", "drawHidden": true, "mode": "officiated", "hidden": false },
+    { "name": "a started knockout is public whatever is stored", "status": "knockout", "drawHidden": true, "mode": "officiated", "hidden": false },
+    { "name": "a completed competition is public whatever is stored", "status": "completed", "drawHidden": true, "mode": "officiated", "hidden": false }
+  ]
+}

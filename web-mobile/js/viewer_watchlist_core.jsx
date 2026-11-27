@@ -22,6 +22,7 @@ import { resultRecencyDesc } from './result_recency.jsx';
 import { parseWatchlistTokens, resolveFreshTokens, WATCHLIST_PARAM } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 import { checkInApplies } from './competition_shape.jsx';
+import { drawHiddenFromPublic } from './draw_visibility.jsx';
 
 const { useState, useEffect } = React;
 
@@ -721,6 +722,11 @@ export function rosterFullyLoaded(competitions) {
 export function buildRoster(competitions, tournament) {
   const map = new Map();
   (competitions || []).forEach((c) => {
+    // A draft whose draw the public may not see yet (bc-drpb): the record
+    // names it in `preparingDraws`, so the watchlist can say "Draw being
+    // prepared" for it beside whatever the competitor's other competitions
+    // show (preparingDrawsFor below).
+    const preparing = drawHiddenFromPublic(tournament, c) ? [{ id: c.id || "", name: c.name || "" }] : [];
     (c.players || []).forEach((p) => {
       if (!p || !p.id) return;
       const checkedIn = checkInApplies(tournament, c.checkInEnabled) && !!p.checkedIn;
@@ -740,7 +746,9 @@ export function buildRoster(competitions, tournament) {
         // and a competition handed in without that pass (a fixture) is judged
         // here from its own `namesHidden` marker by the same rule.
         const masked = nameHidden(p) || isMaskedName(c.namesHidden, p.name, p.number);
-        map.set(p.id, { ...p, checkedIn, comps: [c.name || ""], numberPrefix: c.numberPrefix || "", ...(masked ? { nameHidden: true } : {}) });
+        // `compIds` beside `comps`: a competition is known by its id, and two
+        // competitions may share a name.
+        map.set(p.id, { ...p, checkedIn, comps: [c.name || ""], compIds: [c.id || ""], preparingDraws: preparing, numberPrefix: c.numberPrefix || "", ...(masked ? { nameHidden: true } : {}) });
       } else {
         // Reached only if the SAME participant id appears under two
         // competitions. Participant ids are minted per competition (a fresh
@@ -759,12 +767,36 @@ export function buildRoster(competitions, tournament) {
         map.set(p.id, {
           ...existing,
           comps: [...existing.comps, c.name || ""],
+          compIds: [...existing.compIds, c.id || ""],
+          preparingDraws: [...existing.preparingDraws, ...preparing],
           checkedIn: existing.checkedIn || checkedIn,
         });
       }
     });
   });
   return Array.from(map.values());
+}
+
+// preparingDrawsFor: the drafts a watchlist entry is in whose draw the public
+// may not see yet (bc-drpb), one {id, name} per competition, by id, in roster
+// order. A player entry reads its own record; a dojo entry its members'. The
+// watchlist shows "Draw being prepared" for each, beside whatever the entry's
+// other competitions show, and "No upcoming matches" only when it shows
+// nothing else. Empty for no entry, or for an entry the roster does not hold.
+export function preparingDrawsFor(entry, roster) {
+  const ids = new Set(resolveEntryPlayerIds(entry, roster));
+  if (ids.size === 0) return [];
+  const seen = new Set();
+  const out = [];
+  (Array.isArray(roster) ? roster : []).forEach((p) => {
+    if (!p || !ids.has(String(p.id))) return;
+    (p.preparingDraws || []).forEach((d) => {
+      if (!d || seen.has(d.id)) return;
+      seen.add(d.id);
+      out.push(d);
+    });
+  });
+  return out;
 }
 
 // Hook: watchlist (array of polymorphic player/dojo entries) backed by

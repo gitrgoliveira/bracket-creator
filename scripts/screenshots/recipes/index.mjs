@@ -19,6 +19,7 @@ import * as knockout from './knockout.mjs';
 import * as hero from './hero.mjs';
 import * as branding from './branding.mjs';
 import * as publicNames from './public_names.mjs';
+import * as drawVisibility from './draw_visibility.mjs';
 import * as posters from './posters.mjs';
 
 // Each module paired with its file name, because a module cannot name its own
@@ -37,6 +38,7 @@ const groups = [
   [hero, 'hero.mjs'],
   [branding, 'branding.mjs'],
   [publicNames, 'public_names.mjs'],
+  [drawVisibility, 'draw_visibility.mjs'],
   [posters, 'posters.mjs'],
 ];
 

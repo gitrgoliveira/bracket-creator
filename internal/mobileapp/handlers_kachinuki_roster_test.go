@@ -31,6 +31,7 @@ func seedKachinukiRosterComp(t *testing.T, store *state.Store) (a1, a2 domain.Te
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: "k1", Name: "Kachinuki", Kind: "team", TeamSize: 2,
 		TeamMatchType: state.TeamMatchTypeKachinuki, Format: state.CompFormatMixed,
+		Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SaveParticipants("k1", []domain.Player{
 		{ID: aID, Name: "Ryu", Dojo: "DojoR"},

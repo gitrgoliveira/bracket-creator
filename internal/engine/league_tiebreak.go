@@ -74,6 +74,30 @@ func isConsequentialTie(g TiedGroup, comp *state.Competition) bool {
 	return true
 }
 
+// LeagueTiebreakCandidatesBeforeDraw is LeagueTiebreakCandidates as the same
+// competition answers before its draw: no match is played, so nothing is tied
+// and nothing needs a decider. A public read of a draft whose draw is hidden
+// from its caller answers it (bc-drpb).
+func (e *Engine) LeagueTiebreakCandidatesBeforeDraw(compID string) ([]TiedGroup, error) {
+	if _, err := e.loadExistingCompetition(compID); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+// loadExistingCompetition reads a competition, answering an unknown one with a
+// NotFoundError.
+func (e *Engine) loadExistingCompetition(compID string) (*state.Competition, error) {
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return nil, err
+	}
+	if comp == nil {
+		return nil, notFoundErrorf("competition %s not found", compID)
+	}
+	return comp, nil
+}
+
 // LeagueTiebreakCandidates returns the consequential tied groups in a team-league
 // competition after all regular pool matches are complete. A group is
 // "consequential" when it intersects the tie-break band [1..3] and
@@ -93,12 +117,9 @@ func isConsequentialTie(g TiedGroup, comp *state.Competition) bool {
 // for single-pool leagues). All tied groups across all pools are evaluated;
 // in practice a league has exactly one pool.
 func (e *Engine) LeagueTiebreakCandidates(compID string) ([]TiedGroup, error) {
-	comp, err := e.store.LoadCompetition(compID)
+	comp, err := e.loadExistingCompetition(compID)
 	if err != nil {
 		return nil, err
-	}
-	if comp == nil {
-		return nil, notFoundErrorf("competition %s not found", compID)
 	}
 
 	// Only applicable to team leagues.

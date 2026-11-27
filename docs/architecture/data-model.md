@@ -865,6 +865,16 @@ The `roster_shuffled` field is an optional boolean (absent means false) recordin
 
 Once set it stays set, through a discarded draw and later roster edits. It is not a setting, so it is left out of the competition's `configVersion` and a shuffle never makes an open Settings page stale. It needs no migration: an absent key reads as "not recorded as shuffled", which is all that can be said of a file an earlier release wrote, since nothing recorded a shuffle before. A backup or a restore carries `config.md` as it is, and a shuffle counts as a change to it for the scheduled backup's fingerprint.
 
+The `draw_hidden` field is an optional boolean (absent means false) recording that the draw of a competition waiting to start is kept off the public pages until the organiser publishes it. These writes change it:
+
+- Generating a draw sets it, in every tournament mode.
+- **Publish draw** clears it and **Unpublish** sets it again, both only while the draw waits to start.
+- Discarding the draw clears it in the same write that returns the competition to setup, so the next draw starts hidden.
+- Starting the competition clears it in the same write that moves the status.
+- **Start** on a competition still in setup clears it too. That start generates its draw hidden like any other and clears the field as it starts, so a start that fails part way never leaves a public draft.
+
+The public may not see the draw exactly when the competition is draw-ready, the field is true and the tournament is officiated (`Competition.DrawHiddenIn`, the one rule). A started competition is public whatever the field holds. A self-run tournament shows its draw as soon as it is made, judged when the draw is read with the stored field left alone. The server alone writes the field. Creating a competition never sets it, and a settings save neither sets nor clears it. It is not a setting, so it is left out of the competition's `configVersion`. It needs no migration: an absent key reads as published, so a competition drawn before the field existed stays public. A backup or a restore carries `config.md` as it is. So a restored draft is hidden or published as it was when the backup was taken, and a publish or unpublish counts as a change to it for the scheduled backup's fingerprint.
+
 The settings versions are not stored. These are content hashes computed when they are served:
 
 - `tournamentVersion`, over the fields a tournament save writes, never the password.

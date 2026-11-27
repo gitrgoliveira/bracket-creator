@@ -325,6 +325,13 @@ describe('telling the operator what view only means', () => {
       .toBe('Shiaijo C was closed on another device just now. This console takes it within about 10 seconds unless that device comes back.');
   });
 
+  it('a grace seen by a tab that lost the shiaijo to another tab of this device promises no take: the claim at its end takes nothing for that tab', () => {
+    const view = { state: 'other', holderDevice: 'mac', holderLastActiveAt: 0, releasedAt: 5, sameDevice: false, youWereDisplaced: false, tabWasDisplaced: true };
+    const b = courtControlBar(view, 'C');
+    expect(b.text).toBe('Shiaijo C was closed on a Mac just now.');
+    expect(b.take).toBe(true);
+  });
+
   it('losing the shiaijo to another device while open: ONE amber band, announced once, that says what was entered and that Dismiss takes away', async () => {
     const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
     await settle(200);

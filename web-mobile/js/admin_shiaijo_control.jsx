@@ -177,9 +177,11 @@ export function courtControlBar(view, court, { now = serverNowMs(), checked = tr
             }));
         }
         if (held.grace) {
-            return offline(bar('view', 'eye', 'View only',
-                `${cap(held.clause)}. This console takes it within about 10 seconds unless that ${held.noun} comes back.`,
-                { take: true, ask }));
+            // A tab that lost the shiaijo to another tab of this device earlier
+            // is on the displaced list, so the claim at the grace's end takes
+            // nothing for it (court_control.go Claim): it promises no take.
+            const after = view.tabWasDisplaced ? '' : ` This console takes it within about 10 seconds unless that ${held.noun} comes back.`;
+            return offline(bar('view', 'eye', 'View only', `${cap(held.clause)}.${after}`, { take: true, ask }));
         }
         return offline(bar('view', 'eye', 'View only', `${cap(held.clause)}.`, {
             more: active ? `${cap(active)}.` : '',

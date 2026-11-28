@@ -2094,6 +2094,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
     put:
       tags: [tournament]
       summary: Claim, keep or take a shiaijo
@@ -2115,21 +2117,24 @@ paths:
           at `takenAt` and puts the former tablet on the displaced tablets
           list; a take between two tabs of one tablet moves the green bar and
           keeps the standing start where it was.
-        - Claiming one shiaijo frees any other this tab held, except those
-          named in `keep` (the shiaijo its tablet still has queued results
-          for), and ends at once the grace of any other this tab gave back.
+        - Claiming one shiaijo frees any other this tab held and ends at once
+          the grace of any other this tab gave back, except for those named
+          in `keep` (the shiaijo its tablet still has queued results for).
           `keep` never lets a tab take or hold a shiaijo it did not already
-          hold.
+          hold. The holder's heartbeat frees nothing and ends no grace.
         - During the 10-second grace after the holder's tab gave the shiaijo
           back (DELETE), a claim from that tab (a reload: same `tabId`, new
-          `pageId`) or from another tab of its tablet takes it back at once,
-          with its standing start as it was. A claim from another tablet is
-          answered as for a shiaijo that tablet runs (`holderKey`, `device`,
-          `since` and `lastActiveAt` of the hold given back, with
-          `releasedAt` set) and takes nothing; `take: true` takes it at once,
-          as from a running holder. A score or decision write from that
-          tablet in the grace has the standing from the same start and takes
-          the shiaijo back; one from another tablet is ordinary.
+          `pageId`) takes it back at once, with its standing start as it was.
+          So does a claim from another tab of its tablet, unless that tab
+          lost the shiaijo to a take: then only `take: true` takes it. A
+          claim from another tablet is answered as for a shiaijo that tablet
+          runs (`holderKey`, `device`, `since` and `lastActiveAt` of the hold
+          given back, with `releasedAt` set) and takes nothing; `take: true`
+          takes it at once, as from a running holder. A score or decision
+          write from that tablet in the grace has the standing from the same
+          start and takes the shiaijo back, unless its tab lost the shiaijo
+          to a take or holds another shiaijo: then it has the standing and
+          takes nothing. One from another tablet is ordinary.
 
         The control never lapses on a timer while a tab holds it. A change of
         holder is announced
@@ -2212,6 +2217,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
     delete:
       tags: [tournament]
       summary: Give a shiaijo back
@@ -2219,7 +2226,8 @@ paths:
         The console's release as its tab closes or reloads. It gives the
         shiaijo back only when this tab runs it and `pageId` names the current
         page load; anything else changes nothing and answers the control as
-        it stands. A shiaijo given back is kept for this tablet for a grace of
+        the GET does (during a grace, the hold given back with `releasedAt`
+        set, and `youHold` false). A shiaijo given back is kept for this tablet for a grace of
         10 seconds (see the PUT), so a reload over a slow network claims it
         back before any other console: nothing is announced until the grace
         ends, and then `court_control_updated` announces it free and every
@@ -2269,6 +2277,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   # ── Competitions (Admin, requires auth) ────────────────────────────────────
 
@@ -6242,8 +6252,9 @@ paths:
                     CourtControlStamp). With the court's standing the decision
                     replaces a result another device recorded that it never
                     saw, instead of being turned away as its rival. The
-                    both-sides-barred `hikiwake` does not judge it. An id that
-                    is not a lowercase UUID v4 is a 400.
+                    both-sides-barred `hikiwake` gives it no standing. An id
+                    that is not a lowercase UUID v4 is a 400 on every
+                    decision, that hikiwake included.
                 decision:
                   type: string
                   enum: [kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, hikiwake, daihyosen]
@@ -11864,8 +11875,9 @@ components:
         that it never saw, rather than being turned away as its rival
         (`match_closed`); one that would replace a result other matches were
         built on is held `downstream_built_on`. Never judged in a self-run
-        tournament; a participant's (an empty `X-Tournament-Password`) is
-        dropped.
+        tournament. An id that is not a lowercase UUID v4 is a 400 for every
+        caller; a well-formed stamp from a participant (an empty
+        `X-Tournament-Password`) is dropped.
       required: [tabId, deviceId]
       properties:
         tabId:

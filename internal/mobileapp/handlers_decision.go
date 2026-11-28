@@ -126,6 +126,14 @@ func (r *DecisionRequest) Validate() error {
 	if err := validateMaxLen("decisionReason", r.DecisionReason, MaxLenDecisionReason); err != nil {
 		return err
 	}
+	return r.validateStamps()
+}
+
+// validateStamps checks the request-only writeId, basis and courtControl
+// every decision carries, the both-barred hikiwake included: the handler asks
+// it ahead of that carve-out, so a malformed stamp is a 400 on every
+// decision, never accepted unread.
+func (r *DecisionRequest) validateStamps() error {
 	if err := r.validateTag(); err != nil {
 		return &ValidationError{Field: "writeId", Message: err.Error()}
 	}
@@ -180,7 +188,12 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		// of Validate() (which otherwise 400s every hikiwake -- "use /score
 		// for fought/hikiwake"). Any hikiwake that is not this exact
 		// both-barred pool/league shape falls through unchanged to that same
-		// 400.
+		// 400. The write's stamps are checked first, so a malformed one is a
+		// 400 here too.
+		if err := req.validateStamps(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		if handleBothSidesBarredHikiwake(c, eng, store, tx, hub, id, mid, req) {
 			return
 		}

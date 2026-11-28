@@ -334,7 +334,7 @@ The competition refetch it causes is 25.7 KB as sent and 2.1 KB gzipped, and the
 refetch is 50.9 KB and 3.5 KB. With 1,000 viewers fetching both after one point, that is 76.6 MB as
 sent and 5.5 MB gzipped, against 0.6 MB for the events themselves. Answers are gzipped for any
 browser that accepts it, which cuts a refetch to about 8% of its size. The embedded page files are
-not compressed, so a first load is unchanged. Compressing a 317 KB list takes under 1 ms of CPU,
+not compressed, so a first load is unchanged. Compressing a 317 KB list takes under 1 ms of CPU on an Apple M1 Pro,
 once for all the viewers that ask for it at the same moment. A page also fetches once per burst of
 events rather than once per event, and not at all for an event its last answer already holds. Five
 points scored in quick succession cost each viewer one competition fetch instead of five, so 1,000

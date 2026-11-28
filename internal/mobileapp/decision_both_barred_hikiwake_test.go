@@ -243,6 +243,30 @@ func TestScoreHandler_BothSidesBarredKnockout_NeitherCanFightSentence(t *testing
 // path and on PUT /score. A device clock implausibly far in the future gets
 // the same {"applied":false,"reason":"clock_skew"} 200, and nothing is
 // written -- Pool A-2 stays scheduled.
+// A malformed court control stamp is a 400 on the both-barred hikiwake too:
+// the stamps are checked ahead of the carve-out, as on every decision.
+func TestDecisionHandler_BothSidesBarredHikiwake_MalformedCourtControlRefused(t *testing.T) {
+	compID := "both-barred-hikiwake-bad-court-control"
+	r, store, _ := bothBarredPoolFixture(t, compID)
+
+	req := DecisionRequest{
+		Decision: "hikiwake", DecisionReason: "both competitors already withdrawn",
+		ModifiedAt: time.Now().UnixMilli(),
+	}
+	req.CourtControl = &courtControlStamp{TabID: "not-a-uuid", DeviceID: "not-a-uuid"}
+	resp := postDecisionJSON(t, r, compID, "Pool A-2", req)
+	require.Equal(t, http.StatusBadRequest, resp.Code, resp.Body.String())
+	assert.Contains(t, resp.Body.String(), "courtControl")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range matches {
+		if m.ID == "Pool A-2" {
+			assert.Equal(t, state.MatchStatusScheduled, m.Status, "nothing was written")
+		}
+	}
+}
+
 func TestDecisionHandler_BothSidesBarredHikiwake_ClockSkewRefused(t *testing.T) {
 	compID := "both-barred-hikiwake-clock-skew"
 	r, store, _ := bothBarredPoolFixture(t, compID)

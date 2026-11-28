@@ -49,6 +49,32 @@ func TestCourtControlGrace_AReloadTakesItBackAtOnceWithItsStandingWhole(t *testi
 	assert.True(t, rig.stored(t, "A").Held(), "the old page's late release frees nothing")
 }
 
+func TestCourtControlGrace_ALateReleaseIsAnsweredTheHoldGivenBack(t *testing.T) {
+	rig := newCourtRig(t)
+	rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)
+	since := rig.stored(t, "A").Since
+	rig.release(t, "A", ccTab1, ccPage1)
+
+	again, err := rig.reg.Release("A", ccTab1, ccPage1)
+	require.NoError(t, err)
+	assert.Equal(t, state.CourtControlKey(ccTab1), again.HolderKey, "the hold given back, as GET answers it")
+	assert.Equal(t, since, again.Since)
+	assert.NotZero(t, again.ReleasedAt)
+	assert.False(t, again.YouHold, "a hold given back is run by no tab, its own included")
+
+	other, err := rig.reg.Release("A", ccTab2, ccPage2)
+	require.NoError(t, err)
+	assert.Equal(t, state.CourtControlKey(ccTab1), other.HolderKey)
+	assert.NotZero(t, other.ReleasedAt)
+	assert.False(t, other.YouHold)
+	look, err := rig.reg.Look("A")
+	require.NoError(t, err)
+	assert.Equal(t, look.HolderKey, other.HolderKey)
+	assert.Equal(t, look.ReleasedAt, other.ReleasedAt)
+	require.Len(t, rig.graces, 1)
+	assert.False(t, rig.graces[0].stopped, "a late release leaves the grace running")
+}
+
 func TestCourtControlGrace_AnotherTabOfTheTabletTakesItBackAtOnce(t *testing.T) {
 	rig := newCourtRig(t)
 	rig.claim(t, "A", ccTab1, ccTablet1, ccPage1, false, 0)

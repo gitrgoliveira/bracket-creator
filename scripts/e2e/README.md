@@ -96,7 +96,7 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             page.close({ pagehide: false }) closes a page as
                             a crash would, leaving its shiaijo held. A
                             shiaijo given back stays with its tablet for the
-                            server's half-minute grace, so the next test's
+                            server's 10-second grace, so the next test's
                             console (another tablet) takes it with Take
                             control, as openShiaijo does by default
     fixtures/scores.mjs     the Scores tab and its overlay editor

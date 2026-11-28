@@ -191,11 +191,12 @@ func (r *courtControlRegistry) answerLocked(court string, h state.CourtHold, tab
 		a.Device = h.Device
 		a.Since = h.Since
 		a.LastActiveAt = r.lastActive[court]
-		a.YouHold = tabKey != "" && h.HolderKey == tabKey
 		sameDevice = devKey != "" && h.DeviceKey == devKey
 		if g := r.grace[court]; g != nil && g.hold.HolderKey == h.HolderKey {
 			a.ReleasedAt = g.releasedAt
 		}
+		// A hold given back is run by no tab, its own included.
+		a.YouHold = tabKey != "" && h.HolderKey == tabKey && a.ReleasedAt == 0
 	}
 	a.SameDevice = sameDevice
 	displacedDevice := h.IsDisplacedDevice(devKey)
@@ -422,7 +423,8 @@ func freed(h state.CourtHold) state.CourtHold {
 
 // Release gives the shiaijo back only when the tab holds it AND names the
 // current page load, so a reload's late release never frees the new page's
-// claim. Anything else changes nothing and answers the control as it stands.
+// claim. Anything else changes nothing and answers the control as a claim
+// sees it (viewLocked): during a grace, the hold given back, with releasedAt.
 // A shiaijo given back is free in the file at once, but kept for its tablet
 // for courtReleaseGrace (startGraceLocked): nothing is announced until the
 // grace ends, since until then every other console still sees it run from
@@ -440,7 +442,7 @@ func (r *courtControlRegistry) Release(court, tabID, pageID string) (CourtContro
 	defer r.mu.Unlock()
 	h := r.holds[court]
 	if !h.Held() || h.HolderKey != tabKey || h.PageID != pageID {
-		return r.answerLocked(court, h, tabKey, ""), nil
+		return r.answerLocked(court, r.viewLocked(court), tabKey, ""), nil
 	}
 	next := r.copyLocked()
 	next[court] = freed(h)

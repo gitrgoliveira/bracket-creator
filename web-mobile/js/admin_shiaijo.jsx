@@ -45,6 +45,7 @@ import { ShiaijoContext } from './admin_shiaijo_context.jsx';
 import { useCourtStart, ShiaijoUpNextCard } from './admin_shiaijo_start.jsx';
 import { useCourtCalls } from './admin_shiaijo_calls.jsx';
 import { useCourtMoves, ShiaijoConfirms } from './admin_shiaijo_moves.jsx';
+import { noteFirstResultCompetitions } from './first_result_confirm.jsx';
 
 const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
@@ -353,6 +354,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // aggregate as a transient fallback. All competition/match derivations below
     // read from this so the page operates only on THIS court's competitions.
     const courtCompetitions = courtComps || tournament.competitions || NO_COMPETITIONS;
+    // What the court shows is what the first-result question judges (bc-drev
+    // D4 b, first_result_confirm.jsx): a Start of a drawn competition's first
+    // match here asks whether to start the competition.
+    useEffect(() => { noteFirstResultCompetitions(courtCompetitions); }, [courtCompetitions]);
 
     const paceLookup = useCourtPaceLookup(courtCompetitions);
 

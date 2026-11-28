@@ -28,6 +28,29 @@ import {
 import { _forgetShownMatches, _forgetAllShownMatches } from './api_client_status.jsx';
 import { _outboxWrite } from './api_client_enqueue.jsx';
 
+// _drawReviewRead GETs one of the draw review's reads (bc-drev) under the
+// request deadline, with the organiser's password. A refusal throws the
+// server's sentence (readFailure) carrying its `status` and, unless the
+// password was refused, the server's `code` (no_draw, not_in_draw, ...); a
+// dropped connection or a deadline throws the plain "could not read"
+// sentence, so the card always says it read nothing.
+async function _drawReviewRead(path, password, what) {
+    let answer;
+    try {
+        answer = await _fetchJson(path, { headers: password ? { 'X-Tournament-Password': password } : {} });
+    } catch {
+        throw new Error(`Could not read ${what}. Check the connection and try again.`);
+    }
+    const { res, body } = answer;
+    if (!res.ok) {
+        const e = readFailure(res.status, body.message || body.error, what);
+        if (!e.code && body.error) e.code = body.error;
+        e.status = res.status;
+        throw e;
+    }
+    return body;
+}
+
 // _downloadWorkbook GETs an admin-gated .xlsx through the direct door and
 // returns its Blob; a non-2xx throws the server's own sentence, else `fallback`.
 // A download changes nothing, so a dropped connection says "Not sent".
@@ -266,6 +289,70 @@ export const competitionsApi = {
         } catch {
             return [];
         }
+    },
+    // The draw review (bc-drev): four organiser-only requests between the
+    // draw and the start. Plain requests, never outbox doors: the card needs
+    // the server's answer before it shows anything, so they are refused while
+    // offline, like generating the draw.
+    //
+    // fetchDojoSeparation: GET /competitions/:id/dojo-separation, every pair of
+    // dojo-mates in the stored draw and where they can first meet, in the
+    // server's order (a shared pool first, then the earliest meeting). Unlike
+    // the draw warnings a failure throws: an empty list would read as "No two
+    // competitors share a dojo", which the card must never claim unread.
+    async fetchDojoSeparation(id, password) {
+        const body = await _drawReviewRead(`/api/competitions/${id}/dojo-separation`, password, 'the dojo separation');
+        return Array.isArray(body.meetings) ? body.meetings : [];
+    },
+    // fetchSwapSuggestions: GET /competitions/:id/draw/swap-suggestions,
+    // {suggestions}: swaps of two unseeded competitors that keep dojo-mates
+    // apart for longer.
+    async fetchSwapSuggestions(id, password) {
+        const body = await _drawReviewRead(`/api/competitions/${id}/draw/swap-suggestions`, password, 'the swap suggestions');
+        return { suggestions: Array.isArray(body.suggestions) ? body.suggestions : [] };
+    },
+    // fetchSwapCandidates: GET /competitions/:id/draw/swap-candidates?id=,
+    // {pick: {id, place}, candidates: [{id, place, verdict, dojos?}]}: for the
+    // competitor picked first in the swap mode, every other drawn competitor
+    // in draw order, and whether swapping the two keeps dojo-mates apart for
+    // longer ("better"), brings a pair together earlier ("worse") or neither
+    // ("same"), with `dojos`, the dojos better or worse off, sorted. A refusal throws with the server's `code`: not_in_draw (409)
+    // means the draw no longer holds the pick, so the page reads the draw
+    // again; no_draw and draw_started as for the swap.
+    async fetchSwapCandidates(id, pickId, password) {
+        const body = await _drawReviewRead(
+            `/api/competitions/${id}/draw/swap-candidates?id=${encodeURIComponent(pickId || '')}`,
+            password, 'the swap candidates');
+        return {
+            pick: body.pick || null,
+            candidates: Array.isArray(body.candidates) ? body.candidates : [],
+        };
+    },
+    // swapDrawPlaces: POST /competitions/:id/draw/swap with {a: {id, place},
+    // b: {id, place}, dryRun?}. Answers the swap's result (applied, or applied
+    // false with reason already_swapped, or dryRun true). A refusal throws an
+    // Error carrying the server's sentence, its `code` (draw_changed,
+    // draw_started, not_in_draw, ...) and, for draw_changed, `places`. A dry
+    // run saves nothing, so a dropped connection says "Not sent"; the real
+    // swap may have landed, so it says that it may have.
+    async swapDrawPlaces(id, body, password) {
+        const res = await _directFetch(`/api/competitions/${id}/draw/swap`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(password ? { 'X-Tournament-Password': password } : {}),
+            },
+            body: JSON.stringify(body),
+        }, body && body.dryRun ? NOT_SENT_NO_CONNECTION : undefined);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw Object.assign(new Error(data.message || data.error || "The swap could not be made."), {
+                code: data.error, places: data.places, status: res.status,
+            });
+        }
+        // An applied swap changed who sits in the matches this device holds.
+        if (data.applied && !data.dryRun) _forgetShownMatches(id);
+        return data;
     },
     async discardDraw(id, password) {
         const res = await _directFetch(`/api/competitions/${id}/draw`, {

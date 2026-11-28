@@ -393,8 +393,15 @@ func TestSelfRun_MatchLineupNamesATeamInTheMatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, lineups, "nothing is written")
 
+	// The organiser is refused the same way: a lineup for a team the match
+	// does not hold is read by nothing, and one saved before a draw swap moved
+	// the team would land on a match it no longer plays (bc-drev FR6).
 	w = f.send(http.MethodPut, stranger, "main-pw", senpo("Mei Ito", ""))
-	require.Equal(t, http.StatusOK, w.Code, "the organiser's write: %s", w.Body.String())
+	requireRefusal(t, w, http.StatusNotFound, "team_not_in_match",
+		"This team is not in this match. Check the score sheet and try again.")
+	lineups, err = f.store.LoadTeamLineups("c1")
+	require.NoError(t, err)
+	assert.Empty(t, lineups, "nothing is written for the organiser either")
 }
 
 // A participant adds a member while the competition runs, up to a limit, and

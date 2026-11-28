@@ -54,6 +54,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
       await act(async () => { awardBtn.click(); });
       expect(recordDecision).toHaveBeenCalledWith('c1', 'm-barred', {
         decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Yama withdrawn',
+        sideAId: 'u', sideBId: 'y',
       }, '', expect.objectContaining({ onRefusal: expect.any(Function) }));
     } finally {
       window.API.recordDecision = prevRD;

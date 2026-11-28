@@ -257,7 +257,7 @@ You can still toggle individual check-in status during `draw-ready`, but roster 
 
 When the preview looks correct, click **Start competition** to move to match play. To make roster changes instead, click **Discard draw** to delete the draft and return to setup.
 
-A draw-ready competition is already listed on the shiai-jo operator views, since its matches exist. Scoring one of those matches starts the competition on the spot, exactly as **Start competition** would, so a court that begins play never has to wait for the desk.
+A draw-ready competition is already listed on the shiai-jo operator views, since its matches exist. Scoring one of those matches starts the competition on the spot, exactly as **Start competition** would, so a court that begins play never has to wait for the desk. Because that first result fixes the draw, the app asks first; refer to [Before the first result](#before-the-first-result).
 
 #### Keep the draw from the public until it is ready
 
@@ -296,6 +296,71 @@ A self-run tournament has no **Publish draw** button: its draw is public as soon
   </video>
   <figcaption>Generating the draw. Press play to watch.</figcaption>
 </figure>
+
+### Review the draw
+
+A **Pools + Knockout** or **Knockout only** competition whose draw is ready shows a **Draw review** card on its **Overview**, under the card that opens the preview. It shows when two competitors from the same dojo can first meet. If a pairing is wrong, you can swap two competitors there and then, without discarding the draw. The Draw review card takes the place of the Overview's status cards for these formats. League and Swiss competitions have no Draw review card; their Overview keeps a **Draw ready** card and a **To start** card instead.
+
+Under its title, the card gives the facts in one line, counted from the pairs in its **Dojo separation** table, for example "12 pairs from 4 dojos. None share a pool; the earliest any can meet is the Quarterfinals (4 pairs)." When some pairs share a pool it says how many, and when no pair can meet before the final it says "They can meet only in the Final."
+
+A second line says what that means for you: "No swap is needed." when no pair shares a pool and none can meet before the final, "No swap can do better." when the app finds no swap that helps, or how many swaps it suggests, for example "2 swaps would keep dojo-mates apart longer. They are under Change the draw."
+
+![The Draw review card: the facts and the conclusion under the title, the Dojo separation table with each dojo named once over its pairs and the round where each pair can first meet, then Change the draw (optional) with the button to swap competitors on the preview tab.](../../screenshots/mobile-draw-review.png)
+
+#### Dojo separation
+
+The card's first section, **Dojo separation**, lists every pair of competitors from the same dojo, one row per pair. The pairs are grouped by dojo, with the dojo named once beside its pairs and a rule between two dojos; the dojo with the earliest meeting comes first. Each row names the two competitors (with their numbers) and where they **Can first meet**:
+
+- **Share Pool C**: the two are in the same pool, so they fight each other there. These rows come first.
+- A round name, such as **Quarterfinals** or **Final**: the earliest knockout match their paths can join. In a **Pools + Knockout** competition this counts every place their pools send up, so a pool's second qualifier counts too. When that is an earlier round than the one where the two pool winners would meet, a second line gives the later round, for example **Final if both win their pools**.
+
+A dojo of three gives three rows, one for each pair. When no two competitors share a dojo, the section says "No two competitors share a dojo." The table is worked out from the draw every time you open it, so it always matches the draw as it stands. Refer to [The pool draw](pool-draw.md#review-the-draw) and [The knockout draw](knockout-draw.md#review-the-draw) for what the rows mean in each format.
+
+#### Change the draw
+
+The second section, **Change the draw (optional)**, is there for when a pairing is wrong. It is a separate step: you can read the summary and start without touching it.
+
+To swap any two unseeded competitors yourself, click **Swap competitors on Pools** (for a **Knockout only** competition, **Swap competitors on the Bracket**). It opens the preview tab with the Swap competitors mode already on. Refer to [Swap competitors on the preview tabs](#swap-competitors-on-the-preview-tabs).
+
+Below the button, the app suggests up to five swaps of two unseeded competitors that keep dojo-mates apart for longer, each with what it changes and a **Swap** button. The draw already keeps dojos apart as well as it can, so there is often no suggestion, and the line under the card's title says so.
+
+The app judges a swap one dojo at a time, by all of that dojo's pairs together. It takes where each pair can first meet, earliest first, before the swap and after it, and compares the two lists from the earliest meeting: the first difference decides whether that dojo is better or worse off. So two competitors of one dojo trading places changes nothing for that dojo, and a dojo whose earliest meeting moves later is better off even if one of its other pairs now meets a little earlier. A swap is suggested only when no dojo is worse off and at least one is better off. A swap that helps one dojo but leaves another worse off counts as worse.
+
+#### If you swap them
+
+Every swap, a suggestion or one tapped on a preview tab, opens **If you swap them** before anything changes. Its first line names the dojos by what the swap does to each: in amber, the dojos that would be worse off, for example "Dojo-mates from Hizen and Mumeishi could meet earlier." or "Dojo-mates from Fudo would share a pool."; otherwise what happens to each, for example "Dojo-mates from Kenyu could meet later. No change for Fudo.", or "No change for any dojo." Then it says:
+
+- Where each competitor goes, named by the number they hold now, for example "K5 Ren Suzuki goes to Pool C, K8 Luca Conti to Pool B." In a **Knockout only** competition the place is the first-round match as the bracket prints it: "K1 Ren Suzuki goes to M3, K6 Luca Conti to M1."
+- How each affected dojo's earliest meeting changes, naming the round and the match number the bracket shows, for example "Fudo (Ren Suzuki and Aiko Mori): could first meet in the Semifinals (M5), or the Final if both win their pools; now the Semifinals (M6) either way." A pair that moves to another match of the same depth meets no earlier and no later, and a dojo whose meetings are the ones it had reads "no change".
+- Which tags to exchange. A competitor number belongs to the place in the draw, not to the person, so the competitor who moves into a place takes that place's number: "Numbers stay with the place: Ren Suzuki takes K8, Luca Conti takes K5. Swap their tags." If you have already handed out tags, swap the two competitors' tags.
+- For a team competition, how many saved lineups move with their team, and any that are removed because the team's new place has no matching match.
+- Who gains or loses a first-round bye.
+
+Click **Swap them** to make the swap, or **Cancel** to leave the draw as it is. When a dojo would be worse off, the button reads **Swap anyway**, in amber, so the swap is a choice you make knowing it. Every other device showing the draw updates at once, and so do the public pages once the draw is public; while it is hidden from the public, the panel does not mention them.
+
+What moves with a competitor: their name, dojo, check-in, any withdrawal, and, for a team, the lineups saved for single matches, which move to the match the team now plays in the same order. What stays with the place: the number, and every match's shiai-jo and time. Since no seed moves, the knockout is never rebuilt: a **Pools + Knockout** bracket stays as it is, and in a **Knockout only** bracket only the two competitors change places. A swap inside one pool is always allowed; it only changes the order of the pool's bouts.
+
+If the draw changes on another device while the panel is open, the panel works the swap out again, so what it shows is always for the draw as it is now. If either of the two competitors was moved, or the draw was started or discarded, the swap is not made: the draw is read again and you pick the two competitors again.
+
+If the connection drops before the swap is answered, the panel stays open and says "No answer: the connection dropped. The change may or may not have been saved. Check, then try again if it is missing." Click the button again: a swap that was already made is not made twice, and the app says "That swap was already made. The draw shows it now."
+
+To undo a swap, swap the same two competitors again. The draw goes back to how it was, except that in a team competition the lineups the first swap removed are not brought back.
+
+#### Swap competitors on the preview tabs
+
+You can also swap straight from the draw. **Pools (preview)** of a **Pools + Knockout** competition, and **Bracket (preview)** of a **Knockout only** competition, have a **Swap competitors** button. A Pools + Knockout bracket has none, because its places are pool places, such as Pool A-1st, rather than competitors. The Draw review card's button opens the tab at its top, with the mode already on.
+
+With the mode on, a banner says "Swap competitors: tap two unseeded competitors to swap them." While the mode is on, a tap picks a competitor instead of opening a score sheet. The banner stays at the top of the screen as you scroll. Every competitor you can tap has a dashed outline. A seeded competitor is grey, with a line such as "Seed 1, stays in place", and cannot be picked, because seeds keep their places in the draw.
+
+Tap a competitor to pick them; tap them again, or **Cancel**, to put them back. Once one is picked, the banner names them, number first, and their place, for example "Swap K5 Ren Suzuki (Pool A) with…". Every other competitor is then marked by what swapping the two would do to dojo-mates, judged one dojo at a time as for the suggestions. Green, with a line such as "Better for Kenyu", keeps that dojo apart for longer and leaves no dojo worse off. Amber, with a line such as "Worse for Fudo, Hizen", leaves the dojos it names worse off. The dojos named are the ones the swap affects, which need not include the competitor's own. A plain dashed outline changes no dojo. The line under the pick says what the colours mean, and when only amber shows it says that no swap for that competitor helps. The marks are advice: any swap can still be checked.
+
+Tap a second competitor and the same **If you swap them** panel opens. After a swap the mode stays on, so you can make another; **Done**, Escape, or leaving the tab turns it off.
+
+#### Before the first result
+
+Until the first result is recorded, the draw can still change. The first result fixes it: from then on competitors can no longer be swapped, and the draw can no longer be discarded. So before the app records the first result of a draw-ready competition (a start on a shiai-jo, a finished match or a decision), it asks whether to start the competition, for example "Start Men's Individual?", and names the match. **Start the competition** goes ahead. **Not yet** sends nothing and leaves the match as it was; in a score editor of the admin console the app also says "Not recorded: the competition was not started." The question is asked on the shiai-jo operator view and in every score editor of the admin console. Once you have answered **Start the competition**, the app does not ask again for that competition, unless its draw is swapped, discarded or generated again first. Participants scoring their own matches on the public page in self-run mode are not asked.
+
+Once the competition has started, the Draw review card, with its **Dojo separation** table and **Change the draw** section, and the **Swap competitors** buttons are no longer shown, and a swap sent from elsewhere is refused. A result sent from a device that loaded the match before a swap is refused too, rather than recorded against the wrong pairing: open the match again to see who is now on each side.
 
 ## Pools and bracket
 

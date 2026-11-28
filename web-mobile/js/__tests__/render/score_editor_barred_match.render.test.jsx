@@ -76,6 +76,7 @@ describe('the Scores tab and a barred match (bc-cse)', () => {
     await act(async () => { btn.click(); });
     expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-barred', {
       decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Yama withdrawn',
+      sideAId: 'u', sideBId: 'y',
     }, 'pw', expect.objectContaining({ onRefusal: expect.any(Function) }));
   });
 

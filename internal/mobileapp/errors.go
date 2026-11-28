@@ -524,6 +524,48 @@ func respondIfCourtMoveRefused(c *gin.Context, err error) bool {
 	return true
 }
 
+// swapRefusalStatus is the HTTP status of each draw-swap refusal
+// (engine.SwapRefusedError.Code): the request itself is wrong (400), or the
+// draw is not one this swap can change now, or a competitor named is a seed,
+// who keeps their place (409).
+var swapRefusalStatus = map[string]int{
+	engine.SwapInvalid:        http.StatusBadRequest,
+	engine.SwapSameCompetitor: http.StatusBadRequest,
+	engine.SwapNotInDraw:      http.StatusBadRequest,
+	engine.SwapSeeded:         http.StatusConflict,
+	engine.SwapNoDraw:         http.StatusConflict,
+	engine.SwapDrawStarted:    http.StatusConflict,
+	engine.SwapNotSupported:   http.StatusConflict,
+	engine.SwapDrawChanged:    http.StatusConflict,
+}
+
+// swapBodyUnreadable is the draw swap's answer to a body that is not the
+// swap's JSON shape (400 invalid).
+const swapBodyUnreadable = "The swap could not be read: send the two competitors and the place each of them is at."
+
+// respondIfSwapRefused answers engine.SwapRefusedError, the draw review's
+// swap refusal, with its status and {error: <code>, message: <sentence>},
+// plus places (where the two competitors are now) for draw_changed, so the
+// page refetches and says so. It reports whether it answered. The sentences
+// are the engine's: a not_in_draw refusal names the competitor it is about,
+// which only the engine's read of the draw knows.
+func respondIfSwapRefused(c *gin.Context, err error) bool {
+	var refused *engine.SwapRefusedError
+	if !errors.As(err, &refused) {
+		return false
+	}
+	status, ok := swapRefusalStatus[refused.Code]
+	if !ok {
+		status = http.StatusConflict
+	}
+	body := gin.H{"error": refused.Code, "message": refused.Message}
+	if refused.Places != nil {
+		body["places"] = refused.Places
+	}
+	c.JSON(status, body)
+	return true
+}
+
 // blockedMatchesPayload renders knockout matches for the wire, for every
 // payload that names them to the operator (blockingMatches, runningMatches,
 // reopenedMatches): id for addressing, number, label, the words the operator

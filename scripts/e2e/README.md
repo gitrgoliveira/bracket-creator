@@ -268,6 +268,16 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   Competitions are seeded from a second
                                   operator context; every result is entered on
                                   a phone
+      draw-visibility.public      a draft draw kept off a spectator's phone and
+                                  the TV board until Publish draw; Unpublish
+                                  takes it away again; starting a hidden draw
+                                  asks first and makes it public.
+      draw-swap                   two competitors swapping places before the
+                                  start: picked on Pools in swap mode, checked,
+                                  swapped anyway into a shared pool while an
+                                  open phone follows; the Draw review card's
+                                  suggested swap undoing it; a hidden knockout
+                                  draw swapped on the Bracket.
     output/                 screenshots, audit.json and traces (below);
                             gitignored
 
@@ -289,8 +299,9 @@ Two projects, both Chromium:
   Every journey runs here unless its file is named `*.public.spec.mjs`.
 - `public`: a phone in portrait (390x844), for journeys about a public surface
   alone (`*.public.spec.mjs`): `spectator.public`, `league.public`,
-  `public-names.public` and `self-run-public.public`. Each seeds from a second
-  context opened with `OPERATOR_DEVICE`. Other public checks stay on the
+  `public-names.public`, `self-run-public.public` and `draw-visibility.public`.
+  Each seeds from a second context opened with `OPERATOR_DEVICE`. Other public
+  checks stay on the
   `operator` project, through a second context.
 
 240 s is the default test timeout; some journeys raise it for a long test with

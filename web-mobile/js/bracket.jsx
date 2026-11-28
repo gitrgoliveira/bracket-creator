@@ -445,7 +445,11 @@ function teamIVPWScore(m) {
 // emptyLabel: what an EMPTY side reads instead of "-". Only the 3rd-place
 // card passes one (bronzeSlotLabels), so every other card is unchanged. A
 // normalized empty side is {id: "", name: ""}, truthy, so the test is the name.
-const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD, isEngi, slotLabel, feederId, barred, emptyLabel }) => {
+// `pick` is set only in the admin Swap competitors mode (swapPickFor below):
+// the side is then its own button, {picked, mark, word, onPick}, or, for a seed
+// (locked, who keeps their place), a grey side that is no button; without it
+// the side is drawn exactly as before.
+const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD, isEngi, slotLabel, feederId, barred, emptyLabel, pick }) => {
   if (!player || isTBD || (emptyLabel && !player.name)) {
     return (
       <div className={`bc-side bc-side--empty bc-side--${side}`}>
@@ -467,8 +471,18 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
   // so the side is carried by the leading colour bar and tint alone (DESIGN.md
   // §4): the card names no side in text, and the number sits before the name
   // on both sides (operator ruling 2026-09-14, bc-dnst).
+  const tappable = !!pick && !pick.locked;
+  const Side = tappable ? "button" : "div";
+  const pickClass = !pick ? "" : pick.locked ? " swap-pick swap-pick--locked"
+    : ` swap-pick${pick.picked ? " swap-pick--picked" : ""}${pick.mark ? ` swap-pick--${pick.mark}` : ""}`;
   return (
-    <div className={`bc-side bc-side--${side} ${isWinner ? "bc-side--winner" : ""}`}>
+    <Side
+      className={`bc-side bc-side--${side} ${isWinner ? "bc-side--winner" : ""}${pickClass}`}
+      type={tappable ? "button" : undefined}
+      aria-pressed={tappable ? pick.picked : undefined}
+      data-testid={!pick ? undefined : tappable ? "swap-target" : "swap-locked"}
+      onClick={tappable ? pick.onPick : undefined}
+    >
       <div className="bc-name-wrap">
         <span className="bc-name">
           {isWinner ? <WinnerTick /> : null}
@@ -481,6 +495,10 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
             a uniform height (mp-7f2w). When showDojo is off, no line is rendered
             anywhere, so cards stay uniformly short. */}
         {showDojo ? <span className="bc-dojo">{player.dojo || <span aria-hidden="true">{"\u00A0"}</span>}</span> : null}
+        {/* A swap candidate's mark names the dojos it is about ("Worse for
+            Fudo, Hizen") on a line of its own under the dojo, wrapping inside
+            the side, so a long list never pushes the name. */}
+        {pick ? pick.word : null}
       </div>
       {/* score is null for a scheduled match (nothing struck yet), so a barred
           side (ineligible_match.jsx) takes that same results-column slot: a
@@ -488,12 +506,32 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
           ellipsis. Mirrors where a completed match's Kiken/Fus./Ht mark rides
           (cardMarks in MatchCard); the two can never both apply to one side. */}
       {score != null ? <span className="bc-score">{score}</span> : barred ? <BarredChip /> : null}
-    </div>
+    </Side>
   );
 });
 PlayerLine.displayName = "PlayerLine";
 
-const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, highlightPlayers, matchNum, isEngi, slotLabel, emptyLabels }) => {
+// swapPickFor: a card side as a Swap competitors pick (bc-drev FR10), or null
+// when the side is not a drawn competitor (a "Winner of ..." or placeholder
+// slot, an empty bye slot). `swap` comes from the admin host
+// (useSwapCompetitors, admin_competition_bracket.jsx): entrantOf(id) gives the
+// competitor with the first-round place a swap names them by.
+function swapPickFor(swap, side) {
+  const entrant = swap && side && side.id ? swap.entrantOf(side.id) : null;
+  if (!entrant) return null;
+  return {
+    picked: swap.pickedId === entrant.id,
+    locked: swap.lockedOf ? swap.lockedOf(entrant.id) : false,
+    mark: swap.markOf ? swap.markOf(entrant.id) : null,
+    word: swap.verdictWord ? swap.verdictWord(entrant.id) : null,
+    onPick: (ev) => swap.onPick(entrant, ev),
+  };
+}
+
+// `swap` is set only in the admin Swap competitors mode (bc-drev FR10): the card
+// is then a group, not a button, so each drawn competitor on it is its own tap
+// target (a button cannot hold buttons) and a tap on the card opens nothing.
+const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, highlightPlayers, matchNum, isEngi, slotLabel, emptyLabels, swap }) => {
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` -- with
   // both sides id-less (buildPlayerMap keeps id "" for an id-less
   // participant), the naked equality compared two empty strings and lit
@@ -555,13 +593,15 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   // Gated on matchShowsScore: a queued match keeps its overtime, and its card
   // must still read as not started (bc-sbq).
   const metaMid = matchShowsScore(match) ? matchMiddleMark(match) : "";
+  const Card = swap ? "div" : "button";
   return (
-    <button
+    <Card
       ref={matchRef}
-      type="button"
+      type={swap ? undefined : "button"}
+      role={swap ? "group" : undefined}
       data-match-id={match.id}
-      className={`bc-match bc-match--v${variant} ${running ? "bc-match--running" : ""} ${match.status === "completed" ? "bc-match--done" : ""} ${highlighted ? "bc-match--highlight" : ""} ${playerHighlight ? "bc-match--my-match" : ""}`}
-      onClick={onClick}
+      className={`bc-match bc-match--v${variant} ${running ? "bc-match--running" : ""} ${match.status === "completed" ? "bc-match--done" : ""} ${highlighted ? "bc-match--highlight" : ""} ${playerHighlight ? "bc-match--my-match" : ""}${swap ? " bc-match--swap" : ""}`}
+      onClick={swap ? undefined : onClick}
       aria-label={matchNum != null ? `Match ${matchNum}` : `Match ${match.id}`}
     >
       <div className="bc-match-meta">
@@ -578,10 +618,10 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
       </div>
       {/* feeders is [A, B]: hand each side ITS feeder so an unresolved slot can
           be named after the match that will actually fill it (see makeSlotLabeller). */}
-      <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[0]} barred={!!barredA} emptyLabel={emptyLabels && emptyLabels.a} />
+      <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[0]} barred={!!barredA} emptyLabel={emptyLabels && emptyLabels.a} pick={swapPickFor(swap, match.sideA)} />
       <div className="bc-divider"></div>
-      <PlayerLine player={match.sideB} isWinner={bWin} side="b" showDojo={showDojo} score={bScore} isTBD={bTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[1]} barred={!!barredB} emptyLabel={emptyLabels && emptyLabels.b} />
-    </button>
+      <PlayerLine player={match.sideB} isWinner={bWin} side="b" showDojo={showDojo} score={bScore} isTBD={bTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[1]} barred={!!barredB} emptyLabel={emptyLabels && emptyLabels.b} pick={swapPickFor(swap, match.sideB)} />
+    </Card>
   );
 });
 MatchCard.displayName = "MatchCard";
@@ -1051,7 +1091,7 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
 // placeholder before it (bc-tmfn). All cards are absolutely positioned at the
 // feeder-graph-derived top so parents sit centred on their feeders
 // (see computeMetaTops).
-function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers, isEngi }) {
+function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers, isEngi, swap }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
   const [version, setVersion] = useState(0);
@@ -1180,6 +1220,7 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, varian
                     matchNum={matchNumById[m.id]}
                     isEngi={isEngi}
                     slotLabel={slotLabel}
+                    swap={swap}
                   />
                 </div>
               );
@@ -1192,7 +1233,10 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, varian
 }
 
 // BracketTree switches between the effective-round renderer (when the engine
-// supplied display metadata) and the legacy balanced-rounds renderer.
+// supplied display metadata) and the legacy balanced-rounds renderer. Every
+// prop reaches both, the admin-only `swap` (the Swap competitors mode on
+// Bracket (preview), bc-drev FR10) included: {entrantOf(id), pickedId,
+// onPick(entrant, event)}, absent on every public page.
 function BracketTree(props) {
   // Memoise on rounds identity: buildDisplayModel returns fresh arrays, and the
   // meta renderer's effects key on those: recomputing every render would reset
@@ -1208,7 +1252,7 @@ function BracketTree(props) {
   return <BracketTreeLegacy {...props} slotLabel={slotLabel} />;
 }
 
-function BracketTreeLegacy({ rounds, slotLabel, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers, isEngi }) {
+function BracketTreeLegacy({ rounds, slotLabel, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers, isEngi, swap }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
   const [version, setVersion] = useState(0);
@@ -1324,6 +1368,7 @@ function BracketTreeLegacy({ rounds, slotLabel, variant = 1, showDojo = true, on
                     highlightPlayers={highlightPlayers}
                     isEngi={isEngi}
                     slotLabel={slotLabel}
+                    swap={swap}
                   />
                 </div>
                 );

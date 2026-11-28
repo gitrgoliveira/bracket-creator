@@ -2768,6 +2768,248 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/competitions/{id}/dojo-separation:
+    get:
+      tags: [competitions]
+      summary: Where competitors of the same dojo can first meet in the draw
+      description: |
+        The dojo separation summary of a drawn competition: one row per pair of
+        competitors who share a dojo, saying whether they share a pool and, when
+        they do not, the bracket match where they meet if both win their pools
+        (`ifBothWin`) and the earliest bracket match where they can meet
+        (`earliest`). For a knockout-only draw `earliest` is where their two
+        first-round places join. A competitor's `number` is the number of the
+        place they hold, set only when the competition numbers its competitors.
+
+        Recomputed from the stored draw on every request and never stored.
+        Organiser only, in self-run mode too. A competition with no draw, a
+        league or Swiss competition, and a draw whose competitors all come
+        from different dojos answer 200 with an empty list. A draw that cannot
+        be read is 500, never an empty list.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: The summary rows, possibly empty.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [meetings]
+                properties:
+                  meetings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DojoMeeting'
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/draw/swap-suggestions:
+    get:
+      tags: [competitions]
+      summary: Swaps that keep competitors of the same dojo apart for longer
+      description: |
+        Up to five swaps of two unseeded competitors, each of which leaves no
+        dojo worse off and at least one dojo better off. Each dojo is judged
+        as a whole: where its pairs of dojo-mates can first meet, sorted
+        earliest first, before and after the swap, compared from the earliest;
+        the first difference decides (later is better off). `improves` lists
+        the pairs of the dojos better off that meet later, before and after;
+        `byes` lists the first-round byes a knockout-only swap hands over.
+        Seeded competitors are never suggested.
+
+        Recomputed from the stored draw on every request and never stored.
+        Organiser only, in self-run mode too. Only a `draw-ready` competition
+        has suggestions: one with no draw, one that has started, and a league
+        or Swiss competition answer 200 with an empty list. An empty list for
+        a `draw-ready` draw means no swap improves on it.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: The suggestions, possibly none.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapSuggestions'
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/draw/swap-candidates:
+    get:
+      tags: [competitions]
+      summary: What swapping one competitor with each other would do to dojo separation
+      description: |
+        For the competitor picked first in the swap mode (`id`), every other
+        unseeded competitor of the draw, in draw order, with the place they hold (the
+        shape the swap request takes) and a `verdict` for swapping the two,
+        judged on the dojo separation before and after, the same rows the swap
+        answers in `separation`.
+
+        Each dojo is judged as a whole: where its pairs of dojo-mates can first
+        meet, sorted earliest first, before and after, compared from the
+        earliest. The first difference decides the verdict:
+
+        - `worse`: at least one dojo is worse off, its first different meeting
+          earlier (sharing a pool is earliest of all), whatever another dojo
+          gains;
+        - `better`: no dojo is worse off and at least one is better off;
+        - `same`: every dojo's meetings are the ones it has now, so two
+          competitors of one dojo trading places is `same`. A move to another
+          match of the same round is not earlier.
+
+        A seeded competitor keeps their place in the draw: a seeded pick is
+        refused with 409 `seeded_competitor`, and no seed is a candidate.
+
+        Recomputed from the stored draw on every request and never stored.
+        Organiser only, in self-run mode too. Refusals carry `error` (the code)
+        and `message` (the sentence to show).
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - name: id
+          in: query
+          required: true
+          description: The participant id of the competitor picked first.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The pick and every other unseeded drawn competitor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapCandidates'
+        '400':
+          description: '`invalid`: no competitor is named (`id` is missing or blank).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapRefusal'
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            `not_in_draw`: the draw does not hold the picked competitor (it
+            has changed since the page read it).
+            `seeded_competitor`: the picked competitor is seeded, and seeds
+            keep their places in the draw.
+            `no_draw`: the competition has no draw.
+            `draw_started`: the competition has started, or a match of the
+            draw already holds something fought.
+            `swap_not_supported`: the format has no places to swap (a league
+            or a Swiss competition).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapRefusal'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/draw/swap:
+    post:
+      tags: [competitions]
+      summary: Two competitors trade places in a draw that has not started
+      description: |
+        Swaps the places of two competitors in a `draw-ready` competition. Each
+        side names the competitor's participant id and the place the page saw
+        them at: a pool place (`{pool, position}`) for a pools draw, or a
+        first-round place (`{slot}`, 0-based: side A of first-round match m is
+        2m and side B is 2m+1) for a knockout-only draw. A competitor number
+        belongs to its place, so the two trade numbers (`numbers`). In a team
+        competition the lineups each team saved for a match move with it
+        (`lineupsMoved`); a lineup that can no longer apply is removed
+        (`lineupsRemoved`). A seeded competitor keeps their place: a swap
+        naming one is refused with 409 `seeded_competitor`, so no swap moves a
+        seed and the knockout is never rebuilt. `separation` holds the dojo
+        separation rows of the dojos the swap touches, before and after.
+
+        With `dryRun: true` the answer is computed and nothing is saved: it
+        carries `applied: false` and `dryRun: true`. A resend of a swap that
+        already landed (both competitors already at each other's places) is
+        200 with `applied: false` and `reason: already_swapped`, and changes
+        nothing.
+
+        An applied swap broadcasts `draw_generated` once, and `lineup_updated`
+        (naming the competition and no team) once more when it moved or removed
+        saved match lineups. A dry run and an `already_swapped` answer broadcast
+        nothing. Organiser only: in
+        self-run mode it needs `X-Tournament-Password` too. Refusals carry
+        `error` (the code) and `message` (the sentence to show); nothing is
+        written.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SwapRequest'
+      responses:
+        '200':
+          description: The swap, its dry run or a resend of a swap that landed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapResult'
+        '400':
+          description: |
+            `invalid`: the body cannot be read, a side has no id, a place
+            is not the shape this draw uses (a pool place on a knockout-only
+            draw, a slot on a pools draw, both or neither), a position is
+            below 1 or a slot below 0, or two different competitors name the
+            same place.
+            `same_competitor`: both sides name the same competitor.
+            `not_in_draw`: a competitor is not in the draw; the message says
+            whether they are off the roster or were not drawn.
+            The draw's own 409 refusals (`swap_not_supported`, `no_draw`,
+            `draw_started`) are judged before any of these, so a malformed
+            place on a draw that has started answers 409.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapRefusal'
+        '401':
+          $ref: '#/components/responses/InvalidPassword'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            `seeded_competitor`: a competitor named is seeded, and seeds keep
+            their places in the draw; the message names each seed. A dry run
+            is refused alike.
+            `no_draw`: the competition has no draw to change.
+            `draw_started`: the competition has started, or a match of the
+            draw already holds something fought.
+            `swap_not_supported`: the format has no places to swap (a league
+            or a Swiss competition).
+            `draw_changed`: a competitor is no longer at the place the request
+            names; `places` says where the two are now, so the page can fetch
+            the draw again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SwapRefusal'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/draw:
     delete:
       tags: [competitions]
@@ -4490,8 +4732,10 @@ paths:
               introduces no member id never reads the file. Extra fields: `message`, "The
               team members could not be read, so this choice cannot be checked. The
               organiser needs to check team-members.yaml in the tournament data."
-            - `side_mismatch`: the submitted winner does not match either side of the match.
-              Extra fields: `message`.
+            - `side_mismatch`: the write names competitors other than the pairing the
+              match stores, such as a sheet loaded before a draw swap. Nothing is
+              written. Extra fields: `message`, "The submitted competitors don't match
+              this match's pairing. Check the score sheet and try again."
             - `downstream_knockout_played`: the write would change who a
               knockout match that has a result of its own was fought by: a
               knockout correction changing a winner already propagated into
@@ -5984,6 +6228,19 @@ paths:
                   description: >
                     Free-text operator note. Optional, a reopened match
                     included.
+                sideAId:
+                  type: string
+                  description: >
+                    Optional, request-only. The participant id of side A as the
+                    writer saw it. A decision names a side by colour alone, so
+                    when the draw review has swapped competitors since the
+                    writer loaded the match, an id that differs from the stored
+                    one is refused 409 `side_mismatch` and nothing is written.
+                    A side is not judged when this field is omitted or when the
+                    stored side carries no id (an unresolved feeder or a bye).
+                sideBId:
+                  type: string
+                  description: Same as `sideAId`, for side B.
                 encho:
                   $ref: '#/components/schemas/EnchoMetadata'
                 confirmLots:
@@ -6082,7 +6339,10 @@ paths:
             `removedCourts`), or one that gives a drawn tie-breaker bout a
             winner while the lots the organiser entered rule it
             (`lots_replaced`, with `matchId` and `message`, until the request
-            carries `confirmLots: true`). Same bodies as PUT .../score.
+            carries `confirmLots: true`), or one whose `sideAId`/`sideBId`
+            differ from the pairing the match stores, such as a sheet loaded
+            before a draw swap (`side_mismatch`, with `message`; nothing is
+            written). Same bodies as PUT .../score.
           content:
             application/json:
               schema:
@@ -6722,6 +6982,13 @@ paths:
         and answers the lineup as stored. A save naming a member id when the
         competition's `team-members.yaml` cannot be read is refused with 409
         `team_members_unreadable`, whoever sends it.
+
+        A save for a team the match does not hold by id is refused with 404
+        `team_not_in_match` for every caller. The organiser is refused too,
+        because a draw swap can move a team out of a match it had a lineup for. The
+        organiser's save is still accepted for a match side that carries no id
+        yet (a bye, a "Winner of ..." feeder, a legacy row), and for a match id
+        the draw does not hold.
       security:
         - TournamentPassword: []
       requestBody:
@@ -6768,9 +7035,9 @@ paths:
         '404':
           description: |
             Competition not found, or (self-run, an empty password) no match
-            with this id, or a team the match does not hold
-            (`error: team_not_in_match`, with a `message` to show: "This team
-            is not in this match. Check the score sheet and try again.").
+            with this id, or, for every caller, a team the match does not hold
+            by id (`error: team_not_in_match`, with a `message` to show: "This
+            team is not in this match. Check the score sheet and try again.").
           content:
             application/json:
               schema:
@@ -9065,6 +9332,290 @@ components:
       properties:
         error:
           type: string
+
+    DrawPlace:
+      type: object
+      description: |
+        A place in a drawn competition: `pool` (the label pools.csv holds) and
+        `position` (1-based) for a pools draw, or `slot` (0-based first-round
+        place) for a knockout-only draw. Exactly one shape is set.
+      properties:
+        pool:
+          type: string
+        position:
+          type: integer
+          minimum: 1
+        slot:
+          type: integer
+          minimum: 0
+
+    DojoSide:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        displayName:
+          type: string
+        number:
+          type: string
+          description: The number of the place the competitor holds, when the competition numbers.
+        pool:
+          type: string
+
+    BracketMeeting:
+      type: object
+      required: [matchId, round, rounds]
+      description: |
+        The bracket match where two first-round paths join. `round` is 0-based,
+        `rounds` the bracket's round count. `placeA` and `placeB` are the
+        qualifying places (for example "Pool A-1st") the two must finish at,
+        set for a pools draw only.
+      properties:
+        matchId:
+          type: string
+        displayRound:
+          type: integer
+        round:
+          type: integer
+        rounds:
+          type: integer
+        matchNumber:
+          type: integer
+        placeA:
+          type: string
+        placeB:
+          type: string
+
+    DojoMeeting:
+      type: object
+      required: [dojo, a, b]
+      description: |
+        One pair of competitors from the same dojo. `samePool` is set when they
+        share a pool. Otherwise `ifBothWin` is the meeting of their pools' 1st
+        places and `earliest` the earliest meeting over every pair of
+        qualifying places; for a knockout-only draw only `earliest` is set.
+        Both are absent when the bracket holds no qualifying place for one of
+        the pools.
+      properties:
+        dojo:
+          type: string
+        a:
+          $ref: '#/components/schemas/DojoSide'
+        b:
+          $ref: '#/components/schemas/DojoSide'
+        samePool:
+          type: string
+        ifBothWin:
+          $ref: '#/components/schemas/BracketMeeting'
+        earliest:
+          $ref: '#/components/schemas/BracketMeeting'
+
+    SwapBye:
+      type: object
+      required: [id, name, bye]
+      description: A competitor whose first-round bye the swap gives (`bye` true) or takes away (`bye` false).
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        bye:
+          type: boolean
+
+    SwapSuggestions:
+      type: object
+      required: [suggestions]
+      properties:
+        suggestions:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [a, b, improves]
+            properties:
+              a:
+                $ref: '#/components/schemas/SuggestedSide'
+              b:
+                $ref: '#/components/schemas/SuggestedSide'
+              improves:
+                type: array
+                items:
+                  type: object
+                  required: [dojo, before, after]
+                  properties:
+                    dojo:
+                      type: string
+                    before:
+                      $ref: '#/components/schemas/DojoMeeting'
+                    after:
+                      $ref: '#/components/schemas/DojoMeeting'
+              byes:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SwapBye'
+
+    SuggestedSide:
+      type: object
+      required: [id, name, place]
+      description: One competitor of a suggested swap; `id` and `place` are what `SwapRequest` takes.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        displayName:
+          type: string
+        number:
+          type: string
+        dojo:
+          type: string
+        place:
+          $ref: '#/components/schemas/DrawPlace'
+
+    SwapCandidates:
+      type: object
+      required: [pick, candidates]
+      properties:
+        pick:
+          $ref: '#/components/schemas/SwapSide'
+        candidates:
+          type: array
+          description: Every other unseeded drawn competitor, in draw order.
+          items:
+            type: object
+            required: [id, place, verdict]
+            properties:
+              id:
+                type: string
+                description: The participant id.
+              place:
+                $ref: '#/components/schemas/DrawPlace'
+              verdict:
+                type: string
+                enum: [better, worse, same]
+                description: What swapping this competitor with the pick does to the dojo separation.
+              dojos:
+                type: array
+                items:
+                  type: string
+                description: >-
+                  The dojos the verdict is about, sorted: for `worse` the dojos
+                  whose dojo-mates would meet earlier, for `better` the dojos
+                  whose dojo-mates would meet later. Absent for `same`.
+
+    SwapRequest:
+      type: object
+      required: [a, b]
+      properties:
+        a:
+          $ref: '#/components/schemas/SwapSide'
+        b:
+          $ref: '#/components/schemas/SwapSide'
+        dryRun:
+          type: boolean
+          description: Compute the answer and save nothing.
+
+    SwapSide:
+      type: object
+      required: [id, place]
+      properties:
+        id:
+          type: string
+          description: The participant id.
+        place:
+          $ref: '#/components/schemas/DrawPlace'
+
+    SwapPlaces:
+      type: object
+      required: [a, b]
+      properties:
+        a:
+          $ref: '#/components/schemas/DrawPlace'
+        b:
+          $ref: '#/components/schemas/DrawPlace'
+
+    SwapResult:
+      type: object
+      required: [applied, places, moves, lineupsMoved, lineupsRemoved, separation]
+      properties:
+        applied:
+          type: boolean
+          description: This request changed the draw. False for a dry run and for a resend.
+        dryRun:
+          type: boolean
+        reason:
+          type: string
+          enum: [already_swapped]
+        places:
+          $ref: '#/components/schemas/SwapPlaces'
+        moves:
+          type: array
+          items:
+            type: object
+            required: [id, name, from, to]
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              displayName:
+                type: string
+              from:
+                $ref: '#/components/schemas/DrawPlace'
+              to:
+                $ref: '#/components/schemas/DrawPlace'
+        numbers:
+          type: array
+          description: The number each competitor leaves and takes, when the competition numbers.
+          items:
+            type: object
+            required: [id, name, from, to]
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              from:
+                type: string
+              to:
+                type: string
+        byes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SwapBye'
+        lineupsMoved:
+          type: integer
+        lineupsRemoved:
+          type: integer
+        separation:
+          type: object
+          required: [before, after]
+          properties:
+            before:
+              type: array
+              items:
+                $ref: '#/components/schemas/DojoMeeting'
+            after:
+              type: array
+              items:
+                $ref: '#/components/schemas/DojoMeeting'
+
+    SwapRefusal:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum: [invalid, same_competitor, not_in_draw, seeded_competitor, no_draw, draw_started, swap_not_supported, draw_changed]
+        message:
+          type: string
+          description: The sentence to show the organiser.
+        places:
+          $ref: '#/components/schemas/SwapPlaces'
+          description: Set for `draw_changed` only, where the two competitors are now.
 
     PublicNamesError:
       type: object

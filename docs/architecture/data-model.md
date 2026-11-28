@@ -219,7 +219,11 @@ Three fields in these diagrams need a word:
   and drops the `password` key before the file goes into the archive.
 * `Player.PoolPosition` is a competitor's place in their pool. It is never part of a
   participant row or of the app's JSON: it is read from the `Position` column of `pools.csv`
-  and used to order the pool and the workbook.
+  and used to order the pool and the workbook. A swap of two competitors made before the
+  competition starts changes who holds a place, never the place: the two rows trade the
+  competitor (id, name, display name, dojo and the rest of the participant record) and
+  each keeps its `Position` and its `Number`, because a competitor number belongs to the
+  place. A seeded competitor is never swapped.
 * `Overrides.PoolRanks` maps each pool to the ranks set by hand, keyed by the competitor's
   participant id.
 
@@ -281,6 +285,21 @@ Discarding a draw removes the lineups saved for its matches, because a draw gene
 reuses the match ids, and keeps the starting lineups. One rule in the engine owns this, and
 the kachinuki roster, the Kachinuki Detail export and the public `lineup-in-force` read all
 ask it.
+
+Swapping two teams before the competition starts moves their lineups with them. Each lineup
+saved for one of a swapped team's matches moves to the match the team plays in the same
+order at its new place: the k-th team match of its old pool (or its first-round match) to the
+k-th of the new one. A match the team plays both before and after the swap, which happens
+when the two teams share a pool or meet in the first round, keeps its lineup where it is. A
+lineup whose order has no match at the new place, after a move to a smaller pool, is removed,
+and the swap's answer counts it. The matches listed under the team in `round_lineups_given`
+(the list kept for legacy teams) move the same way, and the team's carried lineups are worked out again over
+its new matches. The opponents' lineups and the starting lineups stay where they are.
+
+A lineup save for a team that a match does not hold is refused for every caller, the organiser
+included, when both of the match's sides are known competitors. Without that refusal, a device
+that loaded the match before the swap would store a lineup for a team that no longer plays
+there.
 
 A lineup save names the positions it changed, and the server writes only those, under the
 competition's lock, onto the lineup stored for that match or that starting lineup. A save also
@@ -667,7 +686,8 @@ slot before any pool finished, which is how a qualifier reaches the slot the dra
 without the draw being recomputed. For a knockout drawn without pools the bracket keeps the
 order the competitors were drawn in, which is what their competitor numbers count; a
 competition with pools numbers its entrants at the pool draw instead, so it stores no second
-order.
+order. A swap made before the start trades the two competitors' ids in that order, so each
+number stays with its place, as it does in a pools draw.
 
 ### Match status and decision
 
@@ -911,6 +931,28 @@ log is replayed at the next startup, so the group either lands completely or not
 A participant edit is one such group: the roster, the seeds and, while the competition is
 draw-ready, the pools, pool matches and bracket it renames the competitor in land together or
 not at all, so an edit the draw cannot take is refused whole.
+
+A swap of two competitors in a drawn competition that has not started is another such group:
+the pools, the pool matches, the bracket and, in a team competition, the two teams' lineups
+land together or not at all. A swap is allowed only while the competition is draw-ready and
+nothing has been fought; the first recorded result starts the competition and fixes the draw.
+Every side, winner and bracket slot naming either competitor takes the other's id and name in
+one pass, while courts, times, match ids and the qualifier labels a pools draw writes into
+the bracket stay as they were. A seeded competitor is never swapped, so a swap never changes
+what the knockout is built from and nothing is rebuilt or scheduled again. A swap
+writes no match history, since nothing was fought. The eligibility records and check-ins are
+keyed by participant id, so they stay with the competitor. A swap sent again after it landed
+finds each competitor at the other's place and changes nothing.
+
+A start or a result sent by a device that loaded a match before the swap names the old
+pairing, so it is refused as a side mismatch, writes nothing and does not start the
+competition. A decision names a side by its colour only, so it carries the participant ids
+its writer saw, and ids that differ from the stored pairing are refused the same way.
+
+The dojo separation summary (each pair of competitors of one dojo and the earliest match
+where they can meet), the swap suggestions and the verdicts offered for a competitor picked
+to swap are never stored. All three are worked out from the stored draw on every read, so
+none can go stale against a draw that was changed.
 
 A staged step can also remove a file, applied in its place among the writes. Moving the team
 members of a competition recorded by version 2.0.0 from `squads.yaml` onto `team-members.yaml`

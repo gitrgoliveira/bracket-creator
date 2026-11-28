@@ -2776,7 +2776,7 @@ func TestDojoSumMeetRounds_MatchesFullScan(t *testing.T) {
 			// though their concrete values differ.
 			keys := make([]string, len(roster))
 			for i := range roster {
-				keys[i] = dojoKey(roster[i].Dojo)
+				keys[i] = DojoKey(roster[i].Dojo)
 			}
 			ids := make([]int, len(roster))
 			idOf := map[string]int{}
@@ -2819,7 +2819,7 @@ func TestDojoSwapGainAfter_MatchesFullDrawDelta(t *testing.T) {
 			// both are built here.
 			keys := make([]string, len(roster))
 			for i := range roster {
-				keys[i] = dojoKey(roster[i].Dojo)
+				keys[i] = DojoKey(roster[i].Dojo)
 			}
 			ids := make([]int, len(roster))
 			idOf := map[string]int{}
@@ -2876,7 +2876,7 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 	ids := make([]int, len(result))
 	idOf := map[string]int{}
 	for i := range result {
-		key := dojoKey(result[i].Dojo)
+		key := DojoKey(result[i].Dojo)
 		if _, ok := idOf[key]; !ok {
 			idOf[key] = len(idOf)
 		}

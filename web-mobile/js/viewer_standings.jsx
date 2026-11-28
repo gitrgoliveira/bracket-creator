@@ -843,7 +843,14 @@ export function qualifiersForPool(competition, pool) {
 // data_integrity.jsx). The admin console and the viewer render this SAME
 // component off the SAME public payload, so the audience gate cannot live on
 // the server; it lives here, and only the admin callers pass it.
-export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick, highlightPlayers, showDataIssues }) {
+//
+// swap: the admin console's Swap competitors mode on Pools (preview) (bc-drev
+// FR10, useSwapCompetitors in admin_competition_bracket.jsx), or absent. With
+// it, each drawn competitor's name is its own button (swap.entrantOf(id) is
+// the competitor with the place a swap names them by, or null) and a match
+// opens nothing. Like showDataIssues it is the whole audience gate: the public
+// viewer never passes it, and without it this renders exactly as before.
+export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick, highlightPlayers, showDataIssues, swap }) {
   const isTeam = isTeamCompetition(competition);
   // Engi-Kyogi (kata competition): flag-count scoring. Standings show
   // Victories (V) and total Flags columns only.
@@ -858,6 +865,8 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
     return <EmptyState icon="hourglass" title={isLeague ? "League not drawn yet" : "Pools not drawn yet"} />;
   }
   const compTMT = teamMatchTypeFor(competition);
+  // In the swap mode a tap picks a competitor and never opens a score sheet.
+  const matchClick = swap ? null : onMatchClick;
 
   return (
     <div className="pools-grid">
@@ -972,29 +981,51 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                   ].filter(Boolean).join(" ");
 
                   const [pMember1, pMember2] = isEngi && window.engiPairParts ? window.engiPairParts(p.name) : [p.name, ""];
+                  const entrant = swap && p.id ? swap.entrantOf(p.id) : null;
+                  // A seed keeps their place: drawn grey, not a button.
+                  const isLocked = !!entrant && !!swap.lockedOf && swap.lockedOf(entrant.id);
+                  const isPicked = !!entrant && swap.pickedId === entrant.id;
+                  // In the swap mode a candidate's mark (better, worse) is a colour and
+                  // a line naming the dojos it is about, under the dojo (or under the
+                  // name when dojos are hidden).
+                  const mark = entrant && swap.markOf ? swap.markOf(entrant.id) : null;
+                  const markLine = entrant && swap.verdictWord ? swap.verdictWord(entrant.id) : null;
+                  const nameCell = (
+                    <>
+                      <div className="pool__player-name">
+                        <NumberedName name={pMember1} number={p.number} />
+                        {isTeam && dhWinnerNames.has(p.name) && (
+                          <DHBadge />
+                        )}
+                        {poolHasResults && rank !== null ? (
+                          <span
+                            className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}
+                            title={tie ? tieBadgeTitle(tie, isTeam) : undefined}
+                          >
+                            {tie ? `=${rankOrdinal(tie.place)}` : rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
+                          </span>
+                        ) : null}
+                      </div>
+                      {/* Engi pair: member 2 (from the combined name) stacked below member 1; a solo side has no member 2. */}
+                      {isEngi && pMember2 ? <div className="pool__player-name">{pMember2}</div> : null}
+                      {tweaks.showDojo ? <div className="pool__dojo-name">{p.dojo}</div> : null}
+                      {markLine}
+                    </>
+                  );
                   return (
                     <tr key={p.id || `${p.name}||${p.dojo || ""}` || drawPos} className={rowClasses || undefined}>
                       <td className="pool-standings__draw-pos">
                         {drawPos}
                       </td>
                       <td>
-                        <div className="pool__player-name">
-                          <NumberedName name={pMember1} number={p.number} />
-                          {isTeam && dhWinnerNames.has(p.name) && (
-                            <DHBadge />
-                          )}
-                          {poolHasResults && rank !== null ? (
-                            <span
-                              className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}
-                              title={tie ? tieBadgeTitle(tie, isTeam) : undefined}
-                            >
-                              {tie ? `=${rankOrdinal(tie.place)}` : rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
-                            </span>
-                          ) : null}
-                        </div>
-                        {/* Engi pair: member 2 (from the combined name) stacked below member 1; a solo side has no member 2. */}
-                        {isEngi && pMember2 ? <div className="pool__player-name">{pMember2}</div> : null}
-                        {tweaks.showDojo ? <div className="pool__dojo-name">{p.dojo}</div> : null}
+                        {isLocked ? (
+                          <div className="swap-pick swap-pick--locked" data-testid="swap-locked">{nameCell}</div>
+                        ) : entrant ? (
+                          <button type="button" className={`swap-pick${isPicked ? " swap-pick--picked" : ""}${mark ? ` swap-pick--${mark}` : ""}`}
+                            aria-pressed={isPicked} data-testid="swap-target" onClick={(ev) => swap.onPick(entrant, ev)}>
+                            {nameCell}
+                          </button>
+                        ) : nameCell}
                       </td>
                       {s ? (
                         <>
@@ -1044,7 +1075,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                           <PoolNumberedMatchRow
                             m={m}
                             num={idx + 1}
-                            onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
+                            onMatchClick={matchClick ? () => matchClick(enriched) : null}
                           />
                           {/* Its own line rather than a glyph in the row: the row
                               is a four-column grid whose centre cell is the
@@ -1062,7 +1093,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                             m={m}
                             num={idx + 1}
                             isEngi={isEngi}
-                            onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
+                            onMatchClick={matchClick ? () => matchClick(enriched) : null}
                           />
                           {showDataIssues && matchDataUnreadable(m) ? <UnreadableBoutsNote /> : null}
                         </React.Fragment>
@@ -1076,7 +1107,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
             {/* Round-robin matrix: optional grid below the match list (individual only) */}
             {matches.length > 0 && !isTeam && (
               <div style={{ marginTop: 4 }}>
-                <LeagueMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayers={highlightPlayers} isEngi={isEngi} />
+                <LeagueMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={matchClick} highlightPlayers={highlightPlayers} isEngi={isEngi} />
               </div>
             )}
           </div>

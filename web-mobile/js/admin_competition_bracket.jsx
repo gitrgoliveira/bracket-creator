@@ -5,8 +5,16 @@
 
 import { realIppons } from './result_slot.jsx';
 import { writeKeepsEditorOpen } from './write_result.jsx';
-import { holdsUnsaved, confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY } from './unsaved_entries.jsx';
-const { useState, useEffect, useRef } = React;
+import { confirmLeave } from './unsaved_entries.jsx';
+import { competitionHasRecordedResult } from './recorded_result.jsx';
+import { reviewsDraw } from './admin_draw_review.jsx';
+import { DrawSwapCheck, effectiveFormat, drawEntrants, drawPlaceLabel, competitorLabel, swapDoneToast } from './admin_draw_swap_check.jsx';
+import { useSwapCandidates, marksKey, SwapMarksKey, SwapVerdictWord, SwapLockedWord, swapLocked } from './admin_swap_candidates.jsx';
+import { acceptTap } from './tap_guard.jsx';
+import { useEscapeToClose } from './ui.jsx';
+import { publishHeight } from './published_height.jsx';
+import { takeSwapMode } from './swap_mode_request.jsx';
+const { useState, useEffect, useRef, useMemo } = React;
 
 const hasBothSides = window.hasBothSides;
 const hasPoolOriginPlaceholder = window.hasPoolOriginPlaceholder;
@@ -201,7 +209,235 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
   );
 });
 RunningMatchPanel.displayName = "RunningMatchPanel";
-function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password, hostUnsavedRef = null }) {
+// ---------------------------------------------------------------------------
+// The Swap competitors mode (bc-drev FR10, decision D8 (b)): on Pools
+// (preview) of a pools + knockout draw and Bracket (preview) of a
+// knockout-only one, while the competition is draw-ready with nothing
+// recorded, the organiser taps two competitors to swap them. Both hosts
+// (AdminPools, AdminBracket below) run this one hook; the shared viewers
+// (PoolsViewer, BracketTree) take its `swap` prop, which only these hosts pass,
+// so the public pages render as before.
+//
+// A tap picks, a tap on the picked name unpicks, a tap on another opens "If
+// you swap them" (DrawSwapCheck), the only door that sends a swap. Every tap
+// of the mode (turning it on, a pick, Cancel, Done) goes through ONE keyless
+// tap guard (acceptTap), so the bounce of a double tap never picks and
+// unpicks, picks twice, or lands on the Done that took the place of the
+// button it turned on with; the check panel takes the bounce of the tap that
+// opened it itself. Once a competitor is picked, every other one is marked
+// better or worse for dojo-mates (useSwapCandidates, admin_swap_candidates.jsx)
+// until the pick is cancelled or the second tap opens the check. After a
+// swap the mode stays on with nothing picked, so a
+// second swap can follow; Done, Escape, or leaving the tab (the host
+// unmounts) turns it off. The Draw review card's "Swap competitors on Pools"
+// button opens the tab with the mode already on (swap_mode_request.jsx, taken
+// once as the tab mounts). While the mode is on its banner is pinned under
+// the admin top bar, and publishes its height as --swap-banner-h
+// (published_height.jsx) for the scroll margin that keeps a tapped or
+// focused competitor clear of both bars. The page reads the swapped draw on
+// the draw_generated broadcast the swap makes (admin.jsx).
+// ---------------------------------------------------------------------------
+
+// swapModeAvailable: does this tab offer the mode now? A pools + knockout
+// draw is swapped on its pools (its bracket holds "Pool A-1st" places, not
+// competitors), a knockout-only draw on its bracket.
+export function swapModeAvailable(c, tab, poolMatches, bracket) {
+  if (!c || c.status !== 'draw-ready' || !reviewsDraw(c)) return false;
+  if (effectiveFormat(c) !== (tab === 'bracket' ? 'knockout' : 'mixed')) return false;
+  return !competitionHasRecordedResult(poolMatches, bracket);
+}
+
+// swapPickLine: the banner's line once one competitor is picked, naming them
+// number first and then their place ("Swap P1 Player 08 (Pool A) with…",
+// "Swap K1 Player 01 (M3) with…", operator decision C10). What to do next and
+// what the marks mean are said by the key line (SwapMarksKey) and the marks,
+// so this one never changes length when they arrive.
+export function swapPickLine(picked, bracket) {
+  const where = drawPlaceLabel(picked.place, bracket);
+  return `Swap ${competitorLabel(picked)}${where ? ` (${where})` : ''} with…`;
+}
+
+// useSwapCompetitors: the mode's state for one host tab. Returns `swap` (the
+// prop for the viewer, null while the mode is off), `active`, and `controls`
+// (the button or banner, and the check panel) for the host to draw above the
+// viewer. `beforeTurnOn` may refuse (an editor holding unsaved entries).
+export function useSwapCompetitors({ c, tab, pools, poolMatches, bracket, password, drawHidden, beforeTurnOn, onTurnOn, onRefreshCompetition }) {
+  // Taken once, as the tab mounts: on when the Draw review card's button
+  // opened the tab to swap competitors.
+  const [on, setOn] = useState(() => takeSwapMode(c && c.id));
+  const [pickedId, setPickedId] = useState(null);
+  const bannerRef = useRef(null);
+  const [checking, setChecking] = useState(null);
+  const [note, setNote] = useState(null);
+  const tapRef = useRef(null);
+  const available = swapModeAvailable(c, tab, poolMatches, bracket);
+  const active = on && available;
+  // Opened from the card's button, the page scrolls to the banner, with the
+  // first competitors under it in view (operator decision S4); on a phone the
+  // tab's menu sits above the banner, so the top of the page would hide it.
+  // The page first goes to its top: the Overview's scroll is kept on a tab
+  // switch, so the banner may already be pinned there, which scrollIntoView
+  // takes as in view. Once, and only for that entry: a plain tab switch keeps
+  // the page where it is. The card's button went with the Overview, so focus
+  // goes to the banner (focusable for this alone), whose instruction is the
+  // next thing to read; without scrolling, since the page was just placed.
+  const askedRef = useRef(on);
+  useEffect(() => {
+    if (!active || !askedRef.current || !bannerRef.current) return;
+    askedRef.current = false;
+    window.scrollTo(0, 0);
+    bannerRef.current.scrollIntoView({ block: 'start' });
+    bannerRef.current.focus({ preventScroll: true });
+  }, [active]);
+  // The pinned banner's height, for the competitors' scroll margin, published
+  // while the banner is drawn.
+  useEffect(() => {
+    if (!active || !bannerRef.current) return undefined;
+    return publishHeight(bannerRef.current, document.documentElement, '--swap-banner-h');
+  }, [active]);
+  const entrants = useMemo(() => {
+    const byId = new Map();
+    if (available) drawEntrants(c, pools, bracket).forEach((g) => g.entrants.forEach((e) => byId.set(e.id, e)));
+    return byId;
+  }, [available, c, pools, bracket]);
+  // A pick the draw no longer holds (it changed under the page) reads as none,
+  // and a pick the draw still holds carries the place it holds now.
+  const picked = active && pickedId ? entrants.get(pickedId) || null : null;
+
+  const turnOff = () => { setOn(false); setPickedId(null); setChecking(null); setNote(null); };
+  // One Escape closes one layer: while the check panel is open it is the
+  // panel's (DrawSwapCheck cancels on it), never the mode's as well.
+  useEscapeToClose(active && !checking ? turnOff : undefined);
+
+  const guarded = (fn) => (ev) => { if (!acceptTap(tapRef, ev)) return; fn(ev); };
+  const turnOn = guarded(async () => {
+    if (beforeTurnOn && !(await beforeTurnOn())) return;
+    setOn(true);
+    setPickedId(null);
+    setNote(null);
+    if (onTurnOn) onTurnOn();
+  });
+  const onPick = (entrant, ev) => {
+    if (swapLocked(entrant) || !acceptTap(tapRef, ev)) return;
+    setNote(null);
+    if (!picked) { setPickedId(entrant.id); return; }
+    if (picked.id === entrant.id) { setPickedId(null); return; }
+    setChecking({ a: picked, b: entrant });
+  };
+  // After a swap, or a draw that moved under the page, the page reads the
+  // competition again itself, as the Draw review card does, rather than
+  // waiting for the event stream (which may be down). The panel's close
+  // returns focus to the second pick's row, which the re-read takes away:
+  // focus goes to the banner's line instead, after the panel's own move.
+  const [focusLine, setFocusLine] = useState(0);
+  const lineRef = useRef(null);
+  useEffect(() => {
+    if (focusLine && lineRef.current) lineRef.current.focus({ preventScroll: true });
+  }, [focusLine]);
+  const onSwapped = (answer) => {
+    const pair = checking;
+    setChecking(null);
+    setPickedId(null);
+    setNote({ text: swapDoneToast(answer, pair && pair.a, pair && pair.b) });
+    setFocusLine((n) => n + 1);
+    if (onRefreshCompetition) onRefreshCompetition();
+  };
+  const onDrawChanged = (message) => {
+    setChecking(null);
+    setPickedId(null);
+    setNote({ text: message || 'The draw has changed. Pick the two competitors again.', error: true });
+    setFocusLine((n) => n + 1);
+    if (onRefreshCompetition) onRefreshCompetition();
+  };
+
+  // The marks belong to the first pick alone: none while nothing is picked or
+  // while the check panel is open for the second.
+  // A draw that places someone elsewhere (another device's swap) reads the
+  // marks again too. The key is where every competitor stands, not the
+  // object's identity, so a re-read of the same draw keeps the marks.
+  const drawKey = useMemo(
+    () => [...entrants.values()].map((e) => `${e.id}@${JSON.stringify(e.place)}`).join('|'),
+    [entrants],
+  );
+  const { marks, dojos, failed } = useSwapCandidates({
+    compId: c && c.id, pickId: picked && !checking ? picked.id : null, drawKey, password, onDrawChanged,
+  });
+  const markOf = (id) => (marks && marks.get(id)) || null;
+  const dojosOf = (id) => (dojos && dojos.get(id)) || null;
+
+  const swap = active ? {
+    entrantOf: (id) => entrants.get(id) || null,
+    pickedId: picked ? picked.id : null,
+    onPick,
+    markOf,
+    // A seed keeps their place (operator ruling 2026-11-27): drawn grey and
+    // not a button, never picked and never a candidate.
+    lockedOf: (id) => swapLocked(entrants.get(id)),
+    // The mark's line under the dojo ("Worse for Fudo, Hizen"), drawn blank
+    // on every pick while the mode is on, so a mark that appears moves
+    // nothing; a seed's says it stays in place.
+    verdictWord: (id) => {
+      const e = entrants.get(id);
+      return swapLocked(e) ? <SwapLockedWord seed={e.seed} /> : <SwapVerdictWord mark={markOf(id)} dojos={dojosOf(id)} />;
+    },
+  } : null;
+
+  let controls = null;
+  if (available && !active) {
+    controls = (
+      <div className="swap-mode swap-mode--off">
+        <button type="button" className="btn btn--sm" data-testid="swap-mode-on" onClick={turnOn}>Swap competitors</button>
+      </div>
+    );
+  } else if (active) {
+    // The check panel is drawn beside the banner, never inside it: the pinned
+    // banner is a stacking context under the top bar, which would hold the
+    // panel's backdrop under the bar too.
+    controls = (
+      <>
+      <div className="swap-mode swap-mode--pinned" role="region" aria-label="Swap competitors" data-testid="swap-mode" ref={bannerRef} tabIndex={-1}>
+        {/* One layout on every screen (operator decision C7): the text, then
+            the buttons on the right of the same row. Before the first pick
+            the text is the instruction; from the pick on it is the pick line
+            alone, with Cancel beside Done, and the key line goes under. */}
+        <div className="swap-mode__head">
+          <div className="swap-mode__text">
+            {!picked && (
+              <p className="swap-mode__lead">
+                <strong>Swap competitors:</strong> tap two unseeded competitors to swap them. While this is on, a tap picks a competitor instead of opening a score sheet.
+              </p>
+            )}
+            {/* Always drawn, so the pick line and a note are announced as
+                they are written. */}
+            <p className="swap-mode__line" aria-live="polite" data-testid="swap-mode-line" ref={lineRef} tabIndex={-1}>
+              {picked ? swapPickLine(picked, bracket) : note ? (
+                <span className={note.error ? 'swap-mode__note swap-mode__note--error' : 'swap-mode__note'}>{note.text}</span>
+              ) : null}
+            </p>
+          </div>
+          <div className="swap-mode__actions">
+            {picked && (
+              <button type="button" className="btn btn--sm" data-testid="swap-mode-cancel" onClick={guarded(() => setPickedId(null))}>Cancel</button>
+            )}
+            <button type="button" className="btn btn--sm btn--primary" data-testid="swap-mode-done" onClick={guarded(turnOff)}>Done</button>
+          </div>
+        </div>
+        {/* What the marks mean, on a line of its own drawn from the pick on at
+            the height of its longest sentence (two lines at most on a phone),
+            so the marks arriving move nothing. */}
+        {picked && <SwapMarksKey current={checking ? null : marksKey({ marks, failed })} />}
+      </div>
+      {checking && (
+        <DrawSwapCheck comp={c} bracket={bracket} a={checking.a} b={checking.b} password={password} drawHidden={drawHidden}
+          onClose={() => setChecking(null)} onSwapped={onSwapped} onDrawChanged={onDrawChanged} />
+      )}
+      </>
+    );
+  }
+  return { swap, active, controls };
+}
+
+function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password, drawHidden, hostUnsavedRef = null, onRefreshCompetition }) {
   const [selected, setSelected] = useState(null);
   // The panel's editor publishes its unsaved entries here: choosing another
   // match puts it in the editor's place (keyed by match id), so over unsaved
@@ -255,6 +491,14 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     () => (bracket?.rounds && window.bronzeSlotLabels ? window.bronzeSlotLabels(bracket.rounds, displayModel.matchNumById) : undefined),
     [bracket, displayModel]
   );
+  // Swap competitors (knockout-only draws): turning it on closes the scoring
+  // panel, so over unsaved entries it asks first, as choosing another match does.
+  const swapMode = useSwapCompetitors({
+    c, tab: 'bracket', pools: null, poolMatches: null, bracket, password, drawHidden,
+    beforeTurnOn: () => confirmLeave(editorUnsavedRef),
+    onTurnOn: () => setSelected(null),
+    onRefreshCompetition,
+  });
   const matchMeta = (matchId) => {
     if (!matchId || !bracket?.rounds) return { matchNum: null, roundName: null };
     const cols = displayModel.hasMeta ? displayModel.columns : bracket.rounds;
@@ -279,8 +523,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     return <EmptyState icon="settings" title="Bracket not generated yet" message={previewMode ? "Bracket not available for this format preview." : "Start the competition to build the bracket."} />;
   }
   const select = async (m, ri, mi) => {
-    if (selected && selected.matchId !== m.id && holdsUnsaved(editorUnsavedRef)
-      && !(await confirmDiscardUnsaved(editorUnsavedRef, LEAVE_MATCH_ANYWAY))) return;
+    if (selected && selected.matchId !== m.id && !(await confirmLeave(editorUnsavedRef))) return;
     setSelected({ matchId: m.id, ri, mi });
   };
   // Look up the selected match by ID rather than [ri][mi] index. The
@@ -346,6 +589,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     // tree's columns narrow to fit (.bracket-canvas--fit).
     <div className="bracket-layout">
       <div className="bracket-layout__bracket">
+        {swapMode.controls}
         {hasUnseededPools && (
           <div className="banner banner--info" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--accent-soft)", border: "1px solid var(--accent)", borderRadius: 6, fontSize: 13 }}>
             <strong>Knockout filling in</strong>: this bracket fills in automatically as each pool finishes. Matches start once both sides are decided.
@@ -359,13 +603,14 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
               variant={tweaks.cardVariant}
               showDojo={tweaks.showDojo}
               onMatchClick={(m, ri, mi) => { if (hasBothSides(m)) select(m, ri, mi); }}
-              highlightedMatchId={selected?.matchId}
+              highlightedMatchId={swapMode.active ? undefined : selected?.matchId}
               autoScrollMatchId={autoScrollId}
               scrollContainerRef={scrollRef}
+              swap={swapMode.swap}
             />
             {bracket.thirdPlaceMatch && (() => {
               const bm = bracket.thirdPlaceMatch;
-              const isReady = hasBothSides(bm);
+              const isReady = hasBothSides(bm) && !swapMode.active;
               const isHighlighted = selected?.matchId === bm.id;
               // The "3rd Place Match" section header identifies the lone bronze
               // card, so the card omits a per-card meta badge (no redundant
@@ -403,7 +648,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
         </div>
       </div>
       <div className="bracket-layout__panel" ref={panelRef}>
-        {hasBothSides(selectedMatch) ? (
+        {swapMode.active ? null : hasBothSides(selectedMatch) ? (
           <RunningMatchPanel
             hostUnsavedRef={editorUnsavedRef}
             match={scoringMatch}

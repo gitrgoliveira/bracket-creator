@@ -823,37 +823,49 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		}
 
 		save := lineupSave{compID: compID, teamID: teamID, matchID: matchID, req: req, once: once}
+		// Every caller, the organiser included, saves a match's lineup only
+		// for a team the match holds by id (errTeamNotInMatch): a lineup for
+		// a team the match does not hold is read by nothing, and a save made
+		// before the draw review moved the team to another place (a queued
+		// one included) would otherwise land on a match it no longer plays
+		// (bc-drev FR6). An organiser's save for a match the draw does not
+		// hold, or one with a side that carries no id yet (matchHoldsTeam),
+		// keeps the rule it had: it is stored.
+		//
 		// An anonymous self-run caller writes from the public score sheet,
-		// so the score path's rule holds: the match must exist and hold the
-		// team by id (errTeamNotInMatch), and once it has finished its lineup
-		// is part of the result, which only the organiser corrects (holdSelfReportedWriteUnderTx refuses the same
-		// caller on the result itself). Read under the save's lock, like that
-		// check, and refused with the same result_finalized body. An
-		// organiser keeps the always-editable rule.
-		var guard func(stx state.StoreTx, judge *memberJudge) *txResponse
-		if anonymous {
-			guard = func(stx state.StoreTx, judge *memberJudge) *txResponse {
-				snap, found, err := matchSnapshotOrErr(stx, compID, matchID, "lineup")
-				if err != nil {
-					log.Printf("mobileapp: PUT %s: %v", c.Request.URL.Path, err)
-					return &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
-				}
-				if !found {
+		// so the score path's rule holds beyond that: the match must exist,
+		// and once it has finished its lineup is part of the result, which
+		// only the organiser corrects (holdSelfReportedWriteUnderTx refuses
+		// the same caller on the result itself). Read under the save's lock,
+		// like that check, and refused with the same result_finalized body.
+		// An organiser keeps the always-editable rule.
+		guard := func(stx state.StoreTx, judge *memberJudge) *txResponse {
+			snap, found, err := matchSnapshotOrErr(stx, compID, matchID, "lineup")
+			if err != nil {
+				log.Printf("mobileapp: PUT %s: %v", c.Request.URL.Path, err)
+				return &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+			}
+			if !found {
+				if anonymous {
 					return &txResponse{status: http.StatusNotFound, body: gin.H{"error": "match not found"}}
 				}
-				if teamID != snap.Pairing.SideAID && teamID != snap.Pairing.SideBID {
-					return errTeamNotInMatch.response()
-				}
-				if isMatchFinalized(snap.Status) {
-					return resultFinalized("This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.").response()
-				}
-				comp, err := stx.LoadCompetition(compID)
-				if err != nil || comp == nil {
-					log.Printf("mobileapp: PUT %s: load competition: %v", c.Request.URL.Path, err)
-					return &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
-				}
-				return memberIDsOutsideTeam(judge, teamID, comp.TeamSize, req.memberIDsRead())
+				return nil
 			}
+			if !matchHoldsTeam(snap.Pairing, teamID, anonymous) {
+				return errTeamNotInMatch.response()
+			}
+			if !anonymous {
+				return nil
+			}
+			if isMatchFinalized(snap.Status) {
+				return resultFinalized("This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.").response()
+			}
+			comp, err := stx.LoadCompetition(compID)
+			if err != nil || comp == nil {
+				log.Printf("mobileapp: PUT %s: load competition: %v", c.Request.URL.Path, err)
+				return &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+			}
+			return memberIDsOutsideTeam(judge, teamID, comp.TeamSize, req.memberIDsRead())
 		}
 		saveLineup(c, tx, announce, follow, save, guard, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
 			return findMatchLineup(lineups, teamID, matchID)
@@ -920,14 +932,30 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 	})
 }
 
-// errTeamNotInMatch refuses a participant's lineup write for a team the
-// match does not hold by id: nothing reads such a lineup, and each one would
-// add a key to lineups.yaml. A side with no id yet (an unresolved knockout
-// feeder) takes no participant's lineup either.
+// errTeamNotInMatch refuses a match lineup write for a team the match does
+// not hold by id, for every caller (the organiser too since bc-drev: a draw
+// swap moves a team to another place, and a save made before it must not land
+// on a match the team no longer plays): nothing reads such a lineup, and each
+// one would add a key to lineups.yaml. An anonymous caller is refused the same
+// way when a side has no id yet (an unresolved knockout feeder); the organiser's
+// save there still lands (matchHoldsTeam).
 var errTeamNotInMatch = &selfRunRefusal{
 	status:  http.StatusNotFound,
 	code:    "team_not_in_match",
 	message: "This team is not in this match. Check the score sheet and try again.",
+}
+
+// matchHoldsTeam reports whether a match lineup save for teamID may land on a
+// match with this pairing. A side holding teamID's id does. Otherwise an
+// anonymous caller is refused, and so is the organiser when both sides carry
+// an id: the match then provably holds two other competitors. A side with no
+// id (a knockout feeder or a bye, or a row a repair has not reached) cannot
+// say who it will hold, so the organiser's save there keeps the rule it had.
+func matchHoldsTeam(pairing domain.WinnerAttribution, teamID string, anonymous bool) bool {
+	if teamID == pairing.SideAID || teamID == pairing.SideBID {
+		return true
+	}
+	return !anonymous && (pairing.SideAID == "" || pairing.SideBID == "")
 }
 
 // memberIDsOutsideTeam refuses a lineup that places a member id the team does

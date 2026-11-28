@@ -105,6 +105,7 @@ export const families = {
     sources: [
       'web-mobile/js/admin_setup', 'web-mobile/js/admin_participants',
       'web-mobile/js/admin_competition', 'web-mobile/js/admin_pools',
+      'web-mobile/js/admin_draw_review', 'web-mobile/js/admin_draw_swap_check',
     ],
     seed: async ({ api }) => {
       await api.tournament({ name: TOURNAMENT_NAME, date: TOURNAMENT_DATE, durationDays: 1, courts: ['A', 'B'] });
@@ -299,6 +300,30 @@ export const recipes = [
     waitFor: 'text=Draw ready',
     auth: 'admin',
     route: `/admin/competition/${DRAW_ID}/pools`,
+  },
+
+  {
+    // The Overview's Draw review card of the same draw-ready competition:
+    // Dojo separation first (ROSTER_18 holds nine dojos of two, so the table
+    // has a row per pair), then Change the draw with the button to the Swap
+    // competitors mode and the suggestions. Both reads land after the page
+    // loads, so the
+    // capture waits until neither still says it is reading. The viewport is
+    // tall enough to hold the whole Overview, so the card is photographed
+    // where it stands: scrolled to, its top would sit under the sticky topbar.
+    name: 'mobile-draw-review',
+    family: 'setup',
+    viewport: { width: 1280, height: 2800 },
+    dpr: 2,
+    capture: { selector: '[data-testid="draw-review"]' },
+    waitFor: 'text=Dojo separation',
+    auth: 'admin',
+    route: `/admin/competition/${DRAW_ID}/overview`,
+    drive: async ({ page }) => {
+      const card = page.getByTestId('draw-review');
+      await card.getByTestId('dojo-separation-row').first().waitFor({ state: 'visible', timeout: 15000 });
+      await card.getByText('Looking for swaps', { exact: false }).waitFor({ state: 'detached', timeout: 15000 });
+    },
   },
 
   {

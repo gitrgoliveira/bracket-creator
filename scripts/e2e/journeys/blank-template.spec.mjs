@@ -26,7 +26,9 @@ import {
   bulkCheckInDojo, deskHeadline, generateDrawExcluding, groupByDojo, openCompetitionTab, openDesk, openParticipants,
   poolMembers, toggleCheckIn,
 } from '../fixtures/roster.mjs';
-import { openShiaijo } from '../fixtures/shiaijo.mjs';
+import { openShiaijo, upNextCard } from '../fixtures/shiaijo.mjs';
+import { settled } from '../fixtures/pace.mjs';
+import { FIRST_RESULT_CONFIRM_LABEL } from '../../screenshots/lib/editor.mjs';
 import { playRunningBout } from '../fixtures/individual.mjs';
 import { downloadResultsWorkbook, downloadTemplateWorkbook, poolDrawMembers, readWorkbook } from '../fixtures/organiser.mjs';
 
@@ -126,6 +128,14 @@ test.describe('blank template', () => {
 
     await test.step('once a bout is recorded the results workbook is offered', async () => {
       await openShiaijo(page, 'A');
+      // The competition is still draw-ready, so its first start asks to start
+      // the competition before anything is sent; the operator agrees.
+      await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
+      const ask = page.locator('.modal-backdrop--dialog [role="dialog"]');
+      await expect(ask, 'the first result of a draw-ready competition asks to start it').toContainText(`Start ${COMP}?`);
+      const agree = ask.getByRole('button', { name: FIRST_RESULT_CONFIRM_LABEL });
+      await settled(agree);
+      await agree.tap();
       const pair = await playRunningBout(page);
       record({ journey: 'blank-template', step: 'bout recorded', pair });
       await page.goto(`/admin/competition/${id}/export`);

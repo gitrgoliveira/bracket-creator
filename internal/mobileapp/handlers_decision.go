@@ -37,6 +37,14 @@ type DecisionRequest struct {
 	// closed while still `scheduled` (a queue row's Record default win) was
 	// otherwise the one completion that carried no time at all (mp-jnvl).
 	ModifiedAt int64 `json:"modifiedAt,omitempty"`
+	// SideAID and SideBID are the competitors the writer saw in the match
+	// (request-only). A decision names a side by colour alone, so without them
+	// a write queued or composed before the draw review swapped two
+	// competitors would land on whoever holds that colour now; a seen id that
+	// differs from the stored one is refused 409 side_mismatch, exactly as a
+	// score write naming the old pairing is. Absent means nothing is judged.
+	SideAID string `json:"sideAId,omitempty"`
+	SideBID string `json:"sideBId,omitempty"`
 	// ForceDownstreamReopen bypasses bc-kcdg's downstream-knockout-correction
 	// guard (engine.DownstreamKnockoutPlayedError, HTTP 409
 	// downstream_knockout_played): a decision that changes an already-
@@ -260,7 +268,8 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// req.ForceDownstreamReopen (the bc-kcdg downstream-knockout-
 			// correction guard) and surfaces the reopened downstream match
 			// ids so they can be broadcast below.
-			fo := engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream, ConfirmLots: req.ConfirmLots}
+			fo := engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream, ConfirmLots: req.ConfirmLots,
+				Seen: engine.SeenSides{AID: req.SideAID, BID: req.SideBID}}
 			if snap.ReopenPending {
 				// The reason is part of the result group: it goes on the
 				// write itself, so the baseline the write leaves holds it.
@@ -362,6 +371,10 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		// it would poison the offline queue with one that can never
 		// succeed.
 		respondSuperseded(c, engine.HeldGroupsOf(engErr), engine.HeldReasonOf(engErr), engErr)
+	case errors.Is(engErr, engine.ErrMatchSideMismatch):
+		// The writer saw other competitors in this match than it holds now (a
+		// draw swap since): the same refusal and body PUT /score gives.
+		respondSideMismatch(c)
 	case respondIfLeagueFinished(c, engErr):
 		// A correction of a finished league's result: resent with
 		// confirmFinished once the organiser confirms.
@@ -499,6 +512,10 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 			return nil
 		}
 		if m == nil || m.Status != state.MatchStatusScheduled {
+			return nil
+		}
+		if (engine.SeenSides{AID: req.SideAID, BID: req.SideBID}).Differ(m.SideAID, m.SideBID) {
+			writeErr = engine.ErrMatchSideMismatch
 			return nil
 		}
 		statuses, err := stx.LoadCompetitorStatus(compID)

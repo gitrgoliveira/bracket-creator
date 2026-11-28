@@ -14,6 +14,7 @@
 import './admin_competition_overview.jsx';
 import { effectiveDrawPlayers, serverHeldCheckIns, NO_CHECK_IN_HELD_SENTENCE } from './qualifier_preview.jsx';
 import { checkInApplies } from './competition_shape.jsx';
+import { reviewsDraw } from './admin_draw_review.jsx';
 import { leaveThen, confirmLeave } from './unsaved_entries.jsx';
 import { rosterUnreadableIssues } from './data_integrity.jsx';
 import { Icon } from './icon.jsx';
@@ -564,7 +565,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                   </button>
                 </div>
                 {selfRun ? (
-                  <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated. Preview below, then start. To change it, discard and edit first.</div>
+                  <div style={{ fontSize: 13, color: "var(--ink-3)" }} data-testid="draw-ready-line">
+                    {reviewsDraw(c)
+                      ? "Draw generated. Review it below, swap competitors if a pairing is wrong, then start. To change anything else, discard the draw first."
+                      : "Draw generated. Preview below, then start. To change it, discard the draw first."}
+                  </div>
                 ) : (
                   <div className={`draw-visibility-hint draw-visibility-hint--${drawHidden ? "hidden" : "published"}`} data-testid="draw-visibility-hint">
                     <Icon name={drawVisibilityIcon(t, c)} size={13} />
@@ -662,8 +667,8 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 onViewStandings={onViewerMode || null}
               />
             )}
-            {section === "pools" && <AdminPools c={c} pools={pools} poolMatches={poolMatches} standings={standings} tweaks={tweaks} onEditScore={onEditScore} password={password} />}
-            {section === "bracket" && <AdminBracket c={c} t={t} bracket={bracket} onMoveCourt={onMoveCourt} onEditScore={onEditScore} tweaks={tweaks} password={password} hostUnsavedRef={editorUnsavedRef} />}
+            {section === "pools" && <AdminPools c={c} pools={pools} poolMatches={poolMatches} standings={standings} tweaks={tweaks} onEditScore={onEditScore} password={password} drawHidden={drawHidden} onRefreshCompetition={onRefreshCompetition} />}
+            {section === "bracket" && <AdminBracket c={c} t={t} bracket={bracket} onMoveCourt={onMoveCourt} onEditScore={onEditScore} tweaks={tweaks} password={password} drawHidden={drawHidden} hostUnsavedRef={editorUnsavedRef} onRefreshCompetition={onRefreshCompetition} />}
             {section === "scores" && !isDrawReady && <AdminScoreEditor c={c} t={t} onEditScore={onEditScore} onMoveCourt={onMoveCourt} restrictToCompId={c.id} password={password} showToast={showToast} />}
             {section === "export" && <AdminExport c={c} t={t} password={password} showToast={showToast} poolMatches={poolMatches} bracket={bracket} />}
           </div>

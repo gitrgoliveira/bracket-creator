@@ -895,6 +895,21 @@ a:hover {
   border-color: var(--accent-strong);
 }
 
+/* The primary answer of a check that found a cost ("Swap anyway" when a
+   swap brings dojo-mates together earlier): amber, the caution colour, in
+   the primary's place. --warn on white text holds 5:1; --warn-ink deepens it
+   on hover. A warning, never an error: a destructive action is .btn--danger. */
+.btn--warn {
+  background: var(--warn);
+  color: var(--accent-fg);
+  border-color: var(--warn);
+}
+
+.btn--warn:hover {
+  background: var(--warn-ink);
+  border-color: var(--warn-ink);
+}
+
 /* Armed "Finish" state: the commit button has been tapped once and now shows
    the computed verdict, awaiting a confirming second tap. Deepen the fill and
    add the accent ring so it reads as "armed, tap again to record", navy, not
@@ -12919,3 +12934,384 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .public-names__fix .btn,
 .seed-row__reveal { min-height: max(36px, var(--tap-floor)); }
 .seed-row__reveal { white-space: nowrap; }
+
+/* ---------- Draw review (bc-drev) ---------- */
+/* The Overview's Draw review card: Dojo separation first, then the optional
+   Change the draw step, divided by a hairline. */
+.draw-review {
+  margin-top: 16px;
+}
+.draw-review__section + .draw-review__section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-2);
+}
+/* The card's title is its h2 and the largest heading in it; the two
+   sections' h3 step down from it. */
+.draw-review__title {
+  font-size: 16px;
+}
+.draw-review__verdict {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+/* The conclusion under the facts, larger and semibold in the body ink, with
+   no tint of its own: the sentence says the state (operator decision C6). It
+   holds a line from the first render (a no-break space while the suggestions
+   load), so their arriving moves nothing below it. */
+.draw-review__conclusion {
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--ink-1);
+}
+.draw-review__heading {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink-1);
+}
+/* A normal-size button, 44 px tall on a touch screen (DESIGN.md 2.4). */
+.draw-review__swap-mode {
+  margin-bottom: 12px;
+  min-height: var(--tap-floor);
+}
+.draw-review__lead {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+/* The review's sentences never leave their last word alone on a line. */
+.draw-review__verdict,
+.draw-review__conclusion,
+.draw-review__lead,
+.draw-review__empty,
+.draw-review__effect,
+.draw-swap-check__line,
+.draw-swap-check__list li {
+  text-wrap: pretty;
+}
+/* The table's short meeting cells break evenly ("Share" over "Pool A"). */
+.draw-review__table td:last-child > div {
+  text-wrap: balance;
+}
+.draw-review__empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+/* A long pair or a narrow phone scrolls the table, never the page. */
+.draw-review__table-wrap {
+  overflow-x: auto;
+}
+.draw-review__table td {
+  vertical-align: top;
+}
+/* One dojo per row group, named once in a cell spanning its pairs, and a
+   stronger rule between two dojos than between two pairs of one. */
+.draw-review__dojo {
+  font-weight: 600;
+}
+.draw-review__group + .draw-review__group > tr:first-child > td {
+  border-top: 2px solid var(--line);
+}
+/* The section below draws its own rule, so the last row draws none. */
+.draw-review__group:last-child > tr:last-child > td,
+.draw-review__group:last-child .draw-review__dojo {
+  border-bottom: 0;
+}
+/* One competitor per line in the Pair cell, never broken inside: the table
+   scrolls instead (above). */
+.draw-review__who {
+  white-space: nowrap;
+}
+.draw-review__row--same-pool td:last-child {
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+.draw-review__second {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.draw-review__suggestions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.draw-review__suggestion {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line-2);
+  font-size: 13.5px;
+  color: var(--ink-1);
+}
+.draw-review__suggestion-text {
+  min-width: 0;
+}
+.draw-review__effect {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+/* "If you swap them": the check every swap passes through, on the confirm
+   card of .shiaijo-move-confirm. */
+.draw-swap-check {
+  max-width: 480px;
+  width: calc(100% + 8px);
+  /* The backdrop's 20px padding on each side; dvh tracks mobile browser
+     chrome, vh is the fallback. */
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+}
+.draw-swap-check__answer {
+  margin-bottom: 14px;
+}
+.draw-swap-check__line {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-1);
+}
+.draw-swap-check__line--warn {
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+.draw-swap-check__list {
+  margin: 0 0 8px;
+  padding-inline-start: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.draw-swap-check__earlier {
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+/* Its two answers are buttons a thumb finds: never under 36px tall. */
+.draw-swap-check .shiaijo-move-confirm__actions .btn {
+  min-height: max(36px, var(--tap-floor));
+}
+
+/* Swap competitors: the mode on Pools (preview) and Bracket (preview). One
+   layout on every screen (operator decision C7): one row of text with the
+   buttons on its right (the instruction before the first pick, the pick line
+   with Cancel beside Done after it), and from the pick on the key line under
+   it, two lines at most on a phone. */
+.swap-mode {
+  margin-bottom: 12px;
+}
+.swap-mode:not(.swap-mode--off) {
+  padding: 10px 14px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--ink-1);
+}
+/* While the mode is on, its banner is pinned under the admin top bar (whose
+   height AdminTopbar publishes as --topbar-stack-h), opaque so the pools and
+   bracket cards scrolling under it never show through. z 25: over the page's
+   own sticky parts (the team sheet's pin at 9, its footer dock at 20), under
+   the top bar (30), and so under every layer of the modal scale. The banner
+   publishes its own height as --swap-banner-h, the scroll margin a tappable
+   competitor carries below. The button that turns the mode on is not pinned. */
+.swap-mode.swap-mode--pinned {
+  position: sticky;
+  top: var(--topbar-stack-h, 0px);
+  /* Scrolled to from the Draw review card's button, it stops under the top bar. */
+  scroll-margin-top: var(--topbar-stack-h, 0px);
+  z-index: 25;
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface);
+}
+/* A competitor a keyboard Tab or a scroll brings into view stops clear of the
+   top bar and the pinned banner: margin on the competitor, never padding on a
+   scroller (a bar's own buttons lie in a padded strip, and focusing one
+   scrolls the page for nothing). */
+button.swap-pick {
+  scroll-margin-top: calc(var(--topbar-stack-h, 0px) + var(--swap-banner-h, 0px));
+}
+.swap-mode__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.swap-mode__text {
+  flex: 1;
+  min-width: 0;
+}
+.swap-mode__actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+.swap-mode__lead,
+.swap-mode__line {
+  margin: 0;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+/* A note after a swap sits under the instruction. */
+.swap-mode__lead + .swap-mode__line:not(:empty) {
+  margin-top: 4px;
+}
+.swap-mode .btn--sm {
+  min-height: max(30px, var(--tap-floor));
+}
+.swap-mode__note--error {
+  color: var(--danger-ink);
+  font-weight: 600;
+}
+
+/* A drawn competitor as a pick. On a pool row the button holds the name
+   block; on a bracket card it IS the side (.bc-side), so the card's own side
+   tints still apply (its reset sits in :where(), which weighs nothing). */
+button.swap-pick {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pool__table button.swap-pick {
+  display: block;
+  width: 100%;
+  min-height: max(36px, var(--tap-floor));
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px dashed var(--ink-4);
+  border-radius: 6px;
+}
+:where(button.bc-side.swap-pick) {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  min-height: max(38px, var(--tap-floor));
+}
+.bc-match--swap {
+  cursor: default;
+}
+.pool__table button.swap-pick:hover,
+button.bc-side.swap-pick:hover {
+  box-shadow: inset 0 0 0 2px var(--line);
+}
+.pool__table button.swap-pick.swap-pick--picked,
+button.bc-side.swap-pick.swap-pick--picked {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  font-weight: 700;
+}
+/* A bracket side has no border of its own to dash (its colour edge is the
+   side's), so its pick mark is a dashed outline drawn inside it: the card
+   does not move, and the focus ring and the picked ring replace it. */
+button.bc-side.swap-pick:not(.swap-pick--picked):not(:focus-visible) {
+  outline: 1px dashed var(--ink-4);
+  outline-offset: -4px;
+}
+button.swap-pick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Once a first competitor is picked, each other one is marked by what the
+   swap would do to dojo-mates (admin_swap_candidates.jsx): green keeps them
+   apart longer, amber brings a pair closer, and an unmarked pick keeps its
+   dashed edge. A mark changes colour, fill and an inset ring only, never a
+   border width or a size, so nothing moves under the finger as it appears. */
+.pool__table button.swap-pick.swap-pick--better,
+button.bc-side.swap-pick.swap-pick--better {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+  border-style: solid;
+  box-shadow: inset 0 0 0 1px var(--ok);
+}
+.pool__table button.swap-pick.swap-pick--worse,
+button.bc-side.swap-pick.swap-pick--worse {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  border-style: solid;
+  box-shadow: inset 0 0 0 1px var(--warn);
+}
+/* A bracket side draws its edge as an inset ring, in place of the dashed
+   outline. */
+button.bc-side.swap-pick.swap-pick--better:not(:focus-visible),
+button.bc-side.swap-pick.swap-pick--worse:not(:focus-visible) {
+  outline: 0;
+}
+button.bc-side.swap-pick.swap-pick--better {
+  box-shadow: inset 0 0 0 2px var(--ok);
+}
+button.bc-side.swap-pick.swap-pick--worse {
+  box-shadow: inset 0 0 0 2px var(--warn);
+}
+/* The mark's line, under the dojo: "Worse for Fudo, Hizen" (operator
+   decision C9). It is drawn on every pick from the moment the mode is on,
+   a no-break space until a mark shows, so the space is held before any mark,
+   and a long list wraps inside the pick rather than pushing the name. It
+   wraps between words only, so a dojo name is never split mid-word (operator
+   ruling 2026-11-27): break-word, unlike anywhere, leaves a whole word in the
+   pick's min-content width, so a narrow pool column widens to the word. */
+.swap-verdict {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: break-word;
+}
+.swap-verdict--better {
+  color: var(--ok-ink);
+}
+.swap-verdict--worse {
+  color: var(--warn-ink);
+}
+.bc-side .swap-verdict {
+  white-space: normal;
+}
+/* A seed keeps their place (operator ruling 2026-11-27): drawn grey and not a
+   button, a solid edge where a pick has a dashed one, at a pick's size so the
+   rows do not move. Its name, dojo and "Seed N, stays in place" line are
+   --ink-3 on --surface-2 (4.97:1). */
+.swap-pick--locked,
+.swap-pick--locked :is(.bc-name, .bc-dojo, .pool__player-name, .pool__dojo-name),
+.swap-verdict--locked {
+  color: var(--ink-3);
+}
+.swap-pick--locked {
+  cursor: default;
+}
+.pool__table .swap-pick--locked {
+  min-height: max(36px, var(--tap-floor));
+  padding: 4px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+}
+.bc-side.swap-pick--locked {
+  min-height: max(38px, var(--tap-floor));
+  background: var(--surface-2);
+}
+/* The key line under the pick line: every sentence it can say stacked in one
+   grid cell, only the current one visible, so it holds the height of the
+   longest from the pick on. */
+.swap-mode__key {
+  display: grid;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.swap-mode__key-line {
+  grid-area: 1 / 1;
+  visibility: hidden;
+  text-wrap: pretty;
+}
+.swap-mode__key-line.is-shown {
+  visibility: visible;
+}
+.swap-mode__key-line--quiet {
+  color: var(--ink-3);
+}

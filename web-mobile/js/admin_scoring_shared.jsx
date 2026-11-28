@@ -19,7 +19,7 @@ import {
   courtBusyMessage, courtBusyReopenWarning, heldWriteDiscardLabel, heldWriteDiscardConfirm, queuedNotice,
   tapNotAppliedText, tapOutcomeQuiet, writePending, writeWasRefused,
 } from './write_result.jsx';
-import { sameCompetitor } from './competitor_identity.jsx';
+import { sameCompetitor, seenSideIds } from './competitor_identity.jsx';
 import { sideWord, sideWithColour } from './side_cell.jsx';
 import { sideMarks, defaultWinMaru } from './bracket.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
@@ -28,6 +28,7 @@ import { isTeamDefaultWinDecision } from './team_default_credit.jsx';
 import { struckIppons, realIppons } from './result_slot.jsx';
 import { acceptTap, useArmedConfirm } from './tap_guard.jsx';
 import { useLatestRef } from './latest_ref.jsx';
+import { firstResultAsks, confirmFirstResult, FIRST_RESULT_CANCELLED } from './first_result_confirm.jsx';
 // bc-evts: the board of a running match (tapBoardOf) is the server's copy with
 // this device's pending taps folded on, by the JS replay port.
 import { applyPending, assignMarks, APPLIED, BOUT_REMOVED, BOUT_REMOVED_MESSAGE } from './score_events.jsx';
@@ -735,6 +736,9 @@ function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCoun
   // The match the decision was recorded on (bc-hlck): recordDecision floors
   // the stamp by it and never sends it.
   if (opts.seenModifiedAt > 0) body.seenModifiedAt = opts.seenModifiedAt;
+  // The competitors the editor showed: a draw swap since refuses the write.
+  if (opts.sideAId) body.sideAId = opts.sideAId;
+  if (opts.sideBId) body.sideBId = opts.sideBId;
   return body;
 }
 
@@ -770,6 +774,18 @@ function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeri
     ),
     confirmDialog: window.confirmDialog,
     compId, matchId, result: body, password: resolveDecisionPassword(password),
+  });
+}
+
+// confirmFirstResultFor: the first-result question (first_result_confirm.jsx)
+// for `match`, named as the operator's rows name it. An editor asks it BEFORE
+// it shows its own start or opens another question over unsaved entries, so a
+// Not yet leaves the board and the entries as they were. Callers ask it only
+// when firstResultAsks(match.compId), so a write that asks nothing still goes
+// out in the same tick. `starts` tells a Start from a result.
+function confirmFirstResultFor(match, starts = false) {
+  return confirmFirstResult({
+    confirmDialog: window.confirmDialog, compId: match.compId, label: scoreRowMatchName(match), starts,
   });
 }
 
@@ -837,6 +853,17 @@ function makeSubmitDecision({
 }) {
   const submit = async (kind, { decisionBy, decisionReason }) => {
     let encho = enchoPeriodCount;
+    // bc-drev D4 b: asked BEFORE the unsaved entries' question, so a Not yet
+    // never discards what the editor holds (BarredMatchNotice does the same).
+    // attemptScoreWrite asks no more once the operator has agreed.
+    if (firstResultAsks(match.compId)) {
+      const go = await confirmFirstResultFor(match);
+      if (!mountedRef.current) return;
+      if (!go) {
+        setDecisionErr(FIRST_RESULT_CANCELLED);
+        return;
+      }
+    }
     if (holdsUnsaved(unsaved)) {
       const go = await confirmDiscardUnsaved(unsaved, recordDecisionAnyway(kind), onDiscard);
       if (!go || !mountedRef.current) return;
@@ -849,7 +876,7 @@ function makeSubmitDecision({
     try {
       const updated = await submitDecisionRequest(
         match.compId, match.id, kind, { decisionBy, decisionReason }, encho, password,
-        { seenModifiedAt: match.modifiedAt || 0, seenScoreVersion: (seenScoreVersion !== undefined ? seenScoreVersion : match.scoreVersion) || 0 },
+        { ...seenSideIds(match), seenModifiedAt: match.modifiedAt || 0, seenScoreVersion: (seenScoreVersion !== undefined ? seenScoreVersion : match.scoreVersion) || 0 },
       );
       if (!mountedRef.current) {
         // The host read the decision from the outbox as it was queued, and
@@ -918,6 +945,14 @@ function makeSubmitDecision({
       // The organiser declined the lots warning: the bout and the lots stand.
       if (e && e.lotsReplacedCancelled) {
         if (mountedRef.current) setDecisionErr(LOTS_REPLACED_CANCELLED);
+        return;
+      }
+      // The operator kept back the first result of a drawn competition
+      // (attemptScoreWrite asked, first_result_confirm.jsx): nothing was sent,
+      // and the form stays open so the decision can be recorded once the
+      // competition is to start.
+      if (e && e.firstResultCancelled) {
+        if (mountedRef.current) setDecisionErr(FIRST_RESULT_CANCELLED);
         return;
       }
       // Any other refusal is shown as the server worded it; nothing is
@@ -2815,6 +2850,7 @@ export {
   buildDecisionBody,
   submitDecisionRequest,
   makeSubmitDecision,
+  confirmFirstResultFor,
   nextEnchoPeriod,
   prevEnchoPeriod,
   initialEnchoPeriodsForMatch,

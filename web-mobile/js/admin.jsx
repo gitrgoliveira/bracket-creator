@@ -19,7 +19,7 @@ import { keptInHistoryNote } from './match_groups.jsx';
 import { normalizeCompetitionDetail } from './api_serializers.jsx';
 import { confirmMatchLabel, confirmRunningCourtMove } from './court_move.jsx';
 import { holdsUnsaved, discardUnsaved } from './unsaved_entries.jsx';
-import { scoreRowMatchLabel } from './pool_ids.jsx';
+import { scoreRowMatchLabel, scoreRowMatchName } from './pool_ids.jsx';
 import { mergeSavedCompetition } from './competition_put_body.jsx';
 import { AdminCalendarPage } from './admin_calendar.jsx';
 import { AdminPostersPage } from './admin_posters.jsx';
@@ -31,6 +31,7 @@ import { dismissToastById } from './toast_queue.jsx';
 import { onDocumentSettled } from './document_versions.jsx';
 import { PUBLIC_NAMES_APPLY_CONFIRM, confirmPublicNamesApply } from './public_names_fields.jsx';
 import { useLatestRef } from './latest_ref.jsx';
+import { noteFirstResultCompetitions, FIRST_RESULT_CANCELLED } from './first_result_confirm.jsx';
 import { startAllHiddenDrawsNote, DRAW_PUBLISHED_TOAST, DRAW_UNPUBLISHED_TOAST } from './draw_visibility.jsx';
 
 const { useState, useEffect, useRef } = React;
@@ -74,6 +75,13 @@ const REFRESHABLE_EVENTS = new Set([
   "swiss_round_generated",
   // participants_updated fires when a participant is checked in or out.
   "participants_updated",
+  // bc-drev FR13: draw_generated fires when a draw is made and when two
+  // competitors are swapped in it (POST .../draw/swap), draw_discarded when it
+  // is discarded. Another organiser device then shows the draw as stored (the
+  // Overview's Draw review card, Pools (preview), Bracket (preview)) without a
+  // reload; the court console and the calendar already listened for both.
+  "draw_generated",
+  "draw_discarded",
   // bc-drpb: draw_visibility_changed fires when a draft's draw is published
   // or hidden again (from this tab or another). Carries competitionId +
   // hidden; the open competition refetches so its header's Publish draw /
@@ -228,6 +236,21 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // Refs are read by the SSE subscription (which has narrower deps to avoid
   // teardown); refresh them only when the underlying props change.
   useEffect(() => { tRef.current = t; onUpdateRef.current = onUpdate; }, [t, onUpdate]);
+  // bc-drev D4 b: what the console shows is what the first-result question
+  // judges (first_result_confirm.jsx). Every admin host (the Scores tab and
+  // page, Pools and Bracket, their previews included) writes through
+  // editMatchScore and so attemptScoreWrite, which asks before the first result
+  // of a drawn competition; it can ask only about a competition noted here.
+  // The tournament's competitions carry their poolMatches and bracket; the open
+  // competition's detail, when loaded, is noted after them, as it is the
+  // fresher copy of that one competition.
+  const tournamentCompetitions = t && t.competitions;
+  useEffect(() => { noteFirstResultCompetitions(tournamentCompetitions); }, [tournamentCompetitions]);
+  useEffect(() => {
+    const cfg = adminCompData && adminCompData.config;
+    if (!cfg || !cfg.id) return;
+    noteFirstResultCompetitions([{ ...cfg, poolMatches: adminCompData.poolMatches, bracket: adminCompData.bracket }]);
+  }, [adminCompData]);
   // AdminApp unmounts on logout / viewer-mode switch. Several async
   // handlers below (updateCompetition's fetchCompetitionDetails,
   // startAllCompetitions) setAdminCompData / setAdminLoading
@@ -522,6 +545,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         // The Start anyway confirm names the bout it would start the way the
         // operator's rows do, never by its raw id.
         label: match ? scoreRowMatchLabel(match) : '',
+        // The first-result question names it the same way every other door
+        // does (confirmFirstResultFor): the label with the pairing.
+        matchName: match ? scoreRowMatchName(match) : '',
         onRefusal: opts && opts.onRefusal,
         onDownstreamReopened: toastReopened,
         // bc-adna: only an admin host's options turn the court_busy warning
@@ -552,6 +578,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       }
       // bc-adna: if the operator cancelled forcing court, toast nothing and mark toasted
       if (e.courtForceCancelled) {
+        throw markToasted(e);
+      }
+      // bc-drev D4 b: the operator answered Not yet to "Start <competition>?"
+      // (first_result_confirm.jsx). Nothing was sent; it is their choice, not
+      // a failure, so the toast is not an error.
+      if (e.firstResultCancelled) {
+        showToast(FIRST_RESULT_CANCELLED);
         throw markToasted(e);
       }
       showToast(e.message, "error");
@@ -1039,7 +1072,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             // gratuitous re-render).
             if (event.type === "match_updated" || event.type === "competitor_status_updated") {
               setAdminCompData(prev => pushes.push(prev, prev && prev.config && prev.config.id, event));
-            } else if (event.type === "tournament_updated") {
+            } else if (event.type === "tournament_updated"
+                || event.type === "draw_generated" || event.type === "draw_discarded") {
+              // A new or changed draw names other sides in the same match
+              // ids: no pushed copy outranks the refetch.
               pushes.clear();
             }
             // Still trigger full refresh (jittered) to reconcile standings/propagation
@@ -1053,7 +1089,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
               || event.type === "competition_started"
               || event.type === "competition_completed"
               || event.type === "competitor_status_updated"
-              || event.type === "swiss_round_generated") {
+              || event.type === "swiss_round_generated"
+              || event.type === "draw_generated"
+              || event.type === "draw_discarded") {
             scheduleTournamentRefresh(false);
           } else if (event.type === "tournament_updated") {
             scheduleTournamentRefresh(true);

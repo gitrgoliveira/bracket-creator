@@ -26,6 +26,8 @@ import { engiShape } from './engi_entry.jsx';
 // Fighting a drawn tie-break bout again is the editors' reopen, so the notice
 // below runs the same hook and shows the same court-busy panel.
 import { useMatchReopen, ReopenFeedback } from './admin_scoring_shared.jsx';
+// Pools (preview)'s Swap competitors mode, the same hook Bracket (preview) runs.
+import { useSwapCompetitors } from './admin_competition_bracket.jsx';
 
 const { useState, useEffect, useRef, useMemo } = React;
 const EmptyState = window.EmptyState;
@@ -366,7 +368,7 @@ function tiebreakPlacesLabel(group) {
 // with joint 3rd places on), named once for the banner and the circle notice.
 const LEAGUE_TIE_PLACES = "at 1st or 2nd place (and at 3rd place when joint 3rd places are off)";
 
-function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
+function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password, drawHidden, onRefreshCompetition }) {
   const isLeague = c && c.format === "league";
   // A KEY, re-resolved from the live poolMatches every render, never a captured
   // object. A match has ONE result and every surface asking for it shows the
@@ -1077,6 +1079,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     () => (scoreOpenRaw ? enrichPoolMatchWithComp(scoreOpenRaw, c) : null),
     [scoreOpenRaw, c]
   );
+  // Swap competitors on Pools (preview) of a pools + knockout draw (bc-drev
+  // FR10): with the mode on, a tap on a name picks it and no tap opens a score
+  // sheet.
+  const swapMode = useSwapCompetitors({ c, tab: 'pools', pools, poolMatches, bracket: null, password, drawHidden, onRefreshCompetition });
 
   // Modal rendered alongside the PoolsViewer.
   const scoreModal = scoreOpenMatch ? (
@@ -1142,6 +1148,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           draw-order via PoolsViewer, leagues always rank-order via
           LeagueStandingsViewer. Mirrored in viewer_competition.jsx and
           admin_shiaijo_context.jsx's ShiaijoContext. */}
+      {!isLeague && swapMode.controls}
       {isLeague ? (
         LeagueStandingsViewer ? (
           // showDataIssues on both branches: this is an operator surface, and
@@ -1168,6 +1175,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             onMatchClick={(m) => setScoreOpenId(m.id)}
             highlightPlayers={[]}
             showDataIssues
+            swap={swapMode.swap}
           />
         ) : null
       )}

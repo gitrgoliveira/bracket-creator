@@ -75,7 +75,9 @@ import {
   finishButtonLabel,
   armedFinishLabel,
   editorMetaText,
+  confirmFirstResultFor,
 } from './admin_scoring_shared.jsx';
+import { firstResultAsks } from './first_result_confirm.jsx';
 import { individualDraftTaps, rebaseIndividualDraft } from './draft_taps.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
@@ -1760,6 +1762,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                   // operator tap: silence here would just re-enable the
                   // button having saved nothing. Check the awaited result
                   // directly instead of relying on the broadcast.
+                  // bc-drev D4 b: the first result of a drawn competition asks
+                  // BEFORE the owner shows the start, so a Not yet leaves the
+                  // board as it was (Start still offered, the match scheduled)
+                  // and nothing is begun. Only when it asks is anything awaited.
+                  if (firstResultAsks(m.compId) && !(await confirmFirstResultFor(m, true))) return;
                   const startPatch = buildPatch("running");
                   // The owner shows the start at once, with the score it
                   // carries (the draft), and reads its answer as it comes.

@@ -276,6 +276,7 @@ Quick lookup: scan, then `Ctrl+F` the class name to jump to its subsection.
 | `.btn` | Default: surface bg, line border |
 | `.btn--primary` | Confirm, save, start match |
 | `.btn--danger` | Destructive (reset, kiken, archive) |
+| `.btn--warn` | The primary answer of a check that found a cost, in the primary's place (the draw swap check's "Swap anyway"): `--warn` fill, `--warn-ink` on hover. Caution, never destructive |
 | `.btn--ghost` | Tertiary, inline cancels |
 | `.btn--link` | An action inside running text or a hint ("Download CSV template", the viewer's "View full standings →"): `--text-link` ink, no box, underline on hover, takes the surrounding text size (a sibling class may set its own). Under a coarse pointer it keeps the 44px floor as an invisible hit area (`::before`) rather than height, so running text around it is not pushed apart |
 | `.btn--sm` / `.btn--lg` | Compact rows / hero CTAs |

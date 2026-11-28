@@ -187,15 +187,21 @@ func TestChangedLineup_LandsOnTheLineupInForce(t *testing.T) {
 		assert.Equal(t, posMap("senpo", "Ito"), lineupFrom(t, w).Positions)
 	})
 
-	t.Run("a match the team is not seated in has the base the read shows there", func(t *testing.T) {
+	t.Run("a match the team is not seated in takes no lineup, from the organiser either", func(t *testing.T) {
 		f := newChangedLineupFixture(t)
 		require.Equal(t, http.StatusOK, f.put(f.startingPath(), organiserPassword, saveBody(posMap("senpo", "Ito", "jiho", "Ueno"), nil)).Code)
-		require.Equal(t, http.StatusOK, f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("senpo", "Endo", "jiho", "Ueno"), nil)).Code)
+		before, err := f.store.LoadTeamLineups("c1")
+		require.NoError(t, err)
 
 		w := f.put(f.matchPath("PoolA-2"), organiserPassword, saveBody(posMap("jiho", "Ueda"), nil, pJiho))
 
-		assert.Equal(t, posMap("senpo", "Endo", "jiho", "Ueda"), lineupFrom(t, w).Positions,
-			"the match's place in the draw is what counts, as in the lineup-in-force read: PoolA-0 comes before it")
+		// A lineup saved before a draw swap moved the team must not land on a
+		// match the team no longer plays (bc-drev FR6).
+		requireRefusal(t, w, http.StatusNotFound, "team_not_in_match",
+			"This team is not in this match. Check the score sheet and try again.")
+		after, err := f.store.LoadTeamLineups("c1")
+		require.NoError(t, err)
+		assert.Equal(t, before, after, "nothing is written")
 	})
 
 	t.Run("a match the draw does not hold has the starting lineup as its base", func(t *testing.T) {

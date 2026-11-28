@@ -60,6 +60,19 @@ Keeping dojo-mates out of one pool is only half the job: two members of one dojo
 
 With two qualifiers per pool the second place crosses to a partner region, and a crossed second meeting a dojo-mate there is chance the draw cannot rule out. It still makes a best effort: where two pools serve a competitor equally well, the draw prefers the one whose crossing lands its qualifiers furthest from the rest of the dojo. Beyond that, the limits are the sheet's own arithmetic, and they are worth knowing at the desk. When a dojo's members qualify from pools that must feed neighbouring slots, because the pool counts leave no alternative, the early meeting stands. When several dojos compete for the same few well-separated pool pairs, not every dojo can have one, so the draw settles the contest in favour of as few early meetings as possible overall.
 
+## Review the draw
+
+Once the draw of a **Pools + Knockout** competition is ready, the competition's **Overview** shows a **Draw review** card. Its **Dojo separation** table has one row for every pair of competitors from the same dojo, earliest meeting first:
+
+- **Share Pool C** when the two are in the same pool. With more members than pools, as described in [When a dojo has more members than pools](#when-a-dojo-has-more-members-than-pools), these rows cannot all be avoided.
+- Otherwise, the earliest knockout round where they can meet. It counts every place the two pools send up, so with two qualifiers per pool a runner-up's crossing counts too. When the two pool winners would meet later than that, a second line says so, for example **Final if both win their pools**.
+
+If a pairing is wrong, take one of the swaps the card suggests, or click **Swap competitors on Pools** on the card (or turn on **Swap competitors** on **Pools (preview)**) and tap the two names. Either way, the app shows what the swap does before it makes it. A swap trades the two competitors between their places in the pools, and everything that belongs to the person goes with them: name, dojo, check-in and, for a team, its saved lineups. The place keeps its number, as described in [Competitor numbers](#competitor-numbers), so the competitor who moves into the third place of Pool B takes that place's number, and the check panel tells you which two tags to exchange. The pools keep their sizes, their shiai-jo and their match times.
+
+A seeded competitor is never swapped, by the draw or by you: seeds keep their places in the pools, and the swap mode shows them grey. The knockout places each pool by the seed it holds, so with every seed in place a swap leaves the bracket as it is; a swap inside one pool only changes the order of its bouts.
+
+Swaps are possible only until the first result is recorded. Refer to [Review the draw](run-tournament.md#review-the-draw) for the whole workflow, the suggestions the app makes and the question it asks before the first result.
+
 ## Pools onto shiai-jo
 
 Pools are assigned to shiai-jo in contiguous blocks: with six pools on two shiai-jo, pools A, B and C fight on the first and pools D, E and F on the second. When the counts do not divide evenly, the earlier shiai-jo take one pool more. A shiai-jo with no pool to run would stand idle, so the draw steps the competition's shiai-jo count down when there are fewer pools than shiai-jo; refer to [How many shiai-jo a competition can use](knockout-draw.md#how-many-shiai-jo-a-competition-can-use).

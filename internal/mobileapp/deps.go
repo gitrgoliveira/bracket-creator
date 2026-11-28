@@ -38,6 +38,24 @@ type DraftEstimator interface {
 	EstimateDraft(comp *state.Competition, tournament *state.Tournament, participants int) (engine.DraftEstimate, error)
 }
 
+// CompetitionLoader is the consumer-boundary view of state.Store for a
+// handler that reads only the competition record (the draw review's routes,
+// to answer 404 for an unknown competition). *state.Store satisfies it.
+type CompetitionLoader interface {
+	LoadCompetition(id string) (*state.Competition, error)
+}
+
+// DrawReviewEngine is the consumer-boundary view of engine.Engine used by the
+// draw review handlers (handlers_draw_review.go): the dojo separation summary,
+// the swap suggestions, the swap candidates and the swap itself.
+// *engine.Engine satisfies it.
+type DrawReviewEngine interface {
+	DojoSeparationFor(comp *state.Competition) ([]engine.DojoMeeting, error)
+	SwapSuggestionsFor(comp *state.Competition) (*engine.SwapSuggestions, error)
+	SwapCandidatesFor(compID, pickID string) (*engine.SwapCandidates, error)
+	SwapDrawPlaces(compID string, req engine.SwapRequest) (*engine.SwapResult, error)
+}
+
 // CalendarPlanner is the consumer-boundary view of engine.Engine used by the
 // tournament schedule calendar handlers. *engine.Engine satisfies this interface.
 type CalendarPlanner interface {

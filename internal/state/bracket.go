@@ -256,6 +256,7 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 			res.Rounds[i][j].MarkIDs = round[j].MarkIDs.Clone()
 			res.Rounds[i][j].EventSeqs = CloneGroupStamps(round[j].EventSeqs)
 			res.Rounds[i][j].TurnedAway = maps.Clone(round[j].TurnedAway)
+			res.Rounds[i][j].ReplacedResult = round[j].ReplacedResult.Clone()
 			res.Rounds[i][j].IneligibleSides = clonePtr(round[j].IneligibleSides)
 			res.Rounds[i][j].WithdrawnStatus = clonePtr(round[j].WithdrawnStatus)
 			if round[j].Feeders != nil {
@@ -280,6 +281,7 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		tpm.MarkIDs = b.ThirdPlaceMatch.MarkIDs.Clone()
 		tpm.EventSeqs = CloneGroupStamps(b.ThirdPlaceMatch.EventSeqs)
 		tpm.TurnedAway = maps.Clone(b.ThirdPlaceMatch.TurnedAway)
+		tpm.ReplacedResult = b.ThirdPlaceMatch.ReplacedResult.Clone()
 		tpm.IneligibleSides = clonePtr(b.ThirdPlaceMatch.IneligibleSides)
 		tpm.WithdrawnStatus = clonePtr(b.ThirdPlaceMatch.WithdrawnStatus)
 		if b.ThirdPlaceMatch.Feeders != nil {

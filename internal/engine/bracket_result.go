@@ -97,6 +97,9 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 		ScoreVersion: bm.ScoreVersion,
 		EventSeqs:    state.CloneGroupStamps(bm.EventSeqs),
 		TurnedAway:   maps.Clone(bm.TurnedAway),
+		// The result the court's result replaced (bc-sseq FR8), the replay's
+		// like the turned-away taps.
+		ReplacedResult: bm.ReplacedResult.Clone(),
 	}
 }
 

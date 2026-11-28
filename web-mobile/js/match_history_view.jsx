@@ -67,11 +67,25 @@ export function historyDoorWords(door) {
     return DOOR_WORDS[door] || 'Updated';
 }
 
+// bc-sseq FR8: the server's history reason for a result the court's result
+// replaced (engine.HoldReasonCourtResult, pinned by
+// match_history_court_result.test.jsx): a result another device recorded
+// that a later result from the court console running the match's shiaijo
+// replaced without having seen it, whichever arrived first. Each of the two
+// results keeps its own line, at the time its device made it.
+export const HISTORY_REASON_COURT_RESULT = "replaced by the court's result";
+export const COURT_RESULT_HISTORY_WORDS = "Replaced by the court's result";
+function replacedByCourt(entry) {
+    return !!entry && entry.reason === HISTORY_REASON_COURT_RESULT;
+}
+
 export function historyEntryWords(entry) {
     const court = entry && typeof entry.court === 'string' ? entry.court.trim() : '';
     if (entry && entry.door === 'requeue' && court) {
         return `Moved to Shiaijo ${court} and sent back to the queue`;
     }
+    // Not a later change: the result the court's replaced was made first.
+    if (entry && entry.door === 'displaced' && replacedByCourt(entry)) return 'Result moved to history';
     return historyDoorWords(entry ? entry.door : undefined);
 }
 
@@ -237,8 +251,10 @@ export function historyEntryView(entry, resolve) {
     // (bc-mrgc phase 3): the server's own words ("older revision of this
     // board" for a save the same device had already followed with a newer one).
     const isTap = entry.door === 'event';
+    // A result the court's replaced reads the same whichever arrived first.
     const reason = isTap ? eventReason(entry)
-        : typeof entry.reason === 'string' && entry.reason ? `${moved ? 'Moved to history' : 'Not applied'}: ${entry.reason}` : null;
+        : replacedByCourt(entry) ? COURT_RESULT_HISTORY_WORDS
+            : typeof entry.reason === 'string' && entry.reason ? `${moved ? 'Moved to history' : 'Not applied'}: ${entry.reason}` : null;
     return {
         time: historyTime(entry),
         door: isTap ? eventWords(entry.event) : historyEntryWords(entry),

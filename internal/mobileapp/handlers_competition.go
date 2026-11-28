@@ -2908,21 +2908,31 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
-
 		// A pools competition that generated zero matches (e.g. single
 		// participant) has nothing to score, so trip the auto-complete check
 		// at start time. The non-zero case will trip via score handlers.
-		// Same sanitized-header contract as tryAutoCompletePools, see
-		// AutoCompleteErrorHeader/Value in hub.go.
-		if outcome, err := eng.MaybeAutoCompletePools(id); err != nil {
-			log.Printf("MaybeAutoCompletePools(%s) after start: %v", id, err)
-			c.Header(AutoCompleteErrorHeader, AutoCompleteErrorValue)
-		} else if outcome == engine.AutoCompleteTransitioned {
-			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
-			// Reflect the auto-complete in the response body so the caller doesn't
-			// see a stale "pools" status. The persisted file is already updated.
-			comp.Status = state.CompStatusComplete
+		// The outcome is announced by answerAutoComplete, the one owner the
+		// score doors use, so every outcome that writes (an injected
+		// tie-break, a seated or started knockout, a league waiting on its
+		// tie-breaker) is followed by its event here too, not only the
+		// completion; its error arm sets the same sanitized header.
+		outcome, acErr := eng.MaybeAutoCompletePools(id)
+		// competition_started goes out once: a knockout the pass just seeded
+		// is announced by answerAutoComplete itself.
+		if outcome != engine.AutoCompleteKnockoutStarted || acErr != nil {
+			hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
+		}
+		answerAutoComplete(c, hub, id, outcome, acErr)
+		if acErr == nil {
+			// Reflect what the pass did in the response body so the caller doesn't
+			// see a stale "pools" status: the persisted file already holds the
+			// finished competition or the seeded knockout.
+			switch outcome {
+			case engine.AutoCompleteTransitioned:
+				comp.Status = state.CompStatusComplete
+			case engine.AutoCompleteKnockoutStarted:
+				comp.Status = state.CompStatusKnockout
+			}
 		}
 
 		c.JSON(http.StatusOK, comp)

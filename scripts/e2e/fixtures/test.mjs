@@ -7,6 +7,7 @@ import { start, BIN } from '../../screenshots/lib/server.mjs';
 import { auditsFor } from './audit.mjs';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { ensureCoarse, isCoarse } from './pointer.mjs';
+import { releaseContextCourts, releaseOnClose } from './court-control.mjs';
 
 export { isCoarse };
 
@@ -88,6 +89,18 @@ const CONSOLE_ALLOWLIST = [
     reason: 'A public page logs its tournament reload failing while the journey has the phone offline (the self-run offline journeys; load in app.jsx, which keeps the last good data and lets the connection indicator report the outage); it reloads again once back online.',
     text: /^Failed to load tournament TypeError: Failed to fetch\b/,
     url: /\/dist\/(?:[0-9a-f]+\/)?app\.jsx?$/,
+    whileOffline: true,
+  },
+  {
+    reason: 'A public page logs its tournament refetch failing while the journey has the phone offline (the self-run offline journeys; the refetch gate\'s onError in app.jsx, which keeps the last good data); it refetches again once back online.',
+    text: /^Tournament refresh failed: TypeError: Failed to fetch\b/,
+    url: /\/dist\/(?:[0-9a-f]+\/)?app\.jsx?$/,
+    whileOffline: true,
+  },
+  {
+    reason: 'A competition page logs its refetch gates failing while the journey has the tablet offline (concurrent-taps case i, the Scores page finishing offline; the onError of the details and list gates in admin.jsx, which keep the last good data); they refetch again once back online.',
+    text: /^Failed to refresh competition(?:s| details) TypeError: Failed to fetch\b/,
+    url: /\/dist\/(?:[0-9a-f]+\/)?admin\.jsx?$/,
     whileOffline: true,
   },
   // The self-run public journey (self-run-public.public.spec.mjs) makes these
@@ -344,7 +357,9 @@ export const test = base.extend({
     browser.newContext = async (...args) => {
       const ctx = await newContext.apply(browser, args);
       c.attachContext(ctx);
-      return ctx;
+      // Closing it, or one of its pages, gives back the shiaijo its court
+      // consoles run, as closing a tab does (fixtures/court-control.mjs).
+      return releaseOnClose(ctx);
     };
     try {
       await use(browser);
@@ -355,9 +370,15 @@ export const test = base.extend({
 
   // The default context goes through browser.newContext today; attached here
   // as well so the policy does not depend on how Playwright builds it.
+  // Playwright closes it after the test without a pagehide, so the shiaijo its
+  // court consoles run are given back first (fixtures/court-control.mjs), as
+  // a closing tab gives them back: the next test of the file, another tablet,
+  // takes one still in the server's grace with Take control (openShiaijo).
   context: async ({ context, consoleCollector: c }, use) => {
     c.attachContext(context);
+    releaseOnClose(context);
     await use(context);
+    await releaseContextCourts(context).catch(() => {});
   },
 
   // The check, at the end of every test (auto, so no journey has to ask).

@@ -488,6 +488,7 @@ func takeSeatedBouts(result, stored *state.MatchResult) {
 	result.ScoreVersion = stored.ScoreVersion
 	result.EventSeqs = stored.EventSeqs
 	result.TurnedAway = stored.TurnedAway
+	result.ReplacedResult = stored.ReplacedResult
 	result.ModifiedAt = stored.ModifiedAt
 	result.GroupStamps = stored.GroupStamps
 }

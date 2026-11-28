@@ -13,8 +13,10 @@ import (
 
 // The push the kachinuki advance makes goes through the one match push door
 // (broadcastMatchNow): it carries the stored match as the advance left it, with
-// the appended bout, and is the LAST match_updated of the write, so a running
-// push held in the window can never follow it with the older bout log.
+// the appended bout, and is the LAST push naming a match in the write, so a
+// running push held in the window can never follow it with the older bout log.
+// The failed auto-complete pass after it announces the competition alone (a
+// match_updated with no match id), so only pushes naming a match are counted.
 func TestKachinukiAdvancePush_CarriesTheStoredMatchAndIsLast(t *testing.T) {
 	const compID = "kachinuki-advance-push"
 	r, store, hub := setupKachinukiScoreServerWithHub(t, compID)
@@ -32,7 +34,7 @@ func TestKachinukiAdvancePush_CarriesTheStoredMatchAndIsLast(t *testing.T) {
 	})
 	var updates []string
 	for _, e := range events {
-		if strings.Contains(e, `"type":"match_updated"`) {
+		if strings.Contains(e, `"type":"match_updated"`) && strings.Contains(e, `"matchId"`) {
 			updates = append(updates, e)
 		}
 	}

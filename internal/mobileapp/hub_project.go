@@ -166,6 +166,10 @@ var sseEventCatalogue = map[EventType]sseEventSpec{
 	// A draft's draw was published or hidden again: a competition id and
 	// whether it is hidden now, which the public pages refetch on.
 	EventDrawVisibilityChanged: {class: sseEventPasses},
+	// Who runs each shiaijo is the organisers' business (bc-sseq FR9): the
+	// court consoles read it, and nobody else needs the holder's key or
+	// device word. Organiser-only in a self-run tournament too.
+	EventCourtControlUpdated: {class: sseEventOrganiserOnly},
 }
 
 // eventCompetitionID is the competition a masked event names: its data's
@@ -196,12 +200,14 @@ func eventCompetitionID(data any, payload []byte) string {
 // project is what sub's stream is sent for e: the event as broadcast for the
 // organiser, for an event that names no one and carries no draw, in a
 // self-run tournament (which hides no names and shows every draw, so every
-// stream is sent every event as it always was), and for a competition that
-// shows names or whose names sub may see; a masked copy otherwise. A draw
-// event (historyEntry.draws) of a competition whose draw is hidden from sub
-// (publicNames.drawHidden) is sent with no data, judged first, before the
-// event's class, the names option or a reveal link count: a hidden draft is
-// the public's competition in setup, whose events carry nothing to show.
+// stream is sent every event but an organiser-only one as it always was), and
+// for a competition that shows names or whose names sub may see; a masked
+// copy otherwise. An organiser-only event is sent to every other stream with
+// no data, self-run or not: what it carries is not a name the self-run rule
+// shows. A draw event (historyEntry.draws) of a competition whose draw is
+// hidden from sub (publicNames.drawHidden) is sent with no data, judged
+// before the names option or a reveal link count: a hidden draft is the
+// public's competition in setup, whose events carry nothing to show.
 // Whatever cannot be judged (an unknown event type, an event naming no
 // competition that it must be judged on, a competition that cannot be read,
 // a copy that cannot be built) is sent with no data, never as broadcast.
@@ -214,10 +220,13 @@ func (h *Hub) project(e *historyEntry, sub *sseSubscriber) string {
 	if known && spec.class == sseEventPasses && !e.draws {
 		return e.payload
 	}
+	if known && spec.class == sseEventOrganiserOnly {
+		return withoutData(e)
+	}
 	if e.inSelfRun(names) {
 		return e.payload
 	}
-	if !known || spec.class == sseEventOrganiserOnly {
+	if !known {
 		return withoutData(e)
 	}
 	if e.compID == "" {

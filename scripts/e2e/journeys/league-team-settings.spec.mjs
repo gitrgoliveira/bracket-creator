@@ -10,8 +10,9 @@
 //
 // Each competition is a team league of teams of two, seeded through the
 // interface (fixtures/league.mjs seedLeague) with the setting under test, and
-// every encounter is scripted by team INDEX, never by the draw: the numbered
-// row says which team the draw made Shiro, and the script says who wins.
+// every encounter is scripted by team INDEX, never by the draw: the court
+// console, where every encounter is scored, says which team the draw made
+// Shiro, and the script says who wins.
 // Expected figures, ranks and the groups the banner must ask are TALLIED from
 // the script below (the same ranking the app documents: team matches won, then
 // lost, drawn, individual wins, losses, draws, points scored, points lost),
@@ -49,10 +50,13 @@ import { flushAudits, journeyRecorder } from '../fixtures/audit.mjs';
 import { enterTournament } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import {
-  TEXT, backUpCompetition, expectNoSidewaysScroll, openLeague, openLeagueSettings, openNumberedRow, openViewerAwards, openViewerLeague,
+  TEXT, backUpCompetition, expectNoSidewaysScroll, openLeague, openLeagueSettings, openViewerAwards, openViewerLeague,
   playEncounter, readBanner, readLeagueSettings, readLeagueTable, readNumberedRows, readPodium, restoreAsCopy,
   retiredControls, rewriteBackup, saveSettings, seedLeague, setTwoThirdPlaces, tiebreakBanner, withFrontMatterLine,
 } from '../fixtures/league.mjs';
+import { inlineEditor, openShiaijo } from '../fixtures/shiaijo.mjs';
+import { competitionPicker, pickCompetition } from '../fixtures/shared-court.mjs';
+import * as T from '../fixtures/team.mjs';
 
 const JOURNEY = 'league-team-settings';
 // Enough shiaijo that no two leagues played here share one. The settings league
@@ -146,29 +150,47 @@ const asked = (groups, { joint }) => groups.filter((g) => g.min <= 3 && !(joint 
 
 // -------------------------------------------------------------------- driving
 
-// Score every encounter of the league from its numbered row, in list order,
-// the winner of each as the script says, whichever side the draw gave it.
-async function playLeague(page, names, script) {
+// The bouts of the encounter between the teams named `pair.shiro` and
+// `pair.aka`, as playEncounter takes them: the winner of each as the script
+// says, whichever side the draw gave it.
+function boutsFor(names, script, pair) {
+  const shiro = names.indexOf(pair.shiro);
+  const aka = names.indexOf(pair.aka);
+  expect(shiro, `${pair.shiro} is on the roster`).toBeGreaterThanOrEqual(0);
+  expect(aka, `${pair.aka} is on the roster`).toBeGreaterThanOrEqual(0);
+  const r = script.find((x) => (x.draw
+    ? x.draw.includes(shiro) && x.draw.includes(aka)
+    : (x.w === shiro && x.l === aka) || (x.w === aka && x.l === shiro)));
+  expect(r, `the script has an encounter for ${pair.shiro} v ${pair.aka}`).toBeTruthy();
+  if (r.draw) return ['tie', 'tie'];
+  return r.w === shiro ? ['shiro', 'shiro'] : ['aka', 'aka'];
+}
+
+// Score every encounter of the league at the court console of its shiaijo, as
+// the court operator does (the admin pages are for corrections, operator
+// ruling 2026-11-27): the first encounter started from Up next, each next one
+// started by Finish + Start Next, in the court's order. The Pools tab only
+// reads: the numbered rows before, the table after. `name` is the
+// competition's, chosen in the console's picker when the shiaijo holds more
+// than one (a league restored as a copy shares its original's).
+async function playLeague(page, { id, court, name }, names, script) {
+  await openLeague(page, id);
   const rows = await readNumberedRows(page);
   expect(rows).toHaveLength(script.length);
-  let played = 0;
-  for (const row of rows) {
-    const shiro = names.indexOf(row.shiro);
-    const aka = names.indexOf(row.aka);
-    expect(shiro, `${row.shiro} is on the roster`).toBeGreaterThanOrEqual(0);
-    expect(aka, `${row.aka} is on the roster`).toBeGreaterThanOrEqual(0);
-    const r = script.find((x) => (x.draw
-      ? x.draw.includes(shiro) && x.draw.includes(aka)
-      : (x.w === shiro && x.l === aka) || (x.w === aka && x.l === shiro)));
-    expect(r, `the script has an encounter for ${row.shiro} v ${row.aka}`).toBeTruthy();
-    let bouts;
-    if (r.draw) bouts = ['tie', 'tie'];
-    else bouts = r.w === shiro ? ['shiro', 'shiro'] : ['aka', 'aka'];
-    const ed = await openNumberedRow(page, { shiro: row.shiro, aka: row.aka });
-    await playEncounter(ed, bouts);
-    played += 1;
-    await expect.poll(async () => (await readLeagueTable(page)).played).toBe(played);
+  for (const row of rows) boutsFor(names, script, row);
+  await openShiaijo(page, court);
+  if (await competitionPicker(page).count()) await pickCompetition(page, name);
+  const ed = inlineEditor(page);
+  for (let played = 1; played <= script.length; played += 1) {
+    // Finish + Start Next left the next encounter running; the first waits as Up next.
+    if (!(await T.boutRow(ed, 1).isVisible().catch(() => false)) || (await ed.locator('.editor-head-pill').count()) > 0) {
+      await T.startUpNextTeam(page);
+    }
+    const [shiro, aka] = (await ed.locator('.numbered-name__text').allInnerTexts()).map((t) => t.trim());
+    await playEncounter(ed, boutsFor(names, script, { shiro, aka }));
   }
+  await openLeague(page, id);
+  await expect.poll(async () => (await readLeagueTable(page)).played).toBe(script.length);
 }
 
 const groupKey = (teams) => [...teams].sort().join('|');
@@ -195,10 +217,12 @@ async function runLeague({ page, browser, baseURL, folder, tag, court, n, script
   const wantAsked = asked(want.groups, { joint });
   const setting = { joint, savedTop4 };
   let id;
+  const name = `${tag} League`;
+  // The league played: the copy, for one saved with Top 4.
+  const playedName = savedTop4 ? `${name} Top 4` : name;
 
   await test.step(`seed a team league: two joint 3rd places ${joint ? 'on' : 'off'}${savedTop4 ? ', saved with Top 4' : ''}`, async () => {
     await enterTournament(page, LEAGUE_CUP);
-    const name = `${tag} League`;
     id = await seedLeague(page, {
       name, kind: 'team', entrants: teams, teamSize: TEAM_SIZE, teamMatchType: 'fixed',
       courts: [court], twoThirdPlaces: joint,
@@ -213,9 +237,8 @@ async function runLeague({ page, browser, baseURL, folder, tag, court, n, script
     expect(stored.retired).toEqual({ tiebreakTop: 0, sharedRanks: 0 });
   });
 
-  await test.step('score every encounter from its numbered row', async () => {
-    await openLeague(page, id);
-    await playLeague(page, names, script);
+  await test.step('score every encounter at the court console', async () => {
+    await playLeague(page, { id, court, name: playedName }, names, script);
   });
 
   const table = await test.step('read the table the results make', async () => {

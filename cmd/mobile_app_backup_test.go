@@ -971,3 +971,84 @@ func TestMobileAppBackupRestore_RequeuesRunningMatches(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, pending, "requeue-pending.json should be removed once resolved")
 }
+
+// (14) CLI restore clears court-control.json when the restore replaces the
+// tournament (mirroring HTTP restore's plan.TournamentReplaced condition), and
+// keeps it for single-competition restores (competition archive or --only).
+func TestMobileAppBackupRestore_CourtControlClearedOnlyWhenTournamentReplaced(t *testing.T) {
+	srcDir, _ := buildTestPopulatedFolder(t)
+	tournZip := filepath.Join(t.TempDir(), "tournament.zip")
+	_, err := executeMobileApp("backup", "--folder", srcDir, "--out", tournZip)
+	require.NoError(t, err)
+
+	compZip := filepath.Join(t.TempDir(), "comp.zip")
+	_, err = executeMobileApp("backup", "--folder", srcDir, "--competition", "open-comp", "--out", compZip)
+	require.NoError(t, err)
+
+	hold := state.CourtHold{
+		HolderKey:    state.CourtControlKey("11111111-1111-4111-8111-111111111111"),
+		DeviceKey:    state.CourtControlKey("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+		Device:       "ipad",
+		Since:        1_700_000_000_000,
+		StandingFrom: 0,
+		PageID:       "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1",
+	}
+	seedTarget := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		s, serr := state.NewStore(dir)
+		require.NoError(t, serr)
+		require.NoError(t, s.SaveTournament(&state.Tournament{
+			Name:     "Target Taikai",
+			Password: "pass",
+			Courts:   []string{"A"},
+		}))
+		require.NoError(t, s.SaveCourtControl(state.CourtControl{
+			Courts: map[string]state.CourtHold{"A": hold},
+		}, []string{"A"}))
+		require.FileExists(t, filepath.Join(dir, state.CourtControlFilename))
+		return dir
+	}
+
+	t.Run("whole-tournament restore clears court-control.json", func(t *testing.T) {
+		targetDir := seedTarget(t)
+		out, rerr := executeMobileApp("restore", "--folder", targetDir, tournZip)
+		require.NoError(t, rerr, "output: %s", out)
+		assert.NoFileExists(t, filepath.Join(targetDir, state.CourtControlFilename))
+
+		reopened, serr := state.NewStore(targetDir)
+		require.NoError(t, serr)
+		assert.Empty(t, reopened.LoadCourtControl().Courts)
+		comps, cerr := reopened.ListCompetitions()
+		require.NoError(t, cerr)
+		assert.Contains(t, comps, "open-comp")
+	})
+
+	t.Run("competition-scope backup keeps court-control.json", func(t *testing.T) {
+		targetDir := seedTarget(t)
+		out, rerr := executeMobileApp("restore", "--folder", targetDir, compZip)
+		require.NoError(t, rerr, "output: %s", out)
+		assert.FileExists(t, filepath.Join(targetDir, state.CourtControlFilename))
+
+		reopened, serr := state.NewStore(targetDir)
+		require.NoError(t, serr)
+		assert.Equal(t, hold.HolderKey, reopened.LoadCourtControl().Courts["A"].HolderKey)
+		comps, cerr := reopened.ListCompetitions()
+		require.NoError(t, cerr)
+		assert.Contains(t, comps, "open-comp")
+	})
+
+	t.Run("tournament backup with --only keeps court-control.json", func(t *testing.T) {
+		targetDir := seedTarget(t)
+		out, rerr := executeMobileApp("restore", "--folder", targetDir, "--only", "open-comp", tournZip)
+		require.NoError(t, rerr, "output: %s", out)
+		assert.FileExists(t, filepath.Join(targetDir, state.CourtControlFilename))
+
+		reopened, serr := state.NewStore(targetDir)
+		require.NoError(t, serr)
+		assert.Equal(t, hold.HolderKey, reopened.LoadCourtControl().Courts["A"].HolderKey)
+		comps, cerr := reopened.ListCompetitions()
+		require.NoError(t, cerr)
+		assert.Contains(t, comps, "open-comp")
+	})
+}

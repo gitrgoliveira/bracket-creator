@@ -7,7 +7,7 @@
 // shot's state - a running match stays running, a completed one stays
 // completed. Each drive() checks the precondition it needs and throws rather
 // than photograph the wrong moment.
-import { settle, withAdminPage } from '../lib/ui.mjs';
+import { courtConsoleRuns, settle, withAdminPage } from '../lib/ui.mjs';
 import { roster } from '../lib/api.mjs';
 import { EDITOR, TAP_DWELL_MS, finishMatch, startMatch } from '../lib/editor.mjs';
 import { assertBoutPoints, assertLineupIds } from '../lib/fixture.mjs';
@@ -80,6 +80,42 @@ export const families = {
           await page.waitForTimeout(250);
           await finishMatch(page);
         }
+      });
+      return { compId: id };
+    },
+  },
+
+  // A shiaijo another device runs (court_control.jsx, one tab runs each
+  // shiaijo): one competition on court A, started, so the court console has a
+  // queue, and court A claimed through the control door by a tablet that is
+  // not the capture's (lib/ui.mjs CAPTURE_COURT_TAB). The console then draws
+  // its slate View only bar with Take control and greys out every control that
+  // writes, each disabled group with its reason beside it.
+  otherDeviceCourt: {
+    server: 'mobile',
+    // SINCE scoping inputs (lib/scope.mjs): the court console and its control
+    // bar.
+    sources: ['web-mobile/js/admin_shiaijo', 'web-mobile/js/court_control'],
+    seed: async ({ api }) => {
+      await api.tournament({ courts: ['A'] });
+      const id = await api.competition('sixth-dan-and-up', '6D and up', {
+        format: 'knockout', courts: ['A'], numberPrefix: 'D',
+      });
+      await api.participants(id, [
+        { name: 'Akira Sato', dojo: 'Mumeishi' },
+        { name: 'Bea Lindqvist', dojo: 'Nenriki' },
+        { name: 'Chen Wei', dojo: 'Kenshinkan' },
+        { name: 'Dai Fujita', dojo: 'Sanshukan' },
+      ]);
+      await api.generateDraw(id);
+      await api.start(id);
+      // The other tablet's claim: ids of its own (lowercase UUID v4s, unlike
+      // CAPTURE_COURT_TAB's), named an iPad.
+      await api.put('/api/courts/A/control', {
+        tabId: '0b7e0b7e-0000-4000-8000-00000000000a',
+        pageId: '0b7e0b7e-0000-4000-8000-00000000000b',
+        deviceId: '0b7e0b7e-0000-4000-8000-00000000000d',
+        device: 'ipad',
       });
       return { compId: id };
     },
@@ -467,6 +503,7 @@ export const recipes = [
     route: '/admin/shiaijo/A',
     waitFor: 'text=Shiaijo A',
     drive: async ({ page }) => {
+      await courtConsoleRuns(page);
       await page.waitForTimeout(800);
     },
     // The subject is the ABSENCE of pending work. Assert it: a court with
@@ -481,6 +518,30 @@ export const recipes = [
       if (!correct) {
         throw new Error('court A shows no "Correct" button, so there are no completed ' +
           'matches to photograph');
+      }
+    },
+  },
+  {
+    // The court console on a shiaijo another tablet runs: the slate View only
+    // bar naming it, with Take control, over a queue whose controls are greyed
+    // out with the reason beside them.
+    name: 'console-run-from-another-device',
+    family: 'otherDeviceCourt',
+    viewport: { width: 1180, height: 820 },
+    capture: 'viewport',
+    auth: 'admin',
+    route: '/admin/shiaijo/A',
+    waitFor: 'text=Shiaijo A',
+    drive: async ({ page }) => {
+      await page.locator('[data-testid="court-control"][data-state="other"]')
+        .waitFor({ state: 'visible', timeout: 15000 });
+      await page.waitForTimeout(800);
+    },
+    assert: async ({ page }) => {
+      const bar = page.locator('[data-testid="court-control"]');
+      const text = await bar.innerText();
+      if (!/^View only\b/.test(text) || !/ runs shiaijo A\./.test(text) || !/Take control/.test(text)) {
+        throw new Error(`the control bar reads "${text}", not the other-device bar with Take control`);
       }
     },
   },

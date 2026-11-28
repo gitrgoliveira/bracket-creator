@@ -36,6 +36,8 @@ import { confirmMatchLabel } from './court_move.jsx';
 import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 import { matchKey } from './admin_shiaijo_feed.jsx';
 import { isTeamMatch, shiaijoMatchNo, TieBreakerReason, MatchSides } from './admin_shiaijo_queue.jsx';
+// A tab that does not run the shiaijo starts, picks and corrects nothing (bc-sseq FR9).
+import { refusedNotHeld } from './admin_shiaijo_control.jsx';
 
 const { useState, useEffect, useRef, useCallback } = React;
 
@@ -43,7 +45,7 @@ export function useCourtStart({
     court, password, showToast, onEditScore, mountedRef, editorUnsavedRef, leaveEditorConfirmed,
     allMatches, courtMatchesRaw, liveHere, liveBout, openCorrection, selectedMatch, isStartedSnapshot,
     startingKey, setStartingKey, startError, setStartError, setPickedKey, setCorrectingKey, setStartedFrom,
-    markSentBackHere,
+    markSentBackHere, controlRef,
 }) {
     // The latest render's pick and correct and the court's matches, for a tap
     // judged again once the operator has answered the unsaved-entries
@@ -88,14 +90,16 @@ export function useCourtStart({
     // askStartWithoutCheck handed out (startAskResolveRef).
     const [pendingStartAsk, setPendingStartAsk] = useState(null);
     const startAskResolveRef = useRef(null);
-    // Memoised on mountedRef, the one value from outside that it reads (a ref
-    // that never changes), so the unmount answer below is set up once.
+    // Memoised on mountedRef and controlRef, the values from outside that it
+    // reads (refs that never change), so the unmount answer below is set up once.
     const answerStartAsk = useCallback((sendBack) => {
         const resolve = startAskResolveRef.current;
         startAskResolveRef.current = null;
         if (mountedRef.current) setPendingStartAsk(null);
-        if (resolve) resolve(sendBack);
-    }, [mountedRef]);
+        // "Send back and start" answered after this tab stopped running the
+        // shiaijo is kept running: nothing is sent back or started.
+        if (resolve) resolve(sendBack && !refusedNotHeld(controlRef));
+    }, [mountedRef, controlRef]);
     const askStartWithoutCheck = (cur, m) => new Promise((resolve) => {
         startAskResolveRef.current = resolve;
         setPendingStartAsk({ curLabel: confirmMatchLabel(cur), pickLabel: confirmMatchLabel(m) });
@@ -244,6 +248,9 @@ export function useCourtStart({
     // `pick` is the pickingRef entry pickMatch made for THIS start, if it is one:
     // that pick is the start itself, not a start in flight against it.
     const startMatch = async (m, { pick = null, after = null } = {}) => {
+        // The automatic start after a finish or decision follows a write this
+        // tab may no longer make: quiet, since that write's refusal is shown.
+        if (refusedNotHeld(controlRef, { quiet: true })) return false;
         const key = matchKey(m);
         // bc-evts: the start is the outbox's (a running score write), answered
         // pending at once; a refusal arrives later, through `settled`. It is
@@ -377,6 +384,7 @@ export function useCourtStart({
     //     being started is silent: it is on its way.
     const pickMatch = async (m, asked = false) => {
         if (!m || m.status === "completed") return;
+        if (refusedNotHeld(controlRef)) return;
         if (openCorrection) {
             refuseTap(m, "correcting");
             return;
@@ -550,6 +558,7 @@ export function useCourtStart({
     // beside correctingMatch).
     const correctMatch = async (m, asked = false) => {
         if (!m || m.status !== "completed") return;
+        if (refusedNotHeld(controlRef)) return;
         if (liveBout) {
             refuseTap(m, "running");
             return;

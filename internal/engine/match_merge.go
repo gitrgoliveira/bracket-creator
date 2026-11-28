@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"maps"
 	"slices"
@@ -487,6 +488,7 @@ func priorMatch(m *state.MatchResult) *state.MatchResult {
 	p.MarkIDs = m.MarkIDs.Clone()
 	p.EventSeqs = state.CloneGroupStamps(m.EventSeqs)
 	p.TurnedAway = maps.Clone(m.TurnedAway)
+	p.ReplacedResult = m.ReplacedResult.Clone()
 	p.ClearRequestFields()
 	return &p
 }
@@ -569,6 +571,10 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 	// a basis the writer SENT says what it had seen.
 	bl.Informed = incoming.CorrectionReason != "" || incoming.ClearsWithdrawal || mc.serverStamped
 	bl.BasisSent = incoming.Basis != nil
+	// The court's standing, judged by the door on arrival (bc-sseq FR8): a
+	// court result displaces an ordinary result it never saw (rivalResult,
+	// courtDisplaced).
+	bl.Court = incoming.CourtStanding
 	// The writer's event session, so the basis's Seq counts its own events.
 	bl.Session = incoming.WriteSession
 	rep.Baseline = &bl
@@ -606,7 +612,7 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 	// The groups the replay itself turned away: a scoring write over a match
 	// a result stamped before it had closed lands nothing, echo or not.
 	var turnedAway []string
-	if h, ok := after.Held[len(all)-1]; ok && h.MatchClosed {
+	if h, ok := after.Held[len(all)-1]; ok && (h.MatchClosed || h.CourtResult) {
 		turnedAway = h.Groups
 	}
 	for _, g := range changed {
@@ -632,7 +638,7 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 		}
 	}
 	if h, ok := after.Held[len(all)-1]; ok && len(rep.Held) > 0 {
-		rep.HoldReason, rep.MatchClosed = h.Reason, h.MatchClosed
+		rep.HoldReason, rep.MatchClosed, rep.CourtResult = h.Reason, h.MatchClosed, h.CourtResult
 	}
 	// The closed-match rule, in the other arrival order: scoring the log
 	// holds from an EARLIER line (a stored baseline no write of this one
@@ -642,9 +648,16 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 	// what that other arrival order gives.
 	displacedEarlier := false
 	if stamp > 0 {
-		byStamp := map[int64]map[string]json.RawMessage{}
+		// Keyed by the displaced line's stamp, and apart by why: a result the
+		// court's result replaced (HoldReasonCourtResult, bc-sseq FR8) is no
+		// match_closed hold of the write, so it sets no heldReason.
+		type displacedKey struct {
+			at    int64
+			court bool
+		}
+		byStamp := map[displacedKey]map[string]json.RawMessage{}
 		for line, h := range after.Held {
-			if !h.MatchClosed || line == len(all)-1 {
+			if (!h.MatchClosed && !h.CourtResult) || line == len(all)-1 {
 				continue
 			}
 			for _, g := range h.Groups {
@@ -664,18 +677,29 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 				if bytes.Equal(was, state.GroupValue(final, g)) {
 					continue
 				}
-				at := stored.GroupStamp(g)
-				if byStamp[at] == nil {
-					byStamp[at] = map[string]json.RawMessage{}
+				k := displacedKey{at: stored.GroupStamp(g), court: h.CourtResult}
+				if byStamp[k] == nil {
+					byStamp[k] = map[string]json.RawMessage{}
 				}
-				byStamp[at][g] = was
+				byStamp[k][g] = was
 				state.CopyGroup(incoming, final, g)
 				displacedEarlier = true
 			}
 		}
-		for _, at := range slices.Sorted(maps.Keys(byStamp)) {
-			rep.Displaced = append(rep.Displaced, state.DisplacedChange{Stamp: at, Values: byStamp[at], Reason: HoldReasonMatchClosed})
-			rep.MatchClosed = true
+		keys := slices.SortedFunc(maps.Keys(byStamp), func(a, b displacedKey) int {
+			if c := cmp.Compare(a.at, b.at); c != 0 {
+				return c
+			}
+			return cmp.Compare(boolOrder(a.court), boolOrder(b.court))
+		})
+		for _, k := range keys {
+			reason := HoldReasonMatchClosed
+			if k.court {
+				reason = HoldReasonCourtResult
+			} else {
+				rep.MatchClosed = true
+			}
+			rep.Displaced = append(rep.Displaced, state.DisplacedChange{Stamp: k.at, Values: byStamp[k], Reason: reason})
 		}
 	}
 	// What the result lock asks of the log as this write found it (the one
@@ -1006,6 +1030,58 @@ const HoldReasonMatchClosed = "the match was already finished"
 // history. The sentence names no button beyond the one every score editor
 // offers for a finished match, Correct.
 const MatchClosedMessage = "Not applied: this match is already finished, so this change was kept in the match's history. To change the result, tap Correct."
+
+// boolOrder orders false before true.
+func boolOrder(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// HoldReasonCourtResult is the history reason of a result the court's result
+// replaced (bc-sseq FR8): a result line from a device without the court's
+// standing that a later-stamped court result line follows without having seen
+// it (courtDisplaced, score_replay.go). It is held whole, kept in the history
+// and never closes the match, so the court's own taps after it count.
+const HoldReasonCourtResult = "replaced by the court's result"
+
+// CourtResultMessage is the sentence a device is answered with when the result
+// it recorded was replaced by the court's (state.HeldReasonCourtResult), whichever
+// arrived first. court is the match's shiaijo letter; an empty one (a match not
+// yet given a shiaijo) is worded without it.
+func CourtResultMessage(court string) string {
+	who := "the court running this match's shiaijo"
+	if court != "" {
+		who = "the court running shiaijo " + court
+	}
+	return "Not applied: " + who + " recorded a different result for this match. The court's result counts; yours is kept in the match's history."
+}
+
+// HoldReasonResultBuiltOn is the history reason of a court result held by the
+// built-on hold (holdBuiltOnResult, result_lock.go; state.HeldReasonBuiltOn).
+const HoldReasonResultBuiltOn = "other matches were already built on the result it would replace"
+
+// ResultBuiltOnMessage is the sentence a court result held by the built-on hold
+// is answered with: which case it was, that the court's result is kept in the
+// match's history, and Correct as the way to use it, with what a correction does
+// there today (a Swiss round already paired keeps its pairings; a finished
+// league reopens). "" when nothing was built on the result.
+func ResultBuiltOnMessage(b BuiltOn) string {
+	const kept = " The court's result is kept in the match's history."
+	switch b.Kind {
+	case BuiltOnSwissRound:
+		return fmt.Sprintf("Not applied: round %d was already paired from the result another device recorded for this match.%s To use it, tap Correct; round %d keeps its pairings.", b.Round, kept, b.Round)
+	case BuiltOnStandings:
+		return "Not applied: a tie-break or representative match was already added from the standings the result another device recorded for this match decided." + kept + " To use it, tap Correct."
+	case BuiltOnFinished:
+		if b.Reopens {
+			return "Not applied: the competition already finished on the result another device recorded for this match." + kept + " To use it, tap Correct; that reopens the competition."
+		}
+		return "Not applied: the competition already finished on the result another device recorded for this match." + kept + " To use it, tap Correct."
+	}
+	return ""
+}
 
 // HoldReasonRepBoutRemoved is the history reason of a representative picked
 // after the representative bout was removed (stamp order: the removal first,

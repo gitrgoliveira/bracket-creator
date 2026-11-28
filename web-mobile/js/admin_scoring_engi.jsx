@@ -74,23 +74,37 @@ function PipRow({ count, side }) {
 // reachable via the on-screen counters and Save button). It shares the
 // `.scoring-shortcut-hint` class for its layout, so it hides under a coarse
 // pointer too (bc-kbhn), and lists ←/→ and Esc only where they act.
-function EngiShortcutHint({ hasNav = false, canClose = false }) {
+function EngiShortcutHint({ hasNav = false, canClose = false, readOnly = false }) {
   const kbd = {
     fontFamily: "var(--font-mono)", fontSize: 11, padding: "1px 5px",
     border: "1px solid var(--line)", borderRadius: 4, background: "var(--surface)",
     color: "var(--ink-3)", margin: "0 1px",
   };
+  const groups = [];
+  if (!readOnly) {
+    groups.push({ key: "flags", lead: <><kbd style={kbd}>A</kbd><kbd style={kbd}>S</kbd></>, words: "add Aka/Shiro flag" });
+    groups.push({ key: "undo", lead: <kbd style={kbd}>⌫</kbd>, words: "undo" });
+    groups.push({ key: "save", lead: <kbd style={kbd}>Enter</kbd>, words: "save" });
+  }
+  if (hasNav) {
+    groups.push({ key: "nav", lead: <><kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd></>, words: "prev/next" });
+  }
+  if (canClose) {
+    groups.push({ key: "close", lead: <kbd style={kbd}>Esc</kbd>, words: "close" });
+  }
+  if (groups.length === 0) return null;
   return (
     <div
       className="scoring-shortcut-hint"
       data-testid="engi-shortcut-hint"
       aria-hidden="true"
     >
-      <kbd style={kbd}>A</kbd><kbd style={kbd}>S</kbd><span>add Aka/Shiro flag;</span>
-      <kbd style={kbd}>⌫</kbd><span>undo;</span>
-      <kbd style={kbd}>Enter</kbd><span>{hasNav || canClose ? "save;" : "save"}</span>
-      {hasNav && <><kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd><span>{canClose ? "prev/next;" : "prev/next"}</span></>}
-      {canClose && <><kbd style={kbd}>Esc</kbd><span>close</span></>}
+      {groups.map((g, i) => (
+        <React.Fragment key={g.key}>
+          {g.lead}
+          <span>{i < groups.length - 1 ? `${g.words};` : g.words}</span>
+        </React.Fragment>
+      ))}
     </div>
   );
 }
@@ -105,7 +119,7 @@ function deriveWinner(flagsA, flagsB) {
 // EngiScoreEditorModal: full engi flag-counter editor.
 // Props mirror the individual ScoreEditorModal surface so the dispatch in
 // admin_scoring_individual.jsx can forward the same prop bag.
-export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, startsNext = true, prevMatch, nextMatch, onPrev, onNext, variant = "modal", canClose = true, password, selfReport, hostUnsavedRef = null }) {
+export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, startsNext = true, prevMatch, nextMatch, onPrev, onNext, variant = "modal", canClose = true, password, selfReport, hostUnsavedRef = null, readOnly = false }) {
   const m = match;
   // bc-mrgc: names the groups each write changes, against the match this
   // editor renders from (see useChangedGroups).
@@ -477,7 +491,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
   const kbRef = useRef(null);
   const lastSideRef = useRef(null); // "a" | "s" | null: which side Backspace undoes
   React.useLayoutEffect(() => {
-    kbRef.current = { submitting, canSubmit, showCorrectionPrompt, stepFlags, handleSubmit, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch };
+    kbRef.current = { submitting, readOnly, canSubmit, showCorrectionPrompt, stepFlags, handleSubmit, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch };
   });
   useEffect(() => {
     const onKeyDown = (ev) => {
@@ -495,6 +509,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
       // scoreKeyOf(null), which throws. Same condition as the hint's hasNav.
       if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.goPrev(); return; }
       if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.goNext(); return; }
+
+      if (s.readOnly) return;
 
       if (ev.key === "Enter") {
         // Let a focused button/link/input handle its own Enter (e.g. Cancel).
@@ -572,7 +588,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
                 type="button"
                 className="btn engi-counter__btn"
                 onClick={() => stepFlags("b", -1)}
-                disabled={flagsB <= 0}
+                disabled={readOnly || flagsB <= 0}
                 aria-label="Shiro minus one flag"
                 data-testid="engi-shiro-dec"
               >−</button>
@@ -581,7 +597,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
                 type="button"
                 className="btn engi-counter__btn"
                 onClick={() => stepFlags("b", 1)}
-                disabled={flagsB >= MAX_FLAGS}
+                disabled={readOnly || flagsB >= MAX_FLAGS}
                 aria-label="Shiro plus one flag"
                 data-testid="engi-shiro-inc"
               >+</button>
@@ -612,7 +628,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
                 type="button"
                 className="btn engi-counter__btn"
                 onClick={() => stepFlags("a", -1)}
-                disabled={flagsA <= 0}
+                disabled={readOnly || flagsA <= 0}
                 aria-label="Aka minus one flag"
                 data-testid="engi-aka-dec"
               >−</button>
@@ -621,7 +637,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
                 type="button"
                 className="btn engi-counter__btn"
                 onClick={() => stepFlags("a", 1)}
-                disabled={flagsA >= MAX_FLAGS}
+                disabled={readOnly || flagsA >= MAX_FLAGS}
                 aria-label="Aka plus one flag"
                 data-testid="engi-aka-inc"
               >+</button>
@@ -664,6 +680,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
             label="Reason for correction"
             presets={CORRECTION_PRESETS}
             submitting={submitting}
+            readOnly={readOnly}
             onConfirm={(r) => {
               setCorrectionReason(r);
               setShowCorrectionPrompt(false);
@@ -699,7 +716,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
           <div className="pending-write-banner" role="status" aria-live="polite">
             <HeldWriteNotice compId={m.compId} matchId={m.id} match={m} res={pendingWrite} />
             {pendingFn && (
-              <button type="button" className="btn btn--sm btn--ghost" disabled={submitting} onClick={() => doSubmit(pendingFn)}>Retry now</button>
+              <button type="button" className="btn btn--sm btn--ghost" disabled={submitting || readOnly} onClick={() => doSubmit(pendingFn)}>Retry now</button>
             )}
             <HeldWriteDiscard
               compId={m.compId}
@@ -713,7 +730,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
             row: hide the footer's own actions so the operator never sees two
             Cancels and two commit buttons at the highest-stakes moment
             (amending a recorded result). Mirrors ScoreEditorModal. */}
-        {own.kept && <DraftKeptNotice from={own.kept.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
+        {own.kept && <DraftKeptNotice from={own.kept.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} readOnly={readOnly} />}
         {own.droppedShown && <DraftDroppedNotice />}
         {!(isComplete && showCorrectionPrompt) && (
           <div className="score-nav">
@@ -726,7 +743,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
                 type="button"
                 className={`btn btn--primary holds-label ${saveArmed && !isComplete ? "btn--confirm" : ""}`}
                 onClick={(ev) => { if (!isComplete && !confirmSave(ev)) return; handleSubmit(); }}
-                disabled={!canSubmit}
+                disabled={!canSubmit || readOnly}
                 data-testid="engi-submit"
                 style={invalidOutline ? { outline: "2px solid var(--danger)" } : null}
                 // Holds its place while armed (.holds-label), as the other
@@ -746,7 +763,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
         {/* Quiet keyboard-shortcut reminder (parity with the kendo editor's
             ScoringShortcutHint). Hidden during the reason prompt, when keys
             are disabled. */}
-        {!(isComplete && showCorrectionPrompt) && <EngiShortcutHint hasNav={!!((prevMatch && onPrev) || (nextMatch && onNext))} canClose={canClose} />}
+        {!(isComplete && showCorrectionPrompt) && <EngiShortcutHint hasNav={!!((prevMatch && onPrev) || (nextMatch && onNext))} canClose={canClose} readOnly={readOnly} />}
       </div>
     </>
   );

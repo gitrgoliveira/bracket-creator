@@ -106,6 +106,16 @@ describe('a scheduled barred match shows BarredMatchNotice instead of Start (bc-
     }, 'secret', expect.objectContaining({ onRefusal: expect.any(Function) }));
   });
 
+  // bc-sseq FR8: the fusensho names the match's shiaijo, so one recorded from
+  // the court console that runs it carries the console's court control
+  // (recordDecision stamps it only there).
+  it("the default win names the match's shiaijo for its court control", async () => {
+    window.API.recordDecision.mockClear();
+    await mount(individualBarred());
+    await act(async () => { fireEvent.click(screen.getByTestId('barred-match-record-fusensho')); });
+    expect(window.API.recordDecision.mock.calls[0][4]).toEqual(expect.objectContaining({ court: 'A' }));
+  });
+
   // bc-cse: BarredMatchNotice is a full-width block, lifted above
   // .score-nav__actions (a centred WRAPPING flex row of small buttons) --
   // not squeezed into one flex item alongside them.

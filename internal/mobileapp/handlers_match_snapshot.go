@@ -229,7 +229,25 @@ func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matc
 // lost and still never wins a retry, so it keeps the same applied:false
 // superseded shape, with heldReason and its own message (messageForHeldReason)
 // telling the operator the match is finished and to tap Correct.
-func respondSuperseded(c *gin.Context, heldGroups []string, heldReason string, from ...error) {
+//
+// stored is the match as it is stored once the write was held, read inside the
+// write's own transaction (storedMatchForAnswer) and projected as the door's
+// applied answer is. It is answered as `match`, so the device that is told
+// "Not applied" shows the stored match in the same render as the note and the
+// two never disagree. nil when it could not be read: the answer then carries
+// no `match`, and the device keeps the copy it had until the next push.
+func respondSuperseded(c *gin.Context, stored *state.MatchResult, heldGroups []string, heldReason string, from ...error) {
+	respondSupersededSaying(c, stored, heldGroups, heldReason, "", from...)
+}
+
+// respondSupersededSaying is respondSuperseded with the sentence the door
+// judged in the write's own transaction (supersededMessageTx), for the one
+// reason a sentence needs that transaction: a court result held because other
+// matches were built on the result it would replace (downstream_built_on,
+// bc-sseq FR8), which names what was built on it. An empty message is worded
+// from the code and the stored match (heldReasonMessage), as respondSuperseded
+// does.
+func respondSupersededSaying(c *gin.Context, stored *state.MatchResult, heldGroups []string, heldReason, message string, from ...error) {
 	// LOGGED because this is the one successful-looking response whose work
 	// an operator does not see on the match. Since bc-mrgc the held values are
 	// in the match's history, but the line still names the request, which is
@@ -247,7 +265,13 @@ func respondSuperseded(c *gin.Context, heldGroups []string, heldReason string, f
 	}
 	if heldReason != "" {
 		body["heldReason"] = heldReason
-		body["message"] = messageForHeldReason(heldReason)
+		if message == "" {
+			message = heldReasonMessage(heldReason, stored)
+		}
+		body["message"] = message
+	}
+	if stored != nil {
+		body["match"] = stored
 	}
 	// The match's turned-away taps as the log stands after the write (a held
 	// rival result is still logged), so the writing device is told of its own
@@ -259,8 +283,70 @@ func respondSuperseded(c *gin.Context, heldGroups []string, heldReason string, f
 				body["scoreVersion"] = version
 			}
 		}
+		// Likewise the result the court's result replaced (bc-sseq FR8).
+		if replaced := engine.ReplacedResultOf(err); replaced != nil {
+			body["replacedResult"] = replaced
+		}
 	}
 	c.JSON(http.StatusOK, body)
+}
+
+// storedMatchForAnswer reads the match as it is stored, for the answer to a
+// write the merge held (respondSuperseded's `match`, bulk-score's per-entry
+// `match`). It is read through the write's own transaction after the engine
+// answered engine.ErrMatchSuperseded, so it is exactly what the write lost to,
+// under the same lock, with nothing landing between the hold and the read.
+//
+// It is projected as the doors' applied answers are: Rev and RevSession
+// zeroed (write-ordering metadata the answer never echoes), a bracket match's
+// court and schedule filled in (engine.BracketMatchAsResult omits them, and a
+// landed write's answer carries them), and the withdrawal stamp the push
+// carries (stampWithdrawnStatus). public is true for a caller answered as
+// the broadcast is (an anonymous self-run participant on /score, every caller
+// of the representative bout's add and remove): the audit notes are then
+// cleared too (matchForBroadcast). nil when the match cannot be read; the
+// answer then simply carries no match, as it did before.
+func storedMatchForAnswer(stx state.StoreTx, compID, matchID string, public bool) *state.MatchResult {
+	snap, found, err := lookupMatchSnapshot(stx, compID, matchID)
+	if err != nil {
+		log.Printf("mobileapp: %s/%s: read the stored match for a superseded answer: %v", compID, matchID, err)
+	}
+	if !found || snap.Stored == nil {
+		return nil
+	}
+	m := *snap.Stored
+	if snap.InBracket {
+		if bracket, berr := stx.LoadBracket(compID); berr == nil {
+			m.Court, m.ScheduledAt = bracketSlot(bracket, matchID)
+		} else {
+			log.Printf("mobileapp: %s/%s: read the bracket slot for a superseded answer: %v", compID, matchID, berr)
+		}
+	}
+	m.Rev, m.RevSession = 0, ""
+	stampWithdrawnStatus(stx, compID, &m)
+	if public {
+		m = matchForBroadcast(m)
+	}
+	return &m
+}
+
+// bracketSlot is the court and the schedule the bracket match matchID holds,
+// a round match or the bronze, empty when the bracket holds no such match.
+func bracketSlot(bracket *state.Bracket, matchID string) (court, scheduledAt string) {
+	if bracket == nil {
+		return "", ""
+	}
+	for _, round := range bracket.Rounds {
+		for i := range round {
+			if round[i].ID == matchID {
+				return round[i].Court, round[i].ScheduledAt
+			}
+		}
+	}
+	if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
+		return bm.Court, bm.ScheduledAt
+	}
+	return "", ""
 }
 
 // SupersededMessage is the one sentence a write every change of which was
@@ -287,8 +373,42 @@ func messageForHeldReason(heldReason string) string {
 		return ResultLockedPlayedMessage
 	case state.HeldReasonDownstreamRunning:
 		return ResultLockedRunningMessage
+	case state.HeldReasonCourtResult:
+		// The bulk-score path knows no shiaijo; a door that holds the stored
+		// match names it (heldReasonMessage).
+		return engine.CourtResultMessage("")
 	}
+	// downstream_built_on lands here only on a path that has no transaction
+	// to judge what was built on the result (supersededMessageTx). Only the
+	// score and decision doors can hold a court result that way, and both
+	// judge it in theirs.
 	return SupersededMessage
+}
+
+// heldReasonMessage is messageForHeldReason for a door that holds the stored
+// match it answers with: the court's result names the match's shiaijo
+// (bc-sseq FR8). stored may be nil; the sentence is then worded without it.
+func heldReasonMessage(heldReason string, stored *state.MatchResult) string {
+	if heldReason == state.HeldReasonCourtResult && stored != nil {
+		return engine.CourtResultMessage(stored.Court)
+	}
+	return messageForHeldReason(heldReason)
+}
+
+// supersededMessageTx is the sentence a held write is answered with, judged in
+// the write's own transaction, where the door already read the stored match
+// for the answer (storedMatchForAnswer): a court result held because other
+// matches were built on the result it would replace names which case it was
+// (engine.ResultBuiltOnMessageTx, the owner the hold itself asked), and the
+// court's result names the match's shiaijo. Every other code is worded as
+// messageForHeldReason words it.
+func supersededMessageTx(stx state.StoreTx, compID, matchID, heldReason string, stored *state.MatchResult) string {
+	if heldReason == state.HeldReasonBuiltOn {
+		if msg := engine.ResultBuiltOnMessageTx(stx, compID, matchID); msg != "" {
+			return msg
+		}
+	}
+	return heldReasonMessage(heldReason, stored)
 }
 
 // ResultLockedPlayedMessage and ResultLockedRunningMessage are the sentences a

@@ -14,6 +14,7 @@ import { whenConfirmed } from './unsaved_entries.jsx';
 import { downloadBlob } from './blob_download.jsx';
 import { Icon } from './icon.jsx';
 import { andList } from './list_phrase.jsx';
+import { useLinkStatus } from './link_status.jsx';
 import { confirmStartHiddenDraw, drawHiddenFromPublic, drawVisibilityCardLine, drawVisibilityIcon, PUBLISH_DRAW_LABEL, UNPUBLISH_DRAW_LABEL } from './draw_visibility.jsx';
 
 const { useState, useMemo, useEffect, useRef, useLayoutEffect } = React;
@@ -137,20 +138,14 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, bef
   // filters reconnect noise so the banner never cries wolf. The timer
   // orchestration lives in watchSustainedDisconnect (below) so it can be
   // unit-tested with fake timers, independent of the component.
-  const [connected, setConnected] = useState(true);
+  // The connection itself is link_status.jsx's (useLinkStatus, the one owner
+  // the court console's control bar asks too); the topbar adds the timer.
   const [sustainedDown, setSustainedDown] = useState(false);
+  const monitorRef = useRef(null);
   useEffect(() => {
-    if (!window.API || typeof window.API.subscribeToEvents !== "function") return;
     const monitor = watchSustainedDisconnect(SUSTAINED_DOWN_MS, setSustainedDown);
-    const unsub = window.API.subscribeToEvents(
-      () => {},
-      (status) => {
-        const up = status === "open";
-        setConnected(up);
-        monitor.note(up);
-      }
-    );
-    return () => { monitor.stop(); unsub(); };
+    monitorRef.current = monitor;
+    return () => { monitor.stop(); monitorRef.current = null; };
   }, []);
 
   // A chip leaves the page, so a page that shows a score editor inline hands
@@ -169,14 +164,12 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, bef
   // parked write would be invisible without a persistent indicator. AdminTopbar
   // is the chrome shared by every admin page, so it is the always-visible home
   // for the "queue is parked on a 401" state. subscribeSyncStatus replays the
-  // current value on subscribe.
-  const [syncStatus, setSyncStatus] = useState('synced');
-  useEffect(() => {
-    const subscribe = typeof window !== 'undefined' && window.subscribeSyncStatus;
-    if (!subscribe) return;
-    const unsub = subscribe((s) => setSyncStatus(s));
-    return () => unsub();
-  }, []);
+  // current value on subscribe. While queued writes fail for network reasons
+  // the event stream may still read open; the pill says what the writes found
+  // (operator decision 2026-09-27): useLinkStatus's linkUp.
+  const { connected, syncStatus, linkUp } = useLinkStatus((up) => {
+    if (monitorRef.current) monitorRef.current.note(up);
+  });
 
   // bc-offl: the held-writes count. A result finished while offline is held on
   // this device, and the court console rightly moves on to the next match, which
@@ -192,9 +185,6 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, bef
   }, []);
   const heldText = heldWritesText(syncStatus, unsent);
   const [heldOpen, setHeldOpen] = useState(false);
-  // While queued writes fail for network reasons the event stream may still
-  // read open; the pill says what the writes found (operator decision 2026-09-27).
-  const linkUp = connected && syncStatus !== 'offline';
 
   // The stack sizes to its content and grows with the connection alert or the
   // running strip, so the pinned team header (styles.css .team-sheet-pin) and

@@ -4,10 +4,25 @@
 // lives here; the editor's insides belong to the scoring fixtures.
 import { expect } from '@playwright/test';
 import { INLINE_EDITOR } from '../../screenshots/lib/editor.mjs';
+import { awaitControl, takeControl } from './court-control.mjs';
 
-export async function openShiaijo(page, court) {
+// Open the court console of `court` and wait until its claim is answered (one
+// tab runs each shiaijo, fixtures/court-control.mjs). The operator opening a
+// console is there to run that shiaijo, so when another tab or tablet still
+// runs it the console takes control, as the operator would with Take control.
+// `take: false` leaves it watching (a second tab or tablet a journey keeps view
+// only on purpose). Returns the state the console settled on, and `took`, the
+// question Take control asked (null when there was nothing to take).
+export async function openShiaijo(page, court, { take = true } = {}) {
   await page.goto(`/admin/shiaijo/${encodeURIComponent(court)}`);
   await expect(page.getByRole('heading', { level: 1, name: `Shiaijo ${court}` })).toBeVisible();
+  let state = await awaitControl(page);
+  let took = null;
+  if (take && state !== 'holds') {
+    took = await takeControl(page);
+    state = 'holds';
+  }
+  return { state, took };
 }
 
 // The queue's parts, as selectors for a caller that combines them (or reads

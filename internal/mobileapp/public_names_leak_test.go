@@ -34,6 +34,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -123,6 +124,7 @@ var leakRoutes = map[string]leakRouteClass{
 	"DELETE /api/announcements":                                          leakOrganiser,
 	"DELETE /api/announcements/:id":                                      leakOrganiser,
 	"DELETE /api/branding/logo":                                          leakOrganiser,
+	"DELETE /api/courts/:court/control":                                  leakOrganiser,
 	"DELETE /api/competitions/:id":                                       leakOrganiser,
 	"DELETE /api/competitions/:id/draw":                                  leakOrganiser,
 	"DELETE /api/competitions/:id/league-tiebreak":                       leakOrganiser,
@@ -151,6 +153,7 @@ var leakRoutes = map[string]leakRouteClass{
 	"GET /api/competitions/:id/schedule/estimate":                        leakOrganiser,
 	"GET /api/competitions/:id/seeds":                                    leakOrganiser,
 	"GET /api/competitions/:id/team-members":                             leakOrganiser,
+	"GET /api/courts/:court/control":                                     leakOrganiser,
 	"GET /api/number-prefix-default":                                     leakOrganiser,
 	"GET /api/schedule/calendar":                                         leakOrganiser,
 	"GET /api/schedule/calendar/preview":                                 leakOrganiser,
@@ -203,6 +206,7 @@ var leakRoutes = map[string]leakRouteClass{
 	"PUT /api/competitions/:id/teams/:tid/lineups/:round":                leakOrganiser,
 	"PUT /api/competitions/:id/teams/:tid/match-lineups/:matchId":        leakOrganiser,
 	"PUT /api/competitions/:id/teams/:tid/members/:memberId":             leakOrganiser,
+	"PUT /api/courts/:court/control":                                     leakOrganiser,
 	"PUT /api/tournament":                                                leakOrganiser,
 }
 
@@ -1008,6 +1012,20 @@ func TestPublicNamesLeak(t *testing.T) {
 		assert.NotContains(t, body, `"namesHidden":true`)
 	})
 
+	t.Run("who runs each shiaijo reaches the organiser's stream only", func(t *testing.T) {
+		const holder = "c0ffee00c0ffee00"
+		public := w.openStream(t, "")
+		organiser := w.openStream(t, "?ticket="+url.QueryEscape(w.ticket(t, map[string]string{"X-Tournament-Password": leakPassword})))
+		w.hub.Broadcast(EventCourtControlUpdated, courtControlEvent{Court: "A", HolderKey: holder, Device: "ipad", Since: 1})
+		w.settle(t, public, organiser)
+		_, publicBody := public.close(t)
+		_, organiserBody := organiser.close(t)
+		assert.Contains(t, publicBody, string(EventCourtControlUpdated), "the public stream still sees the event's seq")
+		assert.NotContains(t, publicBody, holder, "but not who holds the shiaijo")
+		assert.NotContains(t, publicBody, `"ipad"`)
+		assert.Contains(t, organiserBody, holder)
+	})
+
 	t.Run("a reveal ticket's stream reveals its own names only", func(t *testing.T) {
 		id := "individual-competition"
 		tk := w.ticket(t, revealHeader(revealPair(id, w.competitionKey(t, id))))
@@ -1094,4 +1112,38 @@ func TestPublicNamesLeak_SelfRunOverHidingCompetitionsShowsNames(t *testing.T) {
 	rec := f.send(http.MethodGet, "/api/viewer/competitions", "", nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.NotContains(t, rec.Body.String(), `"namesHidden":true`)
+}
+
+// replacedResultCarriesNoName classifies every field of the result the court's
+// result replaced (state.ReplacedResult, bc-sseq FR8), which every copy of a
+// match carries, public ones included: none can hold a name, so the public
+// mask passes it unchanged (the self-run page needs it to tell its own
+// device). A field added there fails TestPublicNamesLeak_ReplacedResultPassesTheMask
+// until it is classified here.
+var replacedResultCarriesNoName = map[string]string{
+	"WriteID": "the client's id for its write, minted by the device (a UUID)",
+	"Stamp":   "the replaced result's stamp, unix milliseconds",
+}
+
+func TestPublicNamesLeak_ReplacedResultPassesTheMask(t *testing.T) {
+	rt := reflect.TypeOf(state.ReplacedResult{})
+	for i := range rt.NumField() {
+		if _, ok := replacedResultCarriesNoName[rt.Field(i).Name]; !ok {
+			t.Errorf("state.ReplacedResult.%s is not classified: decide whether it can carry a name before the public mask passes it", rt.Field(i).Name)
+		}
+	}
+	require.Len(t, replacedResultCarriesNoName, rt.NumField(), "a classified field that state.ReplacedResult no longer has")
+
+	want := &state.ReplacedResult{WriteID: "3f0c1a52-9d4e-4b7a-8c21-6e5f0a9b7d10", Stamp: 1_800_000_060_000}
+	v := maskView{m: individualMask()}
+	m := state.MatchResult{ID: "Pool A-0", SideA: "Alice Arai", SideAID: pnAlice, SideB: "Bob Baba", SideBID: pnBob,
+		Winner: "Bob Baba", WinnerID: pnBob, ReplacedResult: want.Clone()}
+	v.match(&m)
+	assert.Equal(t, "K2", m.Winner, "the match is masked")
+	assert.Equal(t, want, m.ReplacedResult, "a pool match keeps it")
+	bm := state.BracketMatch{ID: "m-r1-0", SideA: "Alice Arai", SideAID: pnAlice, SideB: "Bob Baba", SideBID: pnBob,
+		Winner: "Bob Baba", WinnerID: pnBob, ReplacedResult: want.Clone()}
+	v.bracketMatch(&bm)
+	assert.Equal(t, "K2", bm.Winner, "the knockout match is masked")
+	assert.Equal(t, want, bm.ReplacedResult, "a knockout match keeps it")
 }

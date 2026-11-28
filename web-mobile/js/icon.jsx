@@ -60,6 +60,7 @@ export function Icon({ name, size = 16, className }) {
     "chevron-down": <path d="m6 9 6 6 6-6" />,
     "arrow-left": <><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></>,
     "arrow-right": <><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></>,
+    "wifi-off": <><path d="M12 20h.01" /><path d="M8.5 16.429a5 5 0 0 1 7 0" /><path d="M5 12.859a10 10 0 0 1 5.17-2.69" /><path d="M19 12.859a10 10 0 0 0-2.007-1.523" /><path d="M2 8.82a15 15 0 0 1 4.177-2.643" /><path d="M22 8.82a15 15 0 0 0-11.288-3.764" /><path d="m2 2 20 20" /></>,
     x: <><path d="M18 6 6 18" /><path d="m6 6 12 12" /></>,
     house: <><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" /><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></>,
     // The pin of a watched competitor: outline when unpinned, filled when

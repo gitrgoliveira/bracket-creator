@@ -16,6 +16,8 @@ import { createTimerPool } from './timer_pool.jsx';
 import { Icon } from './icon.jsx';
 import { courtQueueEntriesOf } from './court_queue.jsx';
 import { applyPatch, createPushLedger, matchInComp } from './patch.jsx';
+import { createRefetchGate } from './refetch_gate.jsx';
+import { readSeqOf } from './read_seq.jsx';
 import { useCourtPaceLookup } from './court_pace.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
@@ -26,7 +28,7 @@ import { useCourtPaceLookup } from './court_pace.jsx';
 // already makes.
 import {
     writeDidNotLand, writeKeepsEditorOpen, writeWasSuperseded, BRONZE_MATCH_ID,
-    writePending, writeWasRefused, writeQueueKey,
+    writePending, writeWasRefused, writeQueueKey, writeCourtNotHeld,
 } from './write_result.jsx';
 // bc-cse: a scheduled match a competitor is barred from (withdrew earlier)
 // cannot be fought, so no auto-pick may offer it and the queue row shows the
@@ -36,7 +38,7 @@ import {
 import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineligible_match.jsx';
 import { confirmLeave, leaveThen } from './unsaved_entries.jsx';
 import { matchKey, readOwnMove, eventMatchCourt, bracketSideName,ownStatusMoveEnded, withOwnStatusMove, finishWinnerOf, propagateBracketWinnerLocal, applyBronzeLoserLocal, makeReconnectRefetcher } from './admin_shiaijo_feed.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches, COMPLETED_PREVIEW, ShiaijoQueueGroup, forgetTieBreakerStandings, ShiaijoQueueRow } from './admin_shiaijo_queue.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, COMPLETED_PREVIEW, ShiaijoQueueGroup, forgetTieBreakerStandings, ShiaijoQueueRow, shiaijoMatchNo } from './admin_shiaijo_queue.jsx';
 import { ShiaijoContext } from './admin_shiaijo_context.jsx';
 // The start, pick and correct flow, the court calls and the match moves are
 // hooks the page calls on every render, in that order, so functions flow one
@@ -45,6 +47,9 @@ import { ShiaijoContext } from './admin_shiaijo_context.jsx';
 import { useCourtStart, ShiaijoUpNextCard } from './admin_shiaijo_start.jsx';
 import { useCourtCalls } from './admin_shiaijo_calls.jsx';
 import { useCourtMoves, ShiaijoConfirms } from './admin_shiaijo_moves.jsx';
+// One tab runs each shiaijo (bc-sseq FR9): the mark under the top bar, Take
+// control, and the check every console handler below makes before it writes.
+import { useShiaijoControl, ShiaijoControlBar, ShiaijoViewOnlyReason, courtControlIdle, refusedNotHeld } from './admin_shiaijo_control.jsx';
 
 const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
@@ -127,20 +132,56 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // the SSE effect, the reconnect handler, AND the manual Refresh button all
     // drive the same fetch. Guarded by mountedRef so a late resolve after
     // unmount is dropped. Returns the promise so callers can await completion.
-    const refreshCourt = useCallback(() => {
-        if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return Promise.resolve();
+    // The feed effect's refetch gate (createRefetchGate, refetch_gate.jsx), as
+    // { court, gate }: every read of the feed tells it the seq of the answer
+    // it applied (bc-sseq FR4), so an event that answer holds fetches nothing.
+    const feedGateRef = useRef(null);
+    // fetchCourt reads the court's feed and answers it (whose seq readSeqOf
+    // reads), or nothing when there is no court to read, and rejects when the
+    // read failed. It shows nothing: takeCourt, called as the read is sent,
+    // answers what does, so the feed gate can leave an answer older than a read
+    // the page already shows unshown, and a late answer after the court
+    // changed never shown at all.
+    const fetchCourt = useCallback(() => {
+        if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return Promise.resolve(null);
+        return window.API.fetchCourtMatches(court);
+    }, [court]);
+    const takeCourt = useCallback(() => {
         // A refetch never puts a row back to an older state
         // (keepNewerCompetitions, patch.jsx; the rule showRunningPush applies
         // to a push), nor behind a push applied after it was sent (push-wins).
         const keep = pushes.competitions();
-        return window.API.fetchCourtMatches(court)
-            .then(comps => {
-                if (!mountedRef.current) return;
-                setCourtComps((prev) => keep(prev, comps));
-                forgetTieBreakerStandings(comps);
-            })
-            .catch(err => console.error("Failed to fetch court matches", err));
-    }, [court, pushes]);
+        return (comps) => {
+            // Guarded by mountedRef: a late resolve after unmount is dropped.
+            if (!mountedRef.current || !comps) return false;
+            setCourtComps((prev) => keep(prev, comps));
+            forgetTieBreakerStandings(comps);
+            return true;
+        };
+    }, [pushes]);
+    // An answer read outside the feed gate that is older than one the gate
+    // already applied is dropped before it is shown (createRefetchGate.late,
+    // refetch_gate.jsx), so it never puts older data over a newer feed while the
+    // gate's applied seq stays above it.
+    const lateCourtRead = useCallback((comps) => {
+        const held = feedGateRef.current;
+        return !!(held && held.court === court && held.gate.late(readSeqOf(comps)));
+    }, [court]);
+    // readCourt is fetchCourt and takeCourt in one, for a read made outside the
+    // feed gate: it answers the feed it showed, or nothing when none was (or
+    // when a newer feed was already applied through the gate).
+    const readCourt = useCallback(() => {
+        const apply = takeCourt();
+        return fetchCourt().then((comps) => (!lateCourtRead(comps) && apply(comps) ? comps : null));
+    }, [fetchCourt, takeCourt, lateCourtRead]);
+    // refreshCourt is every read of the feed made outside the feed gate: a
+    // failed one is logged and answers nothing, an applied one is told to the
+    // gate so an event it holds fetches nothing.
+    const refreshCourt = useCallback(() => readCourt().then((comps) => {
+        const held = feedGateRef.current;
+        if (comps && held && held.court === court) held.gate.applied(readSeqOf(comps));
+        return comps;
+    }, (err) => { console.error("Failed to fetch court matches", err); return null; }), [readCourt, court]);
     // Operator-triggered re-sync: the last-resort recovery when a court's tablet
     // has fallen behind (dropped SSE, flaky venue WiFi) and the queue looks
     // stale: e.g. a downstream final still shows placeholder feeders that have
@@ -250,13 +291,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const timerPool = createTimerPool();
         // One refetch per burst of events, not one per event: a running match
         // broadcasts every saved point, and each used to schedule its own
-        // full fetch of the court's feed.
-        let refreshPending = false;
-        const scheduleRefresh = () => {
-            if (refreshPending) return;
-            refreshPending = true;
-            timerPool.schedule(() => { refreshPending = false; if (!cancelled) refreshCourt(); }, 200 + Math.random() * 400);
-        };
+        // full fetch of the court's feed. The gate (createRefetchGate,
+        // refetch_gate.jsx; bc-sseq FR4) sends it 300 to 600 ms after the event, and
+        // none for an event the feed applied already holds.
+        const feedGate = createRefetchGate({
+            schedule: timerPool.schedule,
+            fetch: () => (cancelled ? null : fetchCourt()),
+            take: () => (cancelled ? undefined : takeCourt()),
+            maxDelayMs: 600,
+            onError: (err) => console.error("Failed to fetch court matches", err),
+            // Read at each schedule, so a test's Math.random stub reaches it.
+            random: () => Math.random(),
+        });
+        feedGateRef.current = { court, gate: feedGate };
+        const scheduleRefresh = (event) => feedGate.event(event && event.seq);
+        const refreshNow = () => feedGate.now();
         // A running match's score update changes only its own row, so the
         // pushed result is shown at once rather than after the refetch. The
         // refetch still follows (once per burst): it carries what a push
@@ -293,9 +342,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 // doesn't stay stale until the next ordinary event happens to arrive.
                 "resync_required",
             ]);
-            // A RECONNECT (an 'open' following an 'error') forces an immediate
-            // refetch so a court that missed events while disconnected self-heals.
-            const onStatus = makeReconnectRefetcher(() => { if (!cancelled) scheduleRefresh(); });
+            // A RECONNECT (an 'open' following an 'error') restarts the gate:
+            // the server may have restarted (its seqs begin again), so no feed
+            // held counts as applied, and one refetch follows (still coalesced,
+            // 300 to 600 ms) so a court that missed events while disconnected
+            // self-heals.
+            const onStatus = makeReconnectRefetcher(() => { if (!cancelled) feedGate.restart(); });
             const off = window.API.subscribeToEvents(
                 (event) => {
                     if (cancelled || !event) return;
@@ -303,6 +355,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                     // refetch that follows.
                     if (event.type === "resync_required" || event.type === "tournament_updated") pushes.clear();
                     if (!REFRESH_EVENTS.has(event.type)) return;
+                    if (event.type === "resync_required") {
+                        // A new stream: no feed held counts as applied, and
+                        // the refetch is asked for whatever its seq says.
+                        feedGate.restart();
+                        return;
+                    }
                     if (event.type === "competitor_status_updated") {
                         // Eligibility moved in that competition (a withdrawal
                         // cleared, a competitor reinstated): a Start refused
@@ -323,7 +381,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             }
                         }
                     }
-                    scheduleRefresh();
+                    scheduleRefresh(event);
                 },
                 onStatus
             );
@@ -339,15 +397,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // Back from the background (an iPad locked or switched app): events
         // may have been missed meanwhile, and admin.jsx's own resume refresh
         // reloads the competition, not this court's feed.
-        const onVisible = () => { if (!document.hidden && !cancelled) scheduleRefresh(); };
+        const onVisible = () => { if (!document.hidden && !cancelled) refreshNow(); };
         document.addEventListener("visibilitychange", onVisible);
         return () => {
             cancelled = true;
             timerPool.clearAll();
+            feedGate.dispose();
+            if (feedGateRef.current && feedGateRef.current.gate === feedGate) feedGateRef.current = null;
             document.removeEventListener("visibilitychange", onVisible);
             unsub();
         };
-    }, [court, refreshCourt, pushes]);
+    }, [court, refreshCourt, fetchCourt, takeCourt, pushes]);
 
     // Court-scoped competitions: the live feed once loaded, else the prop
     // aggregate as a transient fallback. All competition/match derivations below
@@ -733,6 +793,29 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         if (!key || !writePending(res)) return;
         setStartedFrom((prev) => (prev && prev.key === key ? null : prev));
     };
+    // Who runs this shiaijo (bc-sseq FR9). While another tab or device runs it,
+    // or nobody does and this tablet lost it, the console is view only: the
+    // action area is a disabled fieldset, and every handler below asks
+    // refusedNotHeld(controlRef) before it acts (the outbox's own gate,
+    // court_control.jsx, refuses any write that still reaches it). The
+    // automatic withdrawal of this console's court calls is not gated:
+    // taking a call down is cleanup the new holder wants too.
+    const control = useShiaijoControl(courtKnown ? court : "", password, showToast);
+    const { controlRef, canWrite } = control;
+    // The match the feed shows running on this shiaijo, as Take control's
+    // confirm names it ("Open individual, Match 1 of 4").
+    const runningLabel = running[0] ? `${running[0].compName || "a match"}${shiaijoMatchNo(running[0])}` : "";
+    // The match the inline editor holds, named the same way, for the band
+    // that says its unsaved entries were not saved when control goes.
+    const editorLabel = selectedMatch ? `${selectedMatch.compName || "a match"}${shiaijoMatchNo(selectedMatch)}` : "";
+    // The idle panel's words while this console is view only (null: it may write).
+    const idleViewOnly = canWrite ? null : courtControlIdle(control.view, court);
+    // The pre-start lineup panel saves a lineup: opened only while this tab runs
+    // the shiaijo (or has had no answer yet).
+    const openLineup = (m) => {
+        if (refusedNotHeld(controlRef)) return;
+        setLineupKey(matchKey(m));
+    };
     // The start, pick and correct flow (useCourtStart, admin_shiaijo_start.jsx),
     // called once the court's live bout, the open correction and the selected
     // match are known. It binds latestRef in its own layout effect.
@@ -743,13 +826,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         court, password, showToast, onEditScore, mountedRef, editorUnsavedRef, leaveEditorConfirmed,
         allMatches, courtMatchesRaw, liveHere, liveBout, openCorrection, selectedMatch, isStartedSnapshot,
         startingKey, setStartingKey, startError, setStartError, setPickedKey, setCorrectingKey, setStartedFrom,
-        markSentBackHere,
+        markSentBackHere, controlRef,
     });
     // Call to court and its withdrawal (useCourtCalls, admin_shiaijo_calls.jsx),
     // which binds withdrawCallRef for the court feed's handler.
     const { callingKey, isCalled, callToCourt, withdrawCall } = useCourtCalls({
         court, password, showToast, mountedRef, callIdsRef, withdrawCallRef,
-        courtComps, courtCompetitions, courtMatchesRaw, tournament,
+        courtComps, courtCompetitions, courtMatchesRaw, tournament, controlRef,
     });
 
     // For pool daihyosen/tiebreaker bouts, enrich the selected match with
@@ -941,7 +1024,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const { moveMatch, requestRevert, requestMoveCourt, confirms } = useCourtMoves({
         court, password, showToast, onMoveCourt, mountedRef, editorUnsavedRef, selectedMatch, sorted,
         filteredScheduled, pickingRef, markSentBackHere, setPickedKey, setCorrectingKey, withdrawCall,
-        pendingStartAsk, answerStartAsk,
+        pendingStartAsk, answerStartAsk, controlRef,
     });
 
     // allDone: selected comp has no more matches to run on this court (AC4).
@@ -957,6 +1040,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     return (
         <div className="app">
             <AdminTopbar onLogout={leaving(onLogout)} onViewerMode={leaving(onViewerMode)} beforeLeave={leaveEditorConfirmed} tournament={tournament} hideRunningStrip />
+            {/* Who runs this shiaijo, stuck under the top bar so it is on
+                screen however far the operator scrolls (bc-sseq FR9). */}
+            {courtKnown && (
+                <ShiaijoControlBar court={court} control={control} showToast={showToast} running={runningLabel}
+                    runningMatch={running[0] || null} courtMatches={sorted}
+                    editorUnsavedRef={editorUnsavedRef} editorLabel={editorLabel} />
+            )}
             <div className="page page--wide">
                 <Breadcrumbs items={[{ label: "Dashboard", onClick: leaving(onBack) }, { label: `Shiaijo ${court}` }]} />
                 <div className="page-head page-head--oneline">
@@ -1118,13 +1208,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             {filteredScheduled.length === 0 && filteredPending.length === 0 && filteredCompleted.length === 0 && (
                                 <p className="shiaijo-queue__empty">Nothing else queued on this court.</p>
                             )}
+                            {/* The queue's actions (Start, Call, Lineup, the moves, a
+                                barred row's decision) are view only while this tab
+                                does not run the shiaijo. The Hide toggle and Show all
+                                stay outside: they only change the view. */}
+                            <ShiaijoViewOnlyReason court={court} control={control} />
+                            <fieldset className="shiaijo-control-scope shiaijo-control-scope--queue" disabled={!canWrite}>
                             {upNext && (
                                 <ShiaijoUpNextCard
                                     upNext={upNext} paceLookup={paceLookup} notice={upNextNotice}
                                     starting={startingKey === matchKey(upNext)}
                                     called={isCalled(matchKey(upNext))} calling={callingKey === matchKey(upNext)}
                                     onStart={(ev) => tapStart(upNext, ev)}
-                                    onEnterLineup={() => setLineupKey(matchKey(upNext))}
+                                    onEnterLineup={() => openLineup(upNext)}
                                     onCall={window.API && typeof window.API.sendAnnouncement === "function" ? (ev) => callToCourt(upNext, ev) : null}
                                     onMoveDown={window.API && typeof window.API.updateMatchTime === "function" && filteredScheduled.length > 1 ? () => moveMatch(upNext, "down") : null}
                                 />
@@ -1138,13 +1234,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <ShiaijoQueueGroup
                                     label="Upcoming" subGroup matches={upcomingQueueMatches}
                                     courts={courts} onMoveCourt={requestMoveCourt}
-                                    onMove={moveMatch} onEnterLineup={(m) => setLineupKey(matchKey(m))}
+                                    onMove={moveMatch} onEnterLineup={openLineup}
                                     onPick={tapStart} noticeFor={(m) => startNoticeFor(matchKey(m))}
                                     onCall={callToCourt} callingKey={callingKey} isCalled={isCalled} startingKey={startingKey}
                                     scheduled={filteredScheduled}
                                     password={password}
                                 />
                             )}
+                            </fieldset>
 
                             {/* Later: scheduled knockout bouts still waiting on a
                                 "Winner of rX-mY" feeder (mp-y3nk). Shown so a court
@@ -1188,11 +1285,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     <div className="section-title">
                                         Completed <span className="shiaijo-count" aria-label={`${filteredCompleted.length} matches`}>{filteredCompleted.length}</span>
                                     </div>
-                                    <ShiaijoQueueGroup
-                                        matches={completedShown}
-                                        courts={courts} onMoveCourt={requestMoveCourt} onCorrect={correctMatch}
-                                        noticeFor={(m) => refusalNotice(matchKey(m))}
-                                    />
+                                    <ShiaijoViewOnlyReason court={court} control={control} />
+                                    <fieldset className="shiaijo-control-scope" disabled={!canWrite}>
+                                        <ShiaijoQueueGroup
+                                            matches={completedShown}
+                                            courts={courts} onMoveCourt={requestMoveCourt} onCorrect={correctMatch}
+                                            noticeFor={(m) => refusalNotice(matchKey(m))}
+                                        />
+                                    </fieldset>
                                     {filteredCompleted.length > COMPLETED_PREVIEW && (
                                         <button
                                             type="button"
@@ -1271,7 +1371,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 bout makes allDone true, and the pin must still
                                 hold the editor open. */}
                             {(!allDone || correctingMatch) && selectedMatch && (
+                                // View only while this tab does not run the shiaijo:
+                                // readOnly={!canWrite} disables write controls and
+                                // scoring shortcuts while keeping read-only controls
+                                // (History, Ippon key, Prev/Next, Discard held write)
+                                // usable; the outbox gate still refuses any write.
+                                // The line above it says why (FR9).
+                                <>
+                                <ShiaijoViewOnlyReason court={court} control={control} />
                                 <ScoreEditorModal
+                                    readOnly={!canWrite}
                                     hostUnsavedRef={editorUnsavedRef}
                                     // No subResults.length: see the same key in
                                     // admin_competition_bracket.jsx. Remounting
@@ -1298,6 +1407,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         try {
                                             // opts: the editor's own claim on a refusal (onRefusal).
                                             const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch, opts);
+                                            // Refused before it was queued: this tab does not run
+                                            // the shiaijo (court_control.jsx). Nothing to end or
+                                            // advance; the editor shows the refusal.
+                                            if (writeCourtNotHeld(res)) return res;
                                             // A landed Save correction ends the correction (a
                                             // write that did not land keeps it open, with the
                                             // editor's not-saved banner).
@@ -1329,6 +1442,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         let res;
                                         try {
                                             res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
+                                            // Refused before it was queued (court_control.jsx): no
+                                            // advance, no next start.
+                                            if (writeCourtNotHeld(res)) return res;
                                             // See the onSubmit handler above: a superseded write must not
                                             // advance the local bracket on a winner the server discarded.
                                             if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch, res);
@@ -1352,6 +1468,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         return res;
                                     }}
                                     onAfterDecision={async (result) => {
+                                        // A decision refused before it was queued (this tab
+                                        // does not run the shiaijo) advances nothing and starts
+                                        // nothing; the editor already says why.
+                                        if (writeCourtNotHeld(result) || refusedNotHeld(controlRef, { quiet: true })) return;
                                         // A fusenpai/hantei decision already persisted the bout via
                                         // the /decision POST: no score PUT here. It still resolves a
                                         // winner, so offline we must advance the LOCAL bracket the same
@@ -1373,6 +1493,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     }}
                                     password={password}
                                 />
+                                </>
                             )}
 
                             {correctingMatch && correctingMatch.status === "completed" && (
@@ -1414,6 +1535,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         type="button"
                                         className="btn btn--sm btn--ghost"
                                         onClick={() => requestRevert(selectedMatch)}
+                                        disabled={!canWrite}
                                         title="Return this match to the queue without recording a result"
                                     >
                                         Send back to queue
@@ -1423,7 +1545,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                             {!allDone && !selectedMatch && (
                                 <div className="empty shiaijo__placeholder">
-                                    <h3>Ready when you are</h3>
+                                    <h3>{idleViewOnly ? idleViewOnly.title : "Ready when you are"}</h3>
                                     <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
                                         {/* bc-cse: when every scheduled match here is barred there
                                             is no Up Next card at all (upNext skips a barred match on
@@ -1431,7 +1553,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             something not on screen. Name the actual remedy instead:
                                             each barred row in the queue carries its own one-tap
                                             resolution (BarredMatchNotice). */}
-                                        {!upNext && filteredScheduled.length > 0
+                                        {idleViewOnly ? idleViewOnly.body : !upNext && filteredScheduled.length > 0
                                             ? "Every scheduled match on this court is barred. Resolve a withdrawal in the queue to bring one back."
                                             : "Start the next match from the Up Next card to begin scoring on this court."}
                                     </p>

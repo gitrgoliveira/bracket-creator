@@ -9,8 +9,8 @@
 // import api_client.jsx from here (it would run the outbox twice).
 
 import {
-    writeWasSuperseded, writeWasRefusedForClock, writeMatchClosed, writeDisplacedGroups, REP_BOUT_NOT_ADDED,
-    REP_BOUT_NOT_REMOVED, isFinishedResultWrite,
+    writeWasSuperseded, writeWasRefusedForClock, writeMatchClosed, writeDisplacedGroups,
+    writeDisplacedByCourtResult, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, isFinishedResultWrite,
 } from './write_result.jsx';
 // The offset lives in a leaf so a score editor can read the same clock (server_clock.jsx).
 import { DOC_VERSION_FIELD, tournamentRefusal, awardsRefusal } from './document_versions.jsx';
@@ -31,7 +31,7 @@ import {
     _dequeue, _baseOf, _byEntryOrder, _entriesFor, _claimRefusal, _settleAnsweredElsewhere, _shareAnswer,
     _afterKeys, _keepForClock,
 } from './api_client_queue.jsx';
-import { _CHECKIN_KINDS, _checkInAnswered, rebaseQueuedVersion } from './api_client_overlays.jsx';
+import { _CHECKIN_KINDS, _checkInAnswered, rebaseQueuedVersion, _showStoredMatch } from './api_client_overlays.jsx';
 import { TAP_BATCH_MAX, _tellTurnedAway, _sendTapBatch } from './api_client_taps.jsx';
 import { _randomId } from './api_client_ids.jsx';
 import { createBaseLease, detectWebLocks } from './base_sender_lease.jsx';
@@ -212,7 +212,7 @@ export function _wakeLeaseWaiters() {
 function _newFlushPass() {
     return {
         superseded: 0, lastSuperseded: null, matchClosed: false,
-        displaced: 0, sent: 0, notApplied: 0, notAppliedTaps: [], parkedTaps: 0, refusedResults: new Set(),
+        displaced: 0, displacedByCourt: 0, sent: 0, notApplied: 0, notAppliedTaps: [], parkedTaps: 0, refusedResults: new Set(),
         anyFailed: false, networkFailed: false, leaseSkipped: false,
     };
 }
@@ -229,8 +229,10 @@ async function _runFlush(only) {
     // overwriting each other.
     //   superseded/lastSuperseded/matchClosed: writes kept in their match's
     //     history (writeMatchClosed: the alert then says to tap Correct).
-    //   displaced: held finishes that landed and moved a LATER change of their
-    //     match to its history (writeDisplacedGroups).
+    //   displaced/displacedByCourt: held finishes that landed and moved a
+    //     LATER change of their match to its history (writeDisplacedGroups),
+    //     and how many of them were court results replacing another device's
+    //     result (writeDisplacedByCourtResult).
     //   sent: HELD writes that landed (bc-offl). A write is held only once a
     //     pass has left it unsettled (or it came back from storage), so an
     //     ordinary online Finish never reaches this count (operator decision
@@ -410,7 +412,11 @@ async function _runFlush(only) {
         // success, so a pass with both still ends on the error, and a pass with
         // no error shows the confirmation.
         if (pass.sent > 0) _notifyQueueAlert({ kind: 'sent', count: pass.sent, terminalCount: pass.sent });
-        if (pass.displaced > 0) _notifyQueueAlert({ kind: 'displaced', count: pass.displaced, terminalCount: pass.displaced });
+        if (pass.displaced > 0) {
+            _notifyQueueAlert({
+                kind: 'displaced', count: pass.displaced, terminalCount: pass.displaced, byCourt: pass.displacedByCourt,
+            });
+        }
         _notifyScoreSupersededAlert(
             pass.superseded,
             pass.lastSuperseded ? pass.lastSuperseded.compID : undefined,
@@ -839,6 +845,11 @@ async function _sendEntry(key, descriptor, pass) {
     if (_endDiscardWhileOut(descriptor, res, body)) return 'settled';
     body = body || {};
     if (res.ok) {
+        // A write the merge held answers with the match as stored (FR5): it is
+        // shown, through the turned-away record and as a whole-match patch,
+        // before the editor or an alert hears of the refusal below and before
+        // the entry leaves the queue (FR6, _showStoredMatch).
+        if (!_NOT_MATCH_WRITE_KINDS.has(kind)) _showStoredMatch(compID, matchID, body);
         // An answer that carries the match names the taps the server turned
         // away since their own answer: this device's are told.
         if (compID && matchID) _tellTurnedAway(compID, matchID, body.result || body);
@@ -925,7 +936,10 @@ async function _sendEntry(key, descriptor, pass) {
             // Counted as results only when it is one (isFinishedResultWrite, R5):
             // a held court move or lineup save that lands is no "result sent".
             if (isFinishedResultWrite(descriptor) && wasHeld && !writeWasSuperseded(body)) pass.sent++;
-            if (isFinishedResultWrite(descriptor) && writeDisplacedGroups(body).length > 0) pass.displaced++;
+            if (isFinishedResultWrite(descriptor) && writeDisplacedGroups(body).length > 0) {
+                pass.displaced++;
+                if (writeDisplacedByCourtResult(body)) pass.displacedByCourt++;
+            }
             // A confirmed terminal score write needs no further rev tracking.
             if (terminal && kind === 'score') _forgetRev(compID, matchID);
             // A document save that landed: a save of it still queued at the

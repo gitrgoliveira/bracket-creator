@@ -173,6 +173,9 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	if result.WriteID == "" && fo.WriteID != "" {
 		result.WriteID, result.Basis, result.WriteSession = fo.WriteID, fo.Basis, fo.Session
 	}
+	// The court's standing rides like the tag (bc-sseq FR8): a door that
+	// builds the write on the server carries it in the options.
+	result.CourtStanding = result.CourtStanding || fo.CourtStanding
 
 	// comp is the competition the caller loaded in this same transaction.
 	// An exact resend of a finish already recorded (a queued write whose
@@ -247,7 +250,7 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			// displaced the stored result without having seen it is held, never
 			// refused, once the next knockout match was played or started. A
 			// pool finish is judged by the requalification below.
-			engiRival = rivalDisplacesResult(result.Merge)
+			engiRival = displacesUnseenResult(result.Merge)
 			if engiRival {
 				probe := engiFinishProbe(engiPrior, result)
 				engiValues = &probe
@@ -396,7 +399,7 @@ func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// stored one without having seen it is held, never refused or forced,
 	// when a seated knockout match was played or started (the refusal rolls
 	// the match back); force belongs to an explicit correction only.
-	if err := e.requalifyMixedPoolWriteLocked(tx, compID, comp, matchID, result, prior, result, nil, fo, rivalDisplacesResult(result.Merge)); err != nil {
+	if err := e.requalifyMixedPoolWriteLocked(tx, compID, comp, matchID, result, prior, result, nil, fo, displacesUnseenResult(result.Merge)); err != nil {
 		return nil, err
 	}
 
@@ -1208,6 +1211,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// A resend of a decision the score event log already holds (its writeId,
 	// bc-evts F1) is answered as recorded before anything judges it.
 	result.WriteID, result.Basis, result.WriteSession = kcdgOpts.WriteID, kcdgOpts.Basis, kcdgOpts.Session
+	result.CourtStanding = kcdgOpts.CourtStanding
 	if kcdgOpts.ReopenReason != "" && prior.CorrectionReason == "" {
 		result.CorrectionReason = kcdgOpts.ReopenReason
 	}
@@ -1318,7 +1322,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// A decision that is a RIVAL displacing the stored result is not refused
 	// here: the result lock holds it when the next match is under way
 	// (applyBracketResultIn), kept in the history, where this 409 lost it.
-	if !rivalDisplacesResult(decisionProbeMerge(comp, prior, result, matchID, probeCtx)) {
+	if !displacesUnseenResult(decisionProbeMerge(comp, prior, result, matchID, probeCtx)) {
 		if err := refuseDecisionReachingRunningMatch(tx, compID, matchID, decisionBy, prior); err != nil {
 			return nil, nil, err
 		}

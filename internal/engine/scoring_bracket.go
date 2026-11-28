@@ -220,10 +220,12 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 		bm.MarkIDs, bm.ScoreVersion = result.MarkIDs.Clone(), result.ScoreVersion
 		bm.EventSeqs = state.CloneGroupStamps(result.EventSeqs)
 		bm.TurnedAway = maps.Clone(result.TurnedAway)
+		bm.ReplacedResult = result.ReplacedResult.Clone()
 	case result.WriteDoor == DoorEvent:
 		bm.MarkIDs, bm.ScoreVersion = result.MarkIDs.Clone(), max(bm.ScoreVersion, result.ScoreVersion)
 		bm.EventSeqs = mergeEventSeqs(bm.EventSeqs, result.EventSeqs)
 		bm.TurnedAway = maps.Clone(result.TurnedAway)
+		bm.ReplacedResult = result.ReplacedResult.Clone()
 	default:
 		d := derivedScoreOf(bm.IpponsA, bm.IpponsB, bm.MarkIDs, bm.SubResults, bm.ScoreVersion, bm.EventSeqs)
 		prior = &d
@@ -285,6 +287,7 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 		result.MarkIDs, result.ScoreVersion = bm.MarkIDs.Clone(), bm.ScoreVersion
 		result.EventSeqs = state.CloneGroupStamps(bm.EventSeqs)
 		result.TurnedAway = maps.Clone(bm.TurnedAway)
+		result.ReplacedResult = bm.ReplacedResult.Clone()
 	}
 	// Echo the persisted scheduling fields back into result so the caller (and
 	// the SSE broadcast) sees the full match state rather than the empty
@@ -349,7 +352,7 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			// The result lock (K1, result_lock.go): an older finish that did
 			// not see the stored result is held, never refused, once the next
 			// match was played or started.
-			if policy == matchWriteForward && rivalDisplacesResult(rep) {
+			if policy == matchWriteForward && displacesUnseenResult(rep) {
 				if code := downstreamLockCode(bracket, rIdx, mIdx); code != "" {
 					result.Merge = rep
 					holdAsLocked(result, nil, code)

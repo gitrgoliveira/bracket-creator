@@ -12,6 +12,7 @@ import React from 'react';
 import { act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { mountApp, settle } from '../helpers/mount_app.js';
+import { HELD_PUSH_WAIT_MS } from '../../refetch_gate.jsx';
 
 function ProbeViewerHome(props) {
   return <div data-testid="viewer-home">{props.tournament && props.tournament.name}</div>;
@@ -34,12 +35,13 @@ const STUBBED_GLOBALS = {
 };
 
 const shown = () => screen.getByTestId('viewer-home').textContent;
-// The reload is jittered; with Math.random at 0 it runs at once.
+// The reload is jittered; with Math.random at 0 it runs at the start of the
+// list gate's window, HELD_PUSH_WAIT_MS (createRefetchGate, refetch_gate.jsx).
 const status = async (s) => {
   const random = vi.spyOn(Math, 'random').mockReturnValue(0);
   try {
     await act(async () => { sse.status(s); });
-    await settle();
+    await act(async () => { await new Promise((r) => setTimeout(r, HELD_PUSH_WAIT_MS + 20)); });
   } finally {
     random.mockRestore();
   }
@@ -79,11 +81,14 @@ describe('reloading after the event stream was lost', () => {
 
     // An event reached the page during the outage; the load it started failed.
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
     try {
       window.API.fetchTournament.mockRejectedValueOnce(new TypeError('Failed to fetch'));
       await act(async () => { sse.emit({ type: 'resync_required', seq: 0 }); });
+      await act(async () => { await new Promise((r) => setTimeout(r, HELD_PUSH_WAIT_MS + 20)); });
       await settle();
     } finally {
+      random.mockRestore();
       logged.mockRestore();
     }
     expect(shown()).not.toBe(name);

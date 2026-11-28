@@ -19,3 +19,22 @@ export async function openScoreEditor(page, id, { court } = {}) {
   await expect(page.locator(EDITOR)).toBeVisible();
   return row;
 }
+
+// The RUNNING match on `court` (the row the server marks running), opened in
+// the overlay editor: how the head table corrects the court's mistakes on a
+// match the court console runs and scores (a point the court missed, a mark
+// it entered wrongly). The admin pages are for corrections, never for
+// scoring a competition (operator ruling 2026-11-27); they are not gated by
+// the court control, while a second court console on the shiaijo is view only
+// (FR9). Waits for the row, since the match may have been started a moment
+// ago on another device. Returns the row it opened.
+export async function openRunningScoreEditor(page, id, { court } = {}) {
+  await page.goto(`/admin/competition/${encodeURIComponent(id)}/scores`);
+  let rows = scoreRows(page).and(page.locator('.score-edit-row--running'));
+  if (court) rows = rows.filter({ has: page.locator('.score-edit-row__court', { hasText: new RegExp(`^${court}\\b`) }) });
+  const row = rows.first();
+  await expect(row, 'the running match is listed on the Scores page').toBeVisible();
+  await row.getByRole('button', { name: /^Score$/ }).tap();
+  await expect(page.locator(EDITOR)).toBeVisible();
+  return row;
+}

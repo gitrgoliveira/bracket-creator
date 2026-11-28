@@ -457,6 +457,7 @@ classDiagram
         +int ScoreVersion
         +map EventSeqs
         +map TurnedAway
+        +ReplacedResult ReplacedResult
     }
 
     class CompetitorSide {
@@ -559,6 +560,7 @@ classDiagram
         +int ScoreVersion
         +map EventSeqs
         +map TurnedAway
+        +ReplacedResult ReplacedResult
     }
 
     class SubMatchResult
@@ -583,10 +585,17 @@ These fields need explaining:
   taps the log holds, so a device does not apply one of its own taps a second time.
 * `TurnedAway` lists, by event id, the device taps the log holds that the server does not
   apply, with the reason, so the device that made a tap learns that it was turned away.
+* `ReplacedResult` names the newest result that the court's result replaced: a finish or a
+  decision another device recorded, which a later result from the court console of the tablet
+  running the match's shiai-jo displaced without having seen it. It holds that result's write
+  id and stamp, and no name, so the device that recorded it recognises its own write on the
+  next copy of the match it receives and tells its operator once.
 * `Recorded` is set on a kachinuki bout when the operator closes it with Record bout.
 
-`MarkIDs`, `ScoreVersion`, `EventSeqs` and `TurnedAway` are derived by replaying the match's
-score event log, and are stored beside the match so that a reader need not replay it.
+`MarkIDs`, `ScoreVersion`, `EventSeqs`, `TurnedAway` and `ReplacedResult` are derived by
+replaying the match's score event log, and are stored beside the match so that a reader need
+not replay it. A score write's body can set none of them: the server drops them as it reads
+the body.
 
 **`CompetitorSide` is a value object that the storage flattens.** The name is this page's
 own, chosen for clarity: no such type exists in the code, and nor does `Outcome`, which
@@ -714,7 +723,8 @@ flowchart TB
         wal[".wal/<br/>committed, not yet applied<br/>transactions, replayed on startup"]
         backups_dir["backups/<br/>zip archives: scheduled<br/>backups, safety copies"]
         restore_dir[".restore/<br/>#lt;token#gt;/journal.json<br/>#lt;token#gt;/new/ staged<br/>#lt;token#gt;/old/ moved out<br/>prefixes-pending.json<br/>requeue-pending.json"]
-        wal ~~~ backups_dir ~~~ restore_dir
+        court_control["court-control.json<br/>which tablet runs<br/>each shiai-jo"]
+        wal ~~~ backups_dir ~~~ restore_dir ~~~ court_control
     end
 
     root --> top
@@ -843,6 +853,24 @@ The `.restore/` folder under the data root holds temporary staging directories a
 - **Pending requeues (`.restore/requeue-pending.json`)**: a restore brings no match back running. The ids of the matches the archive holds as running, keyed by the competition id as restored, are written here before the journal. Once the store releases its locks, the server (or the `mobile-app restore` command) sends each one back to the queue with its score, as the operator's send back does, writing the match's history line, and removes the file.
 - **Crash recovery**: when the store initializes (`Store.init`), it inspects `.restore/`. If a staging directory contains a complete journal, the store rolls forward all steps in order, skips steps already done, syncs the directories, and removes the journal and token folder. A staging folder left without a journal (meaning the process died before the live rename phase) is deleted. If `prefixes-pending.json` or `requeue-pending.json` remains after a crash, the server reassigns the prefixes and requeues the matches at startup.
 
+### The court-control.json file
+
+`court-control.json` sits at the root of the data folder and records which tablet runs each shiai-jo, and from which of its court console tabs, so that one console writes for a shiai-jo at a time and the server can tell which results are the court's (refer to [Write guarantees](#5-write-guarantees)). It is not a tournament record. It is written as a temporary file and a rename like every other file, and a missing, unreadable or unparseable file reads as every shiai-jo free.
+
+The file holds one object, `courts`, keyed by the shiai-jo letter. A shiai-jo with no entry is free and remembers nobody. An entry with an empty `holderKey` is free too, and is kept only while one of its displaced lists names a tab or a tablet. Each entry carries:
+
+- `holderKey`: a one-way key (the first 16 hex characters of the SHA-256) of the holding tab's id. The raw id is never stored, so the file grants nothing.
+- `deviceKey`: the same kind of key for the holding tablet's id. A result has the court's standing when it comes from a court console tab of this tablet, so a take between two tabs of one tablet keeps it.
+- `device`: the holder's device word (`ipad`, `android-tablet`, `iphone`, `android-phone`, `mac`, `windows` or `device`), which the bar on the other consoles shows. Anything else reads as `device`, which the bar calls "another device".
+- `since`: when the holder took the shiai-jo, in unix milliseconds on the server's clock.
+- `standingFrom`: the earliest write stamp of the holding tablet that has the court's standing. It is 0 for a free shiai-jo taken at once, and the take's own stamp when a tablet took it from another tablet (or took back a free shiai-jo it had lost to another tablet), so results the old tablet recorded before the take never gain the standing. A take between two tabs of one tablet leaves it as it was.
+- `pageId`: the holding tab's page load, so a late release from a reloaded page never frees the new page's claim.
+- `displaced` and `displacedDevices`: the keys of the tabs and of the tablets that lost the shiai-jo to a take, oldest first, at most 8 of each.
+
+A court console's finish or decision on a shiai-jo nobody holds claims it, with `standingFrom` 0, as opening the console would, unless its tab or tablet is on a displaced list or its tab already holds another shiai-jo. That is how a console opened with no connection comes to run its shiai-jo. A holder's last activity is kept in memory only and is not in the file.
+
+When the holding tab gives the shiai-jo back (its page closes or reloads), the file has it free at once, but the server keeps the hold that was given back in memory for a grace of 10 seconds, so that a reload over a slow venue network gets it back before any other console. During the grace, a claim or a court console's finish or decision from a tab of that tablet takes it back with its `since` (for the same tab) and its `standingFrom` as they were; a claim from another tablet is answered as a shiai-jo that tablet runs and takes nothing, a finish or decision from another tablet is an ordinary one, and Take control takes it at once, as from a running holder. When the grace ends with no claim from that tablet, the shiai-jo is announced free. Replacing the whole tournament ends every grace at once. The grace is not in the file, so a server restart during one ends it: the shiai-jo is free after the restart, and the first court console to claim it takes it. The file is not part of any backup archive, so a restore never brings an old holder back. Every whole-tournament replacement clears it, because shiai-jo letters repeat from one tournament to the next: a full restore, live or from the command line, and the creation of a first tournament. An import only adds competitions and leaves the file as it is.
+
 ### Archive format and manifest
 
 Backup archives are standard zip files whose internal layout mirrors the data folder:
@@ -858,7 +886,7 @@ competitions/<id>/<files>           (config.md, participants.csv, seeds.csv, poo
                                      history/*.jsonl, events/*.jsonl, and *.corrupt-* files)
 ```
 
-Working directories (`.wal/`, `backups/`, `.restore/`) and temporary and write-check files (`*.tmp`, `*.tmp-*`, `.write-check-*`) are never written into an archive.
+Working directories (`.wal/`, `backups/`, `.restore/`), `court-control.json` and temporary and write-check files (`*.tmp`, `*.tmp-*`, `.write-check-*`) are never written into an archive.
 
 The `manifest.json` file contains:
 
@@ -1083,6 +1111,24 @@ knockout match whose next match has been played or has started: a rival that wou
 the stored result is not applied, and the history says that the next round was already
 fought, or has already started.
 
+**The court's result counts.** One writer is the exception to the rule above: the court console
+of the tablet that runs the match's shiai-jo, as `court-control.json` records it. The server
+judges each finish or decision on arrival: it has the court's standing when its tablet runs the
+shiai-jo the match is on at that moment, through any of its court console tabs, and it was made
+at or after that tablet's `standingFrom`. In a self-run tournament, no result has the standing.
+Neither the tab's id nor the tablet's is kept with the write; its baseline line in
+the score log carries `court: true` instead, and a line written before the field existed reads
+false, which is how it was recorded. A result with the court's standing is no rival of a result
+another device recorded that it never saw: it replaces it in either arrival order. The replaced
+result is kept in the history as replaced by the court's result, and the court's own taps made
+after the replaced result count. Two results from devices without the standing, and two results
+that both had it, keep the first recorded result. Other matches may already be built on the
+result the court's would replace: a later Swiss round paired from it, a tie-break or
+representative match added from the standings it decided, or the competition finished. The
+court's result is then held instead, as a late result is held once the next knockout match was
+played, and the history says that other matches were already built on it. That wait is the
+court's alone: a late result from any other screen keeps the rules above.
+
 A finish that would leave a knockout match without a winner is refused as invalid, and the
 match keeps the result it had. The operator resolves the tie first: in a team match with a
 representative bout, or with overtime on the final kachinuki bout; in an individual match with
@@ -1112,8 +1158,9 @@ saying so. A held group that says exactly what is already stored (for example "n
 over a match with none) is no loss, so it is recorded as unchanged and its value is not kept.
 When a rule held changes rather than their times, the line also says why: an older revision
 of the same running board, the match was already finished, an engi result whose flags and
-winner are kept together, a representative bout that was removed, or a next round that was
-already fought or has already started. The history is written in the same
+winner are kept together, a representative bout that was removed, a next round that was
+already fought or has already started, a result the court's result replaced, or a court result
+that other matches were already built on. The history is written in the same
 transaction as the match, so the two land together or not at all, and a write refused
 outright (an invalid payload, the wrong competitors) leaves no line. Reopening, requeueing,
 overriding a winner and the other server actions that change a result write their own line.
@@ -1169,7 +1216,12 @@ can be turned away when a finish that never saw it arrives after it, and the dev
 reads that from the next copy of the match it receives and tells its operator. The list keeps
 each device session's latest, at most 128 of a session and 512 on the match; when the sessions
 together hold more, each keeps the same share, the largest that fits, so a device with fewer
-taps listed keeps all of its own and no device's taps are pushed out by another's.
+taps listed keeps all of its own and no device's taps are pushed out by another's. Beside it,
+`ReplacedResult` names the newest result the court's result replaced, by the write id its device
+sent with it and the stamp it was recorded at: that result was answered as applied, so its
+device learns from the next copy of the match it receives that the court's result stands
+instead. A result sent without a write id cannot be named and is left out. A result that
+arrives after the court's and is replaced on arrival is told on its own answer instead.
 
 The score event log is the source of truth for match scoring, while the match result stored in
 `pool-matches.csv` or `bracket.json` acts as a materialized cache derived by the replay. This
@@ -1184,7 +1236,7 @@ truth and an unrecognized line is never skipped or guessed at.
 The merge needs the time of each stored change to compare against, so it only works where
 those times are saved. They are saved for every match, in both files (`GroupStamps` in the
 results file at column index 29, followed by `MarkIDs` at index 30, `ScoreVersion` at index 31,
-`EventSeqs` at index 32 and `TurnedAway` at index 33, and in the bracket file), which is what makes the rule the same wherever a match happens to be
+`EventSeqs` at index 32, `TurnedAway` at index 33 and `ReplacedResult` at index 34, and in the bracket file), which is what makes the rule the same wherever a match happens to be
 in the competition. A match saved before the per group times existed has only
 one time for the whole result, and every group reads as changed then, so it is compared exactly
 as before. A running save from a client that does not send a time counts as unstamped and
@@ -1327,8 +1379,10 @@ Appending columns and leaving some fields unwritten are the two consequences tha
 * Column position is the contract. New fields are appended, and a file written by an older
   version stays readable because the reader leaves each missing trailing column at its
   documented default, empty for most (including `MarkIDs` at column index 30, `ScoreVersion`
-  at index 31, `EventSeqs` at index 32 and `TurnedAway` at index 33, defaulting to empty, 0,
-  empty and empty) and `-1` for the round number, which means unknown.
+  at index 31, `EventSeqs` at index 32, `TurnedAway` at index 33 and `ReplacedResult` at
+  index 34, defaulting to empty, 0, empty, empty and empty) and `-1` for the round number,
+  which means unknown. A file written before `ReplacedResult` existed reads it empty, which is
+  what it was, so it needs no migration.
 * Some fields are useful only in flight and are not written at all. Transient client revision
   markers used to discard out of order writes within a single session are one example, as are
   a write's own id, what its writer had in view, the groups it names and the endpoint it came

@@ -125,6 +125,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// stamped before the entry had already closed the match, or "" for
 			// a newer stored change.
 			HeldReason string `json:"heldReason,omitempty"`
+			// Match is, on a "superseded" entry, the match as it is stored
+			// once the entry was held, as respondSuperseded answers it on the
+			// single-match doors (storedMatchForAnswer).
+			Match *state.MatchResult `json:"match,omitempty"`
 		}
 		var errs []scoreError
 		// partlyHeld reports each entry that was applied in part: its matchId
@@ -257,6 +261,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			var capturedStatus *domain.CompetitorStatus
 			var reopenedThisItem []engine.ReopenedMatch
 			var supersededThisItem error
+			var supersededMatchThisItem *state.MatchResult
 			txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
 				// Correction-reason audit policy (require a reason for a
 				// completed -> completed overwrite, otherwise carry the STORED
@@ -293,6 +298,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 					// Committed, not aborted: the entry's history record is
 					// its one footprint (bc-mrgc).
 					supersededThisItem = err
+					supersededMatchThisItem = storedMatchForAnswer(stx, id, results[i].ID, false)
 					return nil
 				}
 				if err != nil {
@@ -356,6 +362,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 					if bulkErr.HeldReason != "" {
 						bulkErr.Error = messageForHeldReason(bulkErr.HeldReason)
 					}
+					bulkErr.Match = supersededMatchThisItem
 				case errors.As(err, &alreadyIneligErr):
 					// bc-rawm/bc-cse: this batch shape has no dedicated 409 to
 					// answer with, so the operator sentence rides in Error
@@ -615,6 +622,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			reopenedDownstream []engine.ReopenedMatch
 			engStatus          *domain.CompetitorStatus
 			refusal            *ValidationError
+			// supersededMatch is the stored match a held write lost to,
+			// read in the write's transaction for the answer's `match`.
+			supersededMatch *state.MatchResult
 		)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
 			snap, _, snapErr := matchSnapshotOrErr(stx, id, mid, "quick-score")
@@ -655,6 +665,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				ConfirmLots: req.ConfirmLots,
 				Reopened:    &reopenedDownstream,
 			})
+			if errors.Is(err, engine.ErrMatchSuperseded) {
+				supersededMatch = storedMatchForAnswer(stx, id, mid, false)
+			}
 			return nil
 		})
 		if txErr != nil {
@@ -672,7 +685,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// timestamp guard), but mapped anyway: the alternative default is
 				// a 500, which the offline write queue treats as transient and
 				// retries forever against a write that can never win.
-				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason(), err)
+				respondSuperseded(c, supersededMatch, result.Merge.HeldGroups(), result.Merge.HeldReason(), err)
 				return
 			}
 			if respondIfLeagueFinished(c, err) || respondIfLotsReplaced(c, err) {

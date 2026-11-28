@@ -9,7 +9,7 @@
 // import api_client.jsx from here (it would run the outbox twice).
 
 import { bridge as _bridge } from './court_bridge.jsx';
-import { writeWasSuperseded } from './write_result.jsx';
+import { writeWasSuperseded, writeWasRefusedForClock } from './write_result.jsx';
 import { createDocumentVersions } from './document_versions.jsx';
 import { _isMatchAlreadyCompletedRefusal } from './api_client_requests.jsx';
 import { _relearnClockThrottled } from './api_client_clock.jsx';
@@ -170,13 +170,25 @@ export function _statusEntriesByBase() {
 
 // _noteOwnStatusAnswer: an entry left the queue (`outcome`, as _dequeue has
 // it). A status move the server took is kept as answered; one it refused, or
-// that was discarded or sent by another tab, keeps nothing.
+// that was discarded or sent by another tab, keeps nothing, and one the server
+// held also ends a move answered before it. Every entry's answer passes here
+// (_dequeue), so a refusal carrying the stored match shows it first
+// (_showStoredMatch), also when another tab of the device sent the write.
 export function _noteOwnStatusAnswer(key, d, outcome) {
+    const v = outcome && 'value' in outcome ? outcome.value : undefined;
+    // A refusal that carries the stored match shows it first (FR6), so the
+    // move this entry held never gives way to the copy the refusal replaces.
+    if (d) _showStoredMatch(d.compID, d.matchID, v);
     const status = _statusMoveOf(d);
     if (!status) return;
     const base = _baseOf(key);
-    const v = outcome && 'value' in outcome ? outcome.value : undefined;
-    if (v === undefined || v === null || _unorderedValue(v) || writeWasSuperseded(v)) return;
+    if (writeWasSuperseded(v) && !writeWasRefusedForClock(v)) {
+        // A move the server held ends any move answered before it: the
+        // screen shows the server's copy (FR6).
+        _ownStatusAnswered.delete(base);
+        return;
+    }
+    if (v === undefined || v === null || _unorderedValue(v)) return;
     if (status === 'running') {
         _ownStatusAnswered.delete(base);
         return;
@@ -274,12 +286,56 @@ export function subscribeLocalMatchPatch(cb) {
     return () => { _localPatchListeners.delete(cb); };
 }
 
-export function _emitLocalMatchPatch(compID, matchID, fields) {
+// `opts.whole` marks a patch that carries the whole match as the server stores
+// it (a refused write's answer, _showStoredMatch): applyPatch (patch.jsx)
+// applies it only when it is not older than the copy held. A court or time
+// patch carries a field or two and no version, and applies as it always did.
+export function _emitLocalMatchPatch(compID, matchID, fields, opts = {}) {
     if (!compID || !matchID || !fields || Object.keys(fields).length === 0) return;
-    const event = { type: 'match_updated', local: true, data: { competitionId: compID, matchId: matchID, result: { id: matchID, ...fields } } };
+    const event = { type: 'match_updated', local: true, data: { competitionId: compID, matchId: matchID, result: { ...fields, id: matchID } } };
+    if (opts.whole === true) event.whole = true;
     for (const cb of _localPatchListeners) {
         try { cb(event); } catch (err) { console.error('local match patch listener failed:', err); }
     }
+}
+
+// ---------------------------------------------------------------------------
+// bc-sseq FR6: a refused write shows the stored match in the same render as
+// its note. The server answers a write the merge held (`applied: false`,
+// superseded) with the match as it is stored (`match`, FR5). That copy is
+// handed, like every copy of a match, to the turned-away record, and shown to
+// the local listeners as a whole-match patch, BEFORE the editor or an alert
+// hears of the refusal and before the entry leaves the queue (which ends the
+// court console's own status move): the note and the sheet never disagree,
+// and no frame shows the match as the refused write left it. Asked by the
+// flush as the answer comes (api_client_flush.jsx _sendEntry) and by every
+// dequeue (_noteOwnStatusAnswer), so the tab that made the write is shown it
+// when another tab sent it; a copy already shown is not shown again.
+// ---------------------------------------------------------------------------
+const _storedShown = new WeakSet();
+
+// _storedMatchOfRefusal: the stored match a held write's answer carries for
+// match `matchID`, or null (an applied answer, a clock refusal, which wrote
+// and read nothing, or an answer carrying no match or another one).
+export function _storedMatchOfRefusal(body, matchID) {
+    if (!body || typeof body !== 'object' || !writeWasSuperseded(body) || writeWasRefusedForClock(body)) return null;
+    const m = body.match;
+    if (!m || typeof m !== 'object' || Array.isArray(m)) return null;
+    return m.id != null && String(m.id) === String(matchID) ? m : null;
+}
+
+// _showStoredMatch: shows the stored match a refusal `body` carries for match
+// (compID, matchID); whether it showed one now.
+export function _showStoredMatch(compID, matchID, body) {
+    if (!compID || !matchID) return false;
+    const m = _storedMatchOfRefusal(body, matchID);
+    if (!m || _storedShown.has(m)) return false;
+    _storedShown.add(m);
+    // The turned-away record reads it as it reads a fetched competition's
+    // copies (one competition holding this match).
+    late._tellTurnedAwayIn({ poolMatches: [m] }, compID);
+    _emitLocalMatchPatch(compID, matchID, m, { whole: true });
+    return true;
 }
 
 // The court and time entries still queued for a match hold, the later winning.

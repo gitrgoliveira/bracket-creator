@@ -111,6 +111,29 @@ describe('queueAlertMessage', () => {
         expect(queueAlertToastType({ kind: 'displaced', count: 2, terminalCount: 2 })).toBe('info');
     });
 
+    it("a held court finish that replaced another device's result says so", () => {
+        const alert = { kind: 'displaced', count: 1, terminalCount: 1, byCourt: 1 };
+        expect(queueAlertMessage(alert)).toBe(
+            "A held result was saved as the court's. A different result recorded on another device for that match was moved to the match's history.");
+        expect(queueAlertMessage(alert)).not.toMatch(/later change/i);
+        expect(queueAlertToastType(alert)).toBe('info');
+    });
+
+    it("several held court finishes say how many replaced other devices' results", () => {
+        const alert = { kind: 'displaced', count: 2, terminalCount: 2, byCourt: 2 };
+        expect(queueAlertMessage(alert)).toBe(
+            "2 held results were saved as the court's. Different results recorded on other devices for those matches were moved to each match's history.");
+        expect(queueAlertMessage(alert)).not.toMatch(/later change/i);
+        expect(queueAlertToastType(alert)).toBe('info');
+    });
+
+    it('a mix of court and non-court displaced finishes or none from the court keeps displacedAlertText', () => {
+        expect(queueAlertMessage({ kind: 'displaced', count: 2, terminalCount: 2, byCourt: 1 })).toBe(
+            "2 held results were saved. Later changes to those matches were moved to each match's history.");
+        expect(queueAlertMessage({ kind: 'displaced', count: 1, terminalCount: 1, byCourt: 0 })).toBe(
+            "A held result was saved. A later change to that match was moved to the match's history.");
+    });
+
     it('a write turned away by a finished match says to tap Correct', () => {
         expect(queueAlertMessage({ kind: 'superseded', count: 1, terminalCount: 1, matchClosed: true })).toMatch(/tap Correct\.$/);
     });

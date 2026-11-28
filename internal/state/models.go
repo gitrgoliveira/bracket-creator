@@ -1836,6 +1836,14 @@ type MatchResult struct {
 	// the baseline the write leaves: with it, the basis's Seq counts that
 	// device's own events up to Seq as seen. Request-only.
 	WriteSession string `json:"-" yaml:"-"`
+	// CourtStanding is the court's standing (bc-sseq FR8): set by the /score
+	// handler once it has judged that the write came from a court console of
+	// the tablet that runs the match's shiaijo, never bound from a body. The
+	// baseline the write leaves carries it (ScoreBaseline.Court): a court
+	// result displaces an ordinary result it never saw instead of being its
+	// rival. Request-only, cleared by ClearRequestFields, so no stored copy
+	// and no server-built write inherits it.
+	CourtStanding bool `json:"-" yaml:"-"`
 	// Merge is what engine.mergeMatchWrite decided for THIS write: which
 	// groups applied, which were held (kept in the match history because a
 	// newer change to them is stored), and the held values. Set on the
@@ -2055,6 +2063,33 @@ type MatchResult struct {
 	// MaxTurnedAway in all, shared fairly between sessions. Derived by
 	// engine.ReplayScoring like EventSeqs; persisted after EventSeqs.
 	TurnedAway map[string]string `json:"turnedAway,omitempty" yaml:"-"`
+	// ReplacedResult names the newest result the court's result replaced
+	// (bc-sseq FR8): a finish or a decision another device recorded, applied
+	// on arrival, that a later-stamped result from the court console of the
+	// tablet running the match's shiaijo displaced without having seen it.
+	// Its own answer said applied, so the device that made it learns of the
+	// change from here, on whatever copy of the match reaches it next, by
+	// the write id it kept, and tells its operator once. Carries no name.
+	// nil when no court result displaced one, or the one displaced was sent
+	// without a write id. Derived by engine.ReplayScoring like TurnedAway;
+	// persisted after TurnedAway.
+	ReplacedResult *ReplacedResult `json:"replacedResult,omitempty" yaml:"-"`
+}
+
+// ReplacedResult is MatchResult.ReplacedResult: the write id of the result
+// the court's result replaced and the stamp that result was recorded at.
+type ReplacedResult struct {
+	WriteID string `json:"writeId,omitempty"`
+	Stamp   int64  `json:"stamp,omitempty"`
+}
+
+// Clone returns a copy of r that shares nothing with it (nil stays nil).
+func (r *ReplacedResult) Clone() *ReplacedResult {
+	if r == nil {
+		return nil
+	}
+	c := *r
+	return &c
 }
 
 // MaxTurnedAwayPerSession and MaxTurnedAway bound MatchResult.TurnedAway:
@@ -2398,11 +2433,13 @@ type BracketMatch struct {
 	// bracket.json. nil on a legacy match (every group reads ModifiedAt).
 	GroupStamps map[string]int64 `json:"groupStamps,omitempty"`
 	// MarkIDs, ScoreVersion, EventSeqs and TurnedAway mirror MatchResult's
-	// (bc-evts), persisted in bracket.json.
-	MarkIDs      *MarkIDs          `json:"markIds,omitempty"`
-	ScoreVersion int               `json:"scoreVersion,omitempty"`
-	EventSeqs    map[string]int64  `json:"eventSeqs,omitempty"`
-	TurnedAway   map[string]string `json:"turnedAway,omitempty"`
+	// (bc-evts), persisted in bracket.json, and ReplacedResult (bc-sseq FR8)
+	// with them.
+	MarkIDs        *MarkIDs          `json:"markIds,omitempty"`
+	ScoreVersion   int               `json:"scoreVersion,omitempty"`
+	EventSeqs      map[string]int64  `json:"eventSeqs,omitempty"`
+	TurnedAway     map[string]string `json:"turnedAway,omitempty"`
+	ReplacedResult *ReplacedResult   `json:"replacedResult,omitempty"`
 	// PlaceholderA / PlaceholderB / PlaceholderWinner record what SideA / SideB /
 	// Winner held at DRAW time, before any pool resolved. They are written once,
 	// by engine.buildBracketFromDraw, for a pool-fed (mixed) knockout whose
@@ -2502,8 +2539,25 @@ type Announcement struct {
 	ExpiresAt time.Time `json:"expiresAt" yaml:"expires_at"`
 }
 
+// HeldReasonCourtResult is the wire code (heldReason) of a result held because
+// the court's result replaced it (bc-sseq FR8): a later-stamped result from the
+// court console of the tablet that runs the match's shiaijo, which never saw
+// it. The result is kept in the match's history.
+const HeldReasonCourtResult = "court_result"
+
+// HeldReasonBuiltOn is the wire code (heldReason) of a court result held
+// because other matches were already built on the result it would replace
+// (bc-sseq FR8, engine.holdBuiltOnResult): a later Swiss round was paired from
+// it, a tie-break or representative row was added from the standings it fed,
+// or the competition has finished. The court's result is kept in the match's
+// history, and the operator corrects from the note. Only a write with the
+// court's standing is held so; an ordinary device's late result keeps today's
+// rules.
+const HeldReasonBuiltOn = "downstream_built_on"
+
 // ClearRequestFields drops the fields that belong to ONE write and never to
-// the match it is stored as: Changed, WriteDoor, Merge and ClearsWithdrawal.
+// the match it is stored as: Changed, WriteDoor, Merge, ClearsWithdrawal, the
+// write's tag (WriteID, Basis, WriteSession) and the court's standing.
 // The ONE list of them, called on every stored copy (the pool write's
 // whole-struct overwrite and every pool-match copy the store hands out), so a
 // writer building its write from a stored match never inherits another
@@ -2512,17 +2566,19 @@ func (m *MatchResult) ClearRequestFields() {
 	m.Changed, m.WriteDoor, m.Merge, m.LineupWarning = nil, "", nil, ""
 	m.ClearsWithdrawal = false
 	m.WriteID, m.Basis, m.WriteSession = "", nil, ""
+	m.CourtStanding = false
 }
 
 // ClearDerivedScoreFields drops what only the score replay derives (bc-evts):
 // the mark ids, the match's and every bout's, the event-log version and the
-// highest event seq the log holds per device session, and the taps it turned
-// away. The HTTP doors that
+// highest event seq the log holds per device session, the taps it turned
+// away and the result the court's result replaced. The HTTP doors that
 // bind a whole MatchResult from a body (/score, each bulk-score entry) call it
 // as they bind, so no client can name a mark or claim a version or a seq; the
 // engine stores them only from the replay's own write.
 func (m *MatchResult) ClearDerivedScoreFields() {
 	m.MarkIDs, m.ScoreVersion, m.EventSeqs, m.TurnedAway = nil, 0, nil, nil
+	m.ReplacedResult = nil
 	for i := range m.SubResults {
 		m.SubResults[i].MarkIDs = nil
 	}

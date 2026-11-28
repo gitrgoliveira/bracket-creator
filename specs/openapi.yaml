@@ -65,6 +65,18 @@ info:
     the same build. A tab running another build's bundle reloads, or tells the
     operator to; the server refuses nothing for its version.
 
+    **The event seq header.** The four reads a page fetches again after an
+    event (GET /api/viewer/tournament, /api/viewer/competitions,
+    /api/viewer/competitions/{id} and /api/viewer/court/{court}/matches)
+    carry `X-Event-Seq`, the newest event the answer already holds, so a page
+    skips a refetch for an event at or below it.
+
+    **Compressed answers.** A JSON answer under /api/ of 1,024 bytes or more is
+    sent with `Content-Encoding: gzip` to a caller whose `Accept-Encoding`
+    allows gzip. A smaller answer, a non-JSON answer and the event stream
+    (GET /api/events) are sent as they are. Every JSON answer names
+    `Accept-Encoding` in `Vary`, compressed or not.
+
     **Self-run mode.** When the tournament is created with `mode: self-run`, the
     main-password gate is bypassed for the operational play surface (scoring,
     start/complete, generate-draw, etc.) so participants can drive their own flow without
@@ -444,6 +456,12 @@ paths:
         - `bracket_quarantined`: a `bracket.json` that would not parse was
           renamed aside and the knockout stage rebuilt; every device should
           reload.
+        - `court_control_updated`: the court console tab that runs a shiaijo
+          changed (a take, a free shiaijo claimed, a release, or every
+          shiaijo freed because the whole tournament was replaced).
+          `data: { court, holderKey, device, since }`, `holderKey` empty while
+          nobody runs it. Organiser only: every other stream, a self-run
+          tournament's included, is sent the event with no data.
         - `resync_required` and `heartbeat`: stream control frames. A
           `resync_required` says the replay ring cannot close the gap since
           `Last-Event-ID`, so the client refetches everything.
@@ -593,7 +611,11 @@ paths:
       tags: [tournament]
       summary: Create tournament configuration
       description: |
-        Creates a new tournament.
+        Creates a new tournament. When no tournament is stored, every shiaijo
+        is freed (see `/api/courts/{court}/control`): shiaijo letters repeat,
+        so whoever ran a shiaijo before runs nothing in the new tournament. A
+        POST over a stored tournament keeps its competitions, so every holder
+        is kept too.
 
         **File mode (default)**: allowed without the
         `X-Tournament-Password` header when no tournament has been
@@ -1031,6 +1053,9 @@ paths:
         via a multipart form upload. The server accepts files under any field name(s).
         One of the uploaded files must be named `manifest.yaml` (or `.yml`); it declares
         which competitions to create and which participant/seed CSV files to associate with each.
+        An import only adds competitions next to the existing ones, so it
+        leaves who runs each shiaijo alone (see
+        `/api/courts/{court}/control`).
 
         Each competition row is validated against the same rules
         `POST /api/competitions` applies, and two manifest keys are worth
@@ -1362,6 +1387,10 @@ paths:
       summary: Execute tournament restore
       description: |
         Restores a tournament or single competition from a backup archive.
+        A restore that replaces the tournament frees every shiaijo (see
+        `/api/courts/{court}/control`); a restore of one competition leaves
+        who runs each shiaijo alone. Who runs each shiaijo is never in a
+        backup.
 
         Saves an automatic safety backup into `backups/` (named `<timestamp>-before-restore-<scope>.zip`)
         before any live directory is replaced or removed. Every rename is journaled, so a
@@ -2022,6 +2051,234 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+
+  # ── Court control (Admin, requires auth) ───────────────────────────────────
+
+  /api/courts/{court}/control:
+    parameters:
+      - name: court
+        in: path
+        required: true
+        description: A shiaijo the tournament lists (its letter, A to P).
+        schema:
+          type: string
+    get:
+      tags: [tournament]
+      summary: Who runs a shiaijo
+      description: |
+        The court console tab that runs the shiaijo, as any organiser sees it:
+        `youHold`, `sameDevice`, `youWereDisplaced` and `tabWasDisplaced` are
+        false, since the GET names no tab. A console learns its own place from
+        the PUT, which it sends as its claim and every 30 seconds as its
+        heartbeat.
+
+        Organiser only, in a self-run tournament too.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: The shiaijo's control.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourtControl'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: "`unknown_court`: the tournament does not list this shiaijo."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [tournament]
+      summary: Claim, keep or take a shiaijo
+      description: |
+        A court console's claim of the shiaijo it shows. One tab runs each
+        shiaijo (the green bar), and the server tracks the tablet that tab is
+        on and when its standing started (the score and decision endpoints
+        judge a write by it: see `courtControl` on
+        `/api/competitions/{id}/matches/{mid}/score`).
+
+        - A shiaijo nobody runs is taken at once, unless this tab or this
+          tablet lost it earlier by a take: then only `take: true` takes it.
+        - The holder's own claim is its heartbeat: it refreshes `lastActiveAt`,
+          records `pageId`, `device` and `deviceId` when they changed, keeps
+          the standing where it was, and announces nothing (other consoles read
+          a new `device` word on their next claim).
+        - A shiaijo another tab runs is taken only with `take: true` (Take
+          control). A take by another tablet records the court's standing start
+          at `takenAt` and puts the former tablet on the displaced tablets
+          list; a take between two tabs of one tablet moves the green bar and
+          keeps the standing start where it was.
+        - Claiming one shiaijo frees any other this tab held and ends at once
+          the grace of any other this tab gave back, except for those named
+          in `keep` (the shiaijo its tablet still has queued results for).
+          `keep` never lets a tab take or hold a shiaijo it did not already
+          hold. The holder's heartbeat frees nothing and ends no grace.
+        - During the 10-second grace after the holder's tab gave the shiaijo
+          back (DELETE), a claim from that tab (a reload: same `tabId`, new
+          `pageId`) takes it back at once, with its standing start as it was.
+          So does a claim from another tab of its tablet, unless that tab
+          lost the shiaijo to a take: then only `take: true` takes it. A
+          claim from another tablet is answered as for a shiaijo that tablet
+          runs (`holderKey`, `device`, `since` and `lastActiveAt` of the hold
+          given back, with `releasedAt` set) and takes nothing; `take: true`
+          takes it at once, as from a running holder. A score or decision
+          write from that tablet in the grace has the standing from the same
+          start and takes the shiaijo back, unless its tab lost the shiaijo
+          to a take or holds another shiaijo: then it has the standing and
+          takes nothing. One from another tablet is ordinary.
+
+        The control never lapses on a timer while a tab holds it. A change of
+        holder is announced
+        as `court_control_updated`; a heartbeat announces nothing. The tab and
+        tablet ids are compared through one-way keys and never stored,
+        answered or broadcast. Organiser only, in a self-run tournament too.
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tabId, pageId, deviceId]
+              properties:
+                tabId:
+                  type: string
+                  description: The console tab's id, a lowercase UUID v4 kept for the tab's life.
+                pageId:
+                  type: string
+                  description: >
+                    The page load's id, a lowercase UUID v4, so a reload's late
+                    release never frees the new page's claim.
+                deviceId:
+                  type: string
+                  description: >
+                    The tablet's id, a lowercase UUID v4 shared by every tab of
+                    the browser. Used to tell tabs of one tablet apart from
+                    another tablet; the score and decision endpoints judge
+                    court standing by it.
+                take:
+                  type: boolean
+                  description: Take control from whoever runs the shiaijo.
+                takenAt:
+                  type: integer
+                  format: int64
+                  description: >
+                    Required with `take`: when the take was made, server-relative
+                    unix milliseconds as the outbox stamps a write, held to at
+                    most the server's clock plus 5 seconds.
+                device:
+                  type: string
+                  enum: [ipad, android-tablet, iphone, android-phone, mac, windows, device]
+                  description: The kind of device, shown to the other consoles. Anything else reads `device`.
+                keep:
+                  type: array
+                  maxItems: 16
+                  items:
+                    type: string
+                  description: >
+                    Optional list of shiaijo letters this tab must keep
+                    holding when claiming another shiaijo, because its tablet
+                    still has court-stamped results queued for them. Entries
+                    this tab does not already hold are ignored; `keep` never
+                    takes or creates a hold. More than 16 entries or a
+                    non-string entry is refused with 400.
+      responses:
+        '200':
+          description: The shiaijo's control as this tab sees it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourtControl'
+        '400':
+          description: "`invalid_court_control`: the body is not JSON of this shape, an id is not a lowercase UUID v4, a take carries no `takenAt`, or `keep` has more than 16 entries or a non-string entry."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: "`unknown_court`: the tournament does not list this shiaijo."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [tournament]
+      summary: Give a shiaijo back
+      description: |
+        The console's release as its tab closes or reloads. It gives the
+        shiaijo back only when this tab runs it and `pageId` names the current
+        page load; anything else changes nothing and answers the control as
+        the GET does (during a grace, the hold given back with `releasedAt`
+        set, and `youHold` false). A shiaijo given back is kept for this tablet for a grace of
+        10 seconds (see the PUT), so a reload over a slow network claims it
+        back before any other console: nothing is announced until the grace
+        ends, and then `court_control_updated` announces it free and every
+        open console claims it. The answer to the release is the shiaijo as
+        the file has it, free. The grace is kept in memory only: a server
+        restart during one ends it, and the shiaijo is free. Replacing the
+        whole tournament ends every grace at once.
+        Organiser only, in a self-run tournament too.
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tabId, pageId]
+              properties:
+                tabId:
+                  type: string
+                  description: The console tab's id, as on the PUT.
+                pageId:
+                  type: string
+                  description: The page load's id, as on the PUT.
+      responses:
+        '200':
+          description: The shiaijo's control after the release.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CourtControl'
+        '400':
+          description: "`invalid_court_control`: the body is not JSON of this shape, or an id is not a lowercase UUID v4."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: "`unknown_court`: the tournament does not list this shiaijo."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   # ── Competitions (Admin, requires auth) ────────────────────────────────────
 
@@ -4154,6 +4411,19 @@ paths:
           never showed is kept in the history as not applied
           (`beforeBaseline`). A write without them is judged as before.
 
+          `courtControl` (also request-only, optional, a CourtControlStamp)
+          is the court console's `{tabId, deviceId}`. With the court's
+          standing (the tablet runs the match's shiaijo and the write was
+          made at or after the standing's start; see CourtControlStamp) a
+          finish replaces a result another device recorded that it never
+          saw, which is then kept in the history and answered
+          `heldReason: court_result` should it arrive later, instead of
+          being turned away as its rival; such a finish over a result other
+          matches were built on is held `downstream_built_on`. A shiaijo
+          nobody runs is claimed by the write. Without the standing the
+          write is an ordinary one. An id that is not a lowercase UUID v4 is
+          a 400.
+
           `changed` (also request-only) names the GROUPS this write changes,
           and the server merges the write group by group (see the MergeGroup
           schema): each named group applies only when the write's
@@ -5750,12 +6020,20 @@ paths:
                           description: On a `superseded` entry, the groups held.
                         heldReason:
                           type: string
-                          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
+                          enum: [match_closed, downstream_knockout_played, downstream_knockout_running, court_result, downstream_built_on]
                           description: >
                             On a `superseded` entry held because a finish or a
                             decision stamped before it had already closed the
                             match (see RefusedWrite.heldReason); `error` then
                             carries that sentence.
+                        match:
+                          readOnly: true
+                          description: >
+                            On a `superseded` entry, the match as it is stored
+                            once the entry was held, read under the same lock
+                            as the entry's write (see RefusedWrite.match).
+                          allOf:
+                            - $ref: '#/components/schemas/MatchResult'
                   heldGroups:
                     type: array
                     description: >
@@ -5778,7 +6056,7 @@ paths:
                           description: As MatchResult.displacedGroups.
                         heldReason:
                           type: string
-                          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
+                          enum: [match_closed, downstream_knockout_played, downstream_knockout_running, court_result, downstream_built_on]
                           description: As RefusedWrite.heldReason.
                   warnings:
                     type: array
@@ -5965,6 +6243,18 @@ paths:
                   $ref: '#/components/schemas/ScoreBasis'
                 session:
                   $ref: '#/components/schemas/WriteSession'
+                courtControl:
+                  allOf:
+                    - $ref: '#/components/schemas/CourtControlStamp'
+                  description: >
+                    Optional, request-only, never stored: the court console's
+                    stamp, judged on arrival as on PUT .../score (see
+                    CourtControlStamp). With the court's standing the decision
+                    replaces a result another device recorded that it never
+                    saw, instead of being turned away as its rival. The
+                    both-sides-barred `hikiwake` gives it no standing. An id
+                    that is not a lowercase UUID v4 is a 400 on every
+                    decision, that hikiwake included.
                 decision:
                   type: string
                   enum: [kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, hikiwake, daihyosen]
@@ -6180,7 +6470,7 @@ paths:
                           and kept in the match's history. As RefusedWrite.heldGroups.
                       heldReason:
                         type: string
-                        enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
+                        enum: [match_closed, downstream_knockout_played, downstream_knockout_running, court_result, downstream_built_on]
                         description: As RefusedWrite.heldReason.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
@@ -6312,7 +6602,7 @@ paths:
                           `heldReason`. As MatchResult.displacedGroups.
                       heldReason:
                         type: string
-                        enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
+                        enum: [match_closed, downstream_knockout_played, downstream_knockout_running, court_result, downstream_built_on]
                         description: As RefusedWrite.heldReason.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
@@ -8078,6 +8368,8 @@ paths:
           headers:
             Cache-Control:
               $ref: '#/components/headers/NoStore'
+            X-Event-Seq:
+              $ref: '#/components/headers/EventSeq'
           description: Public tournament info, or null when no tournament is configured yet.
           content:
             application/json:
@@ -8109,6 +8401,8 @@ paths:
           headers:
             Cache-Control:
               $ref: '#/components/headers/NoStore'
+            X-Event-Seq:
+              $ref: '#/components/headers/EventSeq'
           description: List of competitions.
           content:
             application/json:
@@ -8143,6 +8437,8 @@ paths:
           headers:
             Cache-Control:
               $ref: '#/components/headers/NoStore'
+            X-Event-Seq:
+              $ref: '#/components/headers/EventSeq'
           description: Full competition state.
           content:
             application/json:
@@ -8264,6 +8560,8 @@ paths:
           headers:
             Cache-Control:
               $ref: '#/components/headers/NoStore'
+            X-Event-Seq:
+              $ref: '#/components/headers/EventSeq'
           description: Competitions with a match on the court, full match data each.
           content:
             application/json:
@@ -8450,6 +8748,21 @@ components:
         has none). Set on every answer of the Mobile/Admin API.
       schema:
         type: string
+    EventSeq:
+      description: >
+        The `seq` of the newest event on the stream (GET /api/events) when the
+        read began, `0` before the first. Every event is sent after its change
+        is saved, so the answer already holds every change announced at or
+        below this seq: a page that applied it needs no refetch for those
+        events. A seq lower than one the page already holds means only that
+        this answer's build began before an event the page has since
+        received, so it may be stale for that event. Callers that share one
+        build of the answer are told the same seq. Exposed to browsers
+        through `Access-Control-Expose-Headers`.
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
   responses:
     InvalidPassword:
       description: >
@@ -8670,7 +8983,7 @@ components:
             of them held and kept in the match's history.
         heldReason:
           type: string
-          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
+          enum: [match_closed, downstream_knockout_played, downstream_knockout_running, court_result, downstream_built_on]
           description: >
             Present on `superseded` when the groups were held not because a
             newer change is stored but because a finish or a decision stamped
@@ -8683,7 +8996,24 @@ components:
             finish or decision stamped before it, from a device that did not
             see it, was held because the next knockout match had already been
             played or started. The stored result stands and the write is kept
-            in the history.
+            in the history. `court_result` says a result from a device without
+            the court's standing was replaced by a later-stamped result from
+            the court console of the tablet that runs the match's shiaijo,
+            which never saw it (it arrived after the court's result, or the
+            court's arrived after it); the court's result counts, this one
+            is kept in the history, and `message` names the match's shiaijo
+            (bulk-score's entry, which knows no shiaijo, words it without
+            one). `downstream_built_on` is answered to that
+            court result instead when other matches were already built on the
+            result it would replace: a later Swiss round was paired from it,
+            a tie-break or representative match was added from the standings
+            it fed, or the competition finished on it. The stored result
+            stands, the court's result is kept in the history, and `message`
+            says which case it was and that Correct uses it. Only a write with
+            the court's standing is held so; any other device's later result
+            keeps the closed-match rule (`match_closed`).
+        replacedResult:
+          $ref: '#/components/schemas/ReplacedResult'
         turnedAway:
           type: object
           readOnly: true
@@ -8700,6 +9030,23 @@ components:
           readOnly: true
           description: >
             Present with `turnedAway`: the match's `scoreVersion` it was read at.
+        match:
+          readOnly: true
+          description: >
+            Present on `superseded` from the match writes (PUT /score,
+            /quick-score, POST /decision and both /daihyosen paths): the match
+            as it is stored once the write was held, read under the same lock
+            as the write, so the device can show the stored match at the same
+            moment as `message` and the two never disagree. It is the shape
+            the door answers an applied write with (`rev` and `revSession`
+            omitted; a knockout match carries its `court` and `scheduledAt`);
+            an anonymous self-run participant on PUT /score, and every caller
+            of the /daihyosen paths, gets it without `correctionReason` and
+            `decisionReason`, as the SSE stream carries it. Omitted when the
+            stored match could not be read, and on `clock_skew`, where nothing
+            was judged.
+          allOf:
+            - $ref: '#/components/schemas/MatchResult'
 
     MatchHistoryEntry:
       type: object
@@ -9744,6 +10091,57 @@ components:
               description: >
                 True when the call's time (its `modifiedAt` plus the duration)
                 was already over when it arrived, so nothing is shown.
+
+    CourtControl:
+      type: object
+      description: >
+        Which court console tab runs a shiaijo, as one caller sees it. Times
+        are unix milliseconds on the server's clock.
+      properties:
+        court:
+          type: string
+        holderKey:
+          type: string
+          description: >
+            A one-way key of the holding tab's id (16 hex characters), empty
+            while nobody runs the shiaijo. It grants nothing.
+        device:
+          type: string
+          enum: ['', ipad, android-tablet, iphone, android-phone, mac, windows, device]
+          description: The holder's kind of device, empty while nobody runs it.
+        youHold:
+          type: boolean
+          description: This tab runs the shiaijo.
+        sameDevice:
+          type: boolean
+          description: The holder is a tab of this tablet (this tab or another).
+        youWereDisplaced:
+          type: boolean
+          description: >
+            This tablet lost the shiaijo to another tablet's take. Always false
+            while this tablet runs the shiaijo.
+        tabWasDisplaced:
+          type: boolean
+          description: >
+            This tab lost the shiaijo to another tab of the same tablet while
+            the tablet itself is not displaced and does not currently hold it.
+        since:
+          type: integer
+          format: int64
+          description: When the holder took the shiaijo, 0 while nobody runs it.
+        lastActiveAt:
+          type: integer
+          format: int64
+          description: >
+            The holder's last claim or heartbeat, kept in memory only: after a
+            restart it starts at `since`.
+        releasedAt:
+          type: integer
+          format: int64
+          description: >
+            When the holder's tab gave the shiaijo back, while the 10-second
+            grace still keeps it for its tablet; 0 when the shiaijo is held
+            or free. The holder fields then describe the hold given back.
 
     Announcement:
       type: object
@@ -10822,6 +11220,8 @@ components:
             later taps never push a device's own out) and 512 in all. Absent
             when none. Derived by the server; a value a
             write carries is ignored.
+        replacedResult:
+          $ref: '#/components/schemas/ReplacedResult'
         groupStamps:
           type: object
           readOnly: true
@@ -10848,7 +11248,7 @@ components:
         heldReason:
           type: string
           readOnly: true
-          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
+          enum: [match_closed, downstream_knockout_played, downstream_knockout_running, court_result, downstream_built_on]
           description: >
             On a write's response only, beside `heldGroups` or
             `displacedGroups`: present when they were held or moved because a
@@ -11404,6 +11804,8 @@ components:
           additionalProperties:
             type: string
           description: See MatchResult.turnedAway.
+        replacedResult:
+          $ref: '#/components/schemas/ReplacedResult'
         placeholderA:
           type: string
           readOnly: true
@@ -11424,6 +11826,68 @@ components:
           description: >
             The draw-time counterpart of `winner`, non-empty only where the draw
             pre-filled a bye winner. See `placeholderA`.
+
+    ReplacedResult:
+      type: object
+      readOnly: true
+      description: >
+        The newest result the court's result replaced: a finish or a decision
+        another device recorded, applied on arrival, that a later-stamped
+        result from the court console of the tablet running the match's
+        shiaijo displaced without having seen it. Its own answer said applied,
+        so the device that made it reads the change here, on whatever copy of
+        the match reaches it next, by the write id it kept, and tells its
+        operator once. Carries no name, so a public read shows it unchanged.
+        Absent when no court result displaced one, or the one displaced was
+        sent without a `writeId`. Derived by the server; a value a write
+        carries is ignored.
+      properties:
+        writeId:
+          type: string
+          description: The `writeId` the replaced result was sent with.
+        stamp:
+          type: integer
+          format: int64
+          description: The stamp (server-relative unix ms) the replaced result was made at.
+
+    CourtControlStamp:
+      type: object
+      description: >
+        A court console's stamp on a result write (PUT .../score, POST
+        .../decision): the tab that made it and the tablet that tab belongs to,
+        the same ids the console claims its shiaijo with (PUT
+        /api/courts/{court}/control). Request-only, never stored or echoed.
+        The server judges it on arrival against who runs the match's shiaijo
+        as it is stored then: the write has the court's standing when its
+        tablet runs the shiaijo, through whichever of its tabs, and it was
+        made (`modifiedAt`) at or after the standing's start (the take, when
+        another tablet took the shiaijo; otherwise from the start, so a write
+        the tablet queued before its first claim has the standing too). When
+        nobody runs the shiaijo and neither the tab nor the tablet lost it by
+        a take, the write claims it with the writing tab as its holder (a
+        console opened offline). If that tab already holds another shiaijo,
+        the write still has the standing but records no hold. A write on a
+        shiaijo nobody runs, from a tab or a tablet that lost it by a take,
+        is an ordinary one. A shiaijo another tab of the same tablet
+        runs is left with that tab, and the write still has the standing. A
+        shiaijo another tablet runs makes the write an ordinary one. A result
+        with the court's standing replaces a result another device recorded
+        that it never saw, rather than being turned away as its rival
+        (`match_closed`); one that would replace a result other matches were
+        built on is held `downstream_built_on`. Never judged in a self-run
+        tournament. An id that is not a lowercase UUID v4 is a 400 for every
+        caller; a well-formed stamp from a participant (an empty
+        `X-Tournament-Password`) is dropped.
+      required: [tabId, deviceId]
+      properties:
+        tabId:
+          type: string
+          format: uuid
+          description: The court console tab's id, a lowercase UUID v4.
+        deviceId:
+          type: string
+          format: uuid
+          description: The tablet's id, shared by its tabs, a lowercase UUID v4.
 
     CourtMatchSide:
       type: object

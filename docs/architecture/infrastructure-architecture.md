@@ -222,7 +222,7 @@ flowchart TB
 
 | Device | What it runs | Notes |
 |---|---|---|
-| Operator console (1 per court) | admin scoring SPA | tablet/desktop surface; authenticates with the admin password; scores its own shiai-jo |
+| Operator console (1 per court) | admin scoring SPA | tablet/desktop surface; authenticates with the admin password; scores its own shiai-jo. One tablet runs each shiai-jo at a time (a console opened on another device watches only until its operator taps **Take control**), and its finishes and decisions have the last word on that shiai-jo's results (refer to [Order of writes](network-architecture.md#order-of-writes)) |
 | Display screen (1 per court, optional) | public display / scoreboard view | a browser at a display URL; read-only, no auth. **Preferred: drive it from the operator console's own machine** via an HDMI cable to a TV or monitor, so the board survives a Wi-Fi outage (refer to [Keep the court scoreboard alive on the same machine](#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi)). A standalone smart-TV browser or separate mini-PC also works but loses that offline path |
 | Spectator phones | public viewer (mobile-first) | can be on cellular; they don't need venue Wi-Fi when the app is cloud-hosted |
 
@@ -250,7 +250,7 @@ scoreboard freezes during a Wi-Fi outage:
 
 - **Same machine as the operator console (recommended).** Connect a TV or monitor to the
   operator's laptop or mini-PC with an **HDMI cable**, extend the desktop, and open the court's
-  display URL in a second browser window on that same machine. The operator console and the display board are then two tabs in the same browser on the same computer. They share a private same-origin channel, so every score the operator records reaches the board **directly, on the machine, with no network hop**. If the venue Wi-Fi drops mid-match, that court's
+  display URL in a second browser window on that same machine. The operator console and the display board are then two tabs in the same browser on the same computer (the display takes no control of the shiai-jo, so it never stops the console from scoring). They share a private same-origin channel, so every score the operator records reaches the board **directly, on the machine, with no network hop**. If the venue Wi-Fi drops mid-match, that court's
   scoreboard keeps updating from the operator's entries for as long as the scoring tab stays
   open. The board shows a small amber dot while it is running on this local feed (refer to
   [the scoreboard status dot](../user-guide/spectators/following.md#scoreboards-and-court-displays)).
@@ -307,6 +307,7 @@ model lists every file and what its columns mean.
   append-only log of its scoring taps and its writes (JSON lines) beside its audit history. Every write made
   inside a transaction is made durable through a write-ahead log replayed on startup. The disk survives reboots and stop/start.
 - **Backups.** The app takes a daily copy of the whole tournament into `tournament-data/backups/` when the data changed, and another at a normal shutdown if anything changed since the newest daily copy. The admin console also downloads a backup on demand. Those copies sit on the same disk, so keep a downloaded archive or a disk snapshot off the VM as well. A plain copy of `tournament-data/` taken while the server runs can catch a multi-file write half done; stop the server first. Refer to [Backup and restore](../user-guide/organisers/backup-and-restore.md).
+- **Who runs each shiai-jo is on disk too.** `court-control.json` at the root of `tournament-data/` records which tablet runs each shiai-jo, so a server restart changes nothing for the court consoles, except that a shiai-jo given back in the 10 seconds before it (the grace a reloading tablet has to claim it back, kept in memory only) is free after it. It is not part of any backup, and replacing the whole tournament clears it (refer to [The court-control.json file](data-model.md#the-court-controljson-file)).
 - **Disk sizing is not about data volume.** Tournament state is tiny (KB–MB). The cloud disks
   (30 GB on GCP, 50 GB on Oracle) are the free-tier **boot-disk** allowances (they hold the OS,
   Docker, and the app image, with `tournament-data/` alongside). The module uses the free
@@ -326,6 +327,19 @@ flowchart TB
 Set a **billing budget alert** (for example, $1) on cloud deployments so you're warned if usage ever
 exceeds the free allowance. `SSE_MAX_CLIENTS` bounds fan-out cost (default 5000; ~4–10 KB
 resident per client).
+
+Most of the egress is the answers each viewer fetches after a real-time event, not the event
+itself. In a measured tournament of two 12-competitor round robins, one point is a 612-byte event.
+The competition refetch it causes is 25.7 KB as sent and 2.1 KB gzipped, and the competitions-list
+refetch is 50.9 KB and 3.5 KB. With 1,000 viewers fetching both after one point, that is 76.6 MB as
+sent and 5.5 MB gzipped, against 0.6 MB for the events themselves. Answers are gzipped for any
+browser that accepts it, which cuts a refetch to about 8% of its size. The embedded page files are
+not compressed, so a first load is unchanged. Compressing a 317 KB list takes under 1 ms of CPU on an Apple M1 Pro,
+once for all the viewers that ask for it at the same moment. A page also fetches once per burst of
+events rather than once per event, and not at all for an event its last answer already holds. Five
+points scored in quick succession cost each viewer one competition fetch instead of five, so 1,000
+viewers download 2.1 MB gzipped instead of 10.3 MB (25.7 MB instead of 128.3 MB as sent). Refer to
+[Scale limit](network-architecture.md#7-scale-limit-egress) for the tables.
 
 ## 6. Configuration (environment variables)
 

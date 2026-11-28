@@ -922,17 +922,20 @@ func readCompetitionConsistently(store *state.Store, compID string, build func()
 // RegisterViewerHandlers wires the public viewer reads with a judge of their
 // own over the file-mode password (tests mount the viewer alone this way).
 // NewRouterWithHub calls registerViewerHandlers with the router's shared
-// judge instead, which checks the password the server was started with.
+// judge instead, which checks the password the server was started with, and
+// its hub, whose head seq the answers name (X-Event-Seq); this form names the
+// seq of a hub of its own, on which nothing is broadcast.
 func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine) {
-	registerViewerHandlers(r, store, eng, newPublicNames(store, nil))
+	registerViewerHandlers(r, store, eng, newPublicNames(store, nil), NewHub())
 }
 
 // registerViewerHandlers wires the public viewer reads. Each judges its caller
 // first (names.judge: the organiser, a reveal scope or the public; a password
 // sent but wrong is 401, and every answer is no-store) and answers for that
 // audience, so a competition that hides names (bc-hnam) answers numbers to
-// the public.
-func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, names *publicNames) {
+// the public. The tournament, list and detail answers name the hub's event
+// seq their read began at (X-Event-Seq, event_seq.go).
+func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, names *publicNames, hub *Hub) {
 	// P2 (mp-9afd): singleflight group for the two expensive viewer read
 	// endpoints. Created once per router setup and shared by all requests
 	// via closure capture. Collapses concurrent identical builds (e.g. the
@@ -940,7 +943,7 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 	// per in-flight window without serving stale data, the key is removed
 	// as soon as the elected caller's fn returns, so each new wave
 	// re-executes.
-	sf := newViewerSingleFlight()
+	sf := newViewerSingleFlight(func() int64 { return headSeq(hub) })
 
 	r.GET("/tournament", func(c *gin.Context) {
 		// Judged like every viewer read (a stale password is 401, the answer
@@ -952,6 +955,9 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		if _, ok := names.judge(c); !ok {
 			return
 		}
+		// Read before the load, so the answer holds every change announced
+		// at or below it (X-Event-Seq).
+		seq := headSeq(hub)
 		t, err := store.LoadTournament()
 		if err != nil {
 			// Logged (not returned to the caller) so the root cause is still
@@ -966,6 +972,7 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// a hash that never reads the password.
 			publicT := *t
 			publicT.Password = ""
+			setEventSeq(c, seq)
 			c.JSON(http.StatusOK, withTournamentVersion(&publicT))
 		} else {
 			// No tournament configured yet is a normal bootstrap state, not an
@@ -973,6 +980,7 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// tournament gate without the browser logging a console 404.
 			// fetchTournament (api_client_tournament.jsx) treats a null payload as "no
 			// tournament" exactly like it did the old 404.
+			setEventSeq(c, seq)
 			c.JSON(http.StatusOK, nil)
 		}
 	})
@@ -989,7 +997,7 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// hidden again never joins a build begun before it (bc-drpb).
 		// On panic inside the elected build, sf.Do returns an error and
 		// all waiters receive it; we map that to 500 below.
-		data, err := sf.Do(viewerFlightKeyAt("competitions", store.ConfigWritesToken(), aud), func() ([]byte, error) {
+		res, err := sf.Do(viewerFlightKeyAt("competitions", store.ConfigWritesToken(), aud), acceptsGzip(c.Request), func() ([]byte, error) {
 			comps, err := buildViewerCompetitionPayloads(store, "", names, aud)
 			if err != nil {
 				return nil, err
@@ -997,7 +1005,7 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			return json.Marshal(comps)
 		})
 
-		serveSingleFlightJSON(c, data, err)
+		serveSingleFlightJSON(c, res, err)
 	})
 
 	r.GET("/competitions/:id", func(c *gin.Context) {
@@ -1341,7 +1349,7 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// build begun before it, and the audience (viewerFlightKey), so a
 		// masked build is never shared with a caller who may read the names.
 		key := viewerFlightKeyFor(fmt.Sprintf("competition:%s@%d", id, store.CompetitionWriteToken(id)), id, aud)
-		data, err := sf.Do(key, func() ([]byte, error) {
+		res, err := sf.Do(key, acceptsGzip(c.Request), func() ([]byte, error) {
 			return readCompetitionConsistently(store, id, build)
 		})
 
@@ -1349,6 +1357,6 @@ func registerViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
-		serveSingleFlightJSON(c, data, err)
+		serveSingleFlightJSON(c, res, err)
 	})
 }

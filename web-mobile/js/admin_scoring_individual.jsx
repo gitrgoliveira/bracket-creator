@@ -161,7 +161,7 @@ function startedScore(patch) {
   };
 }
 
-export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, startsNext = true, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false }) {
+export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, startsNext = true, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null, allowCourtForce = false, readOnly = false }) {
   // bc-strt: a match whose start has landed is RUNNING, even while the host's
   // list still says scheduled (it refetches a moment after each save). The
   // editors send a point only for a match they see as running, so a point
@@ -1200,7 +1200,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
   React.useLayoutEffect(() => {
-    kbRef.current = { delegated: isTeam || isEngi, submitting, canFinish, isDrawToggled, needsWinner, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, askCorrectionReason, applyDrawToggle };
+    kbRef.current = { delegated: isTeam || isEngi, submitting, readOnly, canFinish, isDrawToggled, needsWinner, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, askCorrectionReason, applyDrawToggle };
   });
 
   useEffect(() => {
@@ -1231,6 +1231,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
         if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.goPrev(); return; }
         if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.goNext(); return; }
       }
+
+      if (s.readOnly) return;
 
       // Scoring shortcuts blocked when any interactive element has focus
       if (window.isInteractiveTarget(ev.target)) return;
@@ -1284,11 +1286,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // editor is shown from the first render with no kendo-editor flash.
   // The team check is skipped for engi (engi is never a team).
   if (isEngi) {
-    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} startsNext={startsNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} password={password} selfReport={selfReport} hostUnsavedRef={hostUnsavedRef} />;
+    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} startsNext={startsNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} password={password} selfReport={selfReport} hostUnsavedRef={hostUnsavedRef} readOnly={readOnly} />;
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} startsNext={startsNext} onAfterDecision={onAfterDecision}  prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} hostUnsavedRef={hostUnsavedRef} allowCourtForce={allowCourtForce} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} startsNext={startsNext} onAfterDecision={onAfterDecision}  prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} hostUnsavedRef={hostUnsavedRef} allowCourtForce={allowCourtForce} readOnly={readOnly} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers
@@ -1330,6 +1332,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
         </div>
 
         <div className="editor-modal__body">
+          <fieldset className="shiaijo-control-scope" disabled={readOnly}>
           {/* mp-62vr: rep-player pickers for a team daihyosen/tiebreaker rep
               bout. The sides are TEAM names; the operator records which player
               each team fields, picked from that team's roster. Shiro = sideB,
@@ -1337,7 +1340,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               rides every running write (repBlock), so it is saved like a
               point, not held until the next one. */}
           {m.repIsTeam && (
-            <div data-testid="rep-bout-picker" className="rep-bout-picker" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+            <div data-testid="rep-bout-picker" className="rep-bout-picker" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: "var(--ink-2)" }}>
                 <span>Shiro rep: {m.sideB?.name || ""}</span>
                 <select
@@ -1394,7 +1397,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (
-                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={(ev) => tapIppon(ev, s.key, cc)} disabled={boutDecided || decidedByHantei || s.key === lockedKey}>{cc}</button>
+                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={(ev) => tapIppon(ev, s.key, cc)} disabled={readOnly || boutDecided || decidedByHantei || s.key === lockedKey}>{cc}</button>
                         ))}
                       </div>
                     </div>
@@ -1488,6 +1491,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               setEnchoPeriodCount={changeEnchoPeriodCount}
             />
           </div>
+          </fieldset>
 
           {/* Ippon-type letter legend: discoverable "?" affordance mapping
               M/K/D/T/H (+S in naginata) to their kendo meaning, so operators
@@ -1526,7 +1530,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                       // is already decided), when the bout is already decided by
                       // ippons (boutDecided), or when a draw is already toggled.
                       // (0-0 is still a valid tied state. Encho is NOT required.)
-                      disabled={submitting || decisionSubmitting || aTotal !== bTotal || boutDecided || isDrawToggled}
+                      disabled={readOnly || submitting || decisionSubmitting || aTotal !== bTotal || boutDecided || isDrawToggled}
                       title={
                         submitting || decisionSubmitting
                           ? "Saving…"
@@ -1557,7 +1561,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                         data-testid="scoring-modal-hantei-shiro"
                         aria-pressed={hanteiPick === "b"}
                         onClick={() => setHanteiPick("b")}
-                        disabled={submitting || decisionSubmitting}
+                        disabled={readOnly || submitting || decisionSubmitting}
                       >
                         {sideWithColour("shiro")} wins{m.sideB?.name ? `: ${m.sideB.name}` : ""}
                       </button>
@@ -1567,7 +1571,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                         data-testid="scoring-modal-hantei-aka"
                         aria-pressed={hanteiPick === "a"}
                         onClick={() => setHanteiPick("a")}
-                        disabled={submitting || decisionSubmitting}
+                        disabled={readOnly || submitting || decisionSubmitting}
                       >
                         {sideWithColour("aka")} wins{m.sideA?.name ? `: ${m.sideA.name}` : ""}
                       </button>
@@ -1576,7 +1580,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                         className="btn btn--ghost btn--sm"
                         data-testid="scoring-modal-hantei-cancel"
                         onClick={() => { setDecidedByHantei(false); setHanteiPick(recordedHtKey); }}
-                        disabled={submitting || decisionSubmitting}
+                        disabled={submitting || decisionSubmitting || (readOnly && hanteiRecorded)}
                       >
                         Cancel
                       </button>
@@ -1592,19 +1596,19 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               {!decisionPromptKind && (
                 <div className="decision-controls__group">
                   <div className="decision-btn-group">
-                    <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={submitting || decisionSubmitting}>
+                    <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={readOnly || submitting || decisionSubmitting}>
                       Kiken (voluntary)
                     </button>
                     <GlossaryHintAS name="kiken-voluntary" />
                   </div>
                   <div className="decision-btn-group">
-                    <button data-testid="scoring-modal-kiken-injury-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-injury"); }} disabled={submitting || decisionSubmitting}>
+                    <button data-testid="scoring-modal-kiken-injury-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-injury"); }} disabled={readOnly || submitting || decisionSubmitting}>
                       Kiken (injury)
                     </button>
                     <GlossaryHintAS name="kiken-injury" />
                   </div>
                   <div className="decision-btn-group">
-                    <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
+                    <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={readOnly || submitting || decisionSubmitting}>
                       Fusenpai
                     </button>
                     <GlossaryHintAS name="fusenpai" />
@@ -1627,7 +1631,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
           {recordedWithdrawal && !decisionPromptKind && !selfReport && (
             <RecordedWithdrawal
               match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting} singleBout
-              removal={withdrawalRemoval}
+              removal={withdrawalRemoval} readOnly={readOnly}
             />
           )}
           {decisionErr && (
@@ -1640,6 +1644,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               sideB={m.sideB}
               askReason={window.isKikenDecision(decisionPromptKind)}
               submitting={decisionSubmitting}
+              readOnly={readOnly}
               onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}
               onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}
             />
@@ -1655,6 +1660,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               label="Reason for correction"
               presets={CORRECTION_PRESETS}
               submitting={submitting}
+              readOnly={readOnly}
               onConfirm={(r) => {
                 setCorrectionReason(r);
                 setCorrectionPrompt(null);
@@ -1673,7 +1679,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               court-busy remedy. Here in the footer, not inside
               RecordedWithdrawal, which unmounts the moment the match is
               running again (the team editor places its copy the same way). */}
-          <ReopenFeedback ctl={reopenCtl} testIdPrefix="withdrawal-reopen" />
+          <ReopenFeedback ctl={reopenCtl} testIdPrefix="withdrawal-reopen" readOnly={readOnly} />
           {/* F5: PERMANENT-failure banner: the write was refused (superseded,
               refused for the clock, or a 4xx on a queued replay), so it never
               saved. Non-dismissible danger state. No Retry (writeRetryable
@@ -1706,7 +1712,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                 <button
                   type="button"
                   className="btn btn--sm btn--ghost"
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                   onClick={() => doSubmit(pendingFn)}
                 >
                   Retry now
@@ -1729,10 +1735,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               plus its action buttons were squeezed into one flex item there
               instead of reading as the full-width block it is everywhere
               else this component renders. */}
+          <fieldset className="shiaijo-control-scope" disabled={readOnly}>
           {m.status === "scheduled" && isBarredMatch(m) && (
             <BarredMatchNotice match={m} password={password} unsaved={unsavedRef} onDiscard={onDiscardUnsaved} />
           )}
-          {own.kept && <DraftKeptNotice from={own.kept.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
+          </fieldset>
+          {own.kept && <DraftKeptNotice from={own.kept.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} readOnly={readOnly} />}
           <StartRefusedNotice text={own.refusal ? ownStartRefusalText(m, own.refusal) : ""} />
           {own.droppedShown && <DraftDroppedNotice />}
           {/* While the correction prompt is open it owns the only Cancel/commit
@@ -1778,7 +1786,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                   const banner = res && notLandedBanner(res);
                   if (banner) setWriteFailed(banner);
                   own.settle(token, res);
-                }} disabled={submitting}>
+                }} disabled={submitting || readOnly}>
                   Start match
                 </button>
               )}
@@ -1788,7 +1796,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                   if (isComplete && !correctionReason) { askCorrectionReason(); return; }
                   if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => (isComplete || !onSubmitAndNext ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
-                }} disabled={submitting || !canFinish}
+                }} disabled={submitting || !canFinish || readOnly}
                   title={koTieBlocked ? KO_TIE_REASON : hanteiFinishBlock || undefined}
                   // Holds its place while armed (.holds-label): the armed label
                   // is longer, and a button that grew or wrapped would move
@@ -1806,7 +1814,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
           )}
           {/* Quiet keyboard-shortcut reminder. It lists only keys that act on
               this host (the same conditions the keydown handler checks). */}
-          <ScoringShortcutHint pointKeys={getValidPointKeys(isNaginata)} hasNav={!!((prevMatch && onPrev) || (nextMatch && onNext))} canClose={canClose} />
+          <ScoringShortcutHint pointKeys={readOnly ? "" : getValidPointKeys(isNaginata)} hasNav={!!((prevMatch && onPrev) || (nextMatch && onNext))} canClose={canClose} />
         </div>
     </>
   );

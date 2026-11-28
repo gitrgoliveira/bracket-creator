@@ -685,6 +685,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			internalError(c, err)
 			return
 		}
+		// The seeds ride on the participants every page reads (merged onto
+		// each player at load), so the save is announced as a roster change.
+		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
 		c.JSON(http.StatusOK, assignments)
 	})
 

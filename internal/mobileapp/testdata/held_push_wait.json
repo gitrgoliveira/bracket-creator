@@ -1,0 +1,5 @@
+{
+  "matchCoalesceWindowMs": 250,
+  "marginMs": 50,
+  "heldPushWaitMs": 300
+}

@@ -330,9 +330,13 @@ function patchCompetition(prev, event) {
     };
     // The ids of the matches the patch changed (createPushLedger counts them).
     const applied = [];
+    // A whole-match local patch (a refused write's stored match, bc-sseq FR6)
+    // never replaces a newer copy held.
+    const whole = event.whole === true;
     const patchMatch = (m) => {
         const update = resultMap.get(m.id);
         if (!update) return m;
+        if (whole && isOlderWholeCopy(update, m)) return m;
         const base = _mergeMatchPatch(m, update);
         // A push the merge ignored (older than the running copy held) changes
         // nothing.
@@ -379,6 +383,23 @@ function patchCompetition(prev, event) {
     // together.
     if (queueChanges.length > 0) next = shiftQueuePositions(next, queueChanges);
     return { next, queueMoved: queueChanges.length > 0, applied };
+}
+
+// isOlderWholeCopy: whether `update`, a whole match the server stored (the
+// copy a refused write's answer carries, marked `whole` by the outbox,
+// _showStoredMatch in api_client_overlays.jsx), is older than the copy `held`
+// already shows: by the server's scoreVersion when both carry one
+// (olderByScoreVersion), else by `modifiedAt` when both are stamped: a court
+// or time move writes no score-log line, so two copies at ONE version can still
+// differ by it, and the stamp orders them. An answer read before a newer push
+// it lands after then changes nothing. A court or time patch is never whole,
+// so it applies as it always did.
+function isOlderWholeCopy(update, held) {
+    if (olderByScoreVersion(update, held) === true) return true;
+    if (olderByScoreVersion(held, update) === true) return false;
+    const u = Number(update.modifiedAt) || 0;
+    const h = Number(held.modifiedAt) || 0;
+    return u > 0 && h > u;
 }
 
 // isOlderRunningCopy: whether `fetched` is a running match older than a

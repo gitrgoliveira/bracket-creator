@@ -2,11 +2,16 @@
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
 import { applyPatch as patchCompetitionData, checkSeqGap, createPushLedger, keepNewerTournament } from './patch.jsx';
+import { createRefetchGate } from './refetch_gate.jsx';
+import { holdReadSeq, readSeqOf } from './read_seq.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
-import { queuedWritesNoun, supersededAlertText, displacedAlertText, tapNotAppliedAlertText, tapNotAppliedText } from './write_result.jsx';
+import {
+  queuedWritesNoun, supersededAlertText, displacedAlertText, courtDisplacedAlertText,
+  tapNotAppliedAlertText, tapNotAppliedText, courtReplacedAlertText,
+} from './write_result.jsx';
 import { VersionBanner } from './version_banner.jsx';
 import { PublicHeldWrites } from './held_writes_panel.jsx';
 import { useUnsavedInput } from './app_version.jsx';
@@ -515,10 +520,19 @@ export function queueAlertMessage(alert) {
       return "A team member this device treated as not added was kept by the server. Check the team's member names and lineups.";
     case "member_unsent":
       return "A change to a team member's name was not sent, because the member was never added. Add the member again if the name is still needed.";
-    // Held finishes that landed and moved a later change of their match to
-    // its history. Recorded, so not an error: the history has the change.
+    // Held finishes that landed and moved a later change (or, for the court's
+    // result, a different result recorded on another device) to the match's
+    // history. Recorded, so not an error: the history has the moved entry.
     case "displaced":
-      return displacedAlertText(n, one);
+      return alert.byCourt > 0 && alert.byCourt === alert.count
+        ? courtDisplacedAlertText(n, one)
+        : displacedAlertText(n, one);
+    // bc-sseq FR8: a result this device recorded, applied, that the court
+    // running the match's shiaijo replaced with its own later result. Told
+    // once per replaced write, as information: the court's result counts and
+    // this one is in the match's history, so there is nothing to correct.
+    case "court_replaced":
+      return courtReplacedAlertText({ court: alert.court || "" }, alert.where || "");
     // bc-evts: taps the server did not apply this pass, one alert a match
     // (decision q-f6-one-message), naming the match; a single one says why in
     // the server's words or the outcome's, and several end on those words
@@ -539,10 +553,11 @@ export function queueAlertMessage(alert) {
 
 // queueAlertToastType: how the one subscriber below shows a queue alert. Only
 // 'sent' is good news, and 'displaced' is information (the result was saved;
-// the change it moved aside is in the history); every other kind stays an
-// error. Exported for test.
+// the change it moved aside is in the history), as is 'court_replaced' (the
+// court's result counts and this device's is in the history); every other
+// kind stays an error. Exported for test.
 export function queueAlertToastType(alert) {
-  if (alert && (alert.kind === "displaced" || alert.kind === "tap_applied")) return "info";
+  if (alert && (alert.kind === "displaced" || alert.kind === "tap_applied" || alert.kind === "court_replaced")) return "info";
   // The change was kept; a carried lineup could not follow it (F5). A
   // check-in another desk changed later stands as that desk left it: the
   // screen changed under the operator, which they are warned of.
@@ -942,51 +957,117 @@ function App() {
   // in flight at once.
   const updateTournament = useCallback((next) => setTournament((prev) => keepNewerTournament(prev, next)), []);
 
-  const load = async () => {
-    // bc-hnam: an answer read as another audience than the page reads as by
-    // the time it lands (the route changed meanwhile) is dropped: the change
-    // of audience reads again. It answers true when the page now holds an
-    // answer read as that audience, READ_SUPERSEDED for a read dropped as
-    // above, and false for a read that failed (the reload effect below waits
-    // for the first, reports the last and ignores the middle one).
-    const readAs = currentReadAudienceKey();
+  // The SSE effect's refetch gates (createRefetchGate, refetch_gate.jsx), told of the
+  // reads made outside it: listGateRef the tournament's (load below), and
+  // detailGateRef the open competition's detail, as { compId, gate }. Null
+  // while no SSE effect runs.
+  const listGateRef = useRef(null);
+  const detailGateRef = useRef(null);
+  // What the page already holds, for a gate made after the read (the first
+  // load can finish before the SSE effect runs, and a change of competition
+  // or mode makes new gates): the seq of the list's last read, and the open
+  // competition's as { compId, seq }. A gate seeds itself from them as it is
+  // made and hands its applied seq back as it goes, so its first event never
+  // fetches what the page holds already.
+  const listSeedRef = useRef(0);
+  const listReadOwedRef = useRef(false);
+  const detailSeedRef = useRef({ compId: null, seq: 0 });
+
+  // fetchList reads the tournament and its competitions and answers the
+  // tournament with its competitions set, or null when no tournament is
+  // configured. The answer is covered only up to the lower of the two reads'
+  // seqs (bc-sseq FR4), so that is the seq it holds (read_seq.jsx). It shows
+  // nothing: showList does, so the list gate can leave an answer unshown. A
+  // read that failed REJECTS, after the page's own state is tended, so whoever
+  // asked sees the failure and logs it.
+  const fetchList = async () => {
     try {
       const t = await window.API.fetchTournament();
-      if (currentReadAudienceKey() !== readAs) return READ_SUPERSEDED;
-      if (!t || t.error) {
-        // null = no tournament configured yet: fetchTournament returns null for
-        // the bootstrap state (a 200 with a null body on newer servers, or a 404
-        // on older ones). Open the create-tournament gate without logging an error.
-        setTournament(null);
-      } else {
-        const comps = await window.API.fetchCompetitions();
-        if (currentReadAudienceKey() !== readAs) return READ_SUPERSEDED;
-        t.competitions = comps;
-        // A display takes the fetch whole: no score editor reads it, and a
-        // reload must discard its optimistic broadcast overlay (see below).
-        if (mode === "display") setTournament(t);
-        else updateTournament(t);
-        applyTheme(t.theme); // mp-scf: apply custom colors
-      }
-      return true;
+      // null = no tournament configured yet: fetchTournament returns null for
+      // the bootstrap state (a 200 with a null body on newer servers, or a 404
+      // on older ones). Open the create-tournament gate without logging an error.
+      if (!t || t.error) return null;
+      const comps = await window.API.fetchCompetitions();
+      t.competitions = comps;
+      return holdReadSeq(t, Math.min(readSeqOf(t), readSeqOf(comps)));
     } catch (e) {
       // A failed fetch (network, 5xx) says nothing about whether a tournament
       // exists, so it never opens the create-tournament gate over one already
       // shown: a failed RELOAD (every SSE event runs one) keeps the last good
-      // data, logged like the page's other background refetches, and the
-      // connection indicator reports the outage. Only the FIRST load moves
-      // undefined to null here, so the gate opens instead of spinning; only
-      // the server's own "no tournament" answer (above) replaces a loaded one.
-      console.error("Failed to load tournament", e);
+      // data, and the connection indicator reports the outage. Only the FIRST
+      // load moves undefined to null here, so the gate opens instead of
+      // spinning; only the server's own "no tournament" answer replaces a
+      // loaded one.
       // A refused password says nothing about whether a tournament exists
       // either: dropStaleCredential has taken the page off the admin audience,
       // and that change of audience reads again.
       if (!(e && e.code === CREDENTIAL_REFUSED)) setTournament((prev) => (prev === undefined ? null : prev));
-      return false;
-    } finally {
       setLoading(false);
+      throw e;
     }
   };
+
+  // showList shows what fetchList answered, read as the audience `readAs`.
+  // bc-hnam: an answer read as another audience than the page reads as now
+  // (the route changed meanwhile) is dropped: the change of audience reads
+  // again. It answers the tournament it showed, true when no tournament is
+  // configured, and READ_SUPERSEDED for an answer it dropped.
+  const showList = (t, readAs) => {
+    setLoading(false);
+    if (t === READ_SUPERSEDED || currentReadAudienceKey() !== readAs) return READ_SUPERSEDED;
+    if (!t) {
+      setTournament(null);
+      return true;
+    }
+    // A display takes the fetch whole: no score editor reads it, and a
+    // reload must discard its optimistic broadcast overlay (see below).
+    if (mode === "display") setTournament(t);
+    else updateTournament(t);
+    applyTheme(t.theme); // mp-scf: apply custom colors
+    return t;
+  };
+
+  // load is every read of the list the page makes outside the list gate. It
+  // fetches and shows the list as the gate's read does, except that a failed
+  // read is logged and answers false (the reload effect below waits for a
+  // truthy answer, reports false and ignores READ_SUPERSEDED), and an answer
+  // older than one the gate already applied is dropped like the gate's own
+  // late answer (createRefetchGate, refetch_gate.jsx): shown, it would put older data
+  // back while the gate's applied seq stayed above it, so the events up to that
+  // seq would read as covered and nothing would heal the screen. It tells the
+  // list gate the seq of a read it showed, or keeps it for a gate made later.
+  const load = async () => {
+    const readAs = currentReadAudienceKey();
+    let read;
+    try {
+      const fetched = await fetchList();
+      const gate = listGateRef.current;
+      read = gate && gate.late(readSeqOf(fetched)) ? showList(READ_SUPERSEDED, readAs) : showList(fetched, readAs);
+    } catch (e) {
+      console.error("Failed to load tournament", e);
+      return false;
+    }
+    if (read && typeof read === "object") {
+      if (listGateRef.current) listGateRef.current.applied(readSeqOf(read));
+      else listSeedRef.current = readSeqOf(read);
+    }
+    return read;
+  };
+
+  // The list gate's two halves (createRefetchGate, refetch_gate.jsx): fetchListRef
+  // reads, and takeList, called as the read is sent, answers what shows it
+  // (false when it dropped the answer). A refused password is no failure of
+  // the read: the audience change that follows reads again, so the gate must
+  // not retry it.
+  const fetchListRef = useLatestRef(() => fetchList().catch((e) => {
+    if (e && e.code === CREDENTIAL_REFUSED) return READ_SUPERSEDED;
+    throw e;
+  }));
+  const showListRef = useLatestRef(showList);
+  const takeList = useCallback(() => {
+    const sentAs = currentReadAudienceKey();
+    return (t) => showListRef.current(t, sentAs) !== READ_SUPERSEDED;
+  }, [showListRef]);
 
   // The effects below run load() as it is now, never re-running for it.
   const loadRef = useLatestRef(load);
@@ -1261,6 +1342,20 @@ function App() {
   // The server pushes applied to selectedCompData, for its refetches
   // (push-wins, createPushLedger, patch.jsx).
   const [compPushes] = useState(() => createPushLedger());
+  // A match patch the outbox tells this page (subscribeLocalMatchPatch): the
+  // stored match a refused write's answer carries (bc-sseq FR6), shown before
+  // the self-run score sheet's note, so the note and the sheet agree, and a
+  // court or time change. Applied to the open competition only (match ids
+  // repeat across competitions), and never through the push ledger: it is
+  // not the server's push.
+  useEffect(() => {
+    if (!window.API || typeof window.API.subscribeLocalMatchPatch !== "function") return undefined;
+    return window.API.subscribeLocalMatchPatch((event) => {
+      const cid = event && event.data && event.data.competitionId;
+      if (!cid) return;
+      setSelectedCompData(prev => (prev && prev.config && prev.config.id === cid ? patchCompetitionData(prev, event) : prev));
+    });
+  }, []);
   useEffect(() => {
     // Track every pending jittered timer so the cleanup can cancel them when
     // viewerCompId / mode changes. Without this, a timer queued for
@@ -1272,22 +1367,21 @@ function App() {
     // viewer tab, so retaining fired ids would grow the set by one or two
     // entries per SSE event for the tab's lifetime.
     const timerPool = createTimerPool();
-    const jitteredTimeout = timerPool.schedule;
-    // Whether a refetch for a withheld match change (isWithheldMatchEvent) is
-    // already waiting, so a burst of them is one read (bc-drpb).
-    let withheldRefetchPending = false;
     // The competition page's refetches never put a live score back to an
     // older state (keepNewerDetail, patch.jsx), nor behind a push applied
     // after they were sent (push-wins): a self-run score editor reads this
     // data. The display reads `tournament`, never this. Called as the fetch
     // is sent; it answers what takes the fetch's answer. An answer read as
     // another audience than the page's now (the organiser signed out while it
-    // was out) is dropped, never shown: its names were not the public's.
+    // was out) is dropped, never shown (the function answers false, so the
+    // gate does not count its seq as applied): its names were not the public's.
     const takeCompDetail = () => {
         const keep = compPushes.detail();
         const sentAs = audienceRef.current;
         return (data) => {
-            if (audienceRef.current === sentAs) setSelectedCompData((prev) => keep(prev, data));
+            if (audienceRef.current !== sentAs) return false;
+            setSelectedCompData((prev) => keep(prev, data));
+            return true;
         };
     };
 
@@ -1299,10 +1393,54 @@ function App() {
     // score for no benefit (mp-9h1f). `mode` is fresh (effect dep); the active
     // admin view is read from the ref so this closure need not be recreated on
     // navigation. Every other mode/view loads exactly as before.
-    const maybeLoad = () => {
-        if (mode === "admin" && adminViewRef.current && adminViewRef.current.kind === "shiaijo") return;
-        loadRef.current();
-    };
+    const listLoadSkipped = () => mode === "admin" && adminViewRef.current && adminViewRef.current.kind === "shiaijo";
+    const maybeLoad = () => (listLoadSkipped() ? undefined : loadRef.current());
+
+    // bc-sseq FR4: one refetch per burst. Every event that used to schedule
+    // its own fetch asks a gate instead (createRefetchGate, refetch_gate.jsx), which
+    // sends one per burst and none for an event the applied answer already
+    // holds (its X-Event-Seq, read_seq.jsx). Each fetch waits a delay drawn
+    // from HELD_PUSH_WAIT_MS to the top of the page's window, so the many
+    // open tabs do not all ask at the same moment:
+    //   listGate: the tournament and its competitions (maybeLoad), up to
+    //     2,000 ms, which staggers 1,000+ display walls;
+    //   detailGate: the open competition's detail, up to 500 ms.
+    // A load made outside the gate reports its seq from load itself
+    // (listGateRef), and the detail's first read from its own effect below
+    // (detailGateRef). The list gate's fetch answers the read it made, or
+    // nothing when the load was skipped (it covers no event, and takeList is
+    // not asked), and rejects when the read failed, so the gate asks for it
+    // again; the gate, not the fetch, shows what was read (takeList). While
+    // the load is skipped an event asks the gate for nothing: its fetch would
+    // cover no seq, so every event would still cost a flight and its deadline.
+    const listGate = createRefetchGate({
+        schedule: timerPool.schedule,
+        fetch: () => (listLoadSkipped() ? null : fetchListRef.current()),
+        take: () => (listLoadSkipped() ? undefined : takeList()),
+        maxDelayMs: 2000,
+        // Read at each schedule, so a test's Math.random stub reaches it.
+        random: () => Math.random(),
+        onError: (err) => console.error('Tournament refresh failed:', err),
+    });
+    const detailGate = viewerCompId ? createRefetchGate({
+        schedule: timerPool.schedule,
+        fetch: () => window.API.fetchCompetitionDetails(viewerCompId),
+        take: takeCompDetail,
+        maxDelayMs: 500,
+        random: () => Math.random(),
+        onError: (err) => console.error('Competition refresh failed:', err),
+    }) : null;
+    listGateRef.current = listGate;
+    detailGateRef.current = detailGate ? { compId: viewerCompId, gate: detailGate } : null;
+    listGate.seed(listSeedRef.current);
+    // A list read the last effect still owed (out or waiting when the viewer
+    // moved on) is asked for again here: the list does not depend on the
+    // competition shown, so its read must not be lost to a navigation.
+    if (listReadOwedRef.current) {
+        listReadOwedRef.current = false;
+        listGate.now();
+    }
+    if (detailGate && detailSeedRef.current.compId === viewerCompId) detailGate.seed(detailSeedRef.current.seq);
 
     // The pace tick's refetch: on a competition page the tournament list is
     // refetched every PACE_TICK_MS so shared-court pace drift stays current.
@@ -1312,27 +1450,32 @@ function App() {
     // open tabs do not all ask at the same moment.
     const paceRefetch = setInterval(() => {
         if (mode !== "viewer" || !viewerCompId || document.hidden || authPromptRef.current) return;
-        jitteredTimeout(maybeLoad, Math.random() * 2000);
+        // No event names it: the pace moves on with the clock.
+        listGate.now();
     }, PACE_TICK_MS);
 
     // F6b: per-subscription seq tracker. Allocated once per effect run so
     // it resets on viewerCompId/mode changes alongside the SSE reconnect.
     const sseSeq = { lastSeq: 0 };
 
-    // Refresh data so the UI is current: the tournament (now, or after
-    // loadDelay) and the competition page's detail. Defined inside the effect
-    // so the closure captures jitteredTimeout, maybeLoad and viewerCompId.
-    const resync = (loadDelay, label) => {
-        if (loadDelay) jitteredTimeout(maybeLoad, loadDelay);
-        else maybeLoad();
-        if (viewerCompId) {
-            jitteredTimeout(
-                () => window.API.fetchCompetitionDetails(viewerCompId)
-                    .then(takeCompDetail())
-                    .catch(err => console.error(`${label} refresh failed:`, err)),
-                Math.random() * 500
-            );
-        }
+    // Refresh data so the UI is current whatever the seqs say: the tournament
+    // (at once, or through its gate's window) and the competition page's
+    // detail. Defined inside the effect so the closure captures the gates.
+    const resync = (loadNow) => {
+        if (loadNow) maybeLoad();
+        else listGate.now();
+        if (detailGate) detailGate.now();
+    };
+
+    // restartReads is what a new stream asks of the page (resync_required, a
+    // stream that reopened): no answer held counts as applied, the gates
+    // included, and each sends ONE refetch, however many of these arrive in a
+    // row (a reconnect and then resync_required would otherwise read the list
+    // twice). The seqs the page kept for a gate made later need no reset: a
+    // seeded gate lets its first answer replace the seed (seed(), refetch_gate.jsx).
+    const restartReads = () => {
+        listGate.restart();
+        if (detailGate) detailGate.restart();
     };
 
     // F8: resync on tab resume. When the tab becomes visible again after
@@ -1344,7 +1487,7 @@ function App() {
     const onVisibilityChange = () => {
         if (document.hidden) return;
         window.API.reconnectEvents();
-        if (!streamLost) resync(0, 'tab-resume');
+        if (!streamLost) resync(true);
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
 
@@ -1372,17 +1515,10 @@ function App() {
         // Reset our seq counter to the server's head and do a full refetch.
         if (event.type === 'resync_required') {
             sseSeq.lastSeq = (typeof event.seq === 'number') ? event.seq : 0;
-            // Every held copy may be wrong: no push outranks the refetch.
+            // Every held copy may be wrong: no push outranks the refetch,
+            // and no answer held counts as applied (a new stream).
             compPushes.clear();
-            maybeLoad();
-            if (viewerCompId) {
-                jitteredTimeout(
-                    () => window.API.fetchCompetitionDetails(viewerCompId)
-                        .then(takeCompDetail())
-                        .catch(err => console.error('resync refresh failed:', err)),
-                    Math.random() * 500
-                );
-            }
+            restartReads();
             return;
         }
 
@@ -1390,31 +1526,21 @@ function App() {
         // accurately even for events that don't patch state (e.g. lineup_updated,
         // announcement). On a gap, trigger the same scoped refetch the per-type
         // branches below use, so we converge without waiting for the next event.
-        const seqResult = checkSeqGap(sseSeq, event.seq, () => {
-            maybeLoad();
-            if (viewerCompId) {
-                jitteredTimeout(
-                    () => window.API.fetchCompetitionDetails(viewerCompId)
-                        .then(takeCompDetail())
-                        .catch(err => console.error('gap refetch failed:', err)),
-                    Math.random() * 500
-                );
-            }
-        });
+        const seqResult = checkSeqGap(sseSeq, event.seq, () => resync(false));
         if (seqResult.duplicate) return;
 
-        // P1/P4 (mp-9afd): two jitter windows.
-        //   detailJitter: tight (0–500ms) for per-competition detail fetches
+        // P1/P4 (mp-9afd): two windows, the gates' (above).
+        //   detailGate: tight (300-500ms) for per-competition detail fetches
         //     that target a single competition. Each event targets one comp,
         //     and each viewer does O(1) work when it's viewing that comp.
-        //   listJitter: wider (0–2000ms) for full-list fetches (display mode
+        //   listGate: wider (300-2000ms) for full-list fetches (display mode
         //     and genuine list-level transitions, e.g. competition_started,
         //     draw_generated, schedule_updated, participants_updated, etc.).
         //     These are infrequent and the wider window staggers 1000+ display
         //     walls so they don't simultaneously storm GET /api/viewer/competitions.
-        const detailJitter = Math.random() * 500;
-        const listJitter = Math.random() * 2000;
-        const refetchDetail = () => jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail()).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+        // Each asks its gate, which sends one fetch per burst (bc-sseq FR4).
+        const refetchDetail = () => { if (detailGate) detailGate.event(event.seq); };
+        const refetchList = () => { if (!listLoadSkipped()) listGate.event(event.seq); };
         // another competition's event: refetch the open competition only when the two share a day (and, when `courts` is given, a court on that day)
         const refetchIfSharesDay = (event, courts) => {
             const otherDate = (compsRef.current || []).find(c => c.id === event.data?.competitionId)?.date || "";
@@ -1425,7 +1551,7 @@ function App() {
         };
         if (event.type === "tournament_updated") {
             compPushes.clear();
-            if (!authPromptRef.current) jitteredTimeout(maybeLoad, listJitter);
+            if (!authPromptRef.current) refetchList();
         } else if (event.type === "password_reset") {
             // The admin password was rotated by someone hitting
             // POST /api/tournament/reset. Any logged-in admin's
@@ -1465,7 +1591,7 @@ function App() {
             }
             // competitor_status_updated is a list-level event (eligibility
             // badges on the lobby): always refresh the full list.
-            jitteredTimeout(maybeLoad, listJitter);
+            refetchList();
         } else if (event.type === "competition_started" || event.type === "match_updated" || event.type === "competition_completed") {
             // Display mode (T060) reads the full tournament tree
             // (every competition's poolMatches + bracket) and needs a
@@ -1477,21 +1603,15 @@ function App() {
             // thundering the server when many displays are mounted on
             // the same venue LAN.
             if (mode === "display") {
-                jitteredTimeout(maybeLoad, listJitter);
+                refetchList();
             } else if (isWithheldMatchEvent(event)) {
                 // bc-drpb: a hidden draft's match moved (its court, time or
                 // status), sent with no data. Its matches still take their
                 // places on a shared court, so the open competition's queue
-                // positions may have moved: refetch it, once per burst. The
-                // home screen's list refetch below covers a page with no
-                // competition open.
-                if (viewerCompId && !withheldRefetchPending) {
-                    withheldRefetchPending = true;
-                    jitteredTimeout(() => {
-                        withheldRefetchPending = false;
-                        window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail()).catch(err => console.error('SSE refresh failed:', err));
-                    }, detailJitter);
-                }
+                // positions may have moved: refetch it (the detail gate sends
+                // one per burst, bc-sseq FR4). The home screen's list refetch
+                // below covers a page with no competition open.
+                refetchDetail();
             } else if (viewerCompId === event.data?.competitionId) {
                 // Apply partial update immediately (match_updated only: 
                 // competition_completed has no per-match payload)
@@ -1526,7 +1646,7 @@ function App() {
             // Display mode is excluded because it already fires load() in the
             // `mode === "display"` block earlier in this same event handler.
             if (mode !== "display" && (event.type === "competition_started" || event.type === "competition_completed" || (event.type === "match_updated" && !viewerCompId))) {
-                jitteredTimeout(maybeLoad, listJitter);
+                refetchList();
             }
         } else if (event.type === "schedule_updated") {
             // Court/time move: no competitionId in payload, so refresh the
@@ -1534,7 +1654,7 @@ function App() {
             if (viewerCompId) {
                 refetchDetail();
             }
-            jitteredTimeout(maybeLoad, listJitter);
+            refetchList();
         } else if (event.type === "draw_generated" || event.type === "draw_discarded") {
             // Draw generated/discarded: refresh the selected competition's
             // details (new pools/bracket data or cleared state) and the
@@ -1544,7 +1664,7 @@ function App() {
             } else if (viewerCompId && event.data?.competitionId !== viewerCompId) {
                 refetchIfSharesDay(event);
             }
-            jitteredTimeout(maybeLoad, listJitter);
+            refetchList();
         } else if (event.type === "draw_visibility_changed") {
             // bc-drpb: a draft's draw was published or hidden again. Refetch
             // that competition when it is open (its tabs come or go) and the
@@ -1553,7 +1673,7 @@ function App() {
             if (viewerCompId && viewerCompId === event.data?.competitionId) {
                 refetchDetail();
             }
-            jitteredTimeout(maybeLoad, listJitter);
+            refetchList();
         } else if (event.type === "swiss_round_generated") {
             // T192 (US13: FR-050d): a new Swiss round's matches have been
             // generated. The payload carries competitionId + swissCurrentRound
@@ -1570,7 +1690,7 @@ function App() {
             // swiss_round_generated updates the tournament list (swissCurrentRound
             // counter): always do one list refresh: covers display mode, home-
             // screen viewers, and per-comp viewers alike.
-            jitteredTimeout(maybeLoad, listJitter);
+            refetchList();
         } else if (event.type === "participants_updated") {
             // Check-in toggle: viewer-side badges (checked-in indicator) need
             // the updated player list. Refetch the selected competition when the
@@ -1579,7 +1699,7 @@ function App() {
             if (viewerCompId === event.data?.competitionId) {
                 refetchDetail();
             }
-            jitteredTimeout(maybeLoad, listJitter);
+            refetchList();
         } else if (event.type === "lineup_updated") {
             // A team lineup was saved or deleted by an operator. The lineup data
             // is not part of the competition object, so patchCompetitionData /
@@ -1608,7 +1728,7 @@ function App() {
             // helper's own test passed while the CALL SITE stayed mutable to a
             // no-op, so it bought indirection and a swallowed-TypeError path,
             // not coverage.
-            jitteredTimeout(maybeLoad, listJitter);
+            refetchList();
         } else if (event.type === "announcement") {
             // Payload is now the full list snapshot.
             const list = Array.isArray(event.data) ? event.data : [];
@@ -1637,17 +1757,28 @@ function App() {
             streamLost = true;
         } else if (streamLost) {
             streamLost = false;
-            resync(Math.random() * 2000, 'reconnect');
+            // The server may have restarted (its seqs begin again): no
+            // answer held counts as applied, and one refetch follows.
+            restartReads();
         }
     });
     return () => {
         unsub();
         clearInterval(paceRefetch);
         timerPool.clearAll();
+        listSeedRef.current = listGate.appliedSeq();
+        if (detailGate) detailSeedRef.current = { compId: viewerCompId, seq: detailGate.appliedSeq() };
+        // A fetch still out must not show its answer, or send another, once
+        // this effect is over (the competition may have changed).
+        listReadOwedRef.current = listGate.pending();
+        listGate.dispose();
+        if (detailGate) detailGate.dispose();
+        if (listGateRef.current === listGate) listGateRef.current = null;
+        if (detailGateRef.current && detailGateRef.current.gate === detailGate) detailGateRef.current = null;
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('online', onOnline);
     };
-  }, [viewerCompId, mode, loadRef, compPushes, dropStaleCredentialRef]);
+  }, [viewerCompId, mode, loadRef, fetchListRef, takeList, compPushes, dropStaleCredentialRef]);
 
   useEffect(() => { selectedCompDataRef.current = selectedCompData; }, [selectedCompData]);
 
@@ -1659,7 +1790,15 @@ function App() {
       window.API.fetchCompetitionDetails(viewerCompId)
         .then(data => {
           if (cancelled) return;
+          // The detail gate counts the events this read holds (bc-sseq FR4),
+          // read off the fetched value, since the merged one carries no seq. An
+          // answer older than one the gate applied is dropped, as the gate's
+          // own are (late, patch.jsx).
+          const held = detailGateRef.current;
+          if (held && held.compId === viewerCompId && held.gate.late(readSeqOf(data))) { setLoading(false); return; }
           setSelectedCompData((prev) => keep(prev, data));
+          if (held && held.compId === viewerCompId) held.gate.applied(readSeqOf(data));
+          else detailSeedRef.current = { compId: viewerCompId, seq: readSeqOf(data) };
           setLoading(false);
         })
         .catch(err => {

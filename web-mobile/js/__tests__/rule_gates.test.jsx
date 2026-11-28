@@ -268,6 +268,17 @@ describe('the tap-outcome and retired-reason rules', () => {
     expect(trips(r, "if (res.heldReason === 'match_closed') x();")).toBe(false);
     expect(r.exempt || []).toEqual([]);
   });
+  it('the court held reasons (bc-sseq FR8) are read in write_result.jsx alone', () => {
+    const r = rule('court-held-reasons');
+    expect(r).toBeTruthy();
+    expect(trips(r, "if (res.heldReason === 'court_result') x();")).toBe(true);
+    expect(trips(r, 'if (body.heldReason == "downstream_built_on") x();')).toBe(true);
+    expect(trips(r, 'const code = `court_result`;')).toBe(true);
+    expect(trips(r, 'if (writeCourtResult(res) || writeResultLocked(res) === null) x();')).toBe(false);
+    // A name that only contains the words is no reading of the code.
+    expect(trips(r, 'const courtResultKey = _courtResultKeyFor(base);')).toBe(false);
+    expect(r.exempt).toEqual(['write_result.jsx']);
+  });
 });
 
 // The "default win" phrase rule (operator ruling 2026-10-04): "default win"

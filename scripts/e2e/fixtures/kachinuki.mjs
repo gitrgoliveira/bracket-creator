@@ -19,7 +19,10 @@ import { clearMarks } from './scoring.mjs';
 import { inlineEditor, sides, upNextCard } from './shiaijo.mjs';
 import * as T from './team.mjs';
 
-export const editor = (page) => inlineEditor(page).filter({ has: page.locator('.team-bouts-scroll') }).first();
+// The sheet: the court console's inline editor by default; pass `root` (a
+// selector, e.g. EDITOR for the Scores page's overlay) for another mount.
+export const editor = (page, root) => (root ? page.locator(root) : inlineEditor(page))
+  .filter({ has: page.locator('.team-bouts-scroll') }).first();
 
 // ---------------------------------------------------------------- lineup --
 
@@ -60,10 +63,10 @@ export async function typeLineup(page, teamName, names, { save: doSave = true } 
 // ----------------------------------------------------------------- bouts --
 
 // Fought bouts, collapsed to read-only rows above the current one.
-export const doneRows = (page) => editor(page).locator('.team-sub-match--readonly');
+export const doneRows = (page, root) => editor(page, root).locator('.team-sub-match--readonly');
 // The live bout: the one editable row that is not a fought bout reopened for
 // correction.
-export const currentBout = (page) => editor(page)
+export const currentBout = (page, root) => editor(page, root)
   .locator('.team-sub-match:not(.team-sub-match--readonly):not(.team-sub-match--correcting)').first();
 // A fought bout opened for correction.
 export const correctingBout = (page) => editor(page).locator('.team-sub-match--correcting').first();
@@ -74,7 +77,7 @@ export const correctingBout = (page) => editor(page).locator('.team-sub-match--c
 export const boutIpponButton = T.rowIppon;
 export const boutFilled = T.rowSlots;
 export const tieButton = T.rowTie;
-export const recordBoutButton = (page) => editor(page).getByRole('button', { name: /^(Record bout|Saving…)$/ }).first();
+export const recordBoutButton = (page, root) => editor(page, root).getByRole('button', { name: /^(Record bout|Saving…)$/ }).first();
 export const endMatchButton = (page) => editor(page).getByTestId('kachinuki-end-match-button');
 export const enchoButton = (page) => editor(page).getByTestId('kachinuki-encho-button');
 // Takes one overtime period back; offered beside Encho once the bout is in overtime.

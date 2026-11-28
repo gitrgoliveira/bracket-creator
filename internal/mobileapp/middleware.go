@@ -323,6 +323,9 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodGet + " /api/schedule/draft-estimate",
 		http.MethodGet + " /api/schedule/calendar",         // the calendar is the organiser planning view, and each call places every competition once (one estimate per competition), so an anonymous self-run caller must not be able to trigger it
 		http.MethodGet + " /api/schedule/calendar/preview", // the calendar is the organiser planning view, and each call places every competition once (one estimate per competition), so an anonymous self-run caller must not be able to trigger it
+		http.MethodGet + " /api/courts/:court/control",     // bc-sseq FR9: who runs each shiaijo is the court consoles', organiser only
+		http.MethodPut + " /api/courts/:court/control",     // bc-sseq FR9: claiming or taking a shiaijo, organiser only
+		http.MethodDelete + " /api/courts/:court/control",  // bc-sseq FR9: releasing it, organiser only
 		http.MethodPost + " /api/print/:type":              // mp-w87e: PDF export, admin/CPU-heavy, not operational play
 		return true
 	default:

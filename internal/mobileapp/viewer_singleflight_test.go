@@ -1,12 +1,18 @@
 package mobileapp
 
 import (
+	"bytes"
+	"compress/gzip"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -26,7 +32,7 @@ import (
 // the exactly-1 assertion cannot flake on scheduling.
 func TestViewerSingleFlight_CollatesConcurrentBuilds(t *testing.T) {
 	const concurrency = 100
-	g := newViewerSingleFlight()
+	g := newViewerSingleFlight(zeroSeq)
 
 	var buildCount atomic.Int32
 
@@ -51,7 +57,7 @@ func TestViewerSingleFlight_CollatesConcurrentBuilds(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			data, err := g.Do("test-key", func() ([]byte, error) {
+			res, err := g.Do("test-key", false, func() ([]byte, error) {
 				buildCount.Add(1)
 				// Hold the in-flight slot until every other caller has
 				// attached as a waiter (released by the hook above). The
@@ -67,7 +73,7 @@ func TestViewerSingleFlight_CollatesConcurrentBuilds(t *testing.T) {
 				}
 				return []byte(`["ok"]`), nil
 			})
-			results[i] = result{data, err}
+			results[i] = result{res.body, err}
 		}()
 	}
 
@@ -88,7 +94,7 @@ func TestViewerSingleFlight_CollatesConcurrentBuilds(t *testing.T) {
 // TestViewerSingleFlight_DifferentKeysAreIndependent ensures that concurrent
 // calls for distinct keys each execute their own fn without interference.
 func TestViewerSingleFlight_DifferentKeysAreIndependent(t *testing.T) {
-	g := newViewerSingleFlight()
+	g := newViewerSingleFlight(zeroSeq)
 
 	type result struct {
 		data []byte
@@ -104,10 +110,10 @@ func TestViewerSingleFlight_DifferentKeysAreIndependent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			key := fmt.Sprintf("comp:%d", i)
-			data, err := g.Do(key, func() ([]byte, error) {
+			res, err := g.Do(key, false, func() ([]byte, error) {
 				return []byte(fmt.Sprintf(`{"id":%d}`, i)), nil
 			})
-			results[i] = result{data, err}
+			results[i] = result{res.body, err}
 		}()
 	}
 	wg.Wait()
@@ -122,7 +128,7 @@ func TestViewerSingleFlight_DifferentKeysAreIndependent(t *testing.T) {
 // in-flight build completes, a new independent request re-executes fn (the
 // key is not permanently cached, there is no stale-data risk).
 func TestViewerSingleFlight_SubsequentCallsReExecute(t *testing.T) {
-	g := newViewerSingleFlight()
+	g := newViewerSingleFlight(zeroSeq)
 
 	var count atomic.Int32
 	do := func() ([]byte, error) {
@@ -130,11 +136,11 @@ func TestViewerSingleFlight_SubsequentCallsReExecute(t *testing.T) {
 		return []byte("ok"), nil
 	}
 
-	_, err := g.Do("k", do)
+	_, err := g.Do("k", false, do)
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), count.Load())
 
-	_, err = g.Do("k", do)
+	_, err = g.Do("k", false, do)
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), count.Load(), "expected fn to re-execute after first call completed")
 }
@@ -146,7 +152,7 @@ func TestViewerSingleFlight_SubsequentCallsReExecute(t *testing.T) {
 // is reliably exercised.
 func TestViewerSingleFlight_ErrorPropagatedToAllWaiters(t *testing.T) {
 	const concurrency = 50
-	g := newViewerSingleFlight()
+	g := newViewerSingleFlight(zeroSeq)
 
 	var buildCount atomic.Int32
 
@@ -165,7 +171,7 @@ func TestViewerSingleFlight_ErrorPropagatedToAllWaiters(t *testing.T) {
 			defer wg.Done()
 			readyBarrier.Done()
 			readyBarrier.Wait() // all goroutines race into Do together
-			_, err := g.Do("err-key", func() ([]byte, error) {
+			_, err := g.Do("err-key", false, func() ([]byte, error) {
 				buildCount.Add(1)
 				// Hold the in-flight slot so all other goroutines enter
 				// Do and become waiters before the error is returned.
@@ -192,7 +198,7 @@ func TestViewerSingleFlight_ErrorPropagatedToAllWaiters(t *testing.T) {
 // an error instead of deadlocking.
 func TestViewerSingleFlight_PanicRecoveredToError(t *testing.T) {
 	const concurrency = 20
-	g := newViewerSingleFlight()
+	g := newViewerSingleFlight(zeroSeq)
 
 	// readyBarrier ensures all goroutines are spawned before they race
 	// into Do together.
@@ -213,14 +219,14 @@ func TestViewerSingleFlight_PanicRecoveredToError(t *testing.T) {
 			defer wg.Done()
 			readyBarrier.Done()
 			readyBarrier.Wait()
-			data, err := g.Do("panic-key", func() ([]byte, error) {
+			res, err := g.Do("panic-key", false, func() ([]byte, error) {
 				// Hold the slot briefly so all other goroutines attach,
 				// then panic. The singleflight must recover the panic,
 				// convert it to an error, and unblock all waiters.
 				time.Sleep(100 * time.Millisecond)
 				panic("kaboom")
 			})
-			results[i] = result{data, err}
+			results[i] = result{res.body, err}
 		}()
 	}
 
@@ -236,11 +242,11 @@ func TestViewerSingleFlight_PanicRecoveredToError(t *testing.T) {
 	}
 
 	// The key must be cleaned up, a subsequent call should execute normally.
-	data, err := g.Do("panic-key", func() ([]byte, error) {
+	res, err := g.Do("panic-key", false, func() ([]byte, error) {
 		return []byte("recovered"), nil
 	})
 	require.NoError(t, err)
-	assert.Equal(t, []byte("recovered"), data, "key should be usable after panic")
+	assert.Equal(t, []byte("recovered"), res.body, "key should be usable after panic")
 }
 
 // TestViewerFlightKeySeparatesAudiences (bc-hnam): two callers share a viewer
@@ -284,6 +290,180 @@ func TestViewerFlightKeyFor_CountsOnlyTheCompetitionsOwnReveals(t *testing.T) {
 	if len(keys) != 6 {
 		t.Fatalf("audiences that read different bytes share a key: %v", keys)
 	}
+}
+
+// zeroSeq is the event seq of a flight group whose hub has broadcast nothing.
+func zeroSeq() int64 { return 0 }
+
+// bc-sseq FR3: the elected caller reads the event seq BEFORE its build runs,
+// and every caller of the build is told that one seq. A broadcast landing
+// during the build (the seq moving on while fn runs) is above the answer's
+// seq, so the page still refetches for it.
+func TestViewerSingleFlight_SeqIsReadBeforeTheBuildAndShared(t *testing.T) {
+	const concurrency = 20
+	var head atomic.Int64
+	head.Store(7)
+	g := newViewerSingleFlight(head.Load)
+
+	gate := make(chan struct{})
+	var attached atomic.Int32
+	sfTestWaiterAttached = func(string) {
+		if attached.Add(1) == concurrency-1 {
+			close(gate)
+		}
+	}
+	t.Cleanup(func() { sfTestWaiterAttached = nil })
+
+	seqs := make([]int64, concurrency)
+	var wg sync.WaitGroup
+	for i := range concurrency {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := g.Do("seq-key", false, func() ([]byte, error) {
+				head.Add(1) // an event announced while the build runs
+				select {
+				case <-gate:
+				case <-time.After(10 * time.Second):
+					t.Error("gate not released within 10s")
+				}
+				return []byte(`{}`), nil
+			})
+			assert.NoError(t, err)
+			seqs[i] = res.seq
+		}()
+	}
+	wg.Wait()
+	for i, s := range seqs {
+		assert.Equalf(t, int64(7), s, "caller %d must be told the seq read before the build", i)
+	}
+
+	res, err := g.Do("seq-key", false, func() ([]byte, error) { return []byte(`{}`), nil })
+	require.NoError(t, err)
+	assert.Equal(t, int64(8), res.seq, "the next build reads the seq afresh")
+}
+
+// bc-sseq FR2: a shared build is compressed at most once, by the first
+// caller that accepts gzip, however many callers wait on it; gzip and plain
+// callers mixed, so the race detector sees the waiters read the gzipped
+// bytes while the one compression is made.
+func TestViewerSingleFlight_CompressesOncePerBuild(t *testing.T) {
+	const concurrency = 64
+	g := newViewerSingleFlight(zeroSeq)
+	body := bigJSON(t, 200)
+	require.GreaterOrEqual(t, len(body), gzipMinBytes)
+
+	var compressed atomic.Int32
+	sfTestCompressed = func(string) { compressed.Add(1) }
+	gate := make(chan struct{})
+	var attached atomic.Int32
+	sfTestWaiterAttached = func(string) {
+		if attached.Add(1) == concurrency-1 {
+			close(gate)
+		}
+	}
+	t.Cleanup(func() { sfTestCompressed, sfTestWaiterAttached = nil, nil })
+
+	results := make([]sfResult, concurrency)
+	var wg sync.WaitGroup
+	for i := range concurrency {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := g.Do("gz-key", i%2 == 0, func() ([]byte, error) {
+				select {
+				case <-gate:
+				case <-time.After(10 * time.Second):
+					t.Error("gate not released within 10s")
+				}
+				return body, nil
+			})
+			assert.NoError(t, err)
+			results[i] = res
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, int32(1), compressed.Load(), "one build, one compression")
+	for i, res := range results {
+		assert.Equalf(t, body, res.body, "caller %d gets the build's bytes", i)
+		if i%2 == 0 {
+			require.NotNilf(t, res.gz, "gzip caller %d gets the compressed bytes", i)
+			assert.Equalf(t, body, gunzip(t, res.gz), "caller %d's gzip holds the build's bytes", i)
+		} else {
+			assert.Nilf(t, res.gz, "plain caller %d gets no compressed bytes", i)
+		}
+	}
+
+	// A new build compresses afresh: the bytes are the build's, not a cache.
+	_, err := g.Do("gz-key", true, func() ([]byte, error) { return body, nil })
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), compressed.Load())
+}
+
+// A build under gzipMinBytes is never compressed (the middleware would not
+// compress it either), nor is a failed one.
+func TestViewerSingleFlight_SmallOrFailedBuildIsNotCompressed(t *testing.T) {
+	g := newViewerSingleFlight(zeroSeq)
+	var compressed atomic.Int32
+	sfTestCompressed = func(string) { compressed.Add(1) }
+	t.Cleanup(func() { sfTestCompressed = nil })
+
+	res, err := g.Do("small", true, func() ([]byte, error) { return []byte(`["ok"]`), nil })
+	require.NoError(t, err)
+	assert.Nil(t, res.gz)
+	assert.Equal(t, []byte(`["ok"]`), res.body)
+
+	_, err = g.Do("failed", true, func() ([]byte, error) { return nil, fmt.Errorf("build failed") })
+	require.Error(t, err)
+	assert.Equal(t, int32(0), compressed.Load())
+}
+
+// serveSingleFlightJSON sends the gzipped bytes encoded and the plain ones as
+// they are, both with the build's X-Event-Seq and Accept-Encoding merged into
+// the Vary the audience judge set.
+func TestServeSingleFlightJSON_EncodingVaryAndSeq(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := bigJSON(t, 200)
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, err := zw.Write(body)
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+
+	serve := func(res sfResult) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Writer.Header().Set("Vary", "X-Tournament-Password")
+		serveSingleFlightJSON(c, res, nil)
+		return w
+	}
+
+	w := serve(sfResult{body: body, gz: buf.Bytes(), seq: 42})
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "gzip", w.Header().Get("Content-Encoding"))
+	assert.Equal(t, "42", w.Header().Get(eventSeqHeader))
+	assert.Equal(t, []string{"X-Tournament-Password", "Accept-Encoding"}, varyTokens(w.Header()))
+	assert.Equal(t, body, gunzip(t, w.Body.Bytes()))
+
+	w = serve(sfResult{body: body, seq: 0})
+	assert.Empty(t, w.Header().Get("Content-Encoding"))
+	assert.Equal(t, "0", w.Header().Get(eventSeqHeader))
+	assert.Equal(t, []string{"X-Tournament-Password", "Accept-Encoding"}, varyTokens(w.Header()))
+	assert.Equal(t, body, w.Body.Bytes())
+}
+
+// The error answer names Accept-Encoding in Vary too, with no middleware in
+// front of it.
+func TestServeSingleFlightJSON_ErrorAnswerCarriesVary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/viewer/competitions", nil)
+	c.Writer.Header().Set("Vary", "X-Tournament-Password")
+	serveSingleFlightJSON(c, sfResult{}, errors.New("build failed"))
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, []string{"X-Tournament-Password", "Accept-Encoding"}, varyTokens(w.Header()))
 }
 
 // The list and the court feeds key their builds on the config write token

@@ -92,6 +92,7 @@
   --warn-soft: #fffbeb;   /* amber-50: warning fill */
   --warn-border: #fde68a; /* amber-200: warning hairline border */
   --warn-ink: #78350f;    /* amber-900: strongest warning text, ~8:1 on --warn-soft */
+  --warn-fill: #d0700a;   /* saturated amber fill with --ink-1 on it (5:1); 3.3:1 against --bg, 3.5:1 against white */
 
   /* Success / present, green. The "this is checked-in / advancing / a winner /
      succeeded" signal, distinct from the status-pipeline knockout green
@@ -111,6 +112,7 @@
   --ink-2: #3a414e;
   --ink-3: #636a77; /* 4.5:1 or better on every light fill (--line-2 4.77, --surface-2 4.97, --accent-soft 4.53), was #6b7280 (4.24 on --line-2) */
   --ink-4: #6c7480; /* 4.7:1 on white, was #9aa1ac (2.8:1) */
+  --view-fill: #7c8798; /* saturated slate fill with --ink-1 on it (4.9:1); 3.4:1 against --bg, 3.6:1 against white */
   --ink-5: #f1f3f6; /* inverse text/border, use only on dark (--ink / --ink-1) backgrounds */
   --text-link: #2563eb;    /* link blue: standalone text links outside body copy */
   --line: #e4e6eb;
@@ -6111,9 +6113,11 @@ details[open] > summary::before { transform: rotate(90deg); }
    inside the editor body, under the footer dock at 20 and the topbar at
    30). Overlay hosts pin it at the top of their scrolling body; the inline
    hosts sit it under the shell's topbar stack, whose height AdminTopbar
-   publishes as --topbar-stack-h. The sheet publishes this unit's own height as
-   --team-pin-h, and the inline dock's as --team-dock-h, for the scroll margin
-   that keeps a focused control clear of the bars (the content rules below). */
+   publishes as --topbar-stack-h, plus the court console's shiaijo control bar
+   under it (--court-control-h, set only while that bar is mounted). The sheet
+   publishes this unit's own height as --team-pin-h, and the inline dock's as
+   --team-dock-h, for the scroll margin that keeps a focused control clear of
+   the bars (the content rules below). */
 .team-sheet-pin {
   position: sticky;
   top: 0;
@@ -6125,7 +6129,7 @@ details[open] > summary::before { transform: rotate(90deg); }
   background: var(--surface);
 }
 .scoring-panel--team .team-sheet-pin {
-  top: var(--topbar-stack-h, 0px);
+  top: calc(var(--topbar-stack-h, 0px) + var(--court-control-h, 0px));
 }
 /* In the overlay the bar sticks to the body's top edge, over the body's top
    padding, so a bout scrolled past does not show in a strip above the team
@@ -6154,11 +6158,11 @@ details[open] > summary::before { transform: rotate(90deg); }
    the top is margined there. The inline head (the title row and Close) scrolls
    with the page above the pinned header, so only the topbar can cover it. */
 .scoring-panel--team > .editor-modal__body :is(button, a[href], input, select, textarea, summary, [tabindex]):not(.team-sheet-pin *) {
-  scroll-margin-top: calc(var(--topbar-stack-h, 0px) + var(--team-pin-h, 0px));
+  scroll-margin-top: calc(var(--topbar-stack-h, 0px) + var(--court-control-h, 0px) + var(--team-pin-h, 0px));
   scroll-margin-bottom: var(--team-dock-h, 0px);
 }
 .scoring-panel--team > .editor-modal__head :is(button, a[href], input, select, textarea, summary, [tabindex]) {
-  scroll-margin-top: var(--topbar-stack-h, 0px);
+  scroll-margin-top: calc(var(--topbar-stack-h, 0px) + var(--court-control-h, 0px));
 }
 .editor-modal--team > .editor-modal__body :is(button, a[href], input, select, textarea, summary, [tabindex]):not(.team-sheet-pin *) {
   scroll-margin-top: var(--team-pin-h, 0px);
@@ -10649,6 +10653,155 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* ── Shiaijo operator console (Direction C, mp-c2yr) ──────────────────────
    Two-column: queue (left ~40%) + inline scoring & context (right). Stacks
    below 900px so tablet-portrait gets scoring-on-top, queue-below. */
+/* ---------- Court console: who runs this shiaijo (bc-sseq FR9) ---------- */
+/* The mark sits under the admin top bar and sticks with it (the top bar
+   publishes its height as --topbar-stack-h), so it is on screen however far
+   the operator scrolls. It publishes its own height as --court-control-h, which
+   the inline team sheet adds under the top bar (the pinned header and the
+   scroll margin), or the bar would cover them. A static banner, never a pulse
+   (DESIGN.md principle 3). Every state opens with a glyph and a bold word, so
+   the meaning never rests on hue, and each meaning has one treatment:
+     --holds    green tint: this device runs the shiaijo.
+     --view     saturated slate (--view-fill): another tab or device runs it;
+                this console is view only.
+     --lost     saturated amber (--warn-fill): this device lost it; view only
+                until it takes it back (Take control is the primary button).
+                When it lost it while open, this band also carries the
+                one-time account of the loss and its Dismiss.
+     --pending  neutral: no answer yet (Checking, Can't reach court control,
+                Reconnecting); the console still scores.
+     --error    red tint: a sign-in or check this console must fix.
+   The two saturated fills hold 3:1 or more against the white top bar and the
+   --bg page, with --ink-1 on them (4.5:1 or more). */
+.shiaijo-control {
+  position: sticky;
+  top: var(--topbar-stack-h, 0px);
+  z-index: 29;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 14px;
+}
+.shiaijo-control__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 4px 16px;
+}
+.shiaijo-control__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 20px;
+}
+.shiaijo-control__glyph { flex: none; margin-top: 1px; }
+.shiaijo-control__words { min-width: 0; }
+.shiaijo-control__lead { font-weight: 700; color: inherit; }
+.shiaijo-control__offline { font-weight: 600; }
+.shiaijo-control__take {
+  flex: none;
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.shiaijo-control--holds {
+  background: var(--ok-soft);
+  border-bottom-color: var(--ok);
+  color: var(--ok-ink);
+}
+.shiaijo-control--holds .shiaijo-control__glyph { color: var(--ok-strong); }
+.shiaijo-control--view {
+  background: var(--view-fill);
+  border-bottom-color: var(--ink-3);
+  color: var(--ink-1);
+}
+.shiaijo-control--lost {
+  background: var(--warn-fill);
+  border-bottom-color: var(--warn);
+  color: var(--ink-1);
+}
+.shiaijo-control--pending .shiaijo-control__glyph { color: var(--ink-3); }
+.shiaijo-control--error {
+  background: var(--danger-soft);
+  border-bottom-color: var(--danger-border);
+  color: var(--danger-ink);
+}
+/* The button's own ring is navy, which a saturated fill can swallow: on those
+   two the ring is the dark ink, offset clear of the button. */
+.shiaijo-control--view .shiaijo-control__take:focus-visible,
+.shiaijo-control--lost .shiaijo-control__take:focus-visible {
+  outline: 2px solid var(--ink-1);
+  outline-offset: 2px;
+}
+/* The one-time account when this console stops running the shiaijo while it
+   is open: part of the amber band's own sentence (one live region), shown on
+   a phone too, with its Dismiss beside Take control. */
+.shiaijo-control__lost { font-weight: 600; }
+.shiaijo-control__dismiss { flex: none; min-height: 44px; font-size: 14px; color: var(--ink-1); }
+.shiaijo-control__dismiss:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 2px; }
+/* Why a disabled group of the console's write controls is greyed out, set
+   just above it, so a tap on one is never unexplained. */
+.shiaijo-control-reason {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ink-1);
+}
+.shiaijo-control-reason__glyph { flex: none; margin-top: 2px; color: var(--ink-3); }
+/* The console's action areas, disabled as one while this tab does not run the
+   shiaijo: a bare grouping box that lays its children out as the column it
+   sits in did. */
+.shiaijo-control-scope {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.shiaijo-control-scope--queue {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.editor-modal__body > .shiaijo-control-scope:not(:empty) {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.editor-modal__foot--nav > .shiaijo-control-scope:not(:empty) {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* Nothing to group (no Up next, no upcoming rows): no box, so no gap. */
+.shiaijo-control-scope:empty { display: none; }
+/* A phone keeps the bar to the glyph, the bold word, the main sentence and the
+   button on one row: the detail sentence (when it was last active, what still
+   counts) is left to a wider screen. */
+@media (max-width: 640px) {
+  .shiaijo-control__row { padding: 4px 12px; gap: 8px; }
+  .shiaijo-control__more { display: none; }
+  .shiaijo-control__take { padding: 0 12px; }
+  .shiaijo-control__dismiss { padding: 0 8px; }
+}
+/* On a small phone the "Control lost" band's sentence is long and its two
+   buttons squeeze it into a narrow column (169px tall at 320px), so the
+   buttons move under the sentence, right-aligned (101px). 369px is where one
+   row stops being taller (109px up to 369px, 89px from 370px). Only that
+   band: a wider phone, or a shorter band, is shorter on one row. */
+@media (max-width: 369px) {
+  .shiaijo-control--lost .shiaijo-control__row { flex-wrap: wrap; row-gap: 4px; padding-bottom: 8px; }
+  .shiaijo-control--lost .shiaijo-control__text { flex: 1 1 100%; }
+  .shiaijo-control--lost .shiaijo-control__text + .btn { margin-left: auto; }
+}
+
 .shiaijo {
   display: grid;
   grid-template-columns: minmax(300px, 38%) 1fr;

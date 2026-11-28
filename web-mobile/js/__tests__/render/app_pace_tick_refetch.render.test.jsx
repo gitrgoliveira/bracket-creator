@@ -3,12 +3,14 @@ import { act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { mountApp, settle, propsProbe } from '../helpers/mount_app.js';
 import { PACE_TICK_MS } from '../../court_pace.jsx';
+import { HELD_PUSH_WAIT_MS } from '../../refetch_gate.jsx';
 
 // On a competition page the pace tick refetches the tournament every
 // PACE_TICK_MS, so shared-court pace drift stays current. That refetch goes
 // through the SSE effect's gates (maybeLoad, the sign-in prompt, a hidden
 // tab) and lands after a random delay, so the open tabs do not all ask at the
-// same moment.
+// same moment. The delay starts at HELD_PUSH_WAIT_MS (the list gate's window,
+// createRefetchGate, refetch_gate.jsx), so even a zero draw lands after it.
 
 const page = propsProbe(() => <div data-testid="viewer-competition" />);
 
@@ -47,6 +49,8 @@ const tick = async (random = 0) => {
   }
   await settle();
 };
+// gateWait: past the shortest delay the list gate draws.
+const gateWait = () => act(async () => { await new Promise((r) => setTimeout(r, HELD_PUSH_WAIT_MS + 20)); });
 
 beforeAll(async () => {
   intervalSpy = vi.spyOn(globalThis, 'setInterval').mockImplementation((fn, ms, ...rest) => {
@@ -73,7 +77,8 @@ describe('the pace tick refetch', () => {
     const before = loads();
     await tick(0.5);
     expect(loads(), 'not at the tick itself').toBe(before);
-    await act(async () => { await new Promise((r) => setTimeout(r, 1100)); });
+    // A draw of 0.5 lands halfway between HELD_PUSH_WAIT_MS and 2,000 ms.
+    await act(async () => { await new Promise((r) => setTimeout(r, 1200)); });
     expect(loads(), 'within the jitter window').toBe(before + 1);
   });
 
@@ -82,6 +87,7 @@ describe('the pace tick refetch', () => {
     try {
       const before = loads();
       await tick();
+      await gateWait();
       expect(loads()).toBe(before);
     } finally {
       hidden.mockRestore();
@@ -91,11 +97,13 @@ describe('the pace tick refetch', () => {
   it('skips while the sign-in prompt is open', async () => {
     const start = loads();
     await tick();
+    await gateWait();
     expect(loads(), 'a tick with no prompt refetches').toBe(start + 1);
     const before = loads();
     await act(async () => { page.props.onAdminClick(); });
     await settle();
     await tick();
+    await gateWait();
     expect(loads()).toBe(before);
   });
 });

@@ -1487,11 +1487,15 @@ const correctionState = {};
 // loaded afresh in the same context (so already signed in): the console on the
 // page that tapped End match shows the result at once, before the server has
 // answered, and keeps showing it if the server then holds the match unchanged.
+// The fresh page is a second tab of the same tablet that only reads: it
+// watches the shiaijo the operator's tab runs and never takes it (one tab runs
+// each shiaijo; taking it would leave the operator's tab view only, and its
+// close would leave the shiaijo free with that tab displaced).
 async function completedOnServer(page, pair, court = 'A') {
   const fresh = await page.context().newPage();
   try {
     await expect.poll(async () => {
-      await openShiaijo(fresh, court);
+      await openShiaijo(fresh, court, { take: false });
       return completedRowFor(fresh, pair).locator('.shiaijo-qrow__result').count();
     }, { timeout: EXPECT_TIMEOUT_MS, message: `${pair.shiro} v ${pair.aka} is completed on the server` }).toBeGreaterThan(0);
   } finally {

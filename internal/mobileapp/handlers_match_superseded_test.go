@@ -91,7 +91,14 @@ func TestScoreHandler_SupersededWriteIsReportedNotSilentlyDropped(t *testing.T) 
 	assert.Equal(t, false, applied)
 	assert.Equal(t, "superseded", body["reason"])
 	assert.NotEmpty(t, body["message"], "the operator needs something to read")
-	assert.NotContains(t, w.Body.String(), "Bob\"", "the discarded payload must not be echoed back as if stored")
+	// The discarded payload must not be echoed back as if stored: the answer's
+	// match is the STORED one (bc-sseq FR5), with no winner and no points.
+	match, ok := body["match"].(map[string]any)
+	require.True(t, ok, "the superseded answer carries the stored match; got %s", w.Body.String())
+	assert.Equal(t, "", match["winner"], "the discarded winner is not echoed")
+	assert.Equal(t, []any{}, match["ipponsB"], "the discarded points are not echoed")
+	assert.Equal(t, string(state.MatchStatusRunning), match["status"])
+	assert.EqualValues(t, storedAt, match["modifiedAt"])
 
 	hub.Unsubscribe(ch)
 	wg.Wait()

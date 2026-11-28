@@ -73,6 +73,7 @@ All tokens are defined in the `:root` block in [styles.css](web-mobile/css/style
 | `--warn-soft` | `#fffbeb` | Warning fill (amber-50): `.alert--warn`, `.tag-badge--warn`, offline pill background |
 | `--warn-border` | `#fde68a` | Warning hairline border (amber-200) |
 | `--warn-ink` | `#78350f` | Strongest warning text (amber-900, ~8:1 on `--warn-soft`) |
+| `--warn-fill` | `#d0700a` | **Saturated** amber fill for a state that stops the operator's work until they act, with `--ink-1` on it (5:1); 3.3:1 against `--bg` and 3.5:1 against white, so it reads in glare where the amber-50 tint does not. Used by the court console's "Control lost" bar (`.shiaijo-control--lost`). Never as a page or card fill. |
 | `--ok` | `#16a34a` | **Success / present** green: check-in fills, win accents, progress-done. The "this succeeded / is checked-in / advancing / won" signal. Mirrors the `--warn` ramp; **never** for Aka/danger (use `--danger`) or running (use `--accent`). Distinct from the **status-pipeline knockout** green (`#ecfdf5`/`#065f46`/`#a7f3d0`, badge-only carve-out). |
 | `--ok-strong` | `#15803d` | Stronger success text/border on `--ok-soft` (green-700) |
 | `--ok-soft` | `#f0fdf4` | Success fill: checked-in rows, success alerts, hand-over callout (green-50) |
@@ -87,6 +88,7 @@ All tokens are defined in the `:root` block in [styles.css](web-mobile/css/style
 | `--ink-2` | `#3a414e` | Secondary text, labels |
 | `--ink-3` | `#636a77` | Tertiary text (meta, hints, table heads); at least 4.5:1 on `--line-2`, `--surface-2` and white |
 | `--ink-4` | `#6c7480` | **Contrast floor for fine print**: holds **4.7:1 on white (WCAG AA)**. Do not lighten. |
+| `--view-fill` | `#7c8798` | **Saturated** slate fill for a view-only state (this screen cannot write because another device or tab does), with `--ink-1` on it (4.9:1); 3.4:1 against `--bg` and 3.6:1 against white. Used by the court console's "View only" bar (`.shiaijo-control--view`). Neutral on purpose: not navy (running), not amber (lost), not red (Aka/danger). |
 | `--ink-5` | `#f1f3f6` | **Inverse text/border**: use only on dark (`--ink` / `--ink-1`) backgrounds (e.g. `.sb-draw-toggle--active`). Never use on `--surface` or `--bg`. |
 | `--line` | `#e4e6eb` | Default borders, dividers |
 | `--line-2` | `#eef0f4` | Subtle dividers, alt rows, hover backgrounds |

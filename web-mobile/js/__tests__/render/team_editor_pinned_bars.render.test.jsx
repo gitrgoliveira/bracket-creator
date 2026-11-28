@@ -237,7 +237,7 @@ describe('the stylesheet pins the two bars in the inline team panel (bc-tmfd)', 
     expect(pin).toMatch(/position:\s*sticky/);
     expect(pin).toMatch(/top:\s*0/);
     expect(pin).toMatch(/z-index:\s*9\b/);
-    expect(block('.scoring-panel--team .team-sheet-pin')).toMatch(/top:\s*var\(--topbar-stack-h/);
+    expect(block('.scoring-panel--team .team-sheet-pin')).toMatch(/top:\s*calc\(var\(--topbar-stack-h,\s*0px\)\s*\+\s*var\(--court-control-h,\s*0px\)\)/);
   });
 
   it('leaves the individual and engi inline panels alone: no sticky or clip on the shared panel rules', () => {
@@ -467,10 +467,10 @@ describe('the stylesheet keeps the sheet\'s own content clear of the bars with s
     expect(padding.map((r) => r.selector)).toEqual([]);
   });
 
-  it('inline hosts: the content clears the topbar and the pinned header above it and the dock below it', () => {
+  it('inline hosts: the content clears the topbar, the shiaijo control bar and the pinned header above it and the dock below it', () => {
     const rule = inlineRule();
     expect(rule, 'a rule for the inline body exists').toBeDefined();
-    expect(rule.decls).toMatch(/scroll-margin-top:\s*calc\(var\(--topbar-stack-h,\s*0px\)\s*\+\s*var\(--team-pin-h,\s*0px\)\)/);
+    expect(rule.decls).toMatch(/scroll-margin-top:\s*calc\(var\(--topbar-stack-h,\s*0px\)\s*\+\s*var\(--court-control-h,\s*0px\)\s*\+\s*var\(--team-pin-h,\s*0px\)\)/);
     expect(rule.decls).toMatch(/scroll-margin-bottom:\s*var\(--team-dock-h,\s*0px\)/);
   });
 
@@ -502,7 +502,7 @@ describe('the stylesheet keeps the sheet\'s own content clear of the bars with s
   it('inline sheet: the head\'s controls clear the topbar, and nothing else is reached by that rule', async () => {
     const rule = headRule();
     expect(rule, 'a rule for the inline head exists').toBeDefined();
-    expect(rule.decls).toMatch(/scroll-margin-top:\s*var\(--topbar-stack-h,\s*0px\)/);
+    expect(rule.decls).toMatch(/scroll-margin-top:\s*calc\(var\(--topbar-stack-h,\s*0px\)\s*\+\s*var\(--court-control-h,\s*0px\)\)/);
     expect(rule.decls, 'the head is above the dock, which never covers it').not.toMatch(/scroll-margin-bottom/);
     const { container } = await mount({ variant: 'inline', teamMatchType: 'kachinuki' });
     const head = controlsIn(container, '.editor-modal__head');

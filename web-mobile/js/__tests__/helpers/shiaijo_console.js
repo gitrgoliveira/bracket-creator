@@ -130,7 +130,7 @@ export async function mountCourt(initial, opts = {}) {
     revert: window.API.revertMatchToQueue,
   };
   window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve(opts.comps || [{ id: 'c1', name: 'Cup' }]));
-  window.API.subscribeToEvents = () => () => {};
+  window.API.subscribeToEvents = opts.subscribeToEvents || (() => () => {});
   window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
   const showToast = vi.fn();
   const onMoveCourt = opts.onMoveCourt || vi.fn();

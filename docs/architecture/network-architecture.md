@@ -77,8 +77,14 @@ flowchart TB
   device stamps them with the time they were made. Only the rule-bound writes (the taps, the
   whole writes of a match, lineups, team members, reinstatements and pool rank orders) and
   check-in, court calls, the tournament settings and the fighting-spirit awards go through the
-  device's outbox (§4); other setup edits, such as the password change, competition settings,
-  the roster, seeds, the draw and import, are direct calls that are not kept for later. Auth is
+  device's outbox (§4). Other setup edits, such as the password change, competition settings,
+  the roster, seeds, the draw and import, are direct calls that are not kept for later. So are
+  the court control calls on `/api/courts/{court}/control` (`GET`, a `PUT` that claims the
+  shiai-jo, takes it with **Take control**, or renews the claim every 30 s while the console is shown, and a
+  `DELETE` that gives it back), since taking control means nothing offline. A shiai-jo given
+  back stays with its tablet for 10 s on the server, so a reload over a slow network claims it
+  back before any other console; the server, not the waiting consoles, keeps that grace, because
+  their clocks and the events they are sent cannot be trusted on such a network. Auth is
   handled through the `X-Tournament-Password` header (two modes, §5; self-run mode allows
   unauthenticated scoring). Every response carries the `X-App-Build` header naming the git
   commit of the server build (or `unknown`), allowing clients to detect when a new server build
@@ -86,7 +92,10 @@ flowchart TB
 - **SSE**: one stream per client carrying `match_updated`, `competition_started`,
   `competition_completed`, `competitor_status_updated`, `participants_updated`,
   `tournament_updated`, `schedule_updated`, `lineup_updated`, `draw_generated`, `draw_discarded`,
-  `swiss_round_generated`, `announcement`, `password_reset` and `bracket_quarantined`, plus the
+  `swiss_round_generated`, `announcement`, `password_reset`, `bracket_quarantined` and
+  `court_control_updated` (sent to organiser streams only, when a shiai-jo passes to another tab
+  or tablet or is freed, which for a shiai-jo given back is once its 10 s grace ends; a heartbeat
+  announces nothing), plus the
   resilience control events `resync_required` and `heartbeat`. Every real event is stamped with a
   monotonic `seq` written as the SSE `id:` line, so the browser's `Last-Event-ID` advances
   automatically. A tap does not push by itself: the server replays the match and pushes the
@@ -413,6 +422,8 @@ Once a finish or a decision is recorded, a tap or a scoring write made after it 
 
 The first recorded result stands: a later finish or decision from a device that did not see the result in force is held in the same way, whichever arrived first, and so is one that would replace a knockout result after the next match was played or started (`heldReason` `downstream_knockout_played` or `downstream_knockout_running`). A representative pick made after its representative bout was removed is moved to the history the same way when the removal arrives, and that answer names it in `displacedGroups` with no `heldReason`. Where the outbox folds a queued running update into a later one, the later one names every group either changed.
 
+One writer has the last word on a match's result: the court console of the tablet that runs the match's shiai-jo. In a self-run tournament no write has the court's standing, so this section does not apply there. Only one console tab runs a shiai-jo at a time, and a console that does not run it queues no new writes except the withdrawal of a court call. The holding console stamps each finish and decision with `courtControl: {tabId, deviceId}`, its tab's id and its tablet's. Both are kept in browser storage, and the tablet id is shared by the tablet's tabs, as the outbox is. The stamp stays with the write while the outbox holds it. The server judges the stamp when the write arrives, never when it was made. The write has the court's standing when, at that moment, its tablet runs the shiai-jo the match is on, from any of its court console tabs. It must also not have been made before that tablet took the shiai-jo from another tablet. So a tablet's results queued offline keep the standing after a take between two of its own tabs, and lose it once another tablet has taken the shiai-jo. A result with the standing replaces a result another device recorded that it never saw, in either arrival order. A replaced result that had already been answered as applied is named on every later copy of the match (`replacedResult`, its write id), so the device that sent it tells its operator once. One that arrives after the court's is answered `heldReason: "court_result"`. Other matches may already be built on the result the court's would replace: a later Swiss round paired, a tie-break or representative match added, or the competition finished. The court's result is then held with `heldReason: "downstream_built_on"` and a sentence that points at Correct. A write from any other screen keeps the rules above.
+
 The same holds for the writes that are not score sheets: an older save the same device had already followed with a newer one (an out-of-order delivery after a reconnect) is kept whole in the history as an "older revision of this board"; an engi result is ordered by when it was saved, its flags and the winner they decide kept together. A queued decision or finish whose first send landed but whose answer was lost is answered as recorded when it is sent again: the same write under the same stamp changes nothing, so it is not asked for a correction reason and nothing is written to the match; the match's history gains a line saying the write arrived and changed nothing.
 
 ## 5. Authentication on the network
@@ -466,3 +477,62 @@ flowchart TB
 Because every real-time update is fanned out to **every** connected viewer, **network egress is the
 practical ceiling**, not CPU/RAM. Refer to [Infrastructure architecture](infrastructure-architecture.md#5-capacity-scaling)
 for per-tier audience guidance (for example, GCP free tier compared with Oracle for large events).
+
+### What one point costs on the wire
+
+A point is announced by one small `match_updated` event, but a page that hears it fetches the
+competition (or the list) again, and that answer is far larger than the event. Recording one point
+through the real router and counting the bytes gives the figures in the following table. The
+tournament measured is small: two competitions of 12 competitors each, a full round robin of 66
+bouts apiece, so a real tournament's answers are larger.
+
+| What is sent | Bytes as sent | Bytes gzipped |
+|---|---|---|
+| The `match_updated` event (stream frame) | 612 | not compressed |
+| One competition refetch | 25,665 | 2,058 (8%) |
+| One competitions-list refetch | 50,943 | 3,478 (7%) |
+
+Every `/api` answer of 1 KiB or more that is JSON is gzipped for a browser that accepts it, so the saving
+applies to each refetch. The embedded page files are not compressed, so a first load is unchanged.
+Compressing a list answer of 317 KB of JSON, which becomes 41 KB, takes under 1 ms on a
+laptop-class core. Viewers who ask for the same answer at the same moment share one build of it,
+and that build is compressed once for all of them, so a crowd does not multiply that cost.
+
+The following table shows one point, with every viewer fetching both the competition and the list
+again:
+
+| Viewers | The event | Refetches as sent | Refetches gzipped |
+|---|---|---|---|
+| 1 | 612 B | 76.6 KB | 5.5 KB |
+| 100 | 61 KB | 7.7 MB | 554 KB |
+| 1,000 | 612 KB | 76.6 MB | 5.5 MB |
+
+Per viewer, the refetches are 125 times the event's bytes as sent and 9 times gzipped, so they are
+most of what grows with the audience. That is why both the compression and fetching once per burst
+of events matter.
+
+### A burst of points
+
+A court scores in bursts: an ippon, then another a moment later, each announced by its own event.
+A page does not fetch once per event. Each answer it reads carries `X-Event-Seq`, the number of
+the newest event the server had sent when the read began, so an event at or below that number is
+already in the answer and fetches nothing. Events that arrive close together share one fetch, sent
+this long after the first of them:
+
+- a competition page: 300 ms to 500 ms;
+- the tournament list: 300 ms to 2 s, or 300 ms to 1.5 s on the organiser's competition page;
+- the court console: 300 ms to 600 ms.
+
+The 300 ms start lets a point the server is still
+holding (it gathers a running match's points for up to 250 ms) go out before the read takes its
+number, so the read covers it too. The pushed scores themselves show at once, without waiting.
+
+Five points scored in quick succession on a competition the viewer has open cause one fetch of the
+competition instead of five. The following table uses the competition refetch measured in
+[What one point costs on the wire](#what-one-point-costs-on-the-wire):
+
+| Viewers | Five fetches, as sent | One fetch, as sent | Five fetches, gzipped | One fetch, gzipped |
+|---|---|---|---|---|
+| 1 | 128.3 KB | 25.7 KB | 10.3 KB | 2.1 KB |
+| 100 | 12.8 MB | 2.6 MB | 1.0 MB | 206 KB |
+| 1,000 | 128.3 MB | 25.7 MB | 10.3 MB | 2.1 MB |

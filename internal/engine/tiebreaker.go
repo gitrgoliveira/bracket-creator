@@ -872,6 +872,15 @@ func (e *Engine) engiHealOwed(compID string, comp *state.Competition, matches []
 // regenerates the schedule. Returns the newly injected matches (nil
 // when there are no ties or all TB pairs already exist).
 func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, error) {
+	injected, _, err := e.injectTiebreakerMatches(compID)
+	return injected, err
+}
+
+// injectTiebreakerMatches is InjectTiebreakerMatches that also reports
+// whether the engi self-heal removed rows (healed), which it saves even when
+// it injects nothing, so the auto-complete pass can announce that write
+// rather than report no change.
+func (e *Engine) injectTiebreakerMatches(compID string) ([]state.MatchResult, bool, error) {
 	// Read before the transaction (the tournament has its own lock), and
 	// only reported when there is something to schedule, as it always was.
 	tournament, tournErr := e.store.LoadTournament()
@@ -994,7 +1003,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 		return savePoolMatchesAndKnockoutTimes(tx, compID, appendWithSlots(allMatches, injected, comp, tournament, nil), comp, tournament)
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if healed || len(injected) > 0 {
 		// Invalidate the standings cache so the next read reflects the change.
@@ -1002,9 +1011,9 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 		e.standingsFlight.Delete(compID)
 	}
 	if len(injected) == 0 {
-		return nil, nil
+		return nil, healed, nil
 	}
-	return injected, nil
+	return injected, healed, nil
 }
 
 // RunTiebreakerRound adds another round of ippon-shobu bouts among

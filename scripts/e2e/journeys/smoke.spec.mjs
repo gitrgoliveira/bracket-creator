@@ -2,8 +2,9 @@
 //
 // The operator creates the tournament, signs in through the form, builds an
 // individual pools + knockout competition through the wizard, pastes a roster,
-// draws, starts, and scores on /admin/shiaijo/A; a spectator's phone then sees
-// the result. Everything is seeded through the interface.
+// draws, starts, and scores on /admin/shiaijo/A and B; a bout of B is then
+// corrected from the Scores tab in the overlay editor, and a spectator's phone
+// sees the result. Everything is seeded through the interface.
 //
 // The clumsy variants are PERFORMED and RECORDED here (printed as AUDIT lines
 // and written to the journey folder's audit.json, fixtures/audit.mjs), never
@@ -21,9 +22,9 @@ import {
   editorIdentity, inlineEditor, lastCompleted, openShiaijo, sides, startUpNext, upNextCard,
 } from '../fixtures/shiaijo.mjs';
 import {
-  EDITOR, INLINE_EDITOR, armFinish, awardIppon, finishMatch, ipponButton, startMatch, settled, unsentCount,
+  EDITOR, INLINE_EDITOR, armFinish, awardIppon, filledSlots, finishMatch, ipponButton, nextMatchWrite, settled, unsentCount, writeLanded,
 } from '../fixtures/scoring.mjs';
-import { openScoreEditor } from '../fixtures/scores.mjs';
+import { scoreRows } from '../fixtures/scores.mjs';
 import { openTvBoard, openViewer, recentResult, tvBoard } from '../fixtures/public.mjs';
 import { doubleTap, hastyConfirm, interrupt, retapWhileSaving, tapNeighbour } from '../fixtures/clumsy.mjs';
 
@@ -159,12 +160,45 @@ test.describe('smoke', () => {
       await shot(page, 'bout-2-finished');
     });
 
-    await test.step('shiaijo B from the Scores tab: the overlay editor', async () => {
-      await openScoreEditor(page, compId, { court: 'B' });
-      await startMatch(page);
-      await awardIppon(page, 'aka', 'K', EDITOR);
+    // The overlay editor, the second place the score editor mounts, is the
+    // admin pages' and they are for correcting mistakes, never for scoring a
+    // competition (operator ruling 2026-11-27): the court of shiaijo B scores
+    // its bout, and the Scores tab corrects it.
+    let pairB;
+    await test.step('shiaijo B: the court scores a bout', async () => {
+      await openShiaijo(page, 'B');
+      pairB = await startUpNext(page);
+      await awardIppon(page, 'aka', 'K');
+      await finishMatch(page, INLINE_EDITOR);
+      await shot(page, 'shiaijo-B-finished');
+    });
+
+    await test.step('shiaijo B corrected from the Scores tab: the overlay editor', async () => {
+      // The court entered Aka's K; the referees had given men. Correct: K off, M on.
+      await page.goto(`/admin/competition/${encodeURIComponent(compId)}/scores`);
+      const row = scoreRows(page).filter({ hasText: pairB.shiro }).filter({ hasText: pairB.aka }).first();
+      await row.getByRole('button', { name: /^Correct$/ }).tap();
+      const ed = page.locator(EDITOR);
+      await expect(ed).toBeVisible();
+      await ed.locator('[aria-label^="Aka slot "][aria-label$=": remove K"]').first().tap();
+      await expect(filledSlots(page, 'aka', EDITOR)).toHaveCount(0);
+      await awardIppon(page, 'aka', 'M', EDITOR);
       await shot(page, 'overlay-editor-B');
-      await finishMatch(page, EDITOR);
+      const answered = nextMatchWrite(page);
+      await ed.getByRole('button', { name: 'Save correction', exact: true }).tap();
+      const reason = page.locator('.reason-prompt').last();
+      await expect(reason).toBeVisible();
+      await reason.getByRole('textbox').fill('Aka scored men, not kote');
+      await reason.getByRole('button', { name: 'Confirm', exact: true }).tap();
+      const body = await (await writeLanded(answered, 'the correction')).json();
+      expect(body.applied, `the correction was applied: ${JSON.stringify(body)}`).not.toBe(false);
+      await expect(ed, 'the editor closes on the saved correction').toHaveCount(0);
+      const score = row.locator('.score-edit-row__scoreval');
+      await expect(score, 'the row reads the corrected point').toContainText('M');
+      await expect(score).not.toContainText('K');
+      record({ variant: 'correction', action: 'Aka K corrected to M from the Scores tab', pair: pairB,
+        score: (await score.innerText()).replace(/\s+/g, ' ').trim() });
+      await shot(page, 'overlay-correction-saved-B');
     });
 
     await test.step('a spectator phone sees bout 1 on the viewer and the TV board', async () => {

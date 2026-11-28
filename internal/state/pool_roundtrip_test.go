@@ -74,6 +74,10 @@ var notPersistedInPoolCSV = map[string]string{
 		"baseline it leaves in the score event log.",
 	"WriteSession": "request-only (bc-evts S8 b): the writer's event session, " +
 		"kept on the baseline it leaves in the score event log.",
+	"CourtStanding": "request-only (bc-sseq FR8): the court's standing, judged " +
+		"by the door on arrival; the baseline the write leaves keeps it " +
+		"(ScoreBaseline.Court), and ClearRequestFields drops it from every " +
+		"stored copy.",
 	"Merge": "the merge's report on THIS write (bc-mrgc), read by the history " +
 		"writer and the handlers' heldGroups; the history file keeps it.",
 	"HeldTeamResult": "a served copy's held summary (MatchResult.HoldTeamResult): " +

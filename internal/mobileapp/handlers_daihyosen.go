@@ -23,7 +23,6 @@ package mobileapp
 import (
 	"errors"
 	"io"
-	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -43,12 +42,24 @@ import (
 // timestamp guard. An unstamped request still applies: the bracket projection
 // carries no ModifiedAt (the unstamped bypass), and a pool match's copy carries
 // the stored stamp, which ApplyByTimestamp's >= comparison accepts.
+//
+// It answers with no stored match: the daihyosen doors, which read one in their
+// transaction, answer through respondSupersededError with it, and this arm is
+// left for a superseded error no door caught (respondIfEngineWriteError).
 func respondIfSuperseded(c *gin.Context, err error) bool {
 	if !errors.Is(err, engine.ErrMatchSuperseded) {
 		return false
 	}
-	respondSuperseded(c, engine.HeldGroupsOf(err), engine.HeldReasonOf(err), err)
+	respondSupersededError(c, nil, err)
 	return true
+}
+
+// respondSupersededError is respondSuperseded for a door holding the engine's
+// *SupersededError: the held groups, the held reason and the turned-away taps
+// are read off it. stored is the match the write lost to, read in its
+// transaction (storedMatchForAnswer), or nil.
+func respondSupersededError(c *gin.Context, stored *state.MatchResult, err error) {
+	respondSuperseded(c, stored, engine.HeldGroupsOf(err), engine.HeldReasonOf(err), err)
 }
 
 // daihyosenWriteStamp reads the client's server-relative write stamp from the
@@ -216,8 +227,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			haveResult bool
 			// supersededErr is a write whose every change was held: the
 			// transaction commits (its history entry lands) and the answer is
-			// applied:false (bc-mrgc).
-			supersededErr error
+			// applied:false (bc-mrgc), with supersededMatch, the stored match
+			// it lost to, read under the same lock.
+			supersededErr   error
+			supersededMatch *state.MatchResult
 		)
 		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
 			match, found, err := findMatchForDaihyosenTx(stx, id, mid)
@@ -310,6 +323,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 					// Committed, not aborted: the write's history entry is
 					// its one footprint and must land.
 					supersededErr = err
+					supersededMatch = storedMatchForAnswer(stx, id, mid, true)
 					return nil
 				}
 				return err
@@ -326,7 +340,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		}
 		if supersededErr != nil {
-			respondIfSuperseded(c, supersededErr)
+			respondSupersededError(c, supersededMatch, supersededErr)
 			return
 		}
 		if resp != nil {
@@ -374,8 +388,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			subOut     *state.SubMatchResult
 			resp       *txResponse // the answer when nothing is written, decided under the lock
 			haveResult bool
-			// supersededErr: see the remove handler's.
-			supersededErr error
+			// supersededErr and supersededMatch: see the remove handler's.
+			supersededErr   error
+			supersededMatch *state.MatchResult
 		)
 		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
 			// Engi competitions decide bouts by referee flag counts; a
@@ -536,6 +551,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
 				if errors.Is(err, engine.ErrMatchSuperseded) {
 					supersededErr = err
+					supersededMatch = storedMatchForAnswer(stx, id, mid, true)
 					return nil
 				}
 				return err
@@ -553,7 +569,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		}
 		if supersededErr != nil {
-			respondIfSuperseded(c, supersededErr)
+			respondSupersededError(c, supersededMatch, supersededErr)
 			return
 		}
 		if resp != nil {
@@ -571,26 +587,14 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			"result":        matchForBroadcast(updated),
 		})
 
-		// Inline auto-complete check (same pattern as
-		// tryAutoCompletePoolsAfterWrite). A rep bout is only ever added to a
-		// knockout match, so in knockout status this skips the pool pass.
+		// The auto-complete check, answered by the score doors' own tail, so
+		// every outcome is announced as it is there. A rep bout is only ever
+		// added to a knockout match, so in knockout status this skips the
+		// pool pass. An added rep bout left the match running, which is a
+		// recorded result, so a still-draw-ready competition is started by it
+		// (bc-prow, AutoCompleteStarted).
 		outcome, autoErr := eng.MaybeAutoCompletePoolsAfterWrite(id, updated)
-		switch {
-		case autoErr != nil:
-			log.Printf("MaybeAutoCompletePools(%s) after daihyosen: %v", id, autoErr)
-			c.Header(AutoCompleteErrorHeader, AutoCompleteErrorValue)
-		case outcome == engine.AutoCompleteTransitioned:
-			hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
-		case outcome == engine.AutoCompleteTiebreakInjected:
-			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id})
-			hub.Broadcast(EventScheduleUpdated, nil)
-		case outcome == engine.AutoCompleteStarted:
-			// The added rep bout left the match running, which is a recorded
-			// result, so a still-draw-ready competition was started by it
-			// (bc-prow). Same events as tryAutoCompletePools' own branch.
-			hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
-			hub.Broadcast(EventScheduleUpdated, nil)
-		}
+		answerAutoComplete(c, hub, id, outcome, autoErr)
 
 		c.JSON(http.StatusOK, withHeldGroups(gin.H{"subResult": subOut, "result": matchForBroadcast(updated)}, updated.Merge))
 	})

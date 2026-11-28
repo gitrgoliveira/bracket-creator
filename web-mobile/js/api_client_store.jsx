@@ -80,7 +80,98 @@ export const _latestDerived = new Map();
 // left until the next copy of the match (stage 6 review 6). A copy with a
 // lower scoreVersion than the one kept (an answer the server made before
 // the finish) does not replace it. Forgotten with the shown matches.
+// Each entry also keeps the newest `replacedResult` seen (bc-sseq FR8: the
+// result of another device that the court's result replaced) as `replaced`,
+// with the version of the copy that named it (`rv`) and the match's shiaijo
+// (`court`), so a result whose own applied answer is noted after that copy is
+// told as it is noted, and a heartbeat tells what a hidden tab left.
 export const _turnedAwaySeen = new Map();
+
+// bc-sseq FR8: the finished results (isFinishedResultWrite) this device sent
+// that the server applied, by write id, so a copy of the match whose
+// `replacedResult` names one tells its operator, once, that the court's result
+// replaced it (api_client_taps.jsx, _tellReplaced). Kept in browser storage, so
+// every tab of the device and the next page after a reload know them: a ring of
+// APPLIED_RESULTS_MAX, the oldest going first, each kept a day. An entry is
+// taken out before it is told, so it is told once per write id. Each names the
+// tab that noted it (`tab`), so the device's one telling tab tells it
+// (landed_taps.jsx `tellsFor`). Memory alone while storage refuses a write.
+export const APPLIED_RESULTS_KEY = 'bc_applied_results_v1';
+export const APPLIED_RESULTS_MAX = 200;
+export const APPLIED_RESULT_KEEP_MS = 24 * 60 * 60 * 1000;
+export function createAppliedResults({ storage, now = () => Date.now() } = {}) {
+    let mem = [];
+    // True while the last write did not reach storage: storage then lacks
+    // this tab's own change, so memory is read instead.
+    let memOnly = false;
+    const valid = (e) => !!e && typeof e === 'object' && typeof e.id === 'string' && e.id !== '';
+    const read = () => {
+        if (memOnly) return mem.slice();
+        try {
+            const raw = storage.getItem(APPLIED_RESULTS_KEY);
+            if (raw == null) return [];
+            const list = JSON.parse(raw);
+            return Array.isArray(list) ? list.filter(valid) : [];
+        } catch (_e) {
+            return mem.slice();
+        }
+    };
+    const write = (list) => {
+        mem = list;
+        try {
+            if (list.length > 0) storage.setItem(APPLIED_RESULTS_KEY, JSON.stringify(list));
+            else storage.removeItem(APPLIED_RESULTS_KEY);
+            memOnly = false;
+        } catch (_e) {
+            memOnly = true;
+        }
+    };
+    const fresh = (list) => {
+        const t = now();
+        return list.filter((e) => !(Number(e.at) > 0) || t - Number(e.at) < APPLIED_RESULT_KEEP_MS);
+    };
+    return {
+        /** Notes one applied result: {id (the write id), c, m, where, tab}. */
+        note(rec) {
+            if (!valid(rec)) return;
+            const list = fresh(read()).filter((e) => e.id !== rec.id);
+            list.push({ ...rec, at: Number(rec.at) || now() });
+            write(list.slice(-APPLIED_RESULTS_MAX));
+        },
+        /** Whether a write id is noted. */
+        has(id) {
+            return read().some((e) => e.id === id);
+        },
+        /**
+         * Takes the entry of write `id` out and returns it when `may(entry)`
+         * allows, else null: the entry is left for a later copy or another tab.
+         */
+        take(id, may) {
+            if (typeof id !== 'string' || !id) return null;
+            const list = read();
+            const i = list.findIndex((e) => e.id === id);
+            if (i < 0) return null;
+            const e = list[i];
+            if (typeof may === 'function' && !may(e)) return null;
+            list.splice(i, 1);
+            write(fresh(list));
+            return e;
+        },
+        /** Sign-out: takes out every entry `gone(entry)` names. */
+        forget(gone) {
+            const list = read();
+            const kept = list.filter((e) => !gone(e));
+            if (kept.length !== list.length) write(kept);
+        },
+    };
+}
+export const _appliedResults = createAppliedResults({
+    storage: {
+        getItem: (k) => globalThis.localStorage.getItem(k),
+        setItem: (k, v) => globalThis.localStorage.setItem(k, v),
+        removeItem: (k) => globalThis.localStorage.removeItem(k),
+    },
+});
 
 const NOT_PROVIDED = (name) => () => {
     throw new Error(`api_client_store: late.${name} was called before the module that provides it loaded`);

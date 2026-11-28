@@ -218,6 +218,7 @@ func (s *Store) copyMatchResults(results []MatchResult) []MatchResult {
 		res[i].MarkIDs = r.MarkIDs.Clone()
 		res[i].EventSeqs = CloneGroupStamps(r.EventSeqs)
 		res[i].TurnedAway = maps.Clone(r.TurnedAway)
+		res[i].ReplacedResult = r.ReplacedResult.Clone()
 		// The write's own transient inputs and outputs never travel on a
 		// stored copy: a writer that builds its result from one (the
 		// daihyosen add, `u := *match`) must state its own.
@@ -853,6 +854,36 @@ var poolMatchColumns = []poolMatchColumn{
 			if len(away) > 0 {
 				m.TurnedAway = away
 			}
+		}},
+	// The result the court's result replaced (bc-sseq FR8), JSON
+	// {"writeId":"<id>","stamp":<ms>}, appended after TurnedAway. A row
+	// written before the column reads it empty, which is what it was: no
+	// court result had displaced anything then. A corrupt cell reads as none:
+	// the next write's replay derives it again.
+	{name: "ReplacedResult",
+		put: func(r *MatchResult) string {
+			if r.ReplacedResult == nil {
+				return ""
+			}
+			b, err := json.Marshal(r.ReplacedResult)
+			if err != nil {
+				slog.Error("state: pool match ReplacedResult marshal failed; writing empty cell",
+					"matchID", r.ID, "error", err)
+				return ""
+			}
+			return string(b)
+		},
+		take: func(m *MatchResult, cell string) {
+			if cell == "" {
+				return
+			}
+			var replaced ReplacedResult
+			if err := json.Unmarshal([]byte(cell), &replaced); err != nil {
+				slog.Error("state: pool match ReplacedResult cell corrupt; reading as none",
+					"matchID", m.ID, "error", err)
+				return
+			}
+			m.ReplacedResult = &replaced
 		}},
 }
 

@@ -90,7 +90,9 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Tournament-Password, X-Confirm-Password, "+revealKeyHeader)
 		// Every answer names the build that gave it (bc-evts F2).
 		c.Writer.Header().Set(BuildHeader, AppBuild())
-		c.Writer.Header().Set("Access-Control-Expose-Headers", BuildHeader)
+		// The viewer reads name the newest event they already hold
+		// (bc-sseq FR3), which a page reads to skip a refetch.
+		c.Writer.Header().Set("Access-Control-Expose-Headers", BuildHeader+", "+eventSeqHeader)
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -98,6 +100,11 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		}
 		c.Next()
 	})
+
+	// Compress the JSON answers of /api/* for callers that accept gzip
+	// (bc-sseq FR2). Registered after CORS so a preflight never reaches it;
+	// the event stream is skipped by path inside.
+	r.Use(GzipMiddleware())
 
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
@@ -144,6 +151,13 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// the server was started with (in locked mode behind a digest cache).
 	names := newPublicNames(store, verifier)
 	hub.attachPublicNames(names)
+	// Who runs each shiaijo: one registry per router, reached by the claim
+	// routes and, through the hub and restore handler, by the whole-tournament
+	// replacements that free every shiaijo, and by the score and decision
+	// doors, which judge a court console's write for the court's standing
+	// (judgeCourtStanding, write_tag.go).
+	courts := newCourtControlRegistry(store, hub)
+	hub.attachCourtControl(courts)
 
 	// SSE Events endpoint. Each stream is answered for the audience of the
 	// single-use ticket it is opened with (POST /api/events/ticket, which
@@ -154,8 +168,8 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// Public viewer endpoints
 	viewer := r.Group("/api/viewer")
 	{
-		registerViewerHandlers(viewer, store, eng, names)
-		registerDisplayHandlers(viewer, store, names)
+		registerViewerHandlers(viewer, store, eng, names, hub)
+		registerDisplayHandlers(viewer, store, names, hub)
 	}
 
 	// Stateless schedule estimator, no auth, no state-store access.
@@ -215,6 +229,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 
 	adminSmallBody := adminGroup(r, DefaultMaxBodyBytes, verifier, store)
 	RegisterTournamentHandlers(adminSmallBody, store, hub, verifier)
+	RegisterCourtControlHandlers(adminSmallBody, courts)
 	// Deleting a competition or a kept backup asks for the password again
 	// (X-Confirm-Password); this middleware judges only the routes in
 	// confirmedRoutes, after the sign-in, and covers only the routes below.
@@ -253,7 +268,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// The restore asks for the password again; Use covers only the routes
 	// registered after it, so the import above is not judged.
 	adminLargeBody.Use(RequireConfirmPassword(verifier))
-	RegisterRestoreHandlers(adminLargeBody, store, eng, hub, verifier)
+	RegisterRestoreHandlers(adminLargeBody, store, eng, hub, verifier, courts)
 
 	// Sponsor uploads (mp-c38), multipart logo upload needs envelope
 	// headroom for the file plus boundary/form-field overhead; so it gets

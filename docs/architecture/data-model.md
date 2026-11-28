@@ -221,8 +221,9 @@ Three fields in these diagrams need a word:
   participant row or of the app's JSON: it is read from the `Position` column of `pools.csv`
   and used to order the pool and the workbook. A swap of two competitors made before the
   competition starts changes who holds a place, never the place: the two rows trade the
-  competitor (id, name, display name and dojo; a seeded competitor is never swapped) and each keeps its `Position` and its
-  `Number`, because a competitor number belongs to the place.
+  competitor (id, name, display name, dojo and the rest of the participant record) and
+  each keeps its `Position` and its `Number`, because a competitor number belongs to the
+  place. A seeded competitor is never swapped.
 * `Overrides.PoolRanks` maps each pool to the ranks set by hand, keyed by the competitor's
   participant id.
 
@@ -292,7 +293,7 @@ k-th of the new one. A match the team plays both before and after the swap, whic
 when the two teams share a pool or meet in the first round, keeps its lineup where it is. A
 lineup whose order has no match at the new place, after a move to a smaller pool, is removed,
 and the swap's answer counts it. The matches listed under the team in `round_lineups_given`
-(described below) move the same way, and the team's carried lineups are worked out again over
+(the list kept for legacy teams) move the same way, and the team's carried lineups are worked out again over
 its new matches. The opponents' lineups and the starting lineups stay where they are.
 
 A lineup save for a team that a match does not hold is refused for every caller, the organiser

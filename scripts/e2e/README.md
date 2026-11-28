@@ -300,8 +300,8 @@ Two projects, both Chromium:
 - `public`: a phone in portrait (390x844), for journeys about a public surface
   alone (`*.public.spec.mjs`): `spectator.public`, `league.public`,
   `public-names.public`, `self-run-public.public` and `draw-visibility.public`.
-  Each seeds from a second
-  context opened with `OPERATOR_DEVICE`. Other public checks stay on the
+  Each seeds from a second context opened with `OPERATOR_DEVICE`. Other public
+  checks stay on the
   `operator` project, through a second context.
 
 240 s is the default test timeout; some journeys raise it for a long test with
